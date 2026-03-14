@@ -5,19 +5,18 @@
 This document is the canonical authority guide for the migrated forge slices owned by
 `javi-forge`.
 
-It records the WI-028 cutover that stops treating legacy/template notes and
-`project-starter-framework` references as the authoritative home for the slices already
-extracted in WI-023, and the `forge-slice-expansion` milestone that promotes the remaining
-published-but-stub template and generator IDs to implemented slices.
+It records the WI-028 cutover, the `forge-slice-expansion` milestone that promoted stub template and generator IDs to implemented slices, and the `javi-forge-completion` milestone that adds stack-specific API templates, standalone CI bootstrap, self-hosted review mode, and real MkDocs docs wiring.
 
 ## Canonical Authority
 
-For the migrated forge slice, `javi-forge` is now the canonical owner of:
+`javi-forge` is the canonical owner of:
 
 - `docs/contracts/catalog.yaml`
 - `docs/contracts/ai-integrations.yaml`
+- `docs/quickstart.md`
 - `scripts/forge-init.sh`
-- `templates/web/base/`
+- `templates/`
+- `generators/`
 - `ci/bootstrap/ci-local/`
 
 Consumers must use the published template IDs, generator IDs, and stable forge
@@ -33,7 +32,10 @@ entrypoint instead of reading template notes or external source layout.
 | `template.api.base` | `templates/api/base/` | implemented in forge-slice-expansion | PSF multi-stack CI patterns are upstream reference only |
 | `template.fullstack.base` | `templates/fullstack/base/` | implemented in forge-slice-expansion | PSF monorepo/fullstack CI patterns are upstream reference only |
 | `template.docs.base` | `templates/docs/base/` | implemented in forge-slice-expansion | PSF and docs tool patterns are upstream reference only |
-| `generator.review.automation` | `generators/review/automation/` | implemented in forge-slice-expansion | ghagga (https://github.com/JNZader/ghagga) is the upstream reference |
+| `generator.review.automation` | `generators/review/automation/` | implemented in forge-slice-expansion; self-hosted mode added in javi-forge-completion | ghagga (https://github.com/JNZader/ghagga) is the upstream reference |
+| `template.api.go` | `templates/api/go/` | implemented in javi-forge-completion | PSF Go CI patterns are upstream reference only |
+| `template.api.java` | `templates/api/java/` | implemented in javi-forge-completion | PSF Java/Gradle CI patterns are upstream reference only |
+| `template.api.python` | `templates/api/python/` | implemented in javi-forge-completion | PSF Python/pytest CI patterns are upstream reference only |
 
 ## WI-028 Cutover Effect
 
@@ -44,15 +46,20 @@ For the migrated slices above:
 - legacy/template notes no longer define the authoritative usage path
 - public consumption stays bounded to `docs/contracts/*.yaml` and `scripts/forge-init.sh`
 
-## Remaining Non-Migrated Forge Scope
+## Current Implementation State
 
-The `forge-slice-expansion` milestone closes the gap on all currently published template and generator IDs.
+The `javi-forge-completion` milestone brings all catalog IDs to practical 100%.
 
-All four previously-stub IDs are now implemented slices. Later-scope work includes:
+Implemented slices:
 
-- adding stack-specific variant templates (e.g. `template.api.java`, `template.api.go`)
-- expanding `generator.review.automation` to support self-hosted ghagga server mode
-- implementing additional generator families not yet in the catalog
+- 7 templates: web.base, api.base, api.go, api.java, api.python, fullstack.base, docs.base
+- 3 generators: project.init, review.automation (github-action + self-hosted), ci.bootstrap (standalone + composable)
+
+Later-scope work includes:
+
+- Rust and Go module template variants
+- Additional generator families for database schema, Dockerfile, etc.
+- Interactive project wizard UI
 
 ## Reader Guidance
 

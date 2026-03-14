@@ -13,15 +13,25 @@ javi-forge/
 ├── README.md
 ├── .gitignore
 ├── templates/
-│   ├── web/base/          # template.web.base — web/Node CI baseline
-│   ├── api/base/          # template.api.base — API/backend CI (language-agnostic)
-│   ├── fullstack/base/    # template.fullstack.base — parallel frontend+backend CI
-│   └── docs/base/         # template.docs.base — docs build + GitHub Pages deploy
+│   ├── web/base/          # template.web.base — web/Node CI
+│   ├── api/base/          # template.api.base — generic API CI
+│   ├── api/go/            # template.api.go — Go API
+│   ├── api/java/          # template.api.java — Java/Spring Boot
+│   ├── api/python/        # template.api.python — Python/FastAPI
+│   ├── fullstack/base/    # template.fullstack.base — parallel frontend+backend
+│   └── docs/base/         # template.docs.base — MkDocs + GitHub Pages
 ├── generators/
-│   └── review/automation/ # generator.review.automation — ghagga code review
+│   └── review/automation/ # generator.review.automation — ghagga (github-action | self-hosted)
+├── ci/
+│   └── bootstrap/ci-local/ # generator.ci.bootstrap — CI local family
 ├── docs/
+│   ├── quickstart.md      # first-time usage guide
+│   ├── FORGE-AUTHORITY.md
+│   └── contracts/
 ├── scripts/
-└── ci/
+│   └── forge-init.sh      # stable entrypoint
+└── lib/
+    └── common.sh
 ```
 
 ## Directory Intent
@@ -62,16 +72,22 @@ Este repo no deberia ser el hogar principal de:
 
 ## Current State
 
-El milestone `forge-slice-expansion` completa el primer ciclo de implementacion de todos los template y generator IDs publicados en el catalogo.
+El milestone `javi-forge-completion` trae `javi-forge` a 100% practico.
 
-Slices implementados:
+Templates implementados (7):
 
-- `template.web.base` — web/Node CI baseline (WI-023)
-- `template.api.base` — API/backend CI language-agnostic (forge-slice-expansion)
-- `template.fullstack.base` — parallel frontend+backend CI (forge-slice-expansion)
-- `template.docs.base` — docs build + GitHub Pages deploy (forge-slice-expansion)
-- `generator.project.init` — entrypoint de init (WI-023)
-- `generator.ci.bootstrap` — familia CI local (WI-023)
-- `generator.review.automation` — review automatico via ghagga GitHub Action (forge-slice-expansion)
+- `template.web.base` — web/Node CI baseline
+- `template.api.base` — API/backend CI language-agnostic
+- `template.api.go` — Go API (golangci-lint + go test)
+- `template.api.java` — Java/Spring Boot Gradle (Spotless + test)
+- `template.api.python` — Python/FastAPI (ruff + pytest)
+- `template.fullstack.base` — parallel frontend+backend CI
+- `template.docs.base` — MkDocs build + GitHub Pages deploy
 
-Las referencias legacy o de `project-starter-framework` siguen solo como background historico y referencia de lineage.
+Generators implementados (3):
+
+- `generator.project.init` — entrypoint de init
+- `generator.ci.bootstrap` — familia CI local (standalone + composable)
+- `generator.review.automation` — review via ghagga (github-action | self-hosted)
+
+Ver `docs/quickstart.md` para la guia de primera vez. Las referencias legacy siguen solo como background historico.

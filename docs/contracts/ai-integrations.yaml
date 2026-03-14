@@ -2,11 +2,12 @@ kind: forge-ai-integration-catalog
 contract_version: 0.1.0
 status: published
 integration_scope:
-  work_item: WI-024
-  phase: 5
-  wave: 6
+  work_item: WI-028
+  phase: 6
+  wave: 7
   owner_repo: javi-forge
   purpose: map forge templates to optional javi-ai project packages only
+  cutover_status: wi-028-complete
 project_package_catalog:
   owner_repo: javi-ai
   path: manifests/project-packages.yaml
@@ -27,6 +28,7 @@ integrations:
       - project.memory.engram
     compatibility_notes:
       - the WI-023 extracted web template remains AI-agnostic by default
+      - template.web.base is now authoritative in javi-forge; external template notes are historical background only
       - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
       - provider profile packages are out of scope for forge template contracts
 integration_contract:

@@ -2,13 +2,16 @@ kind: forge-catalog
 contract_version: 0.1.0
 status: published
 catalog_status:
-  work_item: WI-024
-  phase: 5
-  wave: 6
-  scope: publish stable identifiers, extract the first bounded forge slice, and publish optional AI integration mapping
+  work_item: WI-028
+  phase: 6
+  wave: 7
+  scope: keep forge contracts stable while making javi-forge the authoritative home for the migrated forge slice
+  cutover_status: wi-028-complete
+  legacy_reference_status: extracted forge slices are canonical in javi-forge; legacy/template notes are historical background only
   follow_up:
     - WI-024 published optional project-facing AI integration mappings in docs/contracts/ai-integrations.yaml
-    - WI-028 may retire legacy/template notes as the authoritative home
+    - WI-028 retires legacy/template notes as the authoritative home for the extracted forge slice
+    - later work still needs to implement the remaining published template and generator IDs
 namespace:
   template_prefix: template.
   generator_prefix: generator.
@@ -26,7 +29,7 @@ templates:
       - shell
       - template-specific toolchain
     contract_version: 0.1.0
-    status: slice-extracted
+    status: slice-cutover-complete
     owning_repo: javi-forge
     intended_slice: first-class web project baseline
     implementation_manifest: templates/web/base/template.yaml
@@ -75,7 +78,7 @@ generators:
       - git
       - shell
     contract_version: 0.1.0
-    status: slice-extracted
+    status: slice-cutover-complete
     owning_repo: javi-forge
     intended_entrypoint: scripts/forge-init.sh
     intended_slice: stable init-project generator surface
@@ -88,7 +91,7 @@ generators:
       - git
       - shell
     contract_version: 0.1.0
-    status: slice-extracted
+    status: slice-cutover-complete
     owning_repo: javi-forge
     intended_slice: CI and bootstrap asset generation family
     implementation_manifest: ci/bootstrap/ci-local/family.yaml
@@ -108,7 +111,7 @@ entrypoints:
   - id: entrypoint.forge.init
     path: scripts/forge-init.sh
     contract_version: 0.1.0
-    status: implemented
+    status: cutover-complete
     owning_repo: javi-forge
     purpose: stable project initialization surface
     supported_generators:
@@ -131,6 +134,7 @@ entrypoints:
       - consumers invoke this wrapper instead of template-internal scripts
       - the wrapper path stays stable if templates, ci, or internal script layout changes
       - request validation is part of the public contract and the first bounded implementation slice lands in WI-023
+      - WI-028 makes this entrypoint authoritative for the migrated forge slice
 catalog_contract:
   required_fields:
     - id

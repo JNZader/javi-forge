@@ -50,9 +50,12 @@ Este repo no deberia ser el hogar principal de:
 ## Contract Governance
 
 - `docs/contracts/catalog.yaml` y `docs/contracts/ai-integrations.yaml` son el punto de partida publico para el contrato forge de `ecosystem-restructure`.
+- `docs/FORGE-AUTHORITY.md` es la guia canonica para los slices de forge ya migrados; las notas legacy o referencias a `project-starter-framework` quedan solo como contexto historico para slices no migrados.
 - La gobernanza y el namespace aprobado viven en `../javi-platform/docs/contracts/CONTRACT-INDEX.md` y `../javi-platform/openspec/changes/ecosystem-restructure/contracts.md`.
 - Los consumers deben depender de IDs y contratos publicados, nunca del layout interno de `templates/`, `scripts/` o `ci/`.
 
 ## Current State
 
-Skeleton minimo preparado para recibir templates y automatizaciones, sin migrar aun assets de `project-starter-framework` ni `ghagga`.
+`javi-forge` ya es el hogar canonico del primer slice extraido de forge (`template.web.base`, `generator.project.init`, `generator.ci.bootstrap`).
+
+Las referencias legacy o de `project-starter-framework` ya no son la fuente autoritativa para esos slices migrados; solo siguen como background historico y para familias todavia no extraidas.

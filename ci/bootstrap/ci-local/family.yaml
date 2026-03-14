@@ -3,8 +3,8 @@ contract_version: 0.1.0
 family:
   id: ci.bootstrap.local
   owner_repo: javi-forge
-  status: extracted
-  work_item: WI-023
+  status: cutover-complete
+  work_item: WI-028
   scope: first bounded CI/bootstrap asset family for generated projects
   assets:
     - path: ci-local.sh
@@ -20,9 +20,16 @@ family:
     - path: hooks/pre-push
       role: full CI simulation hook
   lineage:
-    source: vault/project-starter-framework/.ci-local/
+    reference_sources:
+      - vault/project-starter-framework/.ci-local/
     source_type: curated-delta
     maintenance_owner: javi-forge
+    active_external_dependency: none
+    cutover_status: wi-028-complete
+    extraction_status: slice-wi-023
   rules:
     - generated projects consume this family through scripts/forge-init.sh
     - consumers must not depend on legacy project-starter-framework paths
+  notes:
+    - WI-023 extracted the first local CI/bootstrap family into javi-forge.
+    - WI-028 retires external template notes as the authoritative home for this family.

@@ -299,8 +299,10 @@ init_template_docs_base() {
   ensure_dir "$destination_root"
   ensure_dir "$destination_root/.github"
   ensure_dir "$destination_root/.github/workflows"
+  ensure_dir "$destination_root/docs"
 
   copy_file "$template_root/github/ci-docs.yml" "$destination_root/.github/workflows/ci.yml"
+  copy_file "$template_root/mkdocs.yml.example" "$destination_root/mkdocs.yml.example"
 
   if [[ ! -f "$destination_root/.gitignore" ]]; then
     write_default_gitignore "$destination_root/.gitignore"
@@ -308,17 +310,21 @@ init_template_docs_base() {
 
   if [[ "$dry_run" -eq 1 ]]; then
     dry_run_note "write $destination_root/.github/dependabot.yml"
+    dry_run_note "write $destination_root/docs/index.md"
   else
     {
       cat "$template_root/dependabot/header.yml"
       cat "$template_root/dependabot/github-actions.yml"
     } > "$destination_root/.github/dependabot.yml"
+    printf '# %s\n\nWelcome to the documentation for %s.\n' "$project_dir_name" "$project_dir_name" > "$destination_root/docs/index.md"
   fi
 
   print_step "template_status: implemented"
   print_step "implemented_template: template.docs.base"
+  print_step "docs_tooling: mkdocs-material"
   print_step "project_name: $project_dir_name"
   print_step "destination: $destination_root"
+  print_step "next_steps: rename mkdocs.yml.example to mkdocs.yml and update site metadata"
 }
 
 init_template_fullstack_base() {

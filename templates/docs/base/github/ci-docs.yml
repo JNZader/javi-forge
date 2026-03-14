@@ -18,22 +18,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up environment
-        run: |
-          # Add your docs tool setup here:
-          # pip install mkdocs | npm install -g docsify-cli | npm install -g @vuepress/core
-          echo "docs environment ready"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install MkDocs
+        run: pip install mkdocs-material
 
       - name: Lint markdown
         uses: DavidAnson/markdownlint-cli2-action@v16
         with:
-          globs: '**/*.md'
+          globs: 'docs/**/*.md'
         continue-on-error: true
 
       - name: Build docs
-        run: |
-          # mkdocs build | docsify build | vuepress build docs
-          echo "docs built successfully"
+        run: mkdocs build --strict
 
   deploy-pages:
     name: Deploy to GitHub Pages
@@ -41,29 +42,19 @@ jobs:
     needs: build-docs
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Pages
-        uses: actions/configure-pages@v5
-
-      - name: Build docs for deployment
-        run: |
-          # mkdocs build --site-dir _site | docsify build --dest _site
-          mkdir -p _site
-          echo "docs" > _site/index.html
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          path: '_site'
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install MkDocs
+        run: pip install mkdocs-material
 
       - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+        run: mkdocs gh-deploy --force

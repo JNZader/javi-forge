@@ -10,7 +10,9 @@ template:
     - docs
   assets:
     - path: github/ci-docs.yml
-      role: docs build and GitHub Pages deploy workflow
+      role: MkDocs build and GitHub Pages deploy workflow
+    - path: mkdocs.yml.example
+      role: MkDocs configuration example (rename to mkdocs.yml)
     - path: dependabot/header.yml
       role: Dependabot base header fragment
     - path: dependabot/github-actions.yml
@@ -27,7 +29,7 @@ template:
   rules:
     - generation happens only through scripts/forge-init.sh
     - docs templates do not include ci-local bootstrap by default; add it separately if needed
-    - the build and deploy steps are placeholder stubs; consumers fill in their docs tool
+    - the CI workflow uses MkDocs with mkdocs-material; consumers adapt mkdocs.yml.example for their site
   notes:
-    - forge-slice-expansion implements the first docs slice for template.docs.base.
-    - Supports MkDocs, Docsify, VuePress, or any static site tool via placeholder steps.
+    - forge-slice-expansion implemented the first docs slice.
+    - javi-forge-completion upgraded from placeholder stubs to real MkDocs wiring with mkdocs-material.

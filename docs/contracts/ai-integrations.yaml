@@ -1,17 +1,44 @@
 kind: forge-ai-integration-catalog
 contract_version: 0.1.0
-status: scaffold
-integrations: []
+status: published
+integration_scope:
+  work_item: WI-024
+  phase: 5
+  wave: 6
+  owner_repo: javi-forge
+  purpose: map forge templates to optional javi-ai project packages only
+project_package_catalog:
+  owner_repo: javi-ai
+  path: manifests/project-packages.yaml
+  contract_version: 0.1.0
 allowed_project_package_ids:
   - project.sdd.base
   - project.memory.engram
   - project.ai.instructions
   - project.ai.review
+integrations:
+  - template_id: template.web.base
+    status: published-no-default-packages
+    project_package_ids: []
+    optional_project_package_ids:
+      - project.sdd.base
+      - project.ai.instructions
+      - project.ai.review
+      - project.memory.engram
+    compatibility_notes:
+      - the WI-023 extracted web template remains AI-agnostic by default
+      - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
+      - provider profile packages are out of scope for forge template contracts
 integration_contract:
   required_fields:
     - template_id
+    - status
     - project_package_ids
     - compatibility_notes
+  optional_fields:
+    - optional_project_package_ids
 rules:
   - consume project-facing javi-ai package IDs only
   - do not depend on provider profile package IDs
+  - treat an empty project_package_ids list as no AI package requested by default
+  - add template mappings only when the template ID already exists in docs/contracts/catalog.yaml

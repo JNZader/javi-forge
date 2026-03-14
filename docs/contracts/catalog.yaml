@@ -2,12 +2,12 @@ kind: forge-catalog
 contract_version: 0.1.0
 status: published
 catalog_status:
-  work_item: WI-023
+  work_item: WI-024
   phase: 5
   wave: 6
-  scope: publish stable identifiers and extract the first bounded forge slice
+  scope: publish stable identifiers, extract the first bounded forge slice, and publish optional AI integration mapping
   follow_up:
-    - WI-024 may publish optional project-facing AI integration mappings
+    - WI-024 published optional project-facing AI integration mappings in docs/contracts/ai-integrations.yaml
     - WI-028 may retire legacy/template notes as the authoritative home
 namespace:
   template_prefix: template.

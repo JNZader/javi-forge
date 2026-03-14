@@ -13,23 +13,20 @@ project_package_catalog:
   path: manifests/project-packages.yaml
   contract_version: 0.1.0
 allowed_project_package_ids:
-  - project.sdd.base
-  - project.memory.engram
   - project.ai.instructions
-  - project.ai.review
+  - project.sdd.base
 integrations:
   - template_id: template.web.base
     status: published-no-default-packages
     project_package_ids: []
     optional_project_package_ids:
-      - project.sdd.base
       - project.ai.instructions
-      - project.ai.review
-      - project.memory.engram
+      - project.sdd.base
     compatibility_notes:
       - the WI-023 extracted web template remains AI-agnostic by default
       - template.web.base is now authoritative in javi-forge; external template notes are historical background only
       - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
+      - only currently published project package IDs may appear here; reserved javi-ai IDs stay unavailable until the producer catalog promotes them
       - provider profile packages are out of scope for forge template contracts
 integration_contract:
   required_fields:

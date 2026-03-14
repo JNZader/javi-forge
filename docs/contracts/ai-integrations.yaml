@@ -17,6 +17,7 @@ allowed_project_package_ids:
   - project.sdd.base
   - project.memory.engram
   - project.ai.review
+  # new templates from javi-forge-completion use the same published project packages
 integrations:
   - template_id: template.web.base
     status: published-no-default-packages
@@ -63,6 +64,42 @@ integrations:
       - project.memory.engram
     compatibility_notes:
       - docs template is AI-agnostic by default
+      - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
+      - provider profile packages are out of scope for forge template contracts
+  - template_id: template.api.go
+    status: published-no-default-packages
+    project_package_ids: []
+    optional_project_package_ids:
+      - project.ai.instructions
+      - project.sdd.base
+      - project.memory.engram
+      - project.ai.review
+    compatibility_notes:
+      - Go API template is AI-agnostic by default
+      - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
+      - provider profile packages are out of scope for forge template contracts
+  - template_id: template.api.java
+    status: published-no-default-packages
+    project_package_ids: []
+    optional_project_package_ids:
+      - project.ai.instructions
+      - project.sdd.base
+      - project.memory.engram
+      - project.ai.review
+    compatibility_notes:
+      - Java API template is AI-agnostic by default
+      - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
+      - provider profile packages are out of scope for forge template contracts
+  - template_id: template.api.python
+    status: published-no-default-packages
+    project_package_ids: []
+    optional_project_package_ids:
+      - project.ai.instructions
+      - project.sdd.base
+      - project.memory.engram
+      - project.ai.review
+    compatibility_notes:
+      - Python API template is AI-agnostic by default
       - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
       - provider profile packages are out of scope for forge template contracts
 integration_contract:

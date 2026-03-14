@@ -12,6 +12,7 @@ catalog_status:
     - WI-024 published optional project-facing AI integration mappings in docs/contracts/ai-integrations.yaml
     - WI-028 retires legacy/template notes as the authoritative home for the extracted forge slice
     - forge-slice-expansion implements template.api.base, template.fullstack.base, template.docs.base, and generator.review.automation
+    - javi-forge-completion adds template.api.go, template.api.java, template.api.python, generator.ci.bootstrap standalone, self-hosted review mode, and MkDocs docs template wiring
 namespace:
   template_prefix: template.
   generator_prefix: generator.
@@ -46,6 +47,48 @@ templates:
     owning_repo: javi-forge
     intended_slice: first-class api project baseline
     implementation_manifest: templates/api/base/template.yaml
+  - id: template.api.go
+    type: template
+    supported_stacks_or_modes:
+      - go
+    required_runtime_prerequisites:
+      - git
+      - shell
+      - go 1.23+
+      - golangci-lint (on CI runner)
+    contract_version: 0.1.0
+    status: slice-cutover-complete
+    owning_repo: javi-forge
+    intended_slice: Go API project baseline
+    implementation_manifest: templates/api/go/template.yaml
+  - id: template.api.java
+    type: template
+    supported_stacks_or_modes:
+      - java
+    required_runtime_prerequisites:
+      - git
+      - shell
+      - java 21
+      - gradle wrapper in project
+    contract_version: 0.1.0
+    status: slice-cutover-complete
+    owning_repo: javi-forge
+    intended_slice: Java/Spring Boot Gradle project baseline
+    implementation_manifest: templates/api/java/template.yaml
+  - id: template.api.python
+    type: template
+    supported_stacks_or_modes:
+      - python
+    required_runtime_prerequisites:
+      - git
+      - shell
+      - python 3.12+
+      - ruff and pytest in requirements.txt
+    contract_version: 0.1.0
+    status: slice-cutover-complete
+    owning_repo: javi-forge
+    intended_slice: Python/FastAPI project baseline
+    implementation_manifest: templates/api/python/template.yaml
   - id: template.fullstack.base
     type: template
     supported_stacks_or_modes:
@@ -112,6 +155,9 @@ generators:
     intended_slice: review automation and analysis generation family
     implementation_manifest: generators/review/automation/generator.yaml
     composable: true
+    review_modes:
+      - github-action
+      - self-hosted
 entrypoints:
   - id: entrypoint.forge.init
     path: scripts/forge-init.sh
@@ -121,8 +167,16 @@ entrypoints:
     purpose: stable project initialization surface
     supported_generators:
       - generator.project.init
+      - generator.review.automation
+      - generator.ci.bootstrap
     supported_templates:
       - template.web.base
+      - template.api.base
+      - template.api.go
+      - template.api.java
+      - template.api.python
+      - template.fullstack.base
+      - template.docs.base
     invocation_contract:
       required_options:
         - --template

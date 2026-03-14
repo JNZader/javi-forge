@@ -1,0 +1,37 @@
+kind: forge-template
+contract_version: 0.1.0
+template:
+  id: template.api.base
+  owner_repo: javi-forge
+  status: slice-cutover-complete
+  milestone: forge-slice-expansion
+  family: api
+  supported_stacks:
+    - api
+  assets:
+    - path: github/ci-api.yml
+      role: language-agnostic API/backend CI workflow
+    - path: github/dependabot-automerge.yml
+      role: Dependabot auto-merge workflow
+    - path: dependabot/header.yml
+      role: Dependabot base header fragment
+    - path: dependabot/github-actions.yml
+      role: Dependabot GitHub Actions update fragment
+  bootstrap_dependencies:
+    - ci.bootstrap.local
+    - lib/common.sh
+  lineage:
+    reference_sources:
+      - https://github.com/JNZader-Vault/project-starter-framework/tree/main/templates/github
+      - https://github.com/JNZader-Vault/project-starter-framework/tree/main/.github/workflows
+    source_type: curated-delta
+    maintenance_owner: javi-forge
+    active_external_dependency: none
+    cutover_status: forge-slice-expansion-complete
+    extraction_status: slice-forge-expansion
+  rules:
+    - generation happens only through scripts/forge-init.sh
+    - the CI workflow uses a generic stack-agnostic pattern; consumers add stack-specific steps
+  notes:
+    - forge-slice-expansion implements the first api/backend slice for template.api.base.
+    - PSF multi-stack CI patterns were the upstream reference for the generic job structure.

@@ -10,6 +10,7 @@ DEFAULT_GENERATOR="generator.project.init"
 
 SUPPORTED_GENERATORS=(
   "generator.project.init"
+  "generator.review.automation"
 )
 
 SUPPORTED_TEMPLATES=(
@@ -24,6 +25,18 @@ SUPPORTED_STACKS=(
   "api"
   "fullstack"
   "docs"
+)
+
+IMPLEMENTED_TEMPLATES=(
+  "template.web.base"
+  "template.api.base"
+  "template.fullstack.base"
+  "template.docs.base"
+)
+
+IMPLEMENTED_GENERATORS=(
+  "generator.project.init"
+  "generator.review.automation"
 )
 
 usage() {
@@ -227,6 +240,39 @@ copy_ci_local_family() {
   make_executable "$destination_root/.ci-local/hooks/pre-push"
 }
 
+init_template_api_base() {
+  local destination_root="$1"
+  local project_dir_name="$2"
+  local template_root="$REPO_ROOT/templates/api/base"
+
+  ensure_dir "$destination_root"
+  ensure_dir "$destination_root/.github"
+  ensure_dir "$destination_root/.github/workflows"
+
+  copy_ci_local_family "$destination_root"
+  copy_file "$template_root/github/ci-api.yml" "$destination_root/.github/workflows/ci.yml"
+  copy_file "$template_root/github/dependabot-automerge.yml" "$destination_root/.github/workflows/dependabot-automerge.yml"
+
+  if [[ ! -f "$destination_root/.gitignore" ]]; then
+    write_default_gitignore "$destination_root/.gitignore"
+  fi
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    dry_run_note "write $destination_root/.github/dependabot.yml"
+  else
+    {
+      cat "$template_root/dependabot/header.yml"
+      cat "$template_root/dependabot/github-actions.yml"
+    } > "$destination_root/.github/dependabot.yml"
+  fi
+
+  print_step "template_status: implemented"
+  print_step "implemented_template: template.api.base"
+  print_step "project_name: $project_dir_name"
+  print_step "destination: $destination_root"
+  print_step "ci_family: ci.bootstrap.local"
+}
+
 init_template_web_base() {
   local destination_root="$1"
   local project_dir_name="$2"
@@ -329,8 +375,10 @@ if [[ "$contract_version" != "$DEFAULT_CONTRACT_VERSION" ]]; then
   exit 1
 fi
 
-if [[ -z "$template_id" ]]; then
-  printf 'error: --template is required unless --list-contracts is used\n' >&2
+# Allow generator-only invocation (e.g. --generator generator.review.automation)
+# For template invocations, --template is still required
+if [[ -z "$template_id" && "$generator_id" == "$DEFAULT_GENERATOR" ]]; then
+  printf 'error: --template is required unless --list-contracts is used or --generator is a standalone generator\n' >&2
   exit 1
 fi
 
@@ -344,7 +392,7 @@ if ! contains "$generator_id" "${SUPPORTED_GENERATORS[@]}"; then
   exit 1
 fi
 
-if ! contains "$template_id" "${SUPPORTED_TEMPLATES[@]}"; then
+if [[ -n "$template_id" ]] && ! contains "$template_id" "${SUPPORTED_TEMPLATES[@]}"; then
   printf 'error: unsupported template ID: %s\n' "$template_id" >&2
   exit 1
 fi
@@ -354,32 +402,62 @@ if [[ -n "$stack_id" ]] && ! contains "$stack_id" "${SUPPORTED_STACKS[@]}"; then
   exit 1
 fi
 
-if [[ "$template_id" != "template.web.base" ]]; then
-  printf 'error: template is published but not yet implemented in WI-023: %s\n' "$template_id" >&2
-  printf 'implemented template for this slice: template.web.base\n' >&2
-  exit 1
-fi
-
-if [[ -n "$stack_id" && "$stack_id" != "web" ]]; then
-  printf 'error: template.web.base only supports stack ID: web\n' >&2
-  exit 1
-fi
-
 destination_root="${destination:-$(pwd)}"
 
 printf 'entrypoint: javi-forge/scripts/forge-init.sh\n'
 printf 'mode: scaffold\n'
 printf 'contract_version: %s\n' "$contract_version"
 printf 'generator: %s\n' "$generator_id"
-printf 'template: %s\n' "$template_id"
+printf 'template: %s\n' "${template_id:-none}"
 printf 'project_name: %s\n' "$project_name"
 printf 'destination: %s\n' "$destination_root"
-printf 'stack: %s\n' "${stack_id:-web}"
+printf 'stack: %s\n' "${stack_id:-default}"
 
-init_template_web_base "$destination_root" "$project_name"
+# Dispatch template generation
+if [[ -n "$template_id" ]]; then
+  case "$template_id" in
+    template.web.base)
+      if [[ -n "$stack_id" && "$stack_id" != "web" ]]; then
+        printf 'error: template.web.base only supports stack ID: web\n' >&2
+        exit 1
+      fi
+      init_template_web_base "$destination_root" "$project_name"
+      ;;
+    template.api.base)
+      if [[ -n "$stack_id" && "$stack_id" != "api" ]]; then
+        printf 'error: template.api.base only supports stack ID: api\n' >&2
+        exit 1
+      fi
+      init_template_api_base "$destination_root" "$project_name"
+      ;;
+    template.fullstack.base)
+      if [[ -n "$stack_id" && "$stack_id" != "fullstack" ]]; then
+        printf 'error: template.fullstack.base only supports stack ID: fullstack\n' >&2
+        exit 1
+      fi
+      init_template_fullstack_base "$destination_root" "$project_name"
+      ;;
+    template.docs.base)
+      if [[ -n "$stack_id" && "$stack_id" != "docs" ]]; then
+        printf 'error: template.docs.base only supports stack ID: docs\n' >&2
+        exit 1
+      fi
+      init_template_docs_base "$destination_root" "$project_name"
+      ;;
+    *)
+      printf 'error: template dispatched but no handler found: %s\n' "$template_id" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+# Dispatch generator (composable with template)
+if [[ "$generator_id" == "generator.review.automation" ]]; then
+  generate_review_automation "$destination_root" "$project_name"
+fi
 
 if [[ "$dry_run" -eq 1 ]]; then
-  printf 'result: dry-run request accepted and bounded web slice planned\n'
+  printf 'result: dry-run request accepted\n'
 else
-  printf 'result: bounded web slice generated\n'
+  printf 'result: forge slice generated\n'
 fi

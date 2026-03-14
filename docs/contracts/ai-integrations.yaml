@@ -15,6 +15,8 @@ project_package_catalog:
 allowed_project_package_ids:
   - project.ai.instructions
   - project.sdd.base
+  - project.memory.engram
+  - project.ai.review
 integrations:
   - template_id: template.web.base
     status: published-no-default-packages
@@ -22,11 +24,12 @@ integrations:
     optional_project_package_ids:
       - project.ai.instructions
       - project.sdd.base
+      - project.memory.engram
+      - project.ai.review
     compatibility_notes:
       - the WI-023 extracted web template remains AI-agnostic by default
       - template.web.base is now authoritative in javi-forge; external template notes are historical background only
       - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
-      - only currently published project package IDs may appear here; reserved javi-ai IDs stay unavailable until the producer catalog promotes them
       - provider profile packages are out of scope for forge template contracts
   - template_id: template.api.base
     status: published-no-default-packages
@@ -34,6 +37,8 @@ integrations:
     optional_project_package_ids:
       - project.ai.instructions
       - project.sdd.base
+      - project.memory.engram
+      - project.ai.review
     compatibility_notes:
       - api template is AI-agnostic by default
       - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
@@ -44,6 +49,8 @@ integrations:
     optional_project_package_ids:
       - project.ai.instructions
       - project.sdd.base
+      - project.memory.engram
+      - project.ai.review
     compatibility_notes:
       - fullstack template is AI-agnostic by default
       - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
@@ -53,6 +60,7 @@ integrations:
     project_package_ids: []
     optional_project_package_ids:
       - project.ai.instructions
+      - project.memory.engram
     compatibility_notes:
       - docs template is AI-agnostic by default
       - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml

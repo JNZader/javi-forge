@@ -273,6 +273,36 @@ init_template_api_base() {
   print_step "ci_family: ci.bootstrap.local"
 }
 
+init_template_docs_base() {
+  local destination_root="$1"
+  local project_dir_name="$2"
+  local template_root="$REPO_ROOT/templates/docs/base"
+
+  ensure_dir "$destination_root"
+  ensure_dir "$destination_root/.github"
+  ensure_dir "$destination_root/.github/workflows"
+
+  copy_file "$template_root/github/ci-docs.yml" "$destination_root/.github/workflows/ci.yml"
+
+  if [[ ! -f "$destination_root/.gitignore" ]]; then
+    write_default_gitignore "$destination_root/.gitignore"
+  fi
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    dry_run_note "write $destination_root/.github/dependabot.yml"
+  else
+    {
+      cat "$template_root/dependabot/header.yml"
+      cat "$template_root/dependabot/github-actions.yml"
+    } > "$destination_root/.github/dependabot.yml"
+  fi
+
+  print_step "template_status: implemented"
+  print_step "implemented_template: template.docs.base"
+  print_step "project_name: $project_dir_name"
+  print_step "destination: $destination_root"
+}
+
 init_template_fullstack_base() {
   local destination_root="$1"
   local project_dir_name="$2"

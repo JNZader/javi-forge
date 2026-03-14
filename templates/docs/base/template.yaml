@@ -1,0 +1,33 @@
+kind: forge-template
+contract_version: 0.1.0
+template:
+  id: template.docs.base
+  owner_repo: javi-forge
+  status: slice-cutover-complete
+  milestone: forge-slice-expansion
+  family: docs
+  supported_stacks:
+    - docs
+  assets:
+    - path: github/ci-docs.yml
+      role: docs build and GitHub Pages deploy workflow
+    - path: dependabot/header.yml
+      role: Dependabot base header fragment
+    - path: dependabot/github-actions.yml
+      role: Dependabot GitHub Actions update fragment
+  bootstrap_dependencies: []
+  lineage:
+    reference_sources:
+      - https://github.com/JNZader-Vault/project-starter-framework/tree/main/templates/github
+    source_type: curated-delta
+    maintenance_owner: javi-forge
+    active_external_dependency: none
+    cutover_status: forge-slice-expansion-complete
+    extraction_status: slice-forge-expansion
+  rules:
+    - generation happens only through scripts/forge-init.sh
+    - docs templates do not include ci-local bootstrap by default; add it separately if needed
+    - the build and deploy steps are placeholder stubs; consumers fill in their docs tool
+  notes:
+    - forge-slice-expansion implements the first docs slice for template.docs.base.
+    - Supports MkDocs, Docsify, VuePress, or any static site tool via placeholder steps.

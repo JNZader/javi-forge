@@ -1,13 +1,107 @@
 kind: forge-catalog
 contract_version: 0.1.0
-status: scaffold
-templates: []
-generators: []
-reserved_template_ids:
-  - template.web.base
-  - template.api.base
-  - template.fullstack.base
-  - template.docs.base
+status: published
+catalog_status:
+  work_item: WI-021
+  phase: 5
+  wave: 6
+  scope: publish stable template and generator identifiers only
+  follow_up:
+    - WI-022 will publish the stable forge entrypoint surface
+    - WI-023 will extract the first bounded forge implementation slice
+namespace:
+  template_prefix: template.
+  generator_prefix: generator.
+  rules:
+    - published IDs are stable contract names inside contract_version 0.1.0
+    - consumers must depend on IDs and documented fields only
+    - IDs must remain independent from internal templates, scripts, or ci layout
+templates:
+  - id: template.web.base
+    type: template
+    supported_stacks_or_modes:
+      - web
+    required_runtime_prerequisites:
+      - git
+      - shell
+      - template-specific toolchain
+    contract_version: 0.1.0
+    status: identifier-published
+    owning_repo: javi-forge
+    intended_slice: first-class web project baseline
+  - id: template.api.base
+    type: template
+    supported_stacks_or_modes:
+      - api
+    required_runtime_prerequisites:
+      - git
+      - shell
+      - template-specific toolchain
+    contract_version: 0.1.0
+    status: identifier-published
+    owning_repo: javi-forge
+    intended_slice: first-class api project baseline
+  - id: template.fullstack.base
+    type: template
+    supported_stacks_or_modes:
+      - fullstack
+    required_runtime_prerequisites:
+      - git
+      - shell
+      - template-specific toolchain
+    contract_version: 0.1.0
+    status: identifier-published
+    owning_repo: javi-forge
+    intended_slice: first-class fullstack project baseline
+  - id: template.docs.base
+    type: template
+    supported_stacks_or_modes:
+      - docs
+    required_runtime_prerequisites:
+      - git
+      - shell
+    contract_version: 0.1.0
+    status: identifier-published
+    owning_repo: javi-forge
+    intended_slice: documentation-focused project baseline
+generators:
+  - id: generator.project.init
+    type: generator
+    supported_stacks_or_modes:
+      - multi-stack
+      - interactive-init
+    required_runtime_prerequisites:
+      - git
+      - shell
+    contract_version: 0.1.0
+    status: identifier-published
+    owning_repo: javi-forge
+    intended_entrypoint: scripts/init-project.*
+    intended_slice: stable init-project generator surface
+  - id: generator.ci.bootstrap
+    type: generator
+    supported_stacks_or_modes:
+      - reusable-ci
+      - project-bootstrap-assets
+    required_runtime_prerequisites:
+      - git
+      - shell
+    contract_version: 0.1.0
+    status: identifier-published
+    owning_repo: javi-forge
+    intended_slice: CI and bootstrap asset generation family
+  - id: generator.review.automation
+    type: generator
+    supported_stacks_or_modes:
+      - review-automation
+      - static-analysis
+    required_runtime_prerequisites:
+      - git
+      - shell
+    contract_version: 0.1.0
+    status: identifier-published
+    owning_repo: javi-forge
+    intended_slice: review automation and analysis generation family
 catalog_contract:
   required_fields:
     - id
@@ -15,3 +109,8 @@ catalog_contract:
     - supported_stacks_or_modes
     - required_runtime_prerequisites
     - contract_version
+  optional_fields:
+    - status
+    - owning_repo
+    - intended_entrypoint
+    - intended_slice

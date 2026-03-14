@@ -1,0 +1,72 @@
+# ===========================================
+# CI for Node.js/TypeScript Projects
+# ===========================================
+# Copy to: .github/workflows/ci.yml
+# ===========================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: 'Run tests'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_tests == 'true'
+        run: npm test
+
+      - name: Upload test results
+        if: (github.event_name != 'workflow_dispatch' || github.event.inputs.run_tests == 'true') && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-node
+          path: |
+            coverage/
+            junit.xml
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore

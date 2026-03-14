@@ -1,0 +1,28 @@
+kind: forge-ci-family
+contract_version: 0.1.0
+family:
+  id: ci.bootstrap.local
+  owner_repo: javi-forge
+  status: extracted
+  work_item: WI-023
+  scope: first bounded CI/bootstrap asset family for generated projects
+  assets:
+    - path: ci-local.sh
+      role: local CI simulation entrypoint
+    - path: install.sh
+      role: hook installer for generated repositories
+    - path: semgrep.yml
+      role: default security ruleset
+    - path: hooks/pre-commit
+      role: quick validation hook
+    - path: hooks/commit-msg
+      role: commit message validation hook
+    - path: hooks/pre-push
+      role: full CI simulation hook
+  lineage:
+    source: vault/project-starter-framework/.ci-local/
+    source_type: curated-delta
+    maintenance_owner: javi-forge
+  rules:
+    - generated projects consume this family through scripts/forge-init.sh
+    - consumers must not depend on legacy project-starter-framework paths

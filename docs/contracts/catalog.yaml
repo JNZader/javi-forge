@@ -2,13 +2,13 @@ kind: forge-catalog
 contract_version: 0.1.0
 status: published
 catalog_status:
-  work_item: WI-021
+  work_item: WI-023
   phase: 5
   wave: 6
-  scope: publish stable template and generator identifiers only
+  scope: publish stable identifiers and extract the first bounded forge slice
   follow_up:
-    - WI-022 will publish the stable forge entrypoint surface
-    - WI-023 will extract the first bounded forge implementation slice
+    - WI-024 may publish optional project-facing AI integration mappings
+    - WI-028 may retire legacy/template notes as the authoritative home
 namespace:
   template_prefix: template.
   generator_prefix: generator.
@@ -26,9 +26,10 @@ templates:
       - shell
       - template-specific toolchain
     contract_version: 0.1.0
-    status: identifier-published
+    status: slice-extracted
     owning_repo: javi-forge
     intended_slice: first-class web project baseline
+    implementation_manifest: templates/web/base/template.yaml
   - id: template.api.base
     type: template
     supported_stacks_or_modes:
@@ -74,7 +75,7 @@ generators:
       - git
       - shell
     contract_version: 0.1.0
-    status: identifier-published
+    status: slice-extracted
     owning_repo: javi-forge
     intended_entrypoint: scripts/forge-init.sh
     intended_slice: stable init-project generator surface
@@ -87,9 +88,10 @@ generators:
       - git
       - shell
     contract_version: 0.1.0
-    status: identifier-published
+    status: slice-extracted
     owning_repo: javi-forge
     intended_slice: CI and bootstrap asset generation family
+    implementation_manifest: ci/bootstrap/ci-local/family.yaml
   - id: generator.review.automation
     type: generator
     supported_stacks_or_modes:
@@ -106,16 +108,13 @@ entrypoints:
   - id: entrypoint.forge.init
     path: scripts/forge-init.sh
     contract_version: 0.1.0
-    status: scaffolded
+    status: implemented
     owning_repo: javi-forge
     purpose: stable project initialization surface
     supported_generators:
       - generator.project.init
     supported_templates:
       - template.web.base
-      - template.api.base
-      - template.fullstack.base
-      - template.docs.base
     invocation_contract:
       required_options:
         - --template
@@ -131,7 +130,7 @@ entrypoints:
     rules:
       - consumers invoke this wrapper instead of template-internal scripts
       - the wrapper path stays stable if templates, ci, or internal script layout changes
-      - request validation is part of the public contract; implementation extraction follows in WI-023
+      - request validation is part of the public contract and the first bounded implementation slice lands in WI-023
 catalog_contract:
   required_fields:
     - id

@@ -3,6 +3,8 @@
 set -euo pipefail
 
 SCRIPT_NAME=$(basename "$0")
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 DEFAULT_CONTRACT_VERSION="0.1.0"
 DEFAULT_GENERATOR="generator.project.init"
 
@@ -42,9 +44,13 @@ Options:
   -h, --help               Show this help message.
 
 Notes:
-  - This WI-022 scaffold defines the stable public request shape only.
-  - Template layout and generator implementation stay internal to later work items.
+  - WI-023 implements the first bounded forge slice for template.web.base.
+  - Other published template IDs remain contract-only until later work items land.
 EOF
+}
+
+print_step() {
+  printf '%s\n' "$1"
 }
 
 contains() {
@@ -80,6 +86,175 @@ print_contracts() {
   for item in "${SUPPORTED_STACKS[@]}"; do
     printf '  - %s\n' "$item"
   done
+}
+
+dry_run_note() {
+  if [[ "$dry_run" -eq 1 ]]; then
+    printf 'dry-run: %s\n' "$1"
+  fi
+}
+
+ensure_dir() {
+  local dir="$1"
+  if [[ "$dry_run" -eq 1 ]]; then
+    dry_run_note "mkdir -p $dir"
+  else
+    mkdir -p "$dir"
+  fi
+}
+
+copy_file() {
+  local src="$1"
+  local dest="$2"
+  if [[ "$dry_run" -eq 1 ]]; then
+    dry_run_note "copy $src -> $dest"
+  else
+    cp "$src" "$dest"
+  fi
+}
+
+make_executable() {
+  local path="$1"
+  if [[ "$dry_run" -eq 1 ]]; then
+    dry_run_note "chmod +x $path"
+  else
+    chmod +x "$path"
+  fi
+}
+
+write_file() {
+  local path="$1"
+  local content="$2"
+  if [[ "$dry_run" -eq 1 ]]; then
+    dry_run_note "write $path"
+  else
+    printf '%s' "$content" > "$path"
+  fi
+}
+
+generate_dependabot_yml() {
+  local template_dir="$REPO_ROOT/templates/web/base/dependabot"
+
+  if [[ -f "$template_dir/header.yml" ]]; then
+    cat "$template_dir/header.yml"
+  else
+    printf 'version: 2\n\nupdates:\n'
+  fi
+
+  if [[ -f "$template_dir/github-actions.yml" ]]; then
+    cat "$template_dir/github-actions.yml"
+  fi
+
+  if [[ -f "$template_dir/npm.yml" ]]; then
+    cat "$template_dir/npm.yml"
+  fi
+}
+
+write_default_gitignore() {
+  local path="$1"
+  local content
+  content=$(cat <<'EOF'
+# CI Local
+.ci-local/docker/
+.ci-local-image-built
+semgrep-report.json
+semgrep-results.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+.env.*.local
+*.env
+
+# Credentials
+.npmrc
+credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+.aws/
+.ssh/
+.gcp/
+service-account*.json
+
+# Build
+*.log
+coverage/
+dist/
+build/
+target/
+node_modules/
+__pycache__/
+.pytest_cache/
+EOF
+)
+  write_file "$path" "$content"
+}
+
+copy_ci_local_family() {
+  local destination_root="$1"
+  local family_root="$REPO_ROOT/ci/bootstrap/ci-local"
+
+  ensure_dir "$destination_root/.ci-local"
+  ensure_dir "$destination_root/.ci-local/hooks"
+  ensure_dir "$destination_root/lib"
+
+  copy_file "$REPO_ROOT/lib/common.sh" "$destination_root/lib/common.sh"
+  copy_file "$family_root/README.md" "$destination_root/.ci-local/README.md"
+  copy_file "$family_root/ci-local.sh" "$destination_root/.ci-local/ci-local.sh"
+  copy_file "$family_root/install.sh" "$destination_root/.ci-local/install.sh"
+  copy_file "$family_root/semgrep.yml" "$destination_root/.ci-local/semgrep.yml"
+  copy_file "$family_root/hooks/pre-commit" "$destination_root/.ci-local/hooks/pre-commit"
+  copy_file "$family_root/hooks/commit-msg" "$destination_root/.ci-local/hooks/commit-msg"
+  copy_file "$family_root/hooks/pre-push" "$destination_root/.ci-local/hooks/pre-push"
+
+  make_executable "$destination_root/.ci-local/ci-local.sh"
+  make_executable "$destination_root/.ci-local/install.sh"
+  make_executable "$destination_root/.ci-local/hooks/pre-commit"
+  make_executable "$destination_root/.ci-local/hooks/commit-msg"
+  make_executable "$destination_root/.ci-local/hooks/pre-push"
+}
+
+init_template_web_base() {
+  local destination_root="$1"
+  local project_dir_name="$2"
+  local template_root="$REPO_ROOT/templates/web/base"
+
+  ensure_dir "$destination_root"
+  ensure_dir "$destination_root/.github"
+  ensure_dir "$destination_root/.github/workflows"
+
+  copy_ci_local_family "$destination_root"
+  copy_file "$template_root/github/ci-node.yml" "$destination_root/.github/workflows/ci.yml"
+  copy_file "$template_root/github/dependabot-automerge.yml" "$destination_root/.github/workflows/dependabot-automerge.yml"
+
+  if [[ ! -f "$destination_root/.gitignore" ]]; then
+    write_default_gitignore "$destination_root/.gitignore"
+  fi
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    dry_run_note "write $destination_root/.github/dependabot.yml"
+  else
+    generate_dependabot_yml > "$destination_root/.github/dependabot.yml"
+  fi
+
+  print_step "template_status: implemented"
+  print_step "implemented_template: template.web.base"
+  print_step "project_name: $project_dir_name"
+  print_step "destination: $destination_root"
+  print_step "ci_family: ci.bootstrap.local"
 }
 
 template_id=""
@@ -179,17 +354,32 @@ if [[ -n "$stack_id" ]] && ! contains "$stack_id" "${SUPPORTED_STACKS[@]}"; then
   exit 1
 fi
 
+if [[ "$template_id" != "template.web.base" ]]; then
+  printf 'error: template is published but not yet implemented in WI-023: %s\n' "$template_id" >&2
+  printf 'implemented template for this slice: template.web.base\n' >&2
+  exit 1
+fi
+
+if [[ -n "$stack_id" && "$stack_id" != "web" ]]; then
+  printf 'error: template.web.base only supports stack ID: web\n' >&2
+  exit 1
+fi
+
+destination_root="${destination:-$(pwd)}"
+
 printf 'entrypoint: javi-forge/scripts/forge-init.sh\n'
 printf 'mode: scaffold\n'
 printf 'contract_version: %s\n' "$contract_version"
 printf 'generator: %s\n' "$generator_id"
 printf 'template: %s\n' "$template_id"
 printf 'project_name: %s\n' "$project_name"
-printf 'destination: %s\n' "${destination:-current-directory}"
-printf 'stack: %s\n' "${stack_id:-none-requested}"
+printf 'destination: %s\n' "$destination_root"
+printf 'stack: %s\n' "${stack_id:-web}"
+
+init_template_web_base "$destination_root" "$project_name"
 
 if [[ "$dry_run" -eq 1 ]]; then
-  printf 'result: dry-run request accepted by scaffold\n'
+  printf 'result: dry-run request accepted and bounded web slice planned\n'
 else
-  printf 'result: scaffold accepted request shape; generation behavior not implemented yet\n'
+  printf 'result: bounded web slice generated\n'
 fi

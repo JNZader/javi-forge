@@ -1,0 +1,35 @@
+kind: forge-template
+contract_version: 0.1.0
+template:
+  id: template.web.base
+  owner_repo: javi-forge
+  status: extracted
+  work_item: WI-023
+  family: web
+  supported_stacks:
+    - web
+  supported_package_managers:
+    - npm
+    - yarn
+    - pnpm
+  assets:
+    - path: github/ci-node.yml
+      role: GitHub Actions workflow for Node web repositories
+    - path: github/dependabot-automerge.yml
+      role: Dependabot auto-merge workflow
+    - path: dependabot/header.yml
+      role: Dependabot base header fragment
+    - path: dependabot/github-actions.yml
+      role: Dependabot GitHub Actions update fragment
+    - path: dependabot/npm.yml
+      role: Dependabot npm update fragment
+  bootstrap_dependencies:
+    - ci.bootstrap.local
+    - lib/common.sh
+  lineage:
+    source: vault/project-starter-framework/templates/github/ and templates/common/dependabot/
+    source_type: curated-delta
+    maintenance_owner: javi-forge
+  rules:
+    - generation happens only through scripts/forge-init.sh
+    - this first slice implements template.web.base only; other published template IDs remain contract-only

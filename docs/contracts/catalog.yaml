@@ -76,7 +76,7 @@ generators:
     contract_version: 0.1.0
     status: identifier-published
     owning_repo: javi-forge
-    intended_entrypoint: scripts/init-project.*
+    intended_entrypoint: scripts/forge-init.sh
     intended_slice: stable init-project generator surface
   - id: generator.ci.bootstrap
     type: generator
@@ -102,6 +102,36 @@ generators:
     status: identifier-published
     owning_repo: javi-forge
     intended_slice: review automation and analysis generation family
+entrypoints:
+  - id: entrypoint.forge.init
+    path: scripts/forge-init.sh
+    contract_version: 0.1.0
+    status: scaffolded
+    owning_repo: javi-forge
+    purpose: stable project initialization surface
+    supported_generators:
+      - generator.project.init
+    supported_templates:
+      - template.web.base
+      - template.api.base
+      - template.fullstack.base
+      - template.docs.base
+    invocation_contract:
+      required_options:
+        - --template
+        - --project-name
+      optional_options:
+        - --generator
+        - --destination
+        - --stack
+        - --contract-version
+        - --dry-run
+        - --list-contracts
+      default_generator: generator.project.init
+    rules:
+      - consumers invoke this wrapper instead of template-internal scripts
+      - the wrapper path stays stable if templates, ci, or internal script layout changes
+      - request validation is part of the public contract; implementation extraction follows in WI-023
 catalog_contract:
   required_fields:
     - id
@@ -114,3 +144,4 @@ catalog_contract:
     - owning_repo
     - intended_entrypoint
     - intended_slice
+    - entrypoints

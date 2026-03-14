@@ -11,7 +11,7 @@ catalog_status:
   follow_up:
     - WI-024 published optional project-facing AI integration mappings in docs/contracts/ai-integrations.yaml
     - WI-028 retires legacy/template notes as the authoritative home for the extracted forge slice
-    - later work still needs to implement the remaining published template and generator IDs
+    - forge-slice-expansion implements template.api.base, template.fullstack.base, template.docs.base, and generator.review.automation
 namespace:
   template_prefix: template.
   generator_prefix: generator.
@@ -42,9 +42,10 @@ templates:
       - shell
       - template-specific toolchain
     contract_version: 0.1.0
-    status: identifier-published
+    status: slice-cutover-complete
     owning_repo: javi-forge
     intended_slice: first-class api project baseline
+    implementation_manifest: templates/api/base/template.yaml
   - id: template.fullstack.base
     type: template
     supported_stacks_or_modes:
@@ -54,9 +55,10 @@ templates:
       - shell
       - template-specific toolchain
     contract_version: 0.1.0
-    status: identifier-published
+    status: slice-cutover-complete
     owning_repo: javi-forge
     intended_slice: first-class fullstack project baseline
+    implementation_manifest: templates/fullstack/base/template.yaml
   - id: template.docs.base
     type: template
     supported_stacks_or_modes:
@@ -65,9 +67,10 @@ templates:
       - git
       - shell
     contract_version: 0.1.0
-    status: identifier-published
+    status: slice-cutover-complete
     owning_repo: javi-forge
     intended_slice: documentation-focused project baseline
+    implementation_manifest: templates/docs/base/template.yaml
 generators:
   - id: generator.project.init
     type: generator
@@ -104,9 +107,11 @@ generators:
       - git
       - shell
     contract_version: 0.1.0
-    status: identifier-published
+    status: slice-cutover-complete
     owning_repo: javi-forge
     intended_slice: review automation and analysis generation family
+    implementation_manifest: generators/review/automation/generator.yaml
+    composable: true
 entrypoints:
   - id: entrypoint.forge.init
     path: scripts/forge-init.sh

@@ -13,6 +13,12 @@ javi-forge/
 ├── README.md
 ├── .gitignore
 ├── templates/
+│   ├── web/base/          # template.web.base — web/Node CI baseline
+│   ├── api/base/          # template.api.base — API/backend CI (language-agnostic)
+│   ├── fullstack/base/    # template.fullstack.base — parallel frontend+backend CI
+│   └── docs/base/         # template.docs.base — docs build + GitHub Pages deploy
+├── generators/
+│   └── review/automation/ # generator.review.automation — ghagga code review
 ├── docs/
 ├── scripts/
 └── ci/
@@ -56,6 +62,16 @@ Este repo no deberia ser el hogar principal de:
 
 ## Current State
 
-`javi-forge` ya es el hogar canonico del primer slice extraido de forge (`template.web.base`, `generator.project.init`, `generator.ci.bootstrap`).
+El milestone `forge-slice-expansion` completa el primer ciclo de implementacion de todos los template y generator IDs publicados en el catalogo.
 
-Las referencias legacy o de `project-starter-framework` ya no son la fuente autoritativa para esos slices migrados; solo siguen como background historico y para familias todavia no extraidas.
+Slices implementados:
+
+- `template.web.base` — web/Node CI baseline (WI-023)
+- `template.api.base` — API/backend CI language-agnostic (forge-slice-expansion)
+- `template.fullstack.base` — parallel frontend+backend CI (forge-slice-expansion)
+- `template.docs.base` — docs build + GitHub Pages deploy (forge-slice-expansion)
+- `generator.project.init` — entrypoint de init (WI-023)
+- `generator.ci.bootstrap` — familia CI local (WI-023)
+- `generator.review.automation` — review automatico via ghagga GitHub Action (forge-slice-expansion)
+
+Las referencias legacy o de `project-starter-framework` siguen solo como background historico y referencia de lineage.

@@ -7,7 +7,8 @@ This document is the canonical authority guide for the migrated forge slices own
 
 It records the WI-028 cutover that stops treating legacy/template notes and
 `project-starter-framework` references as the authoritative home for the slices already
-extracted in WI-023.
+extracted in WI-023, and the `forge-slice-expansion` milestone that promotes the remaining
+published-but-stub template and generator IDs to implemented slices.
 
 ## Canonical Authority
 
@@ -24,11 +25,15 @@ entrypoint instead of reading template notes or external source layout.
 
 ## Migrated Slice Matrix
 
-| Surface | Canonical home | WI status | Legacy/reference status |
+| Surface | Canonical home | Status | Legacy/reference status |
 |---|---|---|---|
 | `template.web.base` | `templates/web/base/` | extracted in WI-023, cut over in WI-028 | external template notes are historical background only |
 | `generator.project.init` | `scripts/forge-init.sh` | implemented in WI-023, cut over in WI-028 | consumers must use the stable entrypoint, not template-internal scripts |
 | `generator.ci.bootstrap` | `ci/bootstrap/ci-local/` | extracted in WI-023, cut over in WI-028 | external CI/bootstrap notes are historical background only |
+| `template.api.base` | `templates/api/base/` | implemented in forge-slice-expansion | PSF multi-stack CI patterns are upstream reference only |
+| `template.fullstack.base` | `templates/fullstack/base/` | implemented in forge-slice-expansion | PSF monorepo/fullstack CI patterns are upstream reference only |
+| `template.docs.base` | `templates/docs/base/` | implemented in forge-slice-expansion | PSF and docs tool patterns are upstream reference only |
+| `generator.review.automation` | `generators/review/automation/` | implemented in forge-slice-expansion | ghagga (https://github.com/JNZader/ghagga) is the upstream reference |
 
 ## WI-028 Cutover Effect
 
@@ -41,17 +46,13 @@ For the migrated slices above:
 
 ## Remaining Non-Migrated Forge Scope
 
-WI-028 does not claim that every planned forge family is already extracted.
+The `forge-slice-expansion` milestone closes the gap on all currently published template and generator IDs.
 
-These items remain contract-only or later-scope work:
+All four previously-stub IDs are now implemented slices. Later-scope work includes:
 
-- `template.api.base`
-- `template.fullstack.base`
-- `template.docs.base`
-- `generator.review.automation`
-
-Historical notes or external references may still help discovery for those non-migrated
-families, but they are not authoritative for the migrated WI-023 slice.
+- adding stack-specific variant templates (e.g. `template.api.java`, `template.api.go`)
+- expanding `generator.review.automation` to support self-hosted ghagga server mode
+- implementing additional generator families not yet in the catalog
 
 ## Reader Guidance
 

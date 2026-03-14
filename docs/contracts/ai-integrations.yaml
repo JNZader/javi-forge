@@ -28,6 +28,35 @@ integrations:
       - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
       - only currently published project package IDs may appear here; reserved javi-ai IDs stay unavailable until the producer catalog promotes them
       - provider profile packages are out of scope for forge template contracts
+  - template_id: template.api.base
+    status: published-no-default-packages
+    project_package_ids: []
+    optional_project_package_ids:
+      - project.ai.instructions
+      - project.sdd.base
+    compatibility_notes:
+      - api template is AI-agnostic by default
+      - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
+      - provider profile packages are out of scope for forge template contracts
+  - template_id: template.fullstack.base
+    status: published-no-default-packages
+    project_package_ids: []
+    optional_project_package_ids:
+      - project.ai.instructions
+      - project.sdd.base
+    compatibility_notes:
+      - fullstack template is AI-agnostic by default
+      - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
+      - provider profile packages are out of scope for forge template contracts
+  - template_id: template.docs.base
+    status: published-no-default-packages
+    project_package_ids: []
+    optional_project_package_ids:
+      - project.ai.instructions
+    compatibility_notes:
+      - docs template is AI-agnostic by default
+      - optional project package requests must resolve through javi-ai/manifests/project-packages.yaml
+      - provider profile packages are out of scope for forge template contracts
 integration_contract:
   required_fields:
     - template_id

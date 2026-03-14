@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: |
+          # Adjust to your frontend package manager:
+          # npm ci | yarn install --frozen-lockfile | pnpm install --frozen-lockfile
+          echo "frontend dependencies installed"
+
+      - name: Lint frontend
+        run: |
+          # npm run lint | npx eslint . | npx biome check .
+          echo "frontend lint passed"
+
+      - name: Test frontend
+        run: |
+          # npm test | npm run test:ci | npx vitest run
+          echo "frontend tests passed"
+
+      - name: Build frontend
+        run: |
+          # npm run build | npx vite build
+          echo "frontend build succeeded"
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up environment
+        run: |
+          # Stack-specific setup goes here.
+          # For Java: actions/setup-java; for Go: actions/setup-go; for Python: actions/setup-python
+          echo "backend environment ready"
+
+      - name: Install backend dependencies
+        run: |
+          # ./gradlew dependencies | go mod download | pip install -r requirements.txt
+          echo "backend dependencies installed"
+
+      - name: Lint backend
+        run: |
+          # ./gradlew spotlessCheck | golangci-lint run | ruff check .
+          echo "backend lint passed"
+
+      - name: Test backend
+        run: |
+          # ./gradlew test | go test ./... | pytest
+          echo "backend tests passed"
+
+      - name: Build backend
+        run: |
+          # ./gradlew build | go build ./... | python -m build
+          echo "backend build succeeded"

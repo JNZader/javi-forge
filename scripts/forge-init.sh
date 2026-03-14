@@ -11,11 +11,15 @@ DEFAULT_GENERATOR="generator.project.init"
 SUPPORTED_GENERATORS=(
   "generator.project.init"
   "generator.review.automation"
+  "generator.ci.bootstrap"
 )
 
 SUPPORTED_TEMPLATES=(
   "template.web.base"
   "template.api.base"
+  "template.api.go"
+  "template.api.java"
+  "template.api.python"
   "template.fullstack.base"
   "template.docs.base"
 )
@@ -25,11 +29,22 @@ SUPPORTED_STACKS=(
   "api"
   "fullstack"
   "docs"
+  "go"
+  "java"
+  "python"
+)
+
+SUPPORTED_REVIEW_MODES=(
+  "github-action"
+  "self-hosted"
 )
 
 IMPLEMENTED_TEMPLATES=(
   "template.web.base"
   "template.api.base"
+  "template.api.go"
+  "template.api.java"
+  "template.api.python"
   "template.fullstack.base"
   "template.docs.base"
 )
@@ -37,13 +52,14 @@ IMPLEMENTED_TEMPLATES=(
 IMPLEMENTED_GENERATORS=(
   "generator.project.init"
   "generator.review.automation"
+  "generator.ci.bootstrap"
 )
 
 usage() {
   cat <<EOF
 Usage: ${SCRIPT_NAME} [options]
 
-Stable forge project initialization entrypoint scaffold.
+Forge project initialization entrypoint.
 
 Options:
   --template ID            Published template ID to initialize.
@@ -51,14 +67,25 @@ Options:
   --generator ID           Published generator ID. Defaults to ${DEFAULT_GENERATOR}.
   --destination PATH       Output directory for the generated project.
   --stack ID               Optional stack or mode hint.
+  --review-mode MODE       Review automation mode: github-action (default) | self-hosted.
   --contract-version VER   Contract version to negotiate or pin.
   --dry-run                Print the accepted request without generating files.
   --list-contracts         Print published generator, template, and stack IDs.
   -h, --help               Show this help message.
 
-Notes:
-  - WI-023 implements the first bounded forge slice for template.web.base.
-  - Other published template IDs remain contract-only until later work items land.
+Templates:
+  template.web.base          Web/Node.js CI baseline
+  template.api.base          API/backend (language-agnostic)
+  template.api.go            Go API (golangci-lint + go test)
+  template.api.java          Java/Spring Boot (Spotless + Gradle test)
+  template.api.python        Python/FastAPI (ruff + pytest)
+  template.fullstack.base    Parallel frontend + backend CI
+  template.docs.base         MkDocs + GitHub Pages
+
+Generators:
+  generator.project.init     Default template scaffold generator
+  generator.review.automation  Ghagga AI code review workflow
+  generator.ci.bootstrap     CI bootstrap family (standalone or composable)
 EOF
 }
 
@@ -273,19 +300,149 @@ init_template_api_base() {
   print_step "ci_family: ci.bootstrap.local"
 }
 
+generate_ci_bootstrap() {
+  local destination_root="$1"
+  local project_dir_name="$2"
+
+  ensure_dir "$destination_root"
+
+  copy_ci_local_family "$destination_root"
+
+  if [[ ! -f "$destination_root/.gitignore" ]]; then
+    write_default_gitignore "$destination_root/.gitignore"
+  fi
+
+  print_step "generator_status: implemented"
+  print_step "implemented_generator: generator.ci.bootstrap"
+  print_step "project_name: $project_dir_name"
+  print_step "destination: $destination_root"
+  print_step "ci_family: ci.bootstrap.local"
+}
+
+init_template_api_go() {
+  local destination_root="$1"
+  local project_dir_name="$2"
+  local template_root="$REPO_ROOT/templates/api/go"
+
+  ensure_dir "$destination_root"
+  ensure_dir "$destination_root/.github"
+  ensure_dir "$destination_root/.github/workflows"
+
+  copy_ci_local_family "$destination_root"
+  copy_file "$template_root/github/ci-go.yml" "$destination_root/.github/workflows/ci.yml"
+  copy_file "$template_root/github/dependabot-automerge.yml" "$destination_root/.github/workflows/dependabot-automerge.yml"
+
+  if [[ ! -f "$destination_root/.gitignore" ]]; then
+    write_default_gitignore "$destination_root/.gitignore"
+  fi
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    dry_run_note "write $destination_root/.github/dependabot.yml"
+  else
+    {
+      cat "$template_root/dependabot/header.yml"
+      cat "$template_root/dependabot/github-actions.yml"
+    } > "$destination_root/.github/dependabot.yml"
+  fi
+
+  print_step "template_status: implemented"
+  print_step "implemented_template: template.api.go"
+  print_step "stack: go"
+  print_step "project_name: $project_dir_name"
+  print_step "destination: $destination_root"
+  print_step "ci_family: ci.bootstrap.local"
+}
+
+init_template_api_java() {
+  local destination_root="$1"
+  local project_dir_name="$2"
+  local template_root="$REPO_ROOT/templates/api/java"
+
+  ensure_dir "$destination_root"
+  ensure_dir "$destination_root/.github"
+  ensure_dir "$destination_root/.github/workflows"
+
+  copy_ci_local_family "$destination_root"
+  copy_file "$template_root/github/ci-java.yml" "$destination_root/.github/workflows/ci.yml"
+  copy_file "$template_root/github/dependabot-automerge.yml" "$destination_root/.github/workflows/dependabot-automerge.yml"
+
+  if [[ ! -f "$destination_root/.gitignore" ]]; then
+    write_default_gitignore "$destination_root/.gitignore"
+  fi
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    dry_run_note "write $destination_root/.github/dependabot.yml"
+  else
+    {
+      cat "$template_root/dependabot/header.yml"
+      cat "$template_root/dependabot/github-actions.yml"
+    } > "$destination_root/.github/dependabot.yml"
+  fi
+
+  print_step "template_status: implemented"
+  print_step "implemented_template: template.api.java"
+  print_step "stack: java"
+  print_step "project_name: $project_dir_name"
+  print_step "destination: $destination_root"
+  print_step "ci_family: ci.bootstrap.local"
+}
+
+init_template_api_python() {
+  local destination_root="$1"
+  local project_dir_name="$2"
+  local template_root="$REPO_ROOT/templates/api/python"
+
+  ensure_dir "$destination_root"
+  ensure_dir "$destination_root/.github"
+  ensure_dir "$destination_root/.github/workflows"
+
+  copy_ci_local_family "$destination_root"
+  copy_file "$template_root/github/ci-python.yml" "$destination_root/.github/workflows/ci.yml"
+  copy_file "$template_root/github/dependabot-automerge.yml" "$destination_root/.github/workflows/dependabot-automerge.yml"
+
+  if [[ ! -f "$destination_root/.gitignore" ]]; then
+    write_default_gitignore "$destination_root/.gitignore"
+  fi
+
+  if [[ "$dry_run" -eq 1 ]]; then
+    dry_run_note "write $destination_root/.github/dependabot.yml"
+  else
+    {
+      cat "$template_root/dependabot/header.yml"
+      cat "$template_root/dependabot/github-actions.yml"
+    } > "$destination_root/.github/dependabot.yml"
+  fi
+
+  print_step "template_status: implemented"
+  print_step "implemented_template: template.api.python"
+  print_step "stack: python"
+  print_step "project_name: $project_dir_name"
+  print_step "destination: $destination_root"
+  print_step "ci_family: ci.bootstrap.local"
+}
+
 generate_review_automation() {
   local destination_root="$1"
   local project_dir_name="$2"
+  local mode="${3:-github-action}"
   local generator_root="$REPO_ROOT/generators/review/automation"
 
   ensure_dir "$destination_root"
   ensure_dir "$destination_root/.github"
   ensure_dir "$destination_root/.github/workflows"
 
-  copy_file "$generator_root/ghagga.yml" "$destination_root/.github/workflows/ghagga.yml"
+  case "$mode" in
+    github-action)
+      copy_file "$generator_root/ghagga.yml" "$destination_root/.github/workflows/ghagga.yml"
+      ;;
+    self-hosted)
+      copy_file "$generator_root/ghagga-self-hosted.yml" "$destination_root/.github/workflows/ghagga.yml"
+      ;;
+  esac
 
   print_step "generator_status: implemented"
   print_step "implemented_generator: generator.review.automation"
+  print_step "review_mode: $mode"
   print_step "project_name: $project_dir_name"
   print_step "destination: $destination_root"
   print_step "review_workflow: .github/workflows/ghagga.yml"
@@ -395,6 +552,7 @@ project_name=""
 generator_id="$DEFAULT_GENERATOR"
 destination=""
 stack_id=""
+review_mode="github-action"
 contract_version="$DEFAULT_CONTRACT_VERSION"
 dry_run=0
 list_contracts=0
@@ -424,6 +582,11 @@ while [[ $# -gt 0 ]]; do
     --stack)
       [[ $# -ge 2 ]] || { printf 'error: --stack requires a value\n' >&2; exit 1; }
       stack_id="$2"
+      shift 2
+      ;;
+    --review-mode)
+      [[ $# -ge 2 ]] || { printf 'error: --review-mode requires a value\n' >&2; exit 1; }
+      review_mode="$2"
       shift 2
       ;;
     --contract-version)
@@ -462,9 +625,10 @@ if [[ "$contract_version" != "$DEFAULT_CONTRACT_VERSION" ]]; then
   exit 1
 fi
 
-# Allow generator-only invocation (e.g. --generator generator.review.automation)
-# For template invocations, --template is still required
-if [[ -z "$template_id" && "$generator_id" == "$DEFAULT_GENERATOR" ]]; then
+# Allow generator-only invocation for standalone generators
+# For template invocations (default generator), --template is required
+STANDALONE_GENERATORS=("generator.review.automation" "generator.ci.bootstrap")
+if [[ -z "$template_id" ]] && ! contains "$generator_id" "${STANDALONE_GENERATORS[@]}"; then
   printf 'error: --template is required unless --list-contracts is used or --generator is a standalone generator\n' >&2
   exit 1
 fi
@@ -486,6 +650,12 @@ fi
 
 if [[ -n "$stack_id" ]] && ! contains "$stack_id" "${SUPPORTED_STACKS[@]}"; then
   printf 'error: unsupported stack ID: %s\n' "$stack_id" >&2
+  exit 1
+fi
+
+if ! contains "$review_mode" "${SUPPORTED_REVIEW_MODES[@]}"; then
+  printf 'error: unsupported review mode: %s\n' "$review_mode" >&2
+  printf 'supported review modes: github-action self-hosted\n' >&2
   exit 1
 fi
 
@@ -517,6 +687,27 @@ if [[ -n "$template_id" ]]; then
       fi
       init_template_api_base "$destination_root" "$project_name"
       ;;
+    template.api.go)
+      if [[ -n "$stack_id" && "$stack_id" != "go" ]]; then
+        printf 'error: template.api.go only supports stack ID: go\n' >&2
+        exit 1
+      fi
+      init_template_api_go "$destination_root" "$project_name"
+      ;;
+    template.api.java)
+      if [[ -n "$stack_id" && "$stack_id" != "java" ]]; then
+        printf 'error: template.api.java only supports stack ID: java\n' >&2
+        exit 1
+      fi
+      init_template_api_java "$destination_root" "$project_name"
+      ;;
+    template.api.python)
+      if [[ -n "$stack_id" && "$stack_id" != "python" ]]; then
+        printf 'error: template.api.python only supports stack ID: python\n' >&2
+        exit 1
+      fi
+      init_template_api_python "$destination_root" "$project_name"
+      ;;
     template.fullstack.base)
       if [[ -n "$stack_id" && "$stack_id" != "fullstack" ]]; then
         printf 'error: template.fullstack.base only supports stack ID: fullstack\n' >&2
@@ -538,9 +729,13 @@ if [[ -n "$template_id" ]]; then
   esac
 fi
 
-# Dispatch generator (composable with template)
+# Dispatch generators (composable with template)
 if [[ "$generator_id" == "generator.review.automation" ]]; then
-  generate_review_automation "$destination_root" "$project_name"
+  generate_review_automation "$destination_root" "$project_name" "$review_mode"
+fi
+
+if [[ "$generator_id" == "generator.ci.bootstrap" ]]; then
+  generate_ci_bootstrap "$destination_root" "$project_name"
 fi
 
 if [[ "$dry_run" -eq 1 ]]; then

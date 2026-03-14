@@ -1,0 +1,37 @@
+kind: forge-template
+contract_version: 0.1.0
+template:
+  id: template.api.java
+  owner_repo: javi-forge
+  status: slice-cutover-complete
+  milestone: javi-forge-completion
+  family: api
+  variant: java
+  supported_stacks:
+    - java
+  assets:
+    - path: github/ci-java.yml
+      role: Java/Spring Boot Gradle CI with Spotless and test
+    - path: github/dependabot-automerge.yml
+      role: Dependabot auto-merge workflow
+    - path: dependabot/header.yml
+      role: Dependabot base header fragment
+    - path: dependabot/github-actions.yml
+      role: Dependabot GitHub Actions update fragment
+  bootstrap_dependencies:
+    - ci.bootstrap.local
+    - lib/common.sh
+  lineage:
+    reference_sources:
+      - https://github.com/JNZader-Vault/project-starter-framework/tree/main/.github/workflows
+    source_type: curated-delta
+    maintenance_owner: javi-forge
+    active_external_dependency: none
+    cutover_status: javi-forge-completion
+    extraction_status: slice-forge-completion
+  rules:
+    - generation happens only through scripts/forge-init.sh
+    - CI requires a gradlew wrapper in the generated project root; add Spring Boot Gradle plugin
+  notes:
+    - javi-forge-completion adds the first Java/Spring Boot stack-specific template.
+    - Requires Java 21 (temurin), Gradle wrapper in project.

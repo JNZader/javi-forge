@@ -47,6 +47,12 @@ Este repo no deberia ser el hogar principal de:
 - `../vault/Javi.Dots`: referencia legacy.
 - `../docs/adr/ADR-0001-repo-boundaries.md`: boundary source of truth.
 
+## Contract Governance
+
+- `docs/contracts/catalog.yaml` y `docs/contracts/ai-integrations.yaml` son el punto de partida publico para el contrato forge de `ecosystem-restructure`.
+- La gobernanza y el namespace aprobado viven en `../javi-platform/docs/contracts/CONTRACT-INDEX.md` y `../javi-platform/openspec/changes/ecosystem-restructure/contracts.md`.
+- Los consumers deben depender de IDs y contratos publicados, nunca del layout interno de `templates/`, `scripts/` o `ci/`.
+
 ## Current State
 
 Skeleton minimo preparado para recibir templates y automatizaciones, sin migrar aun assets de `project-starter-framework` ni `ghagga`.

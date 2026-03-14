@@ -1,0 +1,17 @@
+kind: forge-catalog
+contract_version: 0.1.0
+status: scaffold
+templates: []
+generators: []
+reserved_template_ids:
+  - template.web.base
+  - template.api.base
+  - template.fullstack.base
+  - template.docs.base
+catalog_contract:
+  required_fields:
+    - id
+    - type
+    - supported_stacks_or_modes
+    - required_runtime_prerequisites
+    - contract_version

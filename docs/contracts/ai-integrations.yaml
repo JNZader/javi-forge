@@ -1,0 +1,17 @@
+kind: forge-ai-integration-catalog
+contract_version: 0.1.0
+status: scaffold
+integrations: []
+allowed_project_package_ids:
+  - project.sdd.base
+  - project.memory.engram
+  - project.ai.instructions
+  - project.ai.review
+integration_contract:
+  required_fields:
+    - template_id
+    - project_package_ids
+    - compatibility_notes
+rules:
+  - consume project-facing javi-ai package IDs only
+  - do not depend on provider profile package IDs

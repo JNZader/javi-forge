@@ -273,6 +273,24 @@ init_template_api_base() {
   print_step "ci_family: ci.bootstrap.local"
 }
 
+generate_review_automation() {
+  local destination_root="$1"
+  local project_dir_name="$2"
+  local generator_root="$REPO_ROOT/generators/review/automation"
+
+  ensure_dir "$destination_root"
+  ensure_dir "$destination_root/.github"
+  ensure_dir "$destination_root/.github/workflows"
+
+  copy_file "$generator_root/ghagga.yml" "$destination_root/.github/workflows/ghagga.yml"
+
+  print_step "generator_status: implemented"
+  print_step "implemented_generator: generator.review.automation"
+  print_step "project_name: $project_dir_name"
+  print_step "destination: $destination_root"
+  print_step "review_workflow: .github/workflows/ghagga.yml"
+}
+
 init_template_docs_base() {
   local destination_root="$1"
   local project_dir_name="$2"

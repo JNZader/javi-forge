@@ -1,0 +1,33 @@
+kind: forge-generator
+contract_version: 0.1.0
+generator:
+  id: generator.review.automation
+  owner_repo: javi-forge
+  status: slice-cutover-complete
+  milestone: forge-slice-expansion
+  type: review-automation
+  supported_stacks_or_modes:
+    - review-automation
+    - static-analysis
+  recipe: ghagga.yml
+  generated_output:
+    - path: .github/workflows/ghagga.yml
+      role: AI-powered code review workflow using ghagga GitHub Action
+  composable: true
+  composition_notes:
+    - can be combined with any --template flag; generates alongside template output
+    - when used without --template, generates only the review workflow
+  lineage:
+    upstream_source: https://github.com/JNZader/ghagga
+    source_type: curated-integration
+    maintenance_owner: javi-forge
+    active_external_dependency: pinned to JNZader/ghagga@v1
+    cutover_status: forge-slice-expansion-complete
+  rules:
+    - generation happens only through scripts/forge-init.sh
+    - the generated workflow uses @v1 major-version pinning; consumers may upgrade manually
+    - provider defaults to github (GitHub Models, free); override with GHAGGA_PROVIDER var
+  notes:
+    - forge-slice-expansion implements the first review automation slice.
+    - ghagga supports 15+ static analysis tools and 3 review modes (simple, workflow, consensus).
+    - memory is enabled by default for cross-PR learning; disable with enable-memory false.

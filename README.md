@@ -1,93 +1,175 @@
 # javi-forge
 
-Base para templates, scaffolding y estandarizacion de nuevos proyectos.
+> **Project scaffolding for the Javi ecosystem.** Generate production-ready CI pipelines, GitHub Actions workflows, and AI code review automation for any stack — in seconds.
 
-## Role
+---
 
-`javi-forge` define como nacen los repos nuevos del ecosistema: templates, hooks de scaffolding, CI reusable y helpers de inicializacion.
+## How it works
 
-## Starter Layout
-
-```text
-javi-forge/
-├── README.md
-├── .gitignore
-├── templates/
-│   ├── web/base/          # template.web.base — web/Node CI
-│   ├── api/base/          # template.api.base — generic API CI
-│   ├── api/go/            # template.api.go — Go API
-│   ├── api/java/          # template.api.java — Java/Spring Boot
-│   ├── api/python/        # template.api.python — Python/FastAPI
-│   ├── fullstack/base/    # template.fullstack.base — parallel frontend+backend
-│   └── docs/base/         # template.docs.base — MkDocs + GitHub Pages
-├── generators/
-│   └── review/automation/ # generator.review.automation — ghagga (github-action | self-hosted)
-├── ci/
-│   └── bootstrap/ci-local/ # generator.ci.bootstrap — CI local family
-├── docs/
-│   ├── quickstart.md      # first-time usage guide
-│   ├── FORGE-AUTHORITY.md
-│   └── contracts/
-├── scripts/
-│   └── forge-init.sh      # stable entrypoint
-└── lib/
-    └── common.sh
+```mermaid
+flowchart LR
+    CLI([forge-init.sh]) --> TV[Validate\nrequest]
+    TV --> TP{Template?}
+    TP -->|yes| TW[web.base\nNode.js CI]
+    TP -->|yes| TA[api.base\ngeneric API]
+    TP -->|yes| TG[api.go\nGo + lint]
+    TP -->|yes| TJ[api.java\nGradle]
+    TP -->|yes| TPY[api.python\nruff + pytest]
+    TP -->|yes| TFS[fullstack.base\nfrontend+backend]
+    TP -->|yes| TD[docs.base\nMkDocs + Pages]
+    TV --> GP{Generator?}
+    GP -->|review.automation| GRA[ghagga.yml\nGitHub Action]
+    GP -->|review.automation\n--mode self-hosted| GRS[ghagga-selfhosted.yml\nwebhook stub]
+    GP -->|ci.bootstrap| GCI[.ci-local/\nCI family]
+    TW & TA & TG & TJ & TPY & TFS & TD --> OUT[(Generated\nproject)]
+    GRA & GRS & GCI --> OUT
 ```
 
-## Directory Intent
+---
 
-- `templates/`: blueprints y starter repos por stack o modalidad.
-- `docs/`: contratos de scaffold, convenciones y notas de uso.
-- `scripts/`: entrypoints ligeros para init, sync y validacion local.
-- `ci/`: activos reusables de pipeline y automatizacion base para proyectos generados.
+## Quick Start
 
-## Boundaries
+### Via javi-dots (recommended)
 
-Este repo debe concentrarse en:
+```bash
+# Generate a web project
+scripts/javi.sh --preset forge \
+  --template-choice forge.template.web.base \
+  --project-name my-app \
+  --home "$HOME"
 
-- templates y blueprints reutilizables
-- generadores de proyectos
-- CI base y convenciones de scaffolding por stack
-- activos reutilizables para bootstrap de repos y workflows de equipo
+# Generate a Go API + review automation
+scripts/javi.sh --preset forge \
+  --template-choice forge.template.api.go \
+  --generator-choice forge.generator.review.automation \
+  --project-name my-api \
+  --home "$HOME"
+```
 
-Este repo no deberia ser el hogar principal de:
+### Direct usage
 
-- bootstrap global de la maquina
-- configuracion profunda de asistentes de IA del usuario
-- dotfiles o perfiles de sistema
+```bash
+# Dry-run a Go API template
+scripts/forge-init.sh \
+  --template template.api.go \
+  --project-name my-api \
+  --destination ~/projects \
+  --dry-run
 
-## Ecosystem Fit
+# Generate Python API + review automation
+scripts/forge-init.sh \
+  --template template.api.python \
+  --generator generator.review.automation \
+  --project-name my-api \
+  --destination ~/projects
 
-- `../javi-dots`: deja la maquina lista para usar los templates y generadores.
-- `../javi-ai`: aporta tooling de IA que algunos templates podran consumir luego via integraciones explicitas.
-- `../vault/Javi.Dots`: referencia legacy.
-- `../docs/adr/ADR-0001-repo-boundaries.md`: boundary source of truth.
+# Add CI bootstrap to an existing project
+scripts/forge-init.sh \
+  --generator generator.ci.bootstrap \
+  --project-name existing-project \
+  --destination ~/existing-project
 
-## Contract Governance
+# List all available templates and generators
+scripts/forge-init.sh --list-contracts
+```
 
-- `docs/contracts/catalog.yaml` y `docs/contracts/ai-integrations.yaml` son el punto de partida publico para el contrato forge de `ecosystem-restructure`.
-- `docs/FORGE-AUTHORITY.md` es la guia canonica para los slices de forge ya migrados; las notas legacy o referencias a `project-starter-framework` quedan solo como contexto historico para slices no migrados.
-- La gobernanza y el namespace aprobado viven en `../javi-platform/docs/contracts/CONTRACT-INDEX.md` y `../javi-platform/openspec/changes/ecosystem-restructure/contracts.md`.
-- Los consumers deben depender de IDs y contratos publicados, nunca del layout interno de `templates/`, `scripts/` o `ci/`.
+---
 
-## Current State
+## Templates
 
-El milestone `javi-forge-completion` trae `javi-forge` a 100% practico.
+| Template ID | Stack | CI Workflow | Includes |
+|-------------|-------|-------------|---------|
+| `template.web.base` | Node.js | Node CI (test + build) | ci-local, dependabot |
+| `template.api.base` | Any (generic) | Language-agnostic CI | ci-local, dependabot |
+| `template.api.go` | Go | golangci-lint + go test | ci-local, dependabot |
+| `template.api.java` | Java / Spring Boot | Spotless + Gradle test | ci-local, dependabot |
+| `template.api.python` | Python / FastAPI | ruff + pytest | ci-local, dependabot |
+| `template.fullstack.base` | Any frontend + backend | Parallel jobs | ci-local, dependabot |
+| `template.docs.base` | MkDocs | Build strict + gh-deploy | dependabot, mkdocs.yml.example |
 
-Templates implementados (7):
+---
 
-- `template.web.base` — web/Node CI baseline
-- `template.api.base` — API/backend CI language-agnostic
-- `template.api.go` — Go API (golangci-lint + go test)
-- `template.api.java` — Java/Spring Boot Gradle (Spotless + test)
-- `template.api.python` — Python/FastAPI (ruff + pytest)
-- `template.fullstack.base` — parallel frontend+backend CI
-- `template.docs.base` — MkDocs build + GitHub Pages deploy
+## Generators
 
-Generators implementados (3):
+| Generator ID | Mode | Output | Composable |
+|-------------|------|--------|------------|
+| `generator.project.init` | default | Full project scaffold | with any template |
+| `generator.ci.bootstrap` | standalone | `.ci-local/` family | yes, or standalone |
+| `generator.review.automation` | `github-action` | `ghagga.yml` GitHub Action | yes |
+| `generator.review.automation` | `self-hosted` | Webhook-trigger stub | yes |
 
-- `generator.project.init` — entrypoint de init
-- `generator.ci.bootstrap` — familia CI local (standalone + composable)
-- `generator.review.automation` — review via ghagga (github-action | self-hosted)
+### Review automation modes
 
-Ver `docs/quickstart.md` para la guia de primera vez. Las referencias legacy siguen solo como background historico.
+```bash
+# Default: free GitHub Action (GitHub Models, no key needed)
+scripts/forge-init.sh --generator generator.review.automation \
+  --project-name my-project --destination ~/projects
+
+# Self-hosted: your own ghagga server
+scripts/forge-init.sh --generator generator.review.automation \
+  --review-mode self-hosted \
+  --project-name my-project --destination ~/projects
+```
+
+---
+
+## Generated output per template
+
+Every template generates:
+
+```
+.github/
+  workflows/
+    ci.yml                  # Stack-specific CI workflow
+    dependabot-automerge.yml
+  dependabot.yml
+.ci-local/                  # Local CI simulation (most templates)
+  ci-local.sh
+  install.sh
+  semgrep.yml
+  hooks/
+    pre-commit
+    commit-msg
+    pre-push
+lib/
+  common.sh
+.gitignore
+```
+
+The `docs.base` template additionally generates:
+
+```
+docs/
+  index.md                  # Starter documentation page
+mkdocs.yml.example          # Rename to mkdocs.yml
+```
+
+---
+
+## AI Integration
+
+Generated projects can optionally request AI packages from [javi-ai](https://github.com/JNZader/javi-ai):
+
+| Template | Optional AI packages |
+|---------|---------------------|
+| `template.web.base` | `project.ai.instructions` · `project.sdd.base` · `project.memory.engram` · `project.ai.review` |
+| `template.api.*` | same as above |
+| `template.fullstack.base` | same as above |
+| `template.docs.base` | `project.ai.instructions` · `project.memory.engram` |
+
+---
+
+## Documentation
+
+See [`docs/quickstart.md`](docs/quickstart.md) for a comprehensive usage guide.
+
+---
+
+## Ecosystem
+
+| Repo | Role |
+|------|------|
+| [javi-dots](https://github.com/JNZader/javi-dots) | Workstation setup, consumes javi-forge via contracts |
+| [javi-ai](https://github.com/JNZader/javi-ai) | AI provider profiles and project packages |
+| **javi-forge** | Project templates and generators |
+| [javi-platform](https://github.com/JNZader/javi-platform) | Governance, ADRs, SDD artifacts |

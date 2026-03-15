@@ -1,0 +1,80 @@
+# =============================================================================
+# GHAGGA Local Development - Docker Compose
+# =============================================================================
+# Levanta Supabase + Dashboard para desarrollo local de GHAGGA.
+#
+# Uso:
+#   docker compose up -d          # Levantar servicios
+#   docker compose logs -f        # Ver logs
+#   docker compose down           # Detener
+#
+# Prerequisitos:
+#   - Docker y Docker Compose
+#   - Copiar .env.example a .env y configurar API keys
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Supabase (PostgreSQL + Auth + Edge Functions)
+  # ---------------------------------------------------------------------------
+  supabase-db:
+    image: supabase/postgres:15.6.1.143
+    ports:
+      - "127.0.0.1:54322:5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.ghagga}
+      POSTGRES_DB: ghagga
+    volumes:
+      - ghagga-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  supabase-kong:
+    image: kong:3.5
+    # NOTE: kong.yml is required. Get it from the GHAGGA repository:
+    #   curl -o kong.yml https://raw.githubusercontent.com/JNZader/ghagga/main/kong.yml
+    volumes:
+      - ./kong.yml:/home/kong/kong.yml:ro
+    ports:
+      - "127.0.0.1:54321:8000"   # Supabase API
+      - "127.0.0.1:54323:8443"   # Supabase API (HTTPS)
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "kong health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # GHAGGA Dashboard (React + Vite)
+  # ---------------------------------------------------------------------------
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+      args:
+        GHAGGA_REPO: https://github.com/JNZader/ghagga.git
+    ports:
+      - "127.0.0.1:5173:5173"
+    environment:
+      VITE_SUPABASE_URL: http://localhost:54321
+      VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set SUPABASE_ANON_KEY in .env.ghagga}
+    depends_on:
+      supabase-kong:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5173/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  ghagga-db:

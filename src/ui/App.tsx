@@ -28,6 +28,7 @@ interface AppProps {
   presetCI?: CIProvider
   presetMemory?: MemoryOption
   presetName?: string
+  presetGhagga?: boolean
 }
 
 export default function App({
@@ -36,6 +37,7 @@ export default function App({
   presetCI,
   presetMemory,
   presetName,
+  presetGhagga = false,
 }: AppProps) {
   const [stage, setStage] = useState<Stage>('welcome')
   const [projectName, setProjectName] = useState(presetName ?? '')
@@ -45,7 +47,7 @@ export default function App({
   const [memory, setMemory] = useState<MemoryOption>(presetMemory ?? 'engram')
   const [aiSync, setAiSync] = useState(true)
   const [sdd, setSdd] = useState(true)
-  const [ghagga, setGhagga] = useState(false)
+  const [ghagga, setGhagga] = useState(presetGhagga)
   const [steps, setSteps] = useState<InitStep[]>([])
   const [startTime] = useState(Date.now())
 
@@ -112,7 +114,20 @@ export default function App({
       {stage !== 'welcome' && <Header subtitle={subtitle} dryRun={dryRun} />}
 
       {stage === 'welcome' && (
-        <Welcome onDone={() => setStage(presetName ? 'stack' : 'name')} />
+        <Welcome onDone={() => {
+          // Skip stages for which presets are already provided
+          if (presetName && presetStack && presetCI && presetMemory) {
+            setStage('options')
+          } else if (presetName && presetStack && presetCI) {
+            setStage('memory')
+          } else if (presetName && presetStack) {
+            setStage('ci')
+          } else if (presetName) {
+            setStage('stack')
+          } else {
+            setStage('name')
+          }
+        }} />
       )}
       {stage === 'name' && (
         <NameInput
@@ -133,7 +148,7 @@ export default function App({
         <MemorySelector onConfirm={handleMemoryConfirm} />
       )}
       {stage === 'options' && (
-        <OptionSelector onConfirm={handleOptionsConfirm} />
+        <OptionSelector onConfirm={handleOptionsConfirm} presetGhagga={presetGhagga} />
       )}
       {stage === 'running' && (
         <Progress

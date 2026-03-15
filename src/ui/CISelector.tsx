@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
 import type { CIProvider } from '../types/index.js'
 import { theme } from './theme.js'
+import { useCIMode } from './CIContext.js'
 
 const CI_PROVIDERS: { id: CIProvider; label: string; description: string }[] = [
   { id: 'github',     label: 'GitHub Actions', description: 'GitHub CI/CD with reusable workflows' },
@@ -14,7 +15,15 @@ interface Props {
 }
 
 export default function CISelector({ onConfirm }: Props) {
+  const isCI = useCIMode()
   const [cursor, setCursor] = useState(0)
+
+  // Auto-confirm in CI mode
+  useEffect(() => {
+    if (isCI) {
+      onConfirm(CI_PROVIDERS[cursor].id)
+    }
+  }, [isCI]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useInput((_, key) => {
     if (key.upArrow)   setCursor(c => Math.max(0, c - 1))
@@ -22,7 +31,7 @@ export default function CISelector({ onConfirm }: Props) {
     if (key.return) {
       onConfirm(CI_PROVIDERS[cursor].id)
     }
-  })
+  }, { isActive: !isCI })
 
   return (
     <Box flexDirection="column">

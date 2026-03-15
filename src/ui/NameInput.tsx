@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
 import path from 'path'
 import { theme } from './theme.js'
+import { useCIMode } from './CIContext.js'
 
 interface Props {
   defaultName: string
@@ -20,11 +21,19 @@ function validateName(name: string): string | null {
 }
 
 export default function NameInput({ defaultName, onConfirm }: Props) {
+  const isCI = useCIMode()
   const [value, setValue] = useState(defaultName)
   const trimmed = value.trim()
   const error = validateName(trimmed)
   const isValid = error === null && trimmed.length > 0
   const targetDir = path.resolve(process.cwd(), trimmed || '.')
+
+  // Auto-confirm in CI mode
+  useEffect(() => {
+    if (isCI && isValid) {
+      onConfirm(trimmed, targetDir)
+    }
+  }, [isCI]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useInput((input, key) => {
     if (key.return && isValid) {
@@ -34,7 +43,7 @@ export default function NameInput({ defaultName, onConfirm }: Props) {
     } else if (input && !key.ctrl && !key.meta) {
       setValue(v => v + input)
     }
-  })
+  }, { isActive: !isCI })
 
   return (
     <Box flexDirection="column">

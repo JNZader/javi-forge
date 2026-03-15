@@ -5,6 +5,7 @@ import { runDoctor } from '../commands/doctor.js'
 import type { DoctorResult } from '../types/index.js'
 import Header from './Header.js'
 import { theme } from './theme.js'
+import { useCIMode } from './CIContext.js'
 
 type CheckStatus = 'ok' | 'fail' | 'skip'
 
@@ -22,6 +23,7 @@ const STATUS_COLOR: Record<CheckStatus, string> = {
 
 export default function Doctor() {
   const { exit } = useApp()
+  const isCI = useCIMode()
   const [result, setResult] = useState<DoctorResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -37,10 +39,19 @@ export default function Doctor() {
 
   useEffect(() => { runCheck() }, [runCheck])
 
+  // Auto-exit in CI mode once loading finishes
+  useEffect(() => {
+    if (isCI && !loading) {
+      const t = setTimeout(() => exit(), 100)
+      return () => clearTimeout(t)
+    }
+    return undefined
+  }, [isCI, loading, exit])
+
   useInput((input, key) => {
     if (input.toLowerCase() === 'r') runCheck()
     if (input.toLowerCase() === 'q' || key.return || key.escape) exit()
-  })
+  }, { isActive: !isCI })
 
   // Compute health score
   const allChecks = result?.sections.flatMap(s => s.checks) ?? []

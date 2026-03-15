@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
 import type { MemoryOption } from '../types/index.js'
 import { theme } from './theme.js'
+import { useCIMode } from './CIContext.js'
 
 const MEMORY_OPTIONS: { id: MemoryOption; label: string; description: string }[] = [
   { id: 'engram',         label: 'Engram',         description: 'SQLite-backed persistent memory with MCP' },
@@ -15,7 +16,15 @@ interface Props {
 }
 
 export default function MemorySelector({ onConfirm }: Props) {
+  const isCI = useCIMode()
   const [cursor, setCursor] = useState(0)
+
+  // Auto-confirm in CI mode
+  useEffect(() => {
+    if (isCI) {
+      onConfirm(MEMORY_OPTIONS[cursor].id)
+    }
+  }, [isCI]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useInput((_, key) => {
     if (key.upArrow)   setCursor(c => Math.max(0, c - 1))
@@ -23,7 +32,7 @@ export default function MemorySelector({ onConfirm }: Props) {
     if (key.return) {
       onConfirm(MEMORY_OPTIONS[cursor].id)
     }
-  })
+  }, { isActive: !isCI })
 
   return (
     <Box flexDirection="column">

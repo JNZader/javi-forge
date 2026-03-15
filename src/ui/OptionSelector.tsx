@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { theme } from './theme.js'
+import { useCIMode } from './CIContext.js'
 
 interface OptionItem {
   id: string
@@ -17,13 +18,28 @@ const OPTIONS: OptionItem[] = [
 
 interface Props {
   onConfirm: (selected: { aiSync: boolean; sdd: boolean; ghagga: boolean }) => void
+  presetGhagga?: boolean
 }
 
-export default function OptionSelector({ onConfirm }: Props) {
+export default function OptionSelector({ onConfirm, presetGhagga = false }: Props) {
+  const isCI = useCIMode()
   const [cursor, setCursor] = useState(0)
-  const [selected, setSelected] = useState<Set<string>>(
-    new Set(OPTIONS.filter(o => o.default).map(o => o.id))
-  )
+  const [selected, setSelected] = useState<Set<string>>(() => {
+    const defaults = new Set(OPTIONS.filter(o => o.default).map(o => o.id))
+    if (presetGhagga) defaults.add('ghagga')
+    return defaults
+  })
+
+  // Auto-confirm in CI mode with defaults
+  useEffect(() => {
+    if (isCI) {
+      onConfirm({
+        aiSync: selected.has('aiSync'),
+        sdd:    selected.has('sdd'),
+        ghagga: selected.has('ghagga'),
+      })
+    }
+  }, [isCI]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useInput((input, key) => {
     if (key.upArrow)   setCursor(c => Math.max(0, c - 1))
@@ -43,7 +59,7 @@ export default function OptionSelector({ onConfirm }: Props) {
         ghagga: selected.has('ghagga'),
       })
     }
-  })
+  }, { isActive: !isCI })
 
   return (
     <Box flexDirection="column">

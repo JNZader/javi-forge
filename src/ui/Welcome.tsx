@@ -3,16 +3,20 @@ import { Box, Text } from 'ink'
 import Spinner from 'ink-spinner'
 import Header from './Header.js'
 import { theme } from './theme.js'
+import { useCIMode } from './CIContext.js'
 
 interface Props {
   onDone: () => void
 }
 
 export default function Welcome({ onDone }: Props) {
+  const isCI = useCIMode()
+
   useEffect(() => {
-    const timer = setTimeout(onDone, 1500)
+    // Skip welcome delay in CI mode
+    const timer = setTimeout(onDone, isCI ? 0 : 1500)
     return () => clearTimeout(timer)
-  }, [onDone])
+  }, [onDone, isCI])
 
   return (
     <Box flexDirection="column" padding={1}>

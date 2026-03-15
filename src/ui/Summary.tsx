@@ -1,7 +1,8 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
 import type { InitStep } from '../types/index.js'
 import { theme } from './theme.js'
+import { useCIMode } from './CIContext.js'
 
 interface Props {
   steps: InitStep[]
@@ -27,6 +28,7 @@ function getInstallHint(stack?: string): string | null {
 
 export default function Summary({ steps, dryRun, projectName, stack, elapsedMs }: Props) {
   const { exit } = useApp()
+  const isCI = useCIMode()
 
   const done    = steps.filter(s => s.status === 'done').length
   const skipped = steps.filter(s => s.status === 'skipped').length
@@ -35,9 +37,18 @@ export default function Summary({ steps, dryRun, projectName, stack, elapsedMs }
     ? `${(elapsedMs / 1000).toFixed(1)}s`
     : null
 
+  // Auto-exit in CI mode
+  useEffect(() => {
+    if (isCI) {
+      const t = setTimeout(() => exit(), 100)
+      return () => clearTimeout(t)
+    }
+    return undefined
+  }, [isCI, exit])
+
   useInput((_, key) => {
     if (key.return || key.escape) exit()
-  })
+  }, { isActive: !isCI })
 
   const installHint = getInstallHint(stack)
 
@@ -63,6 +74,30 @@ export default function Summary({ steps, dryRun, projectName, stack, elapsedMs }
         </Box>
       )}
 
+      {/* Step details */}
+      <Box marginTop={1} flexDirection="column">
+        {steps.map(step => (
+          <Box key={step.id} marginLeft={2}>
+            {step.status === 'done' ? (
+              <Text color={theme.success}>
+                {'\u2713'} {step.label}
+                {step.detail ? <Text color={theme.muted} dimColor>  {step.detail}</Text> : null}
+              </Text>
+            ) : step.status === 'skipped' ? (
+              <Text color={theme.muted}>
+                {'\u2013'} {step.label}
+                {step.detail ? <Text dimColor>  {step.detail}</Text> : null}
+              </Text>
+            ) : step.status === 'error' ? (
+              <Text color={theme.error}>
+                {'\u2717'} {step.label}
+                {step.detail ? <Text color={theme.muted} dimColor>  {step.detail}</Text> : null}
+              </Text>
+            ) : null}
+          </Box>
+        ))}
+      </Box>
+
       {/* Totals */}
       <Box marginTop={1} flexDirection="column">
         <Text color={theme.success}>  {'\u2713'} {done} steps completed</Text>
@@ -73,7 +108,7 @@ export default function Summary({ steps, dryRun, projectName, stack, elapsedMs }
           <Box flexDirection="column">
             <Text color={theme.error}>  {'\u2717'} {errors.length} errors:</Text>
             {errors.map(e => (
-              <Text key={e.id} color={theme.error}>    {'\u2022'} {e.label}: {e.detail}</Text>
+              <Text key={`err-${e.id}`} color={theme.error}>    {'\u2022'} {e.label}: {e.detail}</Text>
             ))}
           </Box>
         )}

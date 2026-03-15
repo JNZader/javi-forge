@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Box, Text, useInput } from 'ink'
 import { detectStack, STACK_LABELS } from '../lib/common.js'
 import type { Stack } from '../types/index.js'
 import { theme } from './theme.js'
+import { useCIMode } from './CIContext.js'
 
 const ALL_STACKS: Stack[] = ['node', 'python', 'go', 'rust', 'java-gradle', 'java-maven', 'elixir']
 
@@ -12,6 +13,8 @@ interface Props {
 }
 
 export default function StackSelector({ projectDir, onConfirm }: Props) {
+  const isCI = useCIMode()
+  const autoConfirmed = useRef(false)
   const [cursor, setCursor] = useState(0)
   const [detectedStack, setDetectedStack] = useState<Stack | null>(null)
   const [detecting, setDetecting] = useState(true)
@@ -27,6 +30,14 @@ export default function StackSelector({ projectDir, onConfirm }: Props) {
     })
   }, [projectDir])
 
+  // Auto-confirm in CI mode once detection is done
+  useEffect(() => {
+    if (isCI && !detecting && !autoConfirmed.current) {
+      autoConfirmed.current = true
+      onConfirm(ALL_STACKS[cursor])
+    }
+  }, [isCI, detecting]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useInput((input, key) => {
     if (detecting) return
     if (key.upArrow)   setCursor(c => Math.max(0, c - 1))
@@ -34,7 +45,7 @@ export default function StackSelector({ projectDir, onConfirm }: Props) {
     if (key.return) {
       onConfirm(ALL_STACKS[cursor])
     }
-  })
+  }, { isActive: !isCI })
 
   if (detecting) {
     return (

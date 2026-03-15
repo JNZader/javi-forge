@@ -5,6 +5,7 @@ import { runAnalyze } from '../commands/analyze.js'
 import type { InitStep } from '../types/index.js'
 import Header from './Header.js'
 import { theme } from './theme.js'
+import { useCIMode } from './CIContext.js'
 
 interface Props {
   dryRun: boolean
@@ -12,6 +13,7 @@ interface Props {
 
 export default function AnalyzeUI({ dryRun }: Props) {
   const { exit } = useApp()
+  const isCI = useCIMode()
   const [steps, setSteps] = useState<InitStep[]>([])
   const [finished, setFinished] = useState(false)
   const [startTime] = useState(Date.now())
@@ -32,9 +34,18 @@ export default function AnalyzeUI({ dryRun }: Props) {
     ).then(() => setFinished(true))
   }, [dryRun])
 
+  // Auto-exit in CI mode once finished
+  useEffect(() => {
+    if (isCI && finished) {
+      const t = setTimeout(() => exit(), 100)
+      return () => clearTimeout(t)
+    }
+    return undefined
+  }, [isCI, finished, exit])
+
   useInput((_, key) => {
     if (finished && (key.return || key.escape)) exit()
-  })
+  }, { isActive: !isCI })
 
   const doneCount  = steps.filter(s => s.status === 'done').length
   const errorCount = steps.filter(s => s.status === 'error').length

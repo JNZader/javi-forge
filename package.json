@@ -3,10 +3,41 @@
   "version": "0.1.0",
   "description": "Project scaffolding and AI-ready CI bootstrap",
   "type": "module",
-  "bin": { "javi-forge": "./dist/index.js" },
-  "scripts": { "build": "tsc", "test": "vitest run" },
+  "bin": {
+    "javi-forge": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.tsx",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
   "author": "JNZader",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/JNZader/javi-forge" },
-  "engines": { "node": ">=18" }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JNZader/javi-forge"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "fs-extra": "^11.3.4",
+    "glob": "^13.0.6",
+    "ink": "^6.8.0",
+    "ink-spinner": "^5.0.0",
+    "meow": "^14.1.0",
+    "react": "^19.2.4",
+    "yaml": "^2.8.2"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/glob": "^9.0.0",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
 }

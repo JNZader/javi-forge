@@ -4,25 +4,54 @@
 
 ---
 
-## How it works
+## Template and Generator Flow
 
 ```mermaid
 flowchart LR
-    CLI([forge-init.sh]) --> TV[Validate\nrequest]
-    TV --> TP{Template?}
-    TP -->|yes| TW[web.base\nNode.js CI]
-    TP -->|yes| TA[api.base\ngeneric API]
-    TP -->|yes| TG[api.go\nGo + lint]
-    TP -->|yes| TJ[api.java\nGradle]
-    TP -->|yes| TPY[api.python\nruff + pytest]
-    TP -->|yes| TFS[fullstack.base\nfrontend+backend]
-    TP -->|yes| TD[docs.base\nMkDocs + Pages]
-    TV --> GP{Generator?}
-    GP -->|review.automation| GRA[ghagga.yml\nGitHub Action]
-    GP -->|review.automation\n--mode self-hosted| GRS[ghagga-selfhosted.yml\nwebhook stub]
-    GP -->|ci.bootstrap| GCI[.ci-local/\nCI family]
-    TW & TA & TG & TJ & TPY & TFS & TD --> OUT[(Generated\nproject)]
+    CLI(["scripts/forge-init.sh\n--template / --generator\n--project-name --destination"])
+
+    CLI --> TV["Validate\nrequest"]
+
+    TV --> TP{"Template?"}
+    TP -->|"template.web.base"| TW["Node.js CI\ntest + build"]
+    TP -->|"template.api.base"| TA["Generic API\nlang-agnostic CI"]
+    TP -->|"template.api.go"| TG["Go\ngolangci-lint + go test"]
+    TP -->|"template.api.java"| TJ["Java / Spring Boot\nSpotless + Gradle"]
+    TP -->|"template.api.python"| TPY["Python / FastAPI\nruff + pytest"]
+    TP -->|"template.fullstack.base"| TFS["Frontend + Backend\nparallel CI jobs"]
+    TP -->|"template.docs.base"| TD["MkDocs\nbuild strict + Pages"]
+
+    TV --> GP{"Generator?"}
+    GP -->|"generator.review.automation\n--mode github-action"| GRA["ghagga.yml\nGitHub Action (free)"]
+    GP -->|"generator.review.automation\n--mode self-hosted"| GRS["ghagga-selfhosted.yml\nwebhook trigger stub"]
+    GP -->|"generator.ci.bootstrap"| GCI[".ci-local/\nCI family only"]
+
+    TW & TA & TG & TJ & TPY & TFS & TD --> OUT[("Generated Project\n.github/ · .ci-local/\nlib/ · .gitignore")]
     GRA & GRS & GCI --> OUT
+```
+
+---
+
+## AI Integration Architecture
+
+```mermaid
+graph LR
+    subgraph FORGE["javi-forge"]
+        T["Templates\n7 stacks"]
+        G["Generators\n3 modes"]
+    end
+
+    subgraph AI["javi-ai Project Packages"]
+        PAI["project.ai.instructions\nProvider-neutral AI setup"]
+        PS["project.sdd.base\nSDD workflow + agents"]
+        PME["project.memory.engram\nEngram persistent memory"]
+        PR["project.ai.review\nReview hooks + automation"]
+    end
+
+    T -->|optional AI package request| PAI & PS & PME & PR
+    G -->|review.automation| PR
+
+    PAI & PS & PME & PR --> PROJ["Generated Project\nCLAUDE.md · agents/\nhooks/ · memory/"]
 ```
 
 ---

@@ -1,0 +1,145 @@
+# ===========================================
+# Reusable Workflow: Node.js Build
+# ===========================================
+# Minimal CI for Node.js/TypeScript projects.
+#
+# Usage:
+#   jobs:
+#     build:
+#       uses: JNZader/project-starter-framework/.github/workflows/reusable-build-node.yml@main
+#       with:
+#         node-version: '20'
+# ===========================================
+
+name: Node.js Build (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version'
+        required: false
+        default: '20'
+        type: string
+      package-manager:
+        description: 'Package manager (npm, yarn, pnpm)'
+        required: false
+        default: 'npm'
+        type: string
+      build-script:
+        description: 'Build script name'
+        required: false
+        default: 'build'
+        type: string
+      run-tests:
+        description: 'Run tests'
+        required: false
+        default: true
+        type: boolean
+      run-lint:
+        description: 'Run linting'
+        required: false
+        default: true
+        type: boolean
+      working-directory:
+        description: 'Working directory'
+        required: false
+        default: '.'
+        type: string
+      lint-fail-on-error:
+        description: 'Fail the build if linting fails'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js ${{ inputs.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: Install (npm)
+        if: inputs.package-manager == 'npm'
+        run: npm ci
+
+      - name: Install (yarn)
+        if: inputs.package-manager == 'yarn'
+        run: yarn install --frozen-lockfile
+
+      - name: Install (pnpm)
+        if: inputs.package-manager == 'pnpm'
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        if: inputs.run-lint
+        continue-on-error: ${{ !inputs.lint-fail-on-error }}
+        env:
+          PKG_MGR: ${{ inputs.package-manager }}
+        run: |
+          if [ "$PKG_MGR" = "pnpm" ]; then
+            pnpm run lint
+          elif [ "$PKG_MGR" = "yarn" ]; then
+            yarn lint
+          else
+            npm run lint
+          fi
+
+      - name: Build
+        env:
+          PKG_MGR: ${{ inputs.package-manager }}
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+        run: |
+          if [ "$PKG_MGR" = "pnpm" ]; then
+            pnpm run "$BUILD_SCRIPT"
+          elif [ "$PKG_MGR" = "yarn" ]; then
+            yarn "$BUILD_SCRIPT"
+          else
+            npm run "$BUILD_SCRIPT"
+          fi
+
+      - name: Test
+        if: inputs.run-tests
+        env:
+          PKG_MGR: ${{ inputs.package-manager }}
+        run: |
+          if [ "$PKG_MGR" = "pnpm" ]; then
+            pnpm test
+          elif [ "$PKG_MGR" = "yarn" ]; then
+            yarn test
+          else
+            npm test
+          fi
+
+      - name: Upload test results
+        if: inputs.run-tests && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-node
+          path: |
+            coverage/
+            junit.xml
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore

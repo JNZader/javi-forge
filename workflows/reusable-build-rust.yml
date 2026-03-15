@@ -1,0 +1,135 @@
+# ===========================================
+# Reusable Workflow: Rust Build
+# ===========================================
+# Minimal CI for Rust projects.
+#
+# Usage:
+#   jobs:
+#     build:
+#       uses: JNZader/project-starter-framework/.github/workflows/reusable-build-rust.yml@main
+# ===========================================
+
+name: Rust Build (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      toolchain:
+        description: 'Rust toolchain (stable, beta, nightly)'
+        required: false
+        default: 'stable'
+        type: string
+      run-tests:
+        description: 'Run tests'
+        required: false
+        default: true
+        type: boolean
+      run-clippy:
+        description: 'Run clippy linter'
+        required: false
+        default: true
+        type: boolean
+      run-fmt:
+        description: 'Check formatting'
+        required: false
+        default: true
+        type: boolean
+      working-directory:
+        description: 'Working directory'
+        required: false
+        default: '.'
+        type: string
+      cargo-args:
+        description: 'Additional cargo arguments'
+        required: false
+        default: ''
+        type: string
+      lint-fail-on-error:
+        description: 'Fail the build if linting fails'
+        required: false
+        default: true
+        type: boolean
+      upload-binary:
+        description: 'Upload release binary as artifact'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        env:
+          ARGS: ${{ inputs.cargo-args }}
+        run: |
+          if echo "$ARGS" | grep -qE '[;|&$`(){}<>'"'"'"]'; then
+            echo "::error::Invalid characters in input arguments. Shell metacharacters are not allowed."
+            exit 1
+          fi
+
+      - name: Setup Rust ${{ inputs.toolchain }}
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a # master 2024-12
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+        with:
+          workspaces: ${{ inputs.working-directory }}
+
+      - name: Check formatting
+        if: inputs.run-fmt
+        run: cargo fmt --all -- --check
+
+      - name: Build
+        env:
+          CARGO_ARGS: ${{ inputs.cargo-args }}
+        run: cargo build --release $CARGO_ARGS
+
+      - name: Clippy
+        if: inputs.run-clippy
+        continue-on-error: ${{ !inputs.lint-fail-on-error }}
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        if: inputs.run-tests
+        env:
+          CARGO_ARGS: ${{ inputs.cargo-args }}
+        run: cargo test --all-features $CARGO_ARGS
+
+      - name: Build release binary
+        if: inputs.upload-binary
+        env:
+          CARGO_ARGS: ${{ inputs.cargo-args }}
+        run: cargo build --release $CARGO_ARGS
+
+      - name: Upload binary
+        if: inputs.upload-binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binary
+          path: |
+            ${{ inputs.working-directory }}/target/release/*
+            !${{ inputs.working-directory }}/target/release/.fingerprint
+            !${{ inputs.working-directory }}/target/release/build
+            !${{ inputs.working-directory }}/target/release/deps
+            !${{ inputs.working-directory }}/target/release/examples
+            !${{ inputs.working-directory }}/target/release/incremental
+            !${{ inputs.working-directory }}/target/release/.cargo-lock
+            !${{ inputs.working-directory }}/target/release/*.d
+          retention-days: 7
+          if-no-files-found: ignore

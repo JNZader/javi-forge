@@ -1,0 +1,159 @@
+# ===========================================
+# Reusable Workflow: Python Build
+# ===========================================
+# Minimal CI for Python projects.
+#
+# Usage:
+#   jobs:
+#     build:
+#       uses: JNZader/project-starter-framework/.github/workflows/reusable-build-python.yml@main
+#       with:
+#         python-version: '3.12'
+# ===========================================
+
+name: Python Build (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'Python version'
+        required: false
+        default: '3.12'
+        type: string
+      package-manager:
+        description: 'Package manager (pip, poetry, uv)'
+        required: false
+        default: 'pip'
+        type: string
+      run-tests:
+        description: 'Run tests'
+        required: false
+        default: true
+        type: boolean
+      run-lint:
+        description: 'Run linting (ruff)'
+        required: false
+        default: true
+        type: boolean
+      working-directory:
+        description: 'Working directory'
+        required: false
+        default: '.'
+        type: string
+      lint-fail-on-error:
+        description: 'Fail the build if linting fails'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ inputs.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: ${{ inputs.package-manager == 'poetry' && 'poetry' || inputs.package-manager == 'pip' && 'pip' || '' }}
+          cache-dependency-path: |
+            **/requirements*.txt
+            **/pyproject.toml
+            **/poetry.lock
+
+      - name: Install uv
+        if: inputs.package-manager == 'uv'
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install Poetry
+        if: inputs.package-manager == 'poetry'
+        uses: snok/install-poetry@v1
+
+      - name: Install dependencies (pip)
+        if: inputs.package-manager == 'pip'
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+
+      - name: Install dependencies (poetry)
+        if: inputs.package-manager == 'poetry'
+        run: poetry install
+
+      - name: Install dependencies (uv)
+        if: inputs.package-manager == 'uv'
+        run: uv sync
+
+      - name: Install dev tools
+        if: inputs.package-manager == 'pip'
+        run: pip install --quiet ruff mypy pytest
+
+      - name: Install dev tools (poetry)
+        if: inputs.package-manager == 'poetry'
+        run: poetry run pip install --quiet ruff mypy pytest
+
+      - name: Install dev tools (uv)
+        if: inputs.package-manager == 'uv'
+        run: uv pip install --quiet ruff mypy pytest
+
+      - name: Lint (ruff)
+        if: inputs.run-lint
+        continue-on-error: ${{ !inputs.lint-fail-on-error }}
+        env:
+          PKG_MGR: ${{ inputs.package-manager }}
+        run: |
+          if [ "$PKG_MGR" = "uv" ]; then
+            uv run ruff check .
+          else
+            ruff check .
+          fi
+
+      - name: Type check
+        if: hashFiles('mypy.ini') != '' || hashFiles('setup.cfg') != '' || hashFiles('pyproject.toml') != ''
+        continue-on-error: true
+        env:
+          PKG_MGR: ${{ inputs.package-manager }}
+        run: |
+          if [ "$PKG_MGR" = "uv" ]; then
+            uv run mypy . --ignore-missing-imports
+          else
+            mypy . --ignore-missing-imports
+          fi
+
+      - name: Test
+        if: inputs.run-tests
+        env:
+          PKG_MGR: ${{ inputs.package-manager }}
+        run: |
+          if [ "$PKG_MGR" = "poetry" ]; then
+            poetry run pytest
+          elif [ "$PKG_MGR" = "uv" ]; then
+            uv run pytest
+          else
+            pytest
+          fi
+
+      - name: Upload test results
+        if: inputs.run-tests && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-python
+          path: |
+            htmlcov/
+            .coverage
+            junit.xml
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore

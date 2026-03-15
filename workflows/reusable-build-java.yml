@@ -1,0 +1,120 @@
+# ===========================================
+# Reusable Workflow: Java/Gradle Build
+# ===========================================
+# Minimal CI for Java projects - saves CI minutes.
+#
+# Usage in your project:
+#   jobs:
+#     build:
+#       uses: JNZader/project-starter-framework/.github/workflows/reusable-build-java.yml@main
+#       with:
+#         java-version: '21'
+# ===========================================
+
+name: Java Build (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'Java version (17, 21, 25)'
+        required: false
+        default: '21'
+        type: string
+      gradle-tasks:
+        description: 'Gradle tasks to run'
+        required: false
+        default: 'classes'
+        type: string
+      run-tests:
+        description: 'Run tests (uses more minutes)'
+        required: false
+        default: true
+        type: boolean
+      run-spotless:
+        description: 'Run Spotless format check'
+        required: false
+        default: true
+        type: boolean
+      working-directory:
+        description: 'Working directory'
+        required: false
+        default: '.'
+        type: string
+      gradle-args:
+        description: 'Additional Gradle arguments'
+        required: false
+        default: ''
+        type: string
+      lint-fail-on-error:
+        description: 'Fail the build if linting fails'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.caching=true'
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        env:
+          ARGS: ${{ inputs.gradle-args }}
+        run: |
+          if echo "$ARGS" | grep -qE '[;|&$`(){}<>'"'"'"]'; then
+            echo "::error::Invalid characters in input arguments. Shell metacharacters are not allowed."
+            exit 1
+          fi
+
+      - name: Setup Java ${{ inputs.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' }}
+
+      - name: Grant execute permission
+        run: chmod +x gradlew
+
+      - name: Compile
+        env:
+          GRADLE_TASKS: ${{ inputs.gradle-tasks }}
+          GRADLE_ARGS: ${{ inputs.gradle-args }}
+        run: ./gradlew $GRADLE_TASKS --no-daemon $GRADLE_ARGS
+
+      - name: Spotless Check
+        if: inputs.run-spotless
+        continue-on-error: ${{ !inputs.lint-fail-on-error }}
+        run: ./gradlew spotlessCheck --no-daemon
+
+      - name: Test
+        if: inputs.run-tests
+        env:
+          GRADLE_ARGS: ${{ inputs.gradle-args }}
+        run: ./gradlew test --no-daemon $GRADLE_ARGS
+
+      - name: Upload test results
+        if: inputs.run-tests && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/build/reports/tests/'
+          retention-days: 7

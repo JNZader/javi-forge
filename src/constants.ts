@@ -27,10 +27,6 @@ export const CI_LOCAL_DIR = path.join(FORGE_ROOT, 'ci-local')
 /** Dependabot fragment directory */
 export const DEPENDABOT_FRAGMENTS_DIR = path.join(TEMPLATES_DIR, 'common', 'dependabot')
 
-/** Markers for merge mode */
-export const MARKER_START = '<!-- BEGIN JAVI-FORGE -->'
-export const MARKER_END = '<!-- END JAVI-FORGE -->'
-
 /** Stack-to-dependabot fragment mapping */
 export const STACK_DEPENDABOT_MAP: Record<string, string[]> = {
   'node':        ['npm'],
@@ -70,14 +66,4 @@ export const STACK_CI_MAP: Record<string, Record<string, string>> = {
   },
 }
 
-/** AI CLI config filenames (project-level) */
-export const AI_CLI_CONFIG_FILES: Record<string, string> = {
-  claude:   'CLAUDE.md',
-  opencode: 'AGENTS.md',
-  gemini:   'GEMINI.md',
-  codex:    'CODEX.md',
-  copilot:  '.github/copilot-instructions.md',
-  qwen:     'QWEN.md',
-  cursor:   '.cursorrules',
-  aider:    '.aider.conf.yml',
-}
+

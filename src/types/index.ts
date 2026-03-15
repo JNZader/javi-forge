@@ -1,8 +1,6 @@
 export type Stack = 'node' | 'python' | 'go' | 'rust' | 'java-gradle' | 'java-maven' | 'elixir'
 export type CIProvider = 'github' | 'gitlab' | 'woodpecker'
 export type MemoryOption = 'engram' | 'obsidian-brain' | 'memory-simple' | 'none'
-export type AI_CLI = 'claude' | 'opencode' | 'gemini' | 'qwen' | 'codex' | 'copilot'
-
 export interface InitOptions {
   projectName: string
   projectDir: string
@@ -12,13 +10,6 @@ export interface InitOptions {
   aiSync: boolean
   sdd: boolean
   ghagga: boolean
-  dryRun: boolean
-}
-
-export interface SyncOptions {
-  target: AI_CLI | 'all'
-  mode: 'overwrite' | 'merge'
-  projectDir: string
   dryRun: boolean
 }
 

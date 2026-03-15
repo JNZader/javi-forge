@@ -4,8 +4,7 @@ import { render } from 'ink'
 import meow from 'meow'
 import App from './ui/App.js'
 import Doctor from './ui/Doctor.js'
-import SyncUI from './ui/SyncUI.js'
-import type { Stack, CIProvider, MemoryOption, AI_CLI } from './types/index.js'
+import type { Stack, CIProvider, MemoryOption } from './types/index.js'
 
 const cli = meow(`
   Usage
@@ -13,7 +12,6 @@ const cli = meow(`
 
   Commands
     init        Bootstrap a new project (default)
-    sync        Sync AI config to project
     doctor      Show health report
 
   Options
@@ -22,8 +20,6 @@ const cli = meow(`
     --ci            CI provider (github, gitlab, woodpecker)
     --memory        Memory module (engram, obsidian-brain, memory-simple, none)
     --project-name  Project name (skips name prompt)
-    --target        Sync target CLI (claude, opencode, gemini, qwen, codex, copilot, all)
-    --mode          Sync mode (overwrite, merge)
     --version       Show version
     --help          Show this help
 
@@ -31,7 +27,6 @@ const cli = meow(`
     $ javi-forge
     $ javi-forge init --dry-run
     $ javi-forge init --stack node --ci github
-    $ javi-forge sync --target claude --mode merge
     $ javi-forge doctor
 `, {
   importMeta: import.meta,
@@ -41,8 +36,6 @@ const cli = meow(`
     ci:          { type: 'string',  default: '' },
     memory:      { type: 'string',  default: '' },
     projectName: { type: 'string',  default: '' },
-    target:      { type: 'string',  default: 'all' },
-    mode:        { type: 'string',  default: 'overwrite' },
   }
 })
 
@@ -51,23 +44,10 @@ const subcommand = cli.input[0] ?? 'init'
 const VALID_STACKS = ['node', 'python', 'go', 'rust', 'java-gradle', 'java-maven', 'elixir']
 const VALID_CI = ['github', 'gitlab', 'woodpecker']
 const VALID_MEMORY = ['engram', 'obsidian-brain', 'memory-simple', 'none']
-const VALID_TARGETS = ['claude', 'opencode', 'gemini', 'qwen', 'codex', 'copilot', 'all']
-const VALID_MODES = ['overwrite', 'merge']
 
 switch (subcommand) {
   case 'doctor': {
     render(<Doctor />)
-    break
-  }
-
-  case 'sync': {
-    const target = VALID_TARGETS.includes(cli.flags.target)
-      ? cli.flags.target as AI_CLI | 'all'
-      : 'all'
-    const mode = VALID_MODES.includes(cli.flags.mode)
-      ? cli.flags.mode as 'overwrite' | 'merge'
-      : 'overwrite'
-    render(<SyncUI target={target} mode={mode} dryRun={cli.flags.dryRun} />)
     break
   }
 

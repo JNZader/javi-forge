@@ -4,6 +4,7 @@ import { render } from 'ink'
 import meow from 'meow'
 import App from './ui/App.js'
 import Doctor from './ui/Doctor.js'
+import AnalyzeUI from './ui/AnalyzeUI.js'
 import type { Stack, CIProvider, MemoryOption } from './types/index.js'
 
 const cli = meow(`
@@ -12,6 +13,7 @@ const cli = meow(`
 
   Commands
     init        Bootstrap a new project (default)
+    analyze     Run repoforge skills analysis
     doctor      Show health report
 
   Options
@@ -27,6 +29,8 @@ const cli = meow(`
     $ javi-forge
     $ javi-forge init --dry-run
     $ javi-forge init --stack node --ci github
+    $ javi-forge analyze
+    $ javi-forge analyze --dry-run
     $ javi-forge doctor
 `, {
   importMeta: import.meta,
@@ -48,6 +52,11 @@ const VALID_MEMORY = ['engram', 'obsidian-brain', 'memory-simple', 'none']
 switch (subcommand) {
   case 'doctor': {
     render(<Doctor />)
+    break
+  }
+
+  case 'analyze': {
+    render(<AnalyzeUI dryRun={cli.flags.dryRun} />)
     break
   }
 

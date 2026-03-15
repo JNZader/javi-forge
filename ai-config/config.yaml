@@ -1,0 +1,18 @@
+# .ai-config/config.yaml
+# Declarative configuration for sync-ai-config.sh
+# Run: ./scripts/sync-ai-config.sh  (no args = reads this file)
+#
+# yaml-language-server: $schema=../schemas/ai-config.schema.json
+
+# Targets to sync when running without arguments
+targets:
+  - claude
+  - opencode
+  - cursor
+  - aider
+  - gemini
+
+# Sync options
+sync:
+  # Claude mode: 'overwrite' or 'merge' (merge appends/updates generated section)
+  claude_mode: overwrite

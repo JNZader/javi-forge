@@ -1,0 +1,15 @@
+# .skillignore — Exclude skills from sync targets
+#
+# Format:
+#   skill-name           → exclude from ALL targets
+#   target:skill-name    → exclude only from that target
+#   category/skill-name  → use full relative path (no extension, no /SKILL.md)
+#
+# Targets: claude, opencode, cursor, aider, gemini
+#
+# Examples:
+#   cursor:data-ai/onnx-export        # skip heavy ML skill in Cursor
+#   opencode:systems-iot/mqtt-rumqttc # skip IoT skill in OpenCode
+#   references/ai-sdk-5               # skip from all targets
+
+# Add your exclusions below:

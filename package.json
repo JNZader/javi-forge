@@ -1,0 +1,12 @@
+{
+  "name": "javi-forge",
+  "version": "0.1.0",
+  "description": "Project scaffolding and AI-ready CI bootstrap",
+  "type": "module",
+  "bin": { "javi-forge": "./dist/index.js" },
+  "scripts": { "build": "tsc", "test": "vitest run" },
+  "author": "JNZader",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/JNZader/javi-forge" },
+  "engines": { "node": ">=18" }
+}

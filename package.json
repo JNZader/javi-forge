@@ -37,6 +37,7 @@
   },
   "devDependencies": {
     "@stryker-mutator/core": "^9.6.0",
+    "@stryker-mutator/typescript-checker": "^9.6.0",
     "@stryker-mutator/vitest-runner": "^9.6.0",
     "@types/fs-extra": "^11.0.4",
     "@types/glob": "^9.0.0",

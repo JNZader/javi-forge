@@ -118,6 +118,38 @@ Body`
     expect(result).not.toBeNull()
     expect(result!.data['name']).toBe('trimmed')
   })
+
+  it('verifies slice indices — content excludes closing delimiter', () => {
+    const raw = `---
+key: value
+---
+Exact content`
+    const result = parseFrontmatter(raw)
+    expect(result).not.toBeNull()
+    // Verify yamlBlock is trimmed correctly (no leading/trailing whitespace artifacts)
+    expect(result!.data).toEqual({ key: 'value' })
+    // Content should be exactly what follows after the closing ---
+    expect(result!.content).toBe('Exact content')
+  })
+
+  it('trims whitespace from yaml block', () => {
+    const raw = `---
+  spaced: true  
+---
+Body`
+    const result = parseFrontmatter(raw)
+    expect(result).not.toBeNull()
+    expect(result!.data).toEqual({ spaced: true })
+  })
+
+  it('rejects input starting with text then ---', () => {
+    // This should NOT match — the --- must be at the very start (after trimStart)
+    const raw = `text before
+---
+name: test
+---`
+    expect(parseFrontmatter(raw)).toBeNull()
+  })
 })
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -141,6 +173,7 @@ describe('validateFrontmatter', () => {
     const errors = validateFrontmatter(fm, 'agent')
     expect(errors).toHaveLength(1)
     expect(errors[0].field).toBe('name')
+    expect(errors[0].message).toContain('required')
   })
 
   it('returns error for non-string name', () => {

@@ -9,6 +9,10 @@
     "src/commands/analyze.ts",
     "src/constants.ts"
   ],
+  "plugins": [
+    "@stryker-mutator/vitest-runner",
+    "@stryker-mutator/typescript-checker"
+  ],
   "checkers": ["typescript"],
   "tsconfigFile": "tsconfig.json",
   "thresholds": { "high": 80, "low": 60, "break": 50 }

@@ -210,6 +210,65 @@ describe('detectStack', () => {
     expect(result).not.toBeNull()
     expect(result!.stackType).toBe('java-gradle')
   })
+
+  it('detects JavaVersion.VERSION_21 in build.gradle', async () => {
+    mockedFs.pathExists.mockImplementation(async (filePath: unknown) => {
+      const p = String(filePath)
+      if (p.endsWith('build.gradle')) return true
+      return false
+    })
+    mockedFs.readFile.mockResolvedValue('JavaVersion.VERSION_21' as never)
+    const result = await detectStack('/project')
+    expect(result!.javaVersion).toBe('21')
+  })
+
+  it('detects JavaVersion.VERSION_17 in build.gradle.kts', async () => {
+    mockedFs.pathExists.mockImplementation(async (filePath: unknown) => {
+      const p = String(filePath)
+      if (p.endsWith('build.gradle')) return false
+      if (p.endsWith('build.gradle.kts')) return true
+      return false
+    })
+    mockedFs.readFile.mockResolvedValue('JavaVersion.VERSION_17' as never)
+    const result = await detectStack('/project')
+    expect(result!.javaVersion).toBe('17')
+  })
+
+  it('detects maven.compiler.source in pom.xml', async () => {
+    mockedFs.pathExists.mockImplementation(async (filePath: unknown) => {
+      const p = String(filePath)
+      if (p.endsWith('build.gradle') || p.endsWith('build.gradle.kts')) return false
+      if (p.endsWith('pom.xml')) return true
+      return false
+    })
+    mockedFs.readFile.mockResolvedValue('<maven.compiler.source>17</maven.compiler.source>' as never)
+    const result = await detectStack('/project')
+    expect(result!.javaVersion).toBe('17')
+  })
+
+  it('returns undefined javaVersion when no version pattern matches', async () => {
+    mockedFs.pathExists.mockImplementation(async (filePath: unknown) => {
+      const p = String(filePath)
+      if (p.endsWith('build.gradle')) return true
+      return false
+    })
+    mockedFs.readFile.mockResolvedValue('apply plugin: java' as never)
+    const result = await detectStack('/project')
+    expect(result!.javaVersion).toBeUndefined()
+  })
+
+  it('handles readJson error for package.json gracefully', async () => {
+    mockedFs.pathExists.mockImplementation(async (filePath: unknown) => {
+      const p = String(filePath)
+      if (p.endsWith('build.gradle') || p.endsWith('build.gradle.kts') || p.endsWith('pom.xml')) return false
+      if (p.endsWith('package.json')) return true
+      return false
+    })
+    mockedFs.readJson.mockRejectedValue(new Error('invalid json') as never)
+    const result = await detectStack('/project')
+    expect(result).not.toBeNull()
+    expect(result!.stackType).toBe('node')
+  })
 })
 
 // ═══════════════════════════════════════════════════════════════════════════════

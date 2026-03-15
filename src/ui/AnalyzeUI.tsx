@@ -14,6 +14,7 @@ export default function AnalyzeUI({ dryRun }: Props) {
   const { exit } = useApp()
   const [steps, setSteps] = useState<InitStep[]>([])
   const [finished, setFinished] = useState(false)
+  const [startTime] = useState(Date.now())
 
   useEffect(() => {
     runAnalyze(
@@ -35,11 +36,28 @@ export default function AnalyzeUI({ dryRun }: Props) {
     if (finished && (key.return || key.escape)) exit()
   })
 
-  const errors = steps.filter(s => s.status === 'error').length
+  const doneCount  = steps.filter(s => s.status === 'done').length
+  const errorCount = steps.filter(s => s.status === 'error').length
+  const notInstalled = steps.some(
+    s => s.status === 'error' && s.detail?.includes('not found')
+  )
+  const elapsed = finished
+    ? `${((Date.now() - startTime) / 1000).toFixed(1)}s`
+    : null
 
   return (
     <Box flexDirection="column" padding={1}>
       <Header subtitle="analyze" dryRun={dryRun} />
+
+      {/* Scanning context */}
+      {!finished && steps.length === 0 && (
+        <Box marginLeft={2}>
+          <Text color={theme.warning}>
+            <Spinner type="dots" />
+            {' '}Checking for repoforge...
+          </Text>
+        </Box>
+      )}
 
       <Box flexDirection="column">
         {steps.map(step => (
@@ -69,11 +87,31 @@ export default function AnalyzeUI({ dryRun }: Props) {
         ))}
       </Box>
 
+      {/* Install instructions when repoforge is missing */}
+      {finished && notInstalled && (
+        <Box marginTop={1} flexDirection="column" marginLeft={2}>
+          <Text color={theme.warning} bold>repoforge is not installed</Text>
+          <Box marginTop={1} flexDirection="column">
+            <Text color={theme.muted}>  Install it with:</Text>
+            <Text color={theme.primary}>    pip install repoforge</Text>
+            <Text color={theme.muted}>  Then run:</Text>
+            <Text color={theme.primary}>    javi-forge analyze</Text>
+          </Box>
+        </Box>
+      )}
+
       {finished && (
         <Box marginTop={1} flexDirection="column">
-          <Text bold color={errors > 0 ? theme.warning : theme.success}>
+          <Text bold color={errorCount > 0 ? theme.warning : theme.success}>
             {dryRun ? '\u25cb Dry run complete' : '\u2713 Analysis complete'}
+            {elapsed && <Text color={theme.muted}>  Completed in {elapsed}</Text>}
           </Text>
+          {doneCount > 0 && (
+            <Text color={theme.success}>  {'\u2713'} {doneCount} checks passed</Text>
+          )}
+          {errorCount > 0 && (
+            <Text color={theme.error}>  {'\u2717'} {errorCount} errors</Text>
+          )}
           <Box marginTop={1}>
             <Text color={theme.muted} dimColor>Press Enter to exit</Text>
           </Box>

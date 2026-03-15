@@ -1,0 +1,6 @@
+
+# Engram (AI agent memory)
+.engram/
+*.engram.db
+*.engram.db-wal
+*.engram.db-shm

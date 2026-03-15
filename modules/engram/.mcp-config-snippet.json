@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "engram": {
+      "command": "engram",
+      "args": ["mcp"],
+      "env": {
+        "ENGRAM_PROJECT": "__PROJECT_NAME__"
+      }
+    }
+  }
+}

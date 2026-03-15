@@ -218,4 +218,41 @@ describe('validateFrontmatter', () => {
     const errors = validateFrontmatter(fm, 'agent')
     expect(errors.some(e => e.message.includes('Trigger:'))).toBe(false)
   })
+
+  it('returns error for empty string name', () => {
+    const fm = { name: '', description: 'Valid description here' }
+    const errors = validateFrontmatter(fm, 'agent')
+    expect(errors.some(e => e.field === 'name')).toBe(true)
+  })
+
+  it('returns error for empty string description', () => {
+    const fm = { name: 'my-agent', description: '' }
+    const errors = validateFrontmatter(fm, 'agent')
+    expect(errors.some(e => e.field === 'description')).toBe(true)
+  })
+
+  it('returns multiple errors for multiple violations', () => {
+    const fm = { name: 'AB', description: 'short' }
+    const errors = validateFrontmatter(fm, 'skill')
+    // Name is uppercase → kebab error, description < 10 → length error, no Trigger: → skill error
+    expect(errors.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('validates name with numbers in kebab-case', () => {
+    const fm = { name: 'my-skill-v2', description: 'A valid description for testing' }
+    const errors = validateFrontmatter(fm, 'agent')
+    expect(errors).toEqual([])
+  })
+
+  it('rejects name starting with hyphen', () => {
+    const fm = { name: '-invalid', description: 'A valid description for testing' }
+    const errors = validateFrontmatter(fm, 'agent')
+    expect(errors.some(e => e.field === 'name' && e.message.includes('kebab-case'))).toBe(true)
+  })
+
+  it('rejects name ending with hyphen', () => {
+    const fm = { name: 'invalid-', description: 'A valid description for testing' }
+    const errors = validateFrontmatter(fm, 'agent')
+    expect(errors.some(e => e.field === 'name' && e.message.includes('kebab-case'))).toBe(true)
+  })
 })

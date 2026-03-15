@@ -1,0 +1,41 @@
+#!/bin/bash
+# =============================================================================
+# PRE-PUSH: Full CI simulation before push
+# =============================================================================
+# Corre tests en Docker identico al CI
+# Si pasa aca -> pasa en GitHub Actions / GitLab CI
+# =============================================================================
+
+set -e
+
+# Encontrar directorio .ci-local
+if [[ -d "$(git rev-parse --show-toplevel)/.ci-local" ]]; then
+    CI_LOCAL_DIR="$(git rev-parse --show-toplevel)/.ci-local"
+else
+    echo "Warning: .ci-local not found, skipping pre-push CI simulation"
+    exit 0
+fi
+
+# Source shared library for colors
+source "$CI_LOCAL_DIR/../lib/common.sh"
+
+echo -e "${BLUE}PRE-PUSH: CI Simulation${NC}"
+
+# Verificar Docker
+if ! docker info &> /dev/null; then
+    echo -e "${RED}Docker is not running.${NC}"
+    echo -e "${YELLOW}  Start Docker or use: git push --no-verify${NC}"
+    exit 1
+fi
+
+# Ejecutar CI local
+"$CI_LOCAL_DIR/ci-local.sh" full || {
+    echo -e ""
+    echo -e "${RED}CI SIMULATION FAILED - Push aborted${NC}"
+    echo -e "${RED}Fix the issues above before pushing.${NC}"
+    echo -e "${RED}To skip: git push --no-verify${NC}"
+    exit 1
+}
+
+echo -e ""
+echo -e "${GREEN}CI Simulation PASSED - Safe to push!${NC}"

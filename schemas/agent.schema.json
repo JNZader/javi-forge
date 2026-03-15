@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent frontmatter",
+  "description": "Schema for AI agent frontmatter in project-starter-framework",
+  "type": "object",
+  "required": ["name", "description"],
+  "additionalProperties": true,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique agent identifier in kebab-case",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "minLength": 2,
+      "maxLength": 60
+    },
+    "description": {
+      "type": "string",
+      "description": "What the agent does and when to use it",
+      "minLength": 10
+    },
+    "model": {
+      "type": "string",
+      "description": "Preferred model for this agent (optional)"
+    },
+    "tools": {
+      "description": "List of tools this agent uses",
+      "oneOf": [
+        { "type": "array", "items": { "type": "string" } },
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    }
+  }
+}

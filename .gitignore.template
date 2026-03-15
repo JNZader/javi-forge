@@ -1,0 +1,105 @@
+# =============================================================================
+# .gitignore Template
+# =============================================================================
+# Renombrar a .gitignore después de copiar el framework
+# =============================================================================
+
+# CI Local
+.ci-local/docker/
+.ci-local-image-built
+semgrep-report.json
+semgrep-results.json
+
+# Claude
+CLAUDE.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+.env.*.local
+*.env
+
+# Credentials & Keys
+.npmrc
+credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+.aws/
+.ssh/
+.gcp/
+service-account*.json
+
+# AI Config (per-project)
+AGENTS.md
+GEMINI.md
+.cursorrules
+.aider.conf.yml
+
+# Claude Code local settings
+.claude/settings.local.json
+.ai-config/.claude/
+
+# Backups
+*.bak
+
+# Logs
+*.log
+logs/
+
+# =============================================================================
+# Stack-specific (descomentar según tu stack)
+# =============================================================================
+
+# --- Java/Gradle ---
+# .gradle/
+# build/
+# !gradle/wrapper/gradle-wrapper.jar
+# *.class
+# *.jar
+
+# --- Java/Maven ---
+# target/
+# *.class
+# *.jar
+
+# --- Node.js ---
+# node_modules/
+# dist/
+# .next/
+# .nuxt/
+
+# --- Python ---
+# __pycache__/
+# *.py[cod]
+# .venv/
+# venv/
+# .pytest_cache/
+
+# --- Go ---
+# bin/
+# *.exe
+# *.test
+# go.work.sum
+
+# --- Rust ---
+# target/
+# Cargo.lock
+# *.pdb
+
+# =============================================================================
+# Project-specific (agregar según necesidad)
+# =============================================================================

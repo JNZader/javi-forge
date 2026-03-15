@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SKILL.md frontmatter",
+  "description": "Schema for AI skill frontmatter in project-starter-framework",
+  "type": "object",
+  "required": ["name", "description"],
+  "additionalProperties": true,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique skill identifier in kebab-case",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "minLength": 2,
+      "maxLength": 60
+    },
+    "description": {
+      "type": "string",
+      "description": "Short description. Should include 'Trigger:' hint for auto-invoke.",
+      "minLength": 10
+    },
+    "metadata": {
+      "description": "Optional skill metadata",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "author": { "type": "string" },
+            "version": {
+              "type": "string",
+              "pattern": "^\\d+\\.\\d+(\\.\\d+)?$"
+            },
+            "tags": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "category": { "type": "string" }
+          }
+        },
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    }
+  }
+}

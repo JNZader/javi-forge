@@ -1,0 +1,15 @@
+{
+  "testRunner": "vitest",
+  "mutate": [
+    "src/lib/frontmatter.ts",
+    "src/lib/common.ts",
+    "src/lib/template.ts",
+    "src/commands/init.ts",
+    "src/commands/doctor.ts",
+    "src/commands/analyze.ts",
+    "src/constants.ts"
+  ],
+  "checkers": ["typescript"],
+  "tsconfigFile": "tsconfig.json",
+  "thresholds": { "high": 80, "low": 60, "break": 50 }
+}

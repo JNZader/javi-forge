@@ -50,7 +50,10 @@ export default function CISelector({ onConfirm }: Props) {
         ))}
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={1} gap={2}>
+        <Text color={theme.primary}>
+          {CI_PROVIDERS[cursor].label}
+        </Text>
         <Text color={theme.muted} dimColor>
           {'\u2191\u2193'} navigate  Enter confirm
         </Text>

@@ -51,7 +51,10 @@ export default function MemorySelector({ onConfirm }: Props) {
         ))}
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={1} gap={2}>
+        <Text color={theme.primary}>
+          {MEMORY_OPTIONS[cursor].label}
+        </Text>
         <Text color={theme.muted} dimColor>
           {'\u2191\u2193'} navigate  Enter confirm
         </Text>

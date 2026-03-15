@@ -10,7 +10,6 @@ import {
   TEMPLATES_DIR,
   MODULES_DIR,
   CI_LOCAL_DIR,
-  AI_CONFIG_DIR,
 } from '../constants.js'
 
 const execFileAsync = promisify(execFile)
@@ -164,27 +163,35 @@ export async function initProject(
     report(onStep, stepMem, `Install memory module: ${memory}`, 'error', String(e))
   }
 
-  // ── Step 7: AI config sync ────────────────────────────────────────────────
+  // ── Step 7: AI config sync (delegated to javi-ai) ──────────────────────────
   const stepAI = 'ai-sync'
-  report(onStep, stepAI, 'Sync AI config to project', 'running')
+  report(onStep, stepAI, 'Sync AI config via javi-ai', 'running')
   try {
     if (aiSync) {
-      const aiConfigSrc = AI_CONFIG_DIR
-      if (await fs.pathExists(aiConfigSrc)) {
-        if (!dryRun) {
-          const aiConfigDest = path.join(projectDir, '.ai-config')
-          await ensureDirExists(aiConfigDest)
-          await fs.copy(aiConfigSrc, aiConfigDest, { overwrite: false, errorOnExist: false })
+      if (!dryRun) {
+        try {
+          await execFileAsync('npx', ['javi-ai', 'sync', '--project-dir', projectDir, '--target', 'all'], {
+            cwd: projectDir,
+            timeout: 120_000,
+          })
+          report(onStep, stepAI, 'Sync AI config via javi-ai', 'done', 'javi-ai sync --target all')
+        } catch (syncErr: unknown) {
+          const msg = syncErr instanceof Error ? syncErr.message : String(syncErr)
+          if (msg.includes('ENOENT') || msg.includes('not found') || msg.includes('ERR_MODULE_NOT_FOUND')) {
+            report(onStep, stepAI, 'Sync AI config via javi-ai', 'error',
+              'javi-ai not found. Install with: npm install -g javi-ai (or run npx javi-ai sync manually)')
+          } else {
+            report(onStep, stepAI, 'Sync AI config via javi-ai', 'error', msg)
+          }
         }
-        report(onStep, stepAI, 'Sync AI config to project', 'done', '.ai-config/')
       } else {
-        report(onStep, stepAI, 'Sync AI config to project', 'skipped', 'no ai-config dir')
+        report(onStep, stepAI, 'Sync AI config via javi-ai', 'done', 'dry-run: would run javi-ai sync --target all')
       }
     } else {
-      report(onStep, stepAI, 'Sync AI config to project', 'skipped', 'not selected')
+      report(onStep, stepAI, 'Sync AI config via javi-ai', 'skipped', 'not selected')
     }
   } catch (e) {
-    report(onStep, stepAI, 'Sync AI config to project', 'error', String(e))
+    report(onStep, stepAI, 'Sync AI config via javi-ai', 'error', String(e))
   }
 
   // ── Step 8: SDD (Spec-Driven Development) ─────────────────────────────────

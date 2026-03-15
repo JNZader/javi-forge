@@ -1,0 +1,17 @@
+description = "Review code changes for quality, security, and best practices"
+prompt = """
+Review code changes in: {{args}}
+
+If no path specified, review unstaged changes (`git diff`).
+
+Review checklist:
+1. **Security**: OWASP top 10, injection, XSS, secrets in code
+2. **Logic**: Edge cases, off-by-one, null handling, race conditions
+3. **Performance**: N+1 queries, unnecessary allocations, missing indexes
+4. **Readability**: Naming, complexity, dead code, unclear intent
+5. **Testing**: Missing test coverage for new/changed behavior
+6. **Architecture**: SOLID violations, tight coupling, wrong abstraction level
+
+Format: List issues by severity (critical > warning > suggestion).
+For each issue: file:line, description, suggested fix.
+"""

@@ -1,0 +1,63 @@
+# ===========================================
+# GitLab CI for Node.js Projects
+# ===========================================
+# Copy to: .gitlab-ci.yml
+#
+# MINIMAL CI - runs on merge requests, tags, and manual triggers.
+# Run full validation locally: ./.ci-local/ci-local.sh full
+# ===========================================
+
+image: node:20-alpine  # Change: 18, 20, 22
+
+stages:
+  - build
+  - docker
+
+cache:
+  key: "${CI_COMMIT_REF_SLUG}"
+  paths:
+    - node_modules/
+    - .npm/
+
+# ===========================================
+# LINT - Reports failures without blocking pipeline
+# ===========================================
+lint:
+  stage: build
+  allow_failure: true
+  script:
+    - npm ci
+    - npm run lint
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - when: manual
+      allow_failure: true
+
+# ===========================================
+# BUILD - On merge requests, tags, or manual
+# ===========================================
+build:
+  stage: build
+  script:
+    - npm ci
+    - npm run build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - when: manual
+      allow_failure: true
+
+# ===========================================
+# DOCKER - Only on version tags
+# ===========================================
+# docker:
+#   stage: docker
+#   image: docker:24
+#   services:
+#     - docker:24-dind
+#   script:
+#     - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG .
+#     - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+#   rules:
+#     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/

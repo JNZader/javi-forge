@@ -1,0 +1,67 @@
+# ===========================================
+# Woodpecker CI for Java/Gradle Projects
+# ===========================================
+# Copy to: .woodpecker.yml
+#
+# MINIMAL CI - runs on push, pull requests, tags, and manual triggers.
+# Run full validation locally: ./.ci-local/ci-local.sh full
+#
+# Caching: Woodpecker does not have declarative cache.
+# Mount volumes on the server for .gradle/ and build/ to speed up builds.
+# ===========================================
+
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+  - event: tag
+  - event: manual
+
+steps:
+  - name: lint
+    image: eclipse-temurin:21-jdk  # Change: 17, 21, 25
+    environment:
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.caching=true"
+    commands:
+      - chmod +x gradlew
+      - ./gradlew spotlessCheck --no-daemon
+    failure: ignore
+
+  - name: build
+    image: eclipse-temurin:21-jdk  # Change: 17, 21, 25
+    environment:
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.caching=true"
+    commands:
+      - chmod +x gradlew
+      - ./gradlew classes --no-daemon
+
+# ===========================================
+# DOCKER - Only on version tags
+# ===========================================
+# Uncomment to enable Docker builds on tags.
+# Requires woodpeckerci/plugin-docker-buildx.
+#
+#   - name: docker
+#     image: woodpeckerci/plugin-docker-buildx
+#     settings:
+#       repo: registry.example.com/my-app
+#       tag: ${CI_COMMIT_TAG}
+#       dockerfile: Dockerfile
+#     when:
+#       - event: tag
+
+# ===========================================
+# PUBLISH - Only on version tags
+# ===========================================
+#   - name: publish
+#     image: eclipse-temurin:21-jdk
+#     commands:
+#       - chmod +x gradlew
+#       - ./gradlew publish --no-daemon
+#     environment:
+#       MAVEN_USERNAME:
+#         from_secret: maven_username
+#       MAVEN_PASSWORD:
+#         from_secret: maven_password
+#     when:
+#       - event: tag

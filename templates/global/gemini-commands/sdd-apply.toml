@@ -1,0 +1,22 @@
+description = "Implement SDD tasks following specs and design"
+prompt = """
+Implement SDD tasks for: {{args}}
+
+Process:
+1. Read the task list from the current SDD change
+2. For each task (in order):
+   a. Read the relevant spec and design sections
+   b. Implement the code changes
+   c. Run tests to verify
+   d. Commit with conventional commit message
+3. Mark each task as completed after successful implementation
+
+Rules:
+- Follow the spec and design exactly — do not deviate
+- One task = one commit (atomic changes)
+- Run tests after EACH task
+- If a task is blocked, report the blocker and skip to the next
+- If you discover something not covered by the spec, stop and ask
+
+Show progress after each task is completed.
+"""

@@ -1,0 +1,47 @@
+# ===========================================
+# Woodpecker CI for Node.js Projects
+# ===========================================
+# Copy to: .woodpecker.yml
+#
+# MINIMAL CI - runs on push, pull requests, tags, and manual triggers.
+# Run full validation locally: ./.ci-local/ci-local.sh full
+#
+# Caching: Woodpecker does not have declarative cache.
+# Mount a volume for node_modules/ on the server to speed up builds.
+# ===========================================
+
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+  - event: tag
+  - event: manual
+
+steps:
+  - name: lint
+    image: node:20-alpine  # Change: 18, 20, 22
+    commands:
+      - npm ci
+      - npm run lint
+    failure: ignore
+
+  - name: build
+    image: node:20-alpine  # Change: 18, 20, 22
+    commands:
+      - npm ci
+      - npm run build
+
+# ===========================================
+# DOCKER - Only on version tags
+# ===========================================
+# Uncomment to enable Docker builds on tags.
+# Requires woodpeckerci/plugin-docker-buildx.
+#
+#   - name: docker
+#     image: woodpeckerci/plugin-docker-buildx
+#     settings:
+#       repo: registry.example.com/my-app
+#       tag: ${CI_COMMIT_TAG}
+#       dockerfile: Dockerfile
+#     when:
+#       - event: tag

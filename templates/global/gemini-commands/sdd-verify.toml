@@ -1,0 +1,21 @@
+description = "Validate SDD implementation against specs and acceptance criteria"
+prompt = """
+Verify SDD implementation for: {{args}}
+
+Validation checklist:
+1. **Acceptance Criteria** — Check each criterion from the spec
+2. **Test Coverage** — Verify tests exist for all specified behaviors
+3. **Design Compliance** — Implementation follows the design document
+4. **Edge Cases** — Scenarios from the spec are handled
+5. **No Scope Creep** — Nothing was added beyond the spec
+6. **No Regressions** — Existing tests still pass
+
+Process:
+1. Read the spec and design documents
+2. Compare implementation against each requirement
+3. Run the full test suite
+4. Report: PASS/FAIL for each criterion
+5. List any deviations or gaps found
+
+Output a verification report with clear pass/fail status.
+"""

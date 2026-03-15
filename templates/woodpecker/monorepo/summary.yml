@@ -1,0 +1,25 @@
+# ===========================================
+# Woodpecker CI - Monorepo: Summary
+# ===========================================
+# Copy to: .woodpecker/summary.yml
+#
+# Final check that runs after all service pipelines complete.
+# Uses depends_on to wait for frontend and backend.
+# ===========================================
+
+depends_on:
+  - frontend
+  - backend
+
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+  - event: tag
+  - event: manual
+
+steps:
+  - name: summary
+    image: alpine:latest
+    commands:
+      - echo "All services built successfully"

@@ -1,0 +1,51 @@
+# ===========================================
+# Woodpecker CI for Go Projects
+# ===========================================
+# Copy to: .woodpecker.yml
+#
+# MINIMAL CI - runs on push, pull requests, tags, and manual triggers.
+# Run full validation locally: ./.ci-local/ci-local.sh full
+#
+# Caching: Woodpecker does not have declarative cache.
+# Mount volumes for GOPATH/pkg/mod/ on the server to speed up builds.
+# ===========================================
+
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+  - event: tag
+  - event: manual
+
+steps:
+  - name: build
+    image: golang:1.23-bookworm  # Change: 1.22, 1.23
+    environment:
+      GOPROXY: "https://proxy.golang.org,direct"
+      GOFLAGS: "-mod=readonly"
+    commands:
+      - go mod download
+      - go mod verify
+      - go build -v ./...
+      - go vet ./...
+
+  - name: lint
+    image: golangci/golangci-lint:v1.62
+    commands:
+      - golangci-lint run --timeout 5m
+    failure: ignore
+
+# ===========================================
+# DOCKER - Only on version tags
+# ===========================================
+# Uncomment to enable Docker builds on tags.
+# Requires woodpeckerci/plugin-docker-buildx.
+#
+#   - name: docker
+#     image: woodpeckerci/plugin-docker-buildx
+#     settings:
+#       repo: registry.example.com/my-app
+#       tag: ${CI_COMMIT_TAG}
+#       dockerfile: Dockerfile
+#     when:
+#       - event: tag

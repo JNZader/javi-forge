@@ -1,0 +1,41 @@
+# ===========================================
+# CI for Go Projects
+# ===========================================
+# Copy to: .github/workflows/ci.yml
+# ===========================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: 'Run tests'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# Cancel previous runs on same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    uses: JNZader/project-starter-framework/.github/workflows/reusable-build-go.yml@main
+    with:
+      go-version: '1.23'  # Change to: 1.22, 1.23
+      run-lint: true
+      run-tests: ${{ github.event.inputs.run_tests == 'true' }}

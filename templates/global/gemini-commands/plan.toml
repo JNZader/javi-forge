@@ -1,0 +1,30 @@
+description = "Create an implementation plan for a feature or change"
+prompt = """
+Create an implementation plan for: {{args}}
+
+Process:
+1. Understand the requirement — ask clarifying questions if ambiguous
+2. Explore the codebase to understand current architecture and patterns
+3. Identify affected files and components
+4. Design the approach with trade-offs considered
+5. Break down into ordered implementation steps
+6. Identify risks and edge cases
+
+Output format:
+## Goal
+(1-2 sentences)
+
+## Affected Files
+(list with brief description of changes)
+
+## Implementation Steps
+(numbered, ordered by dependency)
+
+## Risks & Edge Cases
+(what could go wrong)
+
+## Testing Strategy
+(how to verify the change works)
+
+Do NOT start implementing — just plan. Ask for approval before proceeding.
+"""

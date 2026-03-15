@@ -1,0 +1,42 @@
+# ===========================================
+# CI for Node.js/TypeScript Projects
+# ===========================================
+# Copy to: .github/workflows/ci.yml
+# ===========================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: 'Run tests'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# Cancel previous runs on same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    uses: JNZader/project-starter-framework/.github/workflows/reusable-build-node.yml@main
+    with:
+      node-version: '20'  # Change to: 18, 20, 22
+      package-manager: 'npm'  # Change to: npm, yarn, pnpm
+      run-lint: true
+      run-tests: ${{ github.event.inputs.run_tests == 'true' }}

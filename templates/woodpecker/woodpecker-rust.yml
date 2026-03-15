@@ -1,0 +1,57 @@
+# ===========================================
+# Woodpecker CI for Rust Projects
+# ===========================================
+# Copy to: .woodpecker.yml
+#
+# MINIMAL CI - runs on push, pull requests, tags, and manual triggers.
+# Run full validation locally: ./.ci-local/ci-local.sh full
+#
+# Caching: Woodpecker does not have declarative cache.
+# Mount volumes for .cargo/ and target/ on the server to speed up builds.
+# ===========================================
+
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+  - event: tag
+  - event: manual
+
+steps:
+  - name: lint
+    image: rust:1.83-slim
+    commands:
+      - rustup component add clippy rustfmt
+      - cargo fmt --all -- --check
+      - cargo clippy --all-targets -- -D warnings
+    failure: ignore
+
+  - name: build
+    image: rust:1.83-slim
+    commands:
+      - cargo build --release
+
+# ===========================================
+# DOCKER - Only on version tags
+# ===========================================
+# Uncomment to enable Docker builds on tags.
+# Requires woodpeckerci/plugin-docker-buildx.
+#
+#   - name: docker
+#     image: woodpeckerci/plugin-docker-buildx
+#     settings:
+#       repo: registry.example.com/my-app
+#       tag: ${CI_COMMIT_TAG}
+#       dockerfile: Dockerfile
+#     when:
+#       - event: tag
+
+# ===========================================
+# RELEASE - Only on version tags
+# ===========================================
+#   - name: release
+#     image: rust:1.83-slim
+#     commands:
+#       - echo "Uploading release artifacts..."
+#     when:
+#       - event: tag

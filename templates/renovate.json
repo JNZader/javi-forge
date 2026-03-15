@@ -1,0 +1,69 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Renovate config para actualización automática de dependencias",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":preserveSemverRanges"
+  ],
+  "labels": ["dependencies"],
+  "schedule": ["before 9am on monday"],
+  "timezone": "America/Argentina/Buenos_Aires",
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "automerge": false,
+  "automergeType": "pr",
+  "packageRules": [
+    {
+      "description": "Automerge patch updates",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true
+    },
+    {
+      "description": "Group all non-major updates together",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "all non-major dependencies",
+      "groupSlug": "all-minor-patch"
+    },
+    {
+      "description": "Java dependencies",
+      "matchManagers": ["gradle", "maven"],
+      "groupName": "Java dependencies"
+    },
+    {
+      "description": "Node.js dependencies",
+      "matchManagers": ["npm"],
+      "groupName": "Node.js dependencies"
+    },
+    {
+      "description": "Python dependencies",
+      "matchManagers": ["pip_requirements", "poetry"],
+      "groupName": "Python dependencies"
+    },
+    {
+      "description": "Go dependencies",
+      "matchManagers": ["gomod"],
+      "groupName": "Go dependencies"
+    },
+    {
+      "description": "Rust dependencies",
+      "matchManagers": ["cargo"],
+      "groupName": "Rust dependencies"
+    },
+    {
+      "description": "Docker images",
+      "matchManagers": ["dockerfile"],
+      "groupName": "Docker images"
+    },
+    {
+      "description": "GitHub Actions",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "automerge": true
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": true
+  }
+}

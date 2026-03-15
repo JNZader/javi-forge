@@ -1,0 +1,42 @@
+# ===========================================
+# CI for Python Projects
+# ===========================================
+# Copy to: .github/workflows/ci.yml
+# ===========================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: 'Run tests'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# Cancel previous runs on same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    uses: JNZader/project-starter-framework/.github/workflows/reusable-build-python.yml@main
+    with:
+      python-version: '3.12'  # Change to: 3.10, 3.11, 3.12
+      package-manager: 'pip'  # Change to: pip, poetry, uv
+      run-lint: true
+      run-tests: ${{ github.event.inputs.run_tests == 'true' }}

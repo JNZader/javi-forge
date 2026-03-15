@@ -1,0 +1,88 @@
+# =============================================================================
+# GitLab CI - Go Project
+# =============================================================================
+# Minimal CI for Go projects. Copy to your project as .gitlab-ci.yml
+#
+# Features:
+#   - Build verification only (tests run locally via CI-Local)
+#   - Merge request, manual trigger, or tag-based releases
+#   - Docker publish on tags
+# =============================================================================
+
+image: golang:1.23-bookworm
+
+variables:
+  GOPROXY: "https://proxy.golang.org,direct"
+  GOFLAGS: "-mod=readonly"
+
+stages:
+  - build
+  - publish
+
+# Cache Go modules
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - .go/pkg/mod/
+
+before_script:
+  - mkdir -p .go
+  - export GOPATH="$CI_PROJECT_DIR/.go"
+  - export PATH="$GOPATH/bin:$PATH"
+
+# =============================================================================
+# Lint with golangci-lint - Reports failures without blocking pipeline
+# =============================================================================
+lint:
+  stage: build
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG
+    - when: manual
+      allow_failure: true
+  before_script:
+    - mkdir -p .go
+    - export GOPATH="$CI_PROJECT_DIR/.go"
+    - export PATH="$GOPATH/bin:$PATH"
+    - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+  script:
+    - golangci-lint run --timeout 5m
+
+# =============================================================================
+# Build - On merge requests, tags, or manual
+# =============================================================================
+build:
+  stage: build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_TAG
+    - when: manual
+      allow_failure: true
+  script:
+    - go mod download
+    - go mod verify
+    - go build -v ./...
+    - go vet ./...
+  artifacts:
+    paths:
+      - bin/
+    expire_in: 1 week
+
+# =============================================================================
+# Docker - Only on version tags
+# =============================================================================
+# docker:
+#   stage: publish
+#   image: docker:24
+#   services:
+#     - docker:24-dind
+#   rules:
+#     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+#   before_script:
+#     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+#   script:
+#     - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG .
+#     - docker build -t $CI_REGISTRY_IMAGE:latest .
+#     - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+#     - docker push $CI_REGISTRY_IMAGE:latest

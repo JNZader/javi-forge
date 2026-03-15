@@ -1,0 +1,15 @@
+description = "Create a conventional commit from staged changes"
+prompt = """
+Create a git commit from the currently staged changes.
+
+Process:
+1. Run `git diff --cached` to see staged changes
+2. Analyze the nature of the changes (feature, fix, refactor, docs, test, chore)
+3. Draft a Conventional Commit message: type(scope): description
+4. Keep subject line under 72 characters, imperative mood
+5. Add body if changes are complex (blank line after subject)
+6. NEVER add Co-Authored-By or AI attribution
+7. Show the commit message for approval before committing
+
+If no changes are staged, show `git status` and suggest what to stage.
+"""

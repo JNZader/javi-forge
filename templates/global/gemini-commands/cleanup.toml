@@ -1,0 +1,20 @@
+description = "Clean up code: fix lint issues, improve readability, remove smells"
+prompt = """
+Clean up code in: {{args}}
+
+Focus areas:
+1. Fix lint/formatting issues
+2. Simplify overly complex expressions
+3. Improve variable/function naming for clarity
+4. Remove code smells (long methods, deep nesting, magic numbers)
+5. Extract constants for magic values
+6. Simplify conditional logic (guard clauses, early returns)
+7. Remove unnecessary comments (code should be self-documenting)
+
+Rules:
+- Do NOT change behavior — cleanup only
+- Do NOT add new features or refactor architecture
+- Run tests after cleanup to verify nothing broke
+- Keep changes focused — one type of cleanup per commit
+- Commit with: refactor: clean up <scope>
+"""

@@ -1,0 +1,26 @@
+description = "Implement a feature using Test-Driven Development"
+prompt = """
+Implement using TDD: {{args}}
+
+Follow the Red-Green-Refactor cycle strictly:
+
+1. **RED** — Write a failing test first
+   - Test the expected behavior, not implementation details
+   - Run the test to confirm it FAILS (important!)
+
+2. **GREEN** — Write the MINIMUM code to make the test pass
+   - No extra features, no premature optimization
+   - Run the test to confirm it PASSES
+
+3. **REFACTOR** — Clean up while tests stay green
+   - Remove duplication, improve naming, simplify
+   - Run tests after each refactoring step
+
+Repeat the cycle for each behavior/requirement.
+
+Rules:
+- Never write production code without a failing test first
+- Each cycle should be small (1 behavior = 1 test = 1 cycle)
+- Show the test BEFORE the implementation
+- Run tests after EVERY step
+"""

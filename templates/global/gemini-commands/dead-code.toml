@@ -1,0 +1,22 @@
+description = "Identify and remove dead code"
+prompt = """
+Identify and safely remove dead code in: {{args}}
+
+Types of dead code:
+- Functions/methods never called
+- Variables declared but never read
+- Unreachable code branches
+- Unused imports
+- Feature flags always true/false
+- Code after return/throw
+
+Safe process:
+1. Identify candidate code to remove
+2. Search ALL usages in the codebase (exhaustive grep)
+3. Verify it's not used via reflection, dynamic imports, or external config
+4. Remove the code
+5. Run the full test suite
+6. If tests pass: commit 'refactor: remove dead code in X'
+
+Caution: Some 'dead code' is intentional (lifecycle hooks, dynamically registered handlers). Verify before removing.
+"""

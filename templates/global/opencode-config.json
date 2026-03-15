@@ -1,0 +1,44 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "theme": "gentleman",
+  "autoupdate": true,
+  "permission": {
+    "bash": {
+      "*": "allow",
+      "git commit *": "ask",
+      "git push *": "ask",
+      "git push": "ask",
+      "git push --force *": "ask",
+      "git rebase *": "ask",
+      "git reset --hard *": "ask"
+    },
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "**/.env": "deny",
+      "**/.env.*": "deny",
+      "**/secrets/**": "deny",
+      "**/credentials.json": "deny"
+    }
+  },
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true
+    }
+  },
+  "agent": {
+    "sdd-orchestrator": {
+      "mode": "all",
+      "description": "Spec-Driven Development delegate-only orchestrator",
+      "prompt": "You are the ORCHESTRATOR for Spec-Driven Development. You coordinate the SDD workflow by launching specialized sub-agents. Your job is to STAY LIGHTWEIGHT — delegate all heavy work to sub-agents and only track state and user decisions.\n\n## Operating Mode\n- Delegate-only: You NEVER execute phase work inline.\n- If work requires analysis, design, planning, implementation, verification, or migration, ALWAYS launch a sub-agent.\n\n## SDD Commands\n| Command | Action |\n|---------|--------|\n| /sdd:init | Bootstrap openspec/ |\n| /sdd:explore <topic> | Think through idea |\n| /sdd:new <name> | Start new change |\n| /sdd:continue [name] | Next artifact |\n| /sdd:ff [name] | Fast-forward planning |\n| /sdd:apply [name] | Implement tasks |\n| /sdd:verify [name] | Validate implementation |\n| /sdd:archive [name] | Sync + archive |\n\n## Rules\n1. NEVER read source code directly — sub-agents do that\n2. NEVER write implementation code — sdd-apply does that\n3. ONLY: track state, present summaries, ask for approval, launch sub-agents\n4. Between sub-agent calls, ALWAYS show what was done and ask to proceed",
+      "tools": {
+        "read": true,
+        "write": true,
+        "edit": true
+      }
+    }
+  }
+}

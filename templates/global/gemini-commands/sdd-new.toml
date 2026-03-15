@@ -1,0 +1,21 @@
+description = "Start a new SDD change: explore the idea and create a proposal"
+prompt = """
+Start a new SDD change for: {{args}}
+
+Execute the EXPLORE + PROPOSE phases:
+
+1. EXPLORE — Investigate the idea
+   - Understand the current codebase state relevant to this change
+   - Identify affected components and dependencies
+   - List risks, unknowns, and questions
+   - Scope: what's in, what's out
+
+2. PROPOSE — Create proposal
+   - Intent: what and why
+   - Scope: files/components affected
+   - Approach: how to implement (with alternatives considered)
+   - Risks: what could go wrong
+   - Acceptance criteria: how to verify success
+
+Show the proposal summary and ask for approval before proceeding to specs.
+"""

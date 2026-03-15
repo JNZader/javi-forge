@@ -1,0 +1,162 @@
+# =============================================================================
+# Dependabot Configuration
+# =============================================================================
+# Alternativa a Renovate para actualización de dependencias
+# Copia este archivo a tu proyecto: .github/dependabot.yml
+# =============================================================================
+
+version: 2
+
+registries:
+  # Descomentar si usas registros privados
+  # npm-private:
+  #   type: npm-registry
+  #   url: https://npm.pkg.github.com
+  #   token: ${{ secrets.GITHUB_TOKEN }}
+
+updates:
+  # =========================================================================
+  # GitHub Actions
+  # =========================================================================
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Argentina/Buenos_Aires"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # =========================================================================
+  # Java (Gradle)
+  # =========================================================================
+  # Descomentar si usas Gradle
+  # - package-ecosystem: "gradle"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"
+  #   labels:
+  #     - "dependencies"
+  #     - "java"
+  #   commit-message:
+  #     prefix: "chore(deps)"
+  #   groups:
+  #     java-dependencies:
+  #       patterns:
+  #         - "*"
+
+  # =========================================================================
+  # Java (Maven)
+  # =========================================================================
+  # Descomentar si usas Maven
+  # - package-ecosystem: "maven"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"
+  #   labels:
+  #     - "dependencies"
+  #     - "java"
+  #   commit-message:
+  #     prefix: "chore(deps)"
+  #   groups:
+  #     maven-dependencies:
+  #       patterns:
+  #         - "*"
+
+  # =========================================================================
+  # Node.js (npm)
+  # =========================================================================
+  # Descomentar si usas Node.js
+  # - package-ecosystem: "npm"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"
+  #   labels:
+  #     - "dependencies"
+  #     - "javascript"
+  #   commit-message:
+  #     prefix: "chore(deps)"
+  #   groups:
+  #     npm-dependencies:
+  #       patterns:
+  #         - "*"
+  #       exclude-patterns:
+  #         - "@types/*"
+  #     npm-types:
+  #       patterns:
+  #         - "@types/*"
+
+  # =========================================================================
+  # Python (pip)
+  # =========================================================================
+  # Descomentar si usas Python
+  # - package-ecosystem: "pip"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"
+  #   labels:
+  #     - "dependencies"
+  #     - "python"
+  #   commit-message:
+  #     prefix: "chore(deps)"
+
+  # =========================================================================
+  # Rust (Cargo)
+  # =========================================================================
+  # Descomentar si usas Rust
+  # - package-ecosystem: "cargo"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"
+  #   labels:
+  #     - "dependencies"
+  #     - "rust"
+  #   commit-message:
+  #     prefix: "chore(deps)"
+
+  # =========================================================================
+  # Go
+  # =========================================================================
+  # Descomentar si usas Go
+  # - package-ecosystem: "gomod"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"
+  #   labels:
+  #     - "dependencies"
+  #     - "go"
+  #   commit-message:
+  #     prefix: "chore(deps)"
+  #   groups:
+  #     go-dependencies:
+  #       patterns:
+  #         - "*"
+
+  # =========================================================================
+  # Docker
+  # =========================================================================
+  # Descomentar si usas Docker
+  # - package-ecosystem: "docker"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"
+  #   labels:
+  #     - "dependencies"
+  #     - "docker"
+  #   commit-message:
+  #     prefix: "chore(deps)"

@@ -1,0 +1,14 @@
+description = "Fast-forward SDD: create all planning artifacts (proposal, spec, design, tasks)"
+prompt = """
+Fast-forward SDD planning for: {{args}}
+
+Execute ALL planning phases in sequence:
+
+1. PROPOSE — Create proposal.md (intent, scope, approach, risks)
+2. SPEC — Write specifications (requirements, scenarios, acceptance criteria)
+3. DESIGN — Technical design (architecture decisions, patterns, implementation approach)
+4. TASKS — Break down into numbered task checklist with phases and dependencies
+
+Show a complete summary of ALL artifacts after they are done.
+Ask user to review before proceeding to implementation.
+"""

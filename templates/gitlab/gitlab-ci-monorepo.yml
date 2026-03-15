@@ -1,0 +1,126 @@
+# ===========================================
+# GitLab CI for Monorepo Projects
+# ===========================================
+# Copy to: .gitlab-ci.yml
+#
+# MINIMAL CI - runs on merge requests, tags, and manual triggers.
+# Uses rules:changes to detect which service changed.
+# Run full validation locally: ./.ci-local/ci-local.sh full
+# ===========================================
+
+stages:
+  - build
+  - docker
+
+# ===========================================
+# FRONTEND LINT (Node.js) - Reports failures without blocking pipeline
+# ===========================================
+frontend-lint:
+  stage: build
+  image: node:20-alpine
+  allow_failure: true
+  script:
+    - cd packages/frontend
+    - npm ci
+    - npm run lint
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - packages/frontend/**/*
+    - if: $CI_COMMIT_TAG
+      changes:
+        - packages/frontend/**/*
+    - when: manual
+      allow_failure: true
+
+# ===========================================
+# FRONTEND BUILD (Node.js)
+# ===========================================
+frontend:
+  stage: build
+  image: node:20-alpine
+  script:
+    - cd packages/frontend
+    - npm ci
+    - npm run build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - packages/frontend/**/*
+    - if: $CI_COMMIT_TAG
+      changes:
+        - packages/frontend/**/*
+    - when: manual
+      allow_failure: true
+
+# ===========================================
+# BACKEND LINT (Java/Gradle) - Reports failures without blocking pipeline
+# ===========================================
+backend-lint:
+  stage: build
+  image: eclipse-temurin:21-jdk
+  allow_failure: true
+  variables:
+    GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+  script:
+    - cd packages/backend
+    - chmod +x gradlew
+    - ./gradlew spotlessCheck --no-daemon
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - packages/backend/**/*
+    - if: $CI_COMMIT_TAG
+      changes:
+        - packages/backend/**/*
+    - when: manual
+      allow_failure: true
+
+# ===========================================
+# BACKEND BUILD (Java/Gradle)
+# ===========================================
+backend:
+  stage: build
+  image: eclipse-temurin:21-jdk
+  variables:
+    GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+  script:
+    - cd packages/backend
+    - chmod +x gradlew
+    - ./gradlew classes --no-daemon
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - packages/backend/**/*
+    - if: $CI_COMMIT_TAG
+      changes:
+        - packages/backend/**/*
+    - when: manual
+      allow_failure: true
+
+# ===========================================
+# DOCKER - Only on version tags
+# ===========================================
+# docker-frontend:
+#   stage: docker
+#   image: docker:24
+#   services:
+#     - docker:24-dind
+#   needs: ["frontend"]
+#   script:
+#     - docker build -t $CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_TAG packages/frontend
+#     - docker push $CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_TAG
+#   rules:
+#     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+# docker-backend:
+#   stage: docker
+#   image: docker:24
+#   services:
+#     - docker:24-dind
+#   needs: ["backend"]
+#   script:
+#     - docker build -t $CI_REGISTRY_IMAGE/backend:$CI_COMMIT_TAG packages/backend
+#     - docker push $CI_REGISTRY_IMAGE/backend:$CI_COMMIT_TAG
+#   rules:
+#     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/

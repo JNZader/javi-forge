@@ -1,0 +1,8 @@
+# Obsidian
+.obsidian/workspace.json
+.obsidian/workspace/
+.obsidian/cache/
+.obsidian/plugins/*/main.js
+.obsidian/plugins/*/styles.css
+.obsidian/plugins/*/manifest.json
+.trash/

@@ -1,0 +1,29 @@
+{
+  "new-card-insertion-method": "prepend-compact",
+  "show-checkboxes": true,
+  "prepend-archive-separator": "---",
+  "prepend-archive-format": "",
+  "date-format": "YYYY-MM-DD",
+  "time-format": "HH:mm",
+  "link-date-to-daily-note": false,
+  "hide-card-count": false,
+  "hide-date-display": false,
+  "tag-colors": [
+    {
+      "tagKey": "#blocker",
+      "color": "var(--text-error)",
+      "backgroundColor": "rgba(var(--color-red-rgb), 0.2)"
+    },
+    {
+      "tagKey": "#wave",
+      "color": "var(--text-accent)",
+      "backgroundColor": "rgba(var(--color-blue-rgb), 0.2)"
+    },
+    {
+      "tagKey": "#review",
+      "color": "var(--text-faint)",
+      "backgroundColor": "rgba(var(--color-yellow-rgb), 0.2)"
+    }
+  ],
+  "tag-sort": []
+}

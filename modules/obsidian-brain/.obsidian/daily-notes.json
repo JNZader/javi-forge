@@ -1,0 +1,5 @@
+{
+  "folder": ".project/Sessions",
+  "format": "YYYY-MM-DD",
+  "template": ".project/Templates/Session.md"
+}

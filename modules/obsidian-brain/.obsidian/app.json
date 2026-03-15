@@ -1,0 +1,23 @@
+{
+  "useMarkdownLinks": false,
+  "newLinkFormat": "relative",
+  "attachmentFolderPath": ".project/Attachments",
+  "alwaysUpdateLinks": true,
+  "showLineNumber": true,
+  "userIgnoreFilters": [
+    "node_modules/",
+    "target/",
+    "build/",
+    "dist/",
+    ".gradle/",
+    ".ci-local/docker/",
+    "__pycache__/",
+    ".pytest_cache/",
+    "coverage/",
+    ".git/",
+    "vendor/"
+  ],
+  "newFileLocation": "current",
+  "strictLineBreaks": false,
+  "showFrontmatter": true
+}

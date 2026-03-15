@@ -1,0 +1,14 @@
+{
+  "templater-obsidian:insert-templater": [
+    {
+      "modifiers": ["Ctrl"],
+      "key": "T"
+    }
+  ],
+  "app:open-settings": [
+    {
+      "modifiers": ["Ctrl"],
+      "key": ","
+    }
+  ]
+}

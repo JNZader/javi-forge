@@ -1,0 +1,34 @@
+{
+  "items": [
+    {
+      "type": "file",
+      "ctime": 0,
+      "path": ".project/Memory/CONTEXT.md",
+      "title": "Contexto"
+    },
+    {
+      "type": "file",
+      "ctime": 0,
+      "path": ".project/Memory/KANBAN.md",
+      "title": "Kanban"
+    },
+    {
+      "type": "file",
+      "ctime": 0,
+      "path": ".project/Memory/DASHBOARD.md",
+      "title": "Dashboard"
+    },
+    {
+      "type": "file",
+      "ctime": 0,
+      "path": ".project/Memory/DECISIONS.md",
+      "title": "Decisiones"
+    },
+    {
+      "type": "file",
+      "ctime": 0,
+      "path": ".project/Memory/BLOCKERS.md",
+      "title": "Blockers"
+    }
+  ]
+}

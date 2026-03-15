@@ -1,0 +1,71 @@
+/* Project Memory - Visual enhancements for Obsidian Brain */
+
+/* Inline field styling (Dataview) */
+.dataview.inline-field-key {
+  font-weight: 600;
+  color: var(--text-accent);
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dataview.inline-field-value {
+  font-size: 0.9em;
+}
+
+/* Status badges */
+.dataview.inline-field-value[data-dv-value="open"],
+.dataview.inline-field-value[data-dv-value="abierto"] {
+  color: var(--text-error);
+  font-weight: 600;
+}
+
+.dataview.inline-field-value[data-dv-value="resolved"],
+.dataview.inline-field-value[data-dv-value="resuelto"] {
+  color: var(--text-success);
+}
+
+.dataview.inline-field-value[data-dv-value="pendiente"] {
+  color: var(--text-warning);
+}
+
+.dataview.inline-field-value[data-dv-value="aceptada"] {
+  color: var(--text-success);
+  font-weight: 600;
+}
+
+.dataview.inline-field-value[data-dv-value="alto"] {
+  color: var(--text-error);
+  font-weight: 700;
+}
+
+.dataview.inline-field-value[data-dv-value="medio"] {
+  color: var(--text-warning);
+}
+
+.dataview.inline-field-value[data-dv-value="bajo"] {
+  color: var(--text-faint);
+}
+
+/* Dataview tables in DASHBOARD.md */
+.dataview.table-view-table {
+  font-size: 0.9em;
+}
+
+.dataview.table-view-table th {
+  text-transform: uppercase;
+  font-size: 0.8em;
+  letter-spacing: 0.05em;
+}
+
+/* Kanban board tweaks */
+.kanban-plugin__board {
+  gap: 8px;
+}
+
+.kanban-plugin__lane-title-text {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.85em;
+  letter-spacing: 0.04em;
+}

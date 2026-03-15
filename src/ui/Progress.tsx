@@ -6,6 +6,8 @@ import { theme } from './theme.js'
 
 interface Props {
   steps: InitStep[]
+  projectName?: string
+  contextLine?: string
   onDone?: () => void
 }
 
@@ -24,7 +26,7 @@ const STATUS_COLOR: Record<string, string> = {
   skipped: theme.muted,
 }
 
-export default function Progress({ steps, onDone }: Props) {
+export default function Progress({ steps, projectName, contextLine, onDone }: Props) {
   const doneRef = useRef(false)
 
   const total     = steps.length
@@ -45,16 +47,23 @@ export default function Progress({ steps, onDone }: Props) {
 
   return (
     <Box flexDirection="column">
-      {total > 0 && (
-        <Box marginBottom={1}>
+      {/* Context header */}
+      <Box marginBottom={1} flexDirection="column">
+        {contextLine && (
+          <Text color={theme.muted}>
+            {'Initializing: '}
+            <Text color={theme.primary}>{contextLine}</Text>
+          </Text>
+        )}
+        {total > 0 && (
           <Text color={theme.muted}>
             {'Progress: '}
             <Text color={completed === total ? theme.success : theme.warning}>
               {completed}/{total} steps
             </Text>
           </Text>
-        </Box>
-      )}
+        )}
+      </Box>
 
       <Box flexDirection="column">
         {steps.map(step => (

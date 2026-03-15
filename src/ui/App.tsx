@@ -136,13 +136,19 @@ export default function App({
         <OptionSelector onConfirm={handleOptionsConfirm} />
       )}
       {stage === 'running' && (
-        <Progress steps={steps} onDone={() => setStage('done')} />
+        <Progress
+          steps={steps}
+          projectName={projectName}
+          contextLine={`${projectName} (${stack} + ${ciProvider})`}
+          onDone={() => setStage('done')}
+        />
       )}
       {stage === 'done' && (
         <Summary
           steps={steps}
           dryRun={dryRun}
           projectName={projectName}
+          stack={stack}
           elapsedMs={Date.now() - startTime}
         />
       )}

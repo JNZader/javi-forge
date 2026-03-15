@@ -7,15 +7,30 @@ interface Props {
   steps: InitStep[]
   dryRun: boolean
   projectName: string
+  stack?: string
   elapsedMs?: number
 }
 
-export default function Summary({ steps, dryRun, projectName, elapsedMs }: Props) {
+/** Map stack to the install command hint */
+function getInstallHint(stack?: string): string | null {
+  switch (stack) {
+    case 'node':        return 'pnpm install'
+    case 'python':      return 'pip install -r requirements.txt'
+    case 'go':          return 'go mod tidy'
+    case 'rust':        return 'cargo build'
+    case 'java-gradle': return './gradlew build'
+    case 'java-maven':  return 'mvn install'
+    case 'elixir':      return 'mix deps.get'
+    default:            return null
+  }
+}
+
+export default function Summary({ steps, dryRun, projectName, stack, elapsedMs }: Props) {
   const { exit } = useApp()
 
-  const done   = steps.filter(s => s.status === 'done').length
+  const done    = steps.filter(s => s.status === 'done').length
   const skipped = steps.filter(s => s.status === 'skipped').length
-  const errors = steps.filter(s => s.status === 'error')
+  const errors  = steps.filter(s => s.status === 'error')
   const elapsed = elapsedMs != null
     ? `${(elapsedMs / 1000).toFixed(1)}s`
     : null
@@ -23,6 +38,8 @@ export default function Summary({ steps, dryRun, projectName, elapsedMs }: Props
   useInput((_, key) => {
     if (key.return || key.escape) exit()
   })
+
+  const installHint = getInstallHint(stack)
 
   return (
     <Box flexDirection="column">
@@ -36,6 +53,7 @@ export default function Summary({ steps, dryRun, projectName, elapsedMs }: Props
       <Box marginTop={1}>
         <Text color={theme.muted}>  Project: </Text>
         <Text color={theme.primary} bold>{projectName}</Text>
+        {stack && <Text color={theme.muted}>  ({stack})</Text>}
       </Box>
 
       {/* Dry run note */}
@@ -65,9 +83,10 @@ export default function Summary({ steps, dryRun, projectName, elapsedMs }: Props
       {!dryRun && errors.length === 0 && (
         <Box marginTop={1} flexDirection="column">
           <Text color={theme.muted} bold>  Next steps:</Text>
-          <Text color={theme.muted}>    cd {projectName}</Text>
-          <Text color={theme.muted}>    javi-forge doctor</Text>
-          <Text color={theme.muted}>    javi-forge sync</Text>
+          <Text color={theme.primary}>    cd {projectName}</Text>
+          {installHint && <Text color={theme.primary}>    {installHint}</Text>}
+          <Text color={theme.primary}>    npx javi-ai sync</Text>
+          <Text color={theme.primary}>    javi-forge doctor</Text>
         </Box>
       )}
 

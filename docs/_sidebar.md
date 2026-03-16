@@ -1,0 +1,11 @@
+- [Home](/)
+- [Getting Started](getting-started.md)
+- [Commands](commands.md)
+- [Templates](templates.md)
+- [CI Providers](ci-providers.md)
+- [Memory](memory.md)
+- [AI Config](ai-config.md)
+- [Architecture](architecture.md)
+- **Links**
+- [javi-dots](https://github.com/JNZader/javi-dots)
+- [javi-ai](https://github.com/JNZader/javi-ai)

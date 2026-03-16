@@ -1,0 +1,12 @@
+src/
+*.test.ts
+*.test.js
+vitest.config.ts
+stryker.config.json
+coverage/
+reports/
+.stryker-tmp/
+.github/
+docs/
+tsconfig.json
+*.map

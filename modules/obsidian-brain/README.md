@@ -266,3 +266,35 @@ Si ya usas vibekanban:
 3. Agregar frontmatter YAML a archivos existentes (CONTEXT, DECISIONS, etc.)
 4. Agregar inline fields Dataview a ADRs y blockers existentes
 5. Actualizar `.gitignore` con el snippet de Obsidian
+
+## Role-Based Templates
+
+Obsidian Brain includes role-based templates organized by persona, sourced from vault/Javi.Dots:
+
+### Core Templates (`core/templates/`)
+| Template | Purpose |
+|----------|---------|
+| `daily-note.md` | Daily focus, notes, reflections |
+| `braindump.md` | Quick unstructured idea capture |
+| `consolidation.md` | Weekly knowledge consolidation |
+| `resource-capture.md` | Annotated resource bookmarking |
+
+### Developer Templates (`developer/templates/`)
+| Template | Purpose |
+|----------|---------|
+| `coding-session.md` | Goal, work log, blockers, decisions, next steps |
+| `adr.md` | Architecture Decision Record with decision map |
+| `debug-journal.md` | Structured debugging sessions |
+| `sdd-feedback.md` | Spec-Driven Development feedback |
+| `tech-debt.md` | Technical debt tracking |
+
+### PM/Lead Templates (`pm-lead/templates/`)
+| Template | Purpose |
+|----------|---------|
+| `daily-brief.md` | Daily standup summary |
+| `weekly-brief.md` | Weekly progress report |
+| `sprint-review.md` | Sprint retrospective |
+| `meeting-notes.md` | Structured meeting notes |
+| `risk-registry.md` | Risk tracking and mitigation |
+| `stakeholder-update.md` | Stakeholder communication |
+| `team-intelligence.md` | Team performance patterns |

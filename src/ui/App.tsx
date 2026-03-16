@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { Box } from 'ink'
+import path from 'path'
 import Welcome from './Welcome.js'
 import Header from './Header.js'
 import NameInput from './NameInput.js'
@@ -41,7 +42,9 @@ export default function App({
 }: AppProps) {
   const [stage, setStage] = useState<Stage>('welcome')
   const [projectName, setProjectName] = useState(presetName ?? '')
-  const [projectDir, setProjectDir] = useState('')
+  const [projectDir, setProjectDir] = useState(
+    presetName ? path.resolve(process.cwd(), presetName) : ''
+  )
   const [stack, setStack] = useState<Stack>(presetStack ?? 'node')
   const [ciProvider, setCIProvider] = useState<CIProvider>(presetCI ?? 'github')
   const [memory, setMemory] = useState<MemoryOption>(presetMemory ?? 'engram')

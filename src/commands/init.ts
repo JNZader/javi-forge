@@ -30,6 +30,11 @@ export async function initProject(
 ): Promise<void> {
   const { projectDir, projectName, stack, ciProvider, memory, aiSync, sdd, ghagga, dryRun } = options
 
+  // Ensure project directory exists before any steps
+  if (!dryRun && projectDir) {
+    await ensureDirExists(projectDir)
+  }
+
   // ── Step 1: Initialize git ────────────────────────────────────────────────
   const stepGit = 'git-init'
   report(onStep, stepGit, 'Initialize git repository', 'running')

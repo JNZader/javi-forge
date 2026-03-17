@@ -5,6 +5,7 @@ import meow from 'meow'
 import App from './ui/App.js'
 import Doctor from './ui/Doctor.js'
 import AnalyzeUI from './ui/AnalyzeUI.js'
+import Plugin from './ui/Plugin.js'
 import { CIProvider as CIContextProvider } from './ui/CIContext.js'
 import type { Stack, CIProvider, MemoryOption } from './types/index.js'
 
@@ -13,9 +14,14 @@ const cli = meow(`
     $ javi-forge [command] [options]
 
   Commands
-    init        Bootstrap a new project (default)
-    analyze     Run repoforge skills analysis
-    doctor      Show health report
+    init              Bootstrap a new project (default)
+    analyze           Run repoforge skills analysis
+    doctor            Show health report
+    plugin add        Install a plugin from GitHub (org/repo)
+    plugin remove     Remove an installed plugin
+    plugin list       List installed plugins
+    plugin search     Search the plugin registry
+    plugin validate   Validate a local plugin directory
 
   Options
     --dry-run       Preview changes without writing files
@@ -36,6 +42,11 @@ const cli = meow(`
     $ javi-forge analyze
     $ javi-forge analyze --dry-run
     $ javi-forge doctor
+    $ javi-forge plugin add mapbox/agent-skills
+    $ javi-forge plugin list
+    $ javi-forge plugin search ai
+    $ javi-forge plugin validate ./my-plugin
+    $ javi-forge plugin remove my-plugin
 `, {
   importMeta: import.meta,
   flags: {
@@ -71,6 +82,20 @@ switch (subcommand) {
     render(
       <CIContextProvider isCI={isCI}>
         <AnalyzeUI dryRun={cli.flags.dryRun} />
+      </CIContextProvider>
+    )
+    break
+  }
+
+  case 'plugin': {
+    const pluginAction = cli.input[1] as 'add' | 'remove' | 'list' | 'search' | 'validate' | undefined
+    const VALID_PLUGIN_ACTIONS = ['add', 'remove', 'list', 'search', 'validate']
+    const action = pluginAction && VALID_PLUGIN_ACTIONS.includes(pluginAction) ? pluginAction : 'list'
+    const target = cli.input[2]
+
+    render(
+      <CIContextProvider isCI={isCI}>
+        <Plugin action={action} target={target} dryRun={cli.flags.dryRun} />
       </CIContextProvider>
     )
     break

@@ -27,6 +27,18 @@ export const CI_LOCAL_DIR = path.join(FORGE_ROOT, 'ci-local')
 /** Dependabot fragment directory */
 export const DEPENDABOT_FRAGMENTS_DIR = path.join(TEMPLATES_DIR, 'common', 'dependabot')
 
+/** Plugins directory (installed plugins) */
+export const PLUGINS_DIR = path.join(FORGE_ROOT, 'plugins')
+
+/** Plugin registry URL */
+export const PLUGIN_REGISTRY_URL = 'https://raw.githubusercontent.com/JNZader/javi-forge-registry/main/registry.json'
+
+/** Plugin manifest filename */
+export const PLUGIN_MANIFEST_FILE = 'plugin.json'
+
+/** Valid plugin asset directories */
+export const PLUGIN_ASSET_DIRS = ['skills', 'commands', 'hooks', 'agents'] as const
+
 /** Stack-to-dependabot fragment mapping */
 export const STACK_DEPENDABOT_MAP: Record<string, string[]> = {
   'node':        ['npm'],

@@ -1,0 +1,334 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { PluginManifest } from '../types/index.js'
+
+// ── Mock fs-extra ────────────────────────────────────────────────────────────
+vi.mock('fs-extra', () => {
+  const mockFs = {
+    pathExists: vi.fn(),
+    readJson: vi.fn(),
+    writeJson: vi.fn(),
+    readdir: vi.fn(),
+    ensureDir: vi.fn(),
+    remove: vi.fn(),
+    move: vi.fn(),
+    copy: vi.fn(),
+  }
+  return { default: mockFs, ...mockFs }
+})
+
+// ── Mock child_process ───────────────────────────────────────────────────────
+vi.mock('child_process', () => ({
+  execFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+    cb(null, { stdout: '', stderr: '' })
+  }),
+}))
+
+import fs from 'fs-extra'
+import { validatePlugin, installPlugin, removePlugin, listInstalledPlugins, normalizeGitUrl } from './plugin.js'
+
+const mockFs = vi.mocked(fs)
+
+beforeEach(() => vi.clearAllMocks())
+
+// ── normalizeGitUrl ──────────────────────────────────────────────────────────
+
+describe('normalizeGitUrl', () => {
+  it('converts org/repo shorthand to full URL', () => {
+    expect(normalizeGitUrl('mapbox/agent-skills')).toBe('https://github.com/mapbox/agent-skills.git')
+  })
+
+  it('handles full GitHub URL without .git', () => {
+    expect(normalizeGitUrl('https://github.com/org/repo')).toBe('https://github.com/org/repo.git')
+  })
+
+  it('keeps full GitHub URL with .git', () => {
+    expect(normalizeGitUrl('https://github.com/org/repo.git')).toBe('https://github.com/org/repo.git')
+  })
+
+  it('handles github.com/org/repo without protocol', () => {
+    expect(normalizeGitUrl('github.com/org/repo')).toBe('https://github.com/org/repo.git')
+  })
+
+  it('returns null for invalid source with 1 segment', () => {
+    expect(normalizeGitUrl('just-a-name')).toBeNull()
+  })
+
+  it('returns null for empty string', () => {
+    expect(normalizeGitUrl('')).toBeNull()
+  })
+
+  it('returns null for source with 3 segments', () => {
+    expect(normalizeGitUrl('a/b/c')).toBeNull()
+  })
+
+  it('returns null for source with empty parts', () => {
+    expect(normalizeGitUrl('/repo')).toBeNull()
+    expect(normalizeGitUrl('org/')).toBeNull()
+  })
+})
+
+// ── validatePlugin ───────────────────────────────────────────────────────────
+
+describe('validatePlugin', () => {
+  const validManifest: PluginManifest = {
+    name: 'my-plugin',
+    version: '1.0.0',
+    description: 'A valid plugin description for testing',
+    skills: ['my-skill'],
+    tags: ['testing'],
+  }
+
+  it('returns invalid when plugin.json is missing', async () => {
+    mockFs.pathExists.mockResolvedValue(false as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors[0]!.message).toBe('plugin.json not found')
+    expect(result.manifest).toBeNull()
+  })
+
+  it('returns invalid for malformed JSON', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockRejectedValue(new Error('parse error') as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors[0]!.message).toBe('invalid JSON')
+  })
+
+  it('validates a complete valid plugin', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue(validManifest as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(true)
+    expect(result.errors).toHaveLength(0)
+    expect(result.manifest?.name).toBe('my-plugin')
+  })
+
+  it('returns errors for missing name', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, name: '' } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'name')).toBe(true)
+  })
+
+  it('returns errors for non-kebab-case name', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, name: 'MyPlugin' } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'name' && e.message.includes('kebab-case'))).toBe(true)
+  })
+
+  it('returns errors for name too short', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, name: 'a' } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'name' && e.message.includes('2-60'))).toBe(true)
+  })
+
+  it('returns errors for missing version', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, version: '' } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'version')).toBe(true)
+  })
+
+  it('returns errors for non-semver version', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, version: 'v1' } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'version' && e.message.includes('semver'))).toBe(true)
+  })
+
+  it('returns errors for missing description', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, description: '' } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'description')).toBe(true)
+  })
+
+  it('returns errors for description too short', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, description: 'short' } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'description' && e.message.includes('10'))).toBe(true)
+  })
+
+  it('returns errors for description too long', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, description: 'x'.repeat(201) } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'description' && e.message.includes('200'))).toBe(true)
+  })
+
+  it('returns errors for declared skill not found on disk', async () => {
+    // pathExists: true for plugin.json, true for skills/, false for skills/my-skill
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('my-skill')) return false as never
+      return true as never
+    })
+    mockFs.readJson.mockResolvedValue(validManifest as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'skills/my-skill')).toBe(true)
+  })
+
+  it('returns errors for declared asset dir missing entirely', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('/skills')) return false as never
+      return true as never
+    })
+    mockFs.readJson.mockResolvedValue(validManifest as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'skills' && e.message.includes('not found'))).toBe(true)
+  })
+
+  it('returns errors for too many tags', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, tags: Array(11).fill('tag') } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.path === 'tags' && e.message.includes('10'))).toBe(true)
+  })
+
+  it('returns manifest even when validation fails', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, name: 'BAD' } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(false)
+    expect(result.manifest).not.toBeNull()
+  })
+
+  it('skips asset dirs with empty arrays', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readJson.mockResolvedValue({ ...validManifest, skills: [], commands: [] } as never)
+
+    const result = await validatePlugin('/fake/dir')
+    expect(result.valid).toBe(true)
+  })
+})
+
+// ── installPlugin ────────────────────────────────────────────────────────────
+
+describe('installPlugin', () => {
+  it('returns error for invalid source', async () => {
+    const result = await installPlugin('bad-source')
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('invalid source')
+  })
+
+  it('succeeds with dry-run', async () => {
+    const result = await installPlugin('org/repo', { dryRun: true })
+    expect(result.success).toBe(true)
+    expect(result.name).toBe('repo')
+  })
+
+  it('returns error when validation fails after clone', async () => {
+    // pathExists returns false for plugin.json (validation fails)
+    mockFs.pathExists.mockResolvedValue(false as never)
+    mockFs.ensureDir.mockResolvedValue(undefined as never)
+    mockFs.remove.mockResolvedValue(undefined as never)
+
+    const result = await installPlugin('org/repo')
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('validation failed')
+  })
+})
+
+// ── removePlugin ─────────────────────────────────────────────────────────────
+
+describe('removePlugin', () => {
+  it('returns error when plugin is not installed', async () => {
+    mockFs.pathExists.mockResolvedValue(false as never)
+
+    const result = await removePlugin('nonexistent')
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('not installed')
+  })
+
+  it('removes plugin directory', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.remove.mockResolvedValue(undefined as never)
+
+    const result = await removePlugin('my-plugin')
+    expect(result.success).toBe(true)
+    expect(mockFs.remove).toHaveBeenCalled()
+  })
+
+  it('skips removal in dry-run', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+
+    const result = await removePlugin('my-plugin', { dryRun: true })
+    expect(result.success).toBe(true)
+    expect(mockFs.remove).not.toHaveBeenCalled()
+  })
+})
+
+// ── listInstalledPlugins ─────────────────────────────────────────────────────
+
+describe('listInstalledPlugins', () => {
+  it('returns empty array when plugins dir does not exist', async () => {
+    mockFs.pathExists.mockResolvedValue(false as never)
+
+    const result = await listInstalledPlugins()
+    expect(result).toEqual([])
+  })
+
+  it('lists installed plugins from .installed.json files', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.includes('.installed.json')) return true as never
+      return true as never
+    })
+    mockFs.readdir.mockResolvedValue(['my-plugin', '.tmp'] as never)
+    mockFs.readJson.mockResolvedValue({
+      name: 'my-plugin',
+      version: '1.0.0',
+      installedAt: '2026-01-01T00:00:00.000Z',
+      source: 'org/repo',
+      manifest: { name: 'my-plugin', version: '1.0.0', description: 'test plugin longer' },
+    } as never)
+
+    const result = await listInstalledPlugins()
+    expect(result).toHaveLength(1)
+    expect(result[0]!.name).toBe('my-plugin')
+  })
+
+  it('skips dot-prefixed directories', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readdir.mockResolvedValue(['.tmp', '.git'] as never)
+
+    const result = await listInstalledPlugins()
+    expect(result).toEqual([])
+  })
+
+  it('skips entries with corrupt .installed.json', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readdir.mockResolvedValue(['corrupt-plugin'] as never)
+    mockFs.readJson.mockRejectedValue(new Error('parse error') as never)
+
+    const result = await listInstalledPlugins()
+    expect(result).toEqual([])
+  })
+})

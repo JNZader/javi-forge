@@ -51,3 +51,52 @@ export interface DoctorSection {
 export interface DoctorResult {
   sections: DoctorSection[]
 }
+
+// ── Plugin Marketplace ──────────────────────────────────────────────────────
+
+export interface PluginManifest {
+  name: string
+  version: string
+  description: string
+  author?: string
+  repository?: string
+  skills?: string[]
+  commands?: string[]
+  hooks?: string[]
+  agents?: string[]
+  tags?: string[]
+}
+
+export interface PluginRegistryEntry {
+  id: string
+  repository: string
+  description: string
+  tags: string[]
+  stars?: number
+  updatedAt?: string
+}
+
+export interface PluginRegistry {
+  version: string
+  updatedAt: string
+  plugins: PluginRegistryEntry[]
+}
+
+export interface PluginValidationError {
+  path: string
+  message: string
+}
+
+export interface PluginValidationResult {
+  valid: boolean
+  errors: PluginValidationError[]
+  manifest: PluginManifest | null
+}
+
+export interface InstalledPlugin {
+  name: string
+  version: string
+  installedAt: string
+  source: string
+  manifest: PluginManifest
+}

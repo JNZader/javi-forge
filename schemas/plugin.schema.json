@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Plugin manifest",
+  "description": "Schema for javi-forge plugin.json manifest",
+  "type": "object",
+  "required": ["name", "version", "description"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique plugin identifier in kebab-case",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "minLength": 2,
+      "maxLength": 60
+    },
+    "version": {
+      "type": "string",
+      "description": "Semver version string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "description": {
+      "type": "string",
+      "description": "Short description of what the plugin provides",
+      "minLength": 10,
+      "maxLength": 200
+    },
+    "author": {
+      "type": "string",
+      "description": "Plugin author or organization"
+    },
+    "repository": {
+      "type": "string",
+      "description": "GitHub repository URL (e.g. https://github.com/org/repo)"
+    },
+    "skills": {
+      "type": "array",
+      "description": "Skill directories included in this plugin",
+      "items": { "type": "string" }
+    },
+    "commands": {
+      "type": "array",
+      "description": "Command definitions included in this plugin",
+      "items": { "type": "string" }
+    },
+    "hooks": {
+      "type": "array",
+      "description": "Hook definitions included in this plugin",
+      "items": { "type": "string" }
+    },
+    "agents": {
+      "type": "array",
+      "description": "Agent definitions included in this plugin",
+      "items": { "type": "string" }
+    },
+    "tags": {
+      "type": "array",
+      "description": "Searchable tags for plugin discovery",
+      "items": { "type": "string" },
+      "maxItems": 10
+    }
+  }
+}

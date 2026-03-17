@@ -24,7 +24,7 @@ vi.mock('child_process', () => ({
 }))
 
 import fs from 'fs-extra'
-import { validatePlugin, installPlugin, removePlugin, listInstalledPlugins, normalizeGitUrl } from './plugin.js'
+import { validatePlugin, installPlugin, removePlugin, listInstalledPlugins, searchRegistry, normalizeGitUrl } from './plugin.js'
 
 const mockFs = vi.mocked(fs)
 
@@ -330,5 +330,100 @@ describe('listInstalledPlugins', () => {
 
     const result = await listInstalledPlugins()
     expect(result).toEqual([])
+  })
+})
+
+// ── searchRegistry ───────────────────────────────────────────────────────────
+
+describe('searchRegistry', () => {
+  const originalFetch = globalThis.fetch
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it('returns empty array when fetch fails', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network error'))
+
+    const result = await searchRegistry('test')
+    expect(result).toEqual([])
+  })
+
+  it('returns empty array when response is not ok', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false })
+
+    const result = await searchRegistry()
+    expect(result).toEqual([])
+  })
+
+  it('returns all plugins when no query provided', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        version: '1',
+        updatedAt: '2026-01-01',
+        plugins: [
+          { id: 'org/alpha', repository: '', description: 'Alpha plugin', tags: ['ai'] },
+          { id: 'org/beta', repository: '', description: 'Beta plugin', tags: ['tools'] },
+        ],
+      }),
+    })
+
+    const result = await searchRegistry()
+    expect(result).toHaveLength(2)
+  })
+
+  it('filters plugins by query matching id', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        version: '1',
+        updatedAt: '2026-01-01',
+        plugins: [
+          { id: 'org/alpha', repository: '', description: 'First', tags: [] },
+          { id: 'org/beta', repository: '', description: 'Second', tags: [] },
+        ],
+      }),
+    })
+
+    const result = await searchRegistry('alpha')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.id).toBe('org/alpha')
+  })
+
+  it('filters plugins by query matching description', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        version: '1',
+        updatedAt: '2026-01-01',
+        plugins: [
+          { id: 'org/a', repository: '', description: 'AI tools for coding', tags: [] },
+          { id: 'org/b', repository: '', description: 'Database helpers', tags: [] },
+        ],
+      }),
+    })
+
+    const result = await searchRegistry('ai tools')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.id).toBe('org/a')
+  })
+
+  it('filters plugins by query matching tags', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        version: '1',
+        updatedAt: '2026-01-01',
+        plugins: [
+          { id: 'org/a', repository: '', description: 'Something', tags: ['security'] },
+          { id: 'org/b', repository: '', description: 'Other', tags: ['testing'] },
+        ],
+      }),
+    })
+
+    const result = await searchRegistry('security')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.id).toBe('org/a')
   })
 })

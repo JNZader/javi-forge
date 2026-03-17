@@ -37,17 +37,27 @@ vi.mock('../lib/common.js', () => ({
   },
 }))
 
+// ── Mock plugin module ───────────────────────────────────────────────────────
+vi.mock('../lib/plugin.js', () => ({
+  listInstalledPlugins: vi.fn().mockResolvedValue([]),
+}))
+
 import fs from 'fs-extra'
 import { execFile } from 'child_process'
 import { runDoctor } from './doctor.js'
 import { detectStack } from '../lib/common.js'
+import { listInstalledPlugins } from '../lib/plugin.js'
 
 const mockedFs = vi.mocked(fs)
 const mockedExecFile = vi.mocked(execFile)
 const mockedDetectStack = vi.mocked(detectStack)
+const mockedListPlugins = vi.mocked(listInstalledPlugins)
 
 beforeEach(() => {
   vi.resetAllMocks()
+
+  // Default: no plugins installed
+  mockedListPlugins.mockResolvedValue([])
 
   // Default: all paths exist, readdir returns items
   mockedFs.pathExists.mockResolvedValue(true as never)

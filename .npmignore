@@ -10,3 +10,4 @@ reports/
 docs/
 tsconfig.json
 *.map
+plugins/

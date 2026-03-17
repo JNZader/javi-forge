@@ -3,7 +3,8 @@ import path from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { detectStack } from '../lib/common.js'
-import { FORGE_ROOT, TEMPLATES_DIR, MODULES_DIR, AI_CONFIG_DIR } from '../constants.js'
+import { listInstalledPlugins } from '../lib/plugin.js'
+import { FORGE_ROOT, TEMPLATES_DIR, MODULES_DIR, AI_CONFIG_DIR, PLUGINS_DIR } from '../constants.js'
 import type { DoctorResult, DoctorSection, DoctorCheck, ForgeManifest } from '../types/index.js'
 
 const execFileAsync = promisify(execFile)
@@ -158,6 +159,27 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
     }
   }
   sections.push({ title: 'Installed Modules', checks: moduleChecks })
+
+  // ── 6. Plugins ─────────────────────────────────────────────────────────────
+  const pluginChecks: DoctorCheck[] = []
+  const pluginsDirExists = await fs.pathExists(PLUGINS_DIR)
+  if (pluginsDirExists) {
+    const plugins = await listInstalledPlugins()
+    if (plugins.length > 0) {
+      for (const plugin of plugins) {
+        pluginChecks.push({
+          label: plugin.name,
+          status: 'ok',
+          detail: `v${plugin.version} from ${plugin.source}`,
+        })
+      }
+    } else {
+      pluginChecks.push({ label: 'Plugins', status: 'skip', detail: 'none installed' })
+    }
+  } else {
+    pluginChecks.push({ label: 'Plugins directory', status: 'skip', detail: 'not created yet' })
+  }
+  sections.push({ title: 'Plugins', checks: pluginChecks })
 
   return { sections }
 }

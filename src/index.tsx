@@ -6,6 +6,7 @@ import App from './ui/App.js'
 import Doctor from './ui/Doctor.js'
 import AnalyzeUI from './ui/AnalyzeUI.js'
 import Plugin from './ui/Plugin.js'
+import LlmsTxt from './ui/LlmsTxt.js'
 import { CIProvider as CIContextProvider } from './ui/CIContext.js'
 import type { Stack, CIProvider, MemoryOption } from './types/index.js'
 
@@ -22,6 +23,7 @@ const cli = meow(`
     plugin list       List installed plugins
     plugin search     Search the plugin registry
     plugin validate   Validate a local plugin directory
+    llms-txt          Generate AI-friendly llms.txt for current project
 
   Options
     --dry-run       Preview changes without writing files
@@ -82,6 +84,15 @@ switch (subcommand) {
     render(
       <CIContextProvider isCI={isCI}>
         <AnalyzeUI dryRun={cli.flags.dryRun} />
+      </CIContextProvider>
+    )
+    break
+  }
+
+  case 'llms-txt': {
+    render(
+      <CIContextProvider isCI={isCI}>
+        <LlmsTxt projectDir={process.cwd()} dryRun={cli.flags.dryRun} />
       </CIContextProvider>
     )
     break

@@ -30,6 +30,7 @@ interface AppProps {
   presetMemory?: MemoryOption
   presetName?: string
   presetGhagga?: boolean
+  presetMock?: boolean
 }
 
 export default function App({
@@ -39,6 +40,7 @@ export default function App({
   presetMemory,
   presetName,
   presetGhagga = false,
+  presetMock = false,
 }: AppProps) {
   const [stage, setStage] = useState<Stage>('welcome')
   const [projectName, setProjectName] = useState(presetName ?? '')
@@ -91,6 +93,7 @@ export default function App({
         aiSync: opts.aiSync,
         sdd: opts.sdd,
         ghagga: opts.ghagga,
+        mock: presetMock,
         dryRun,
       },
       (step) => setSteps(prev => {

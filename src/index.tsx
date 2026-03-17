@@ -32,6 +32,7 @@ const cli = meow(`
     --memory        Memory module (engram, obsidian-brain, memory-simple, none)
     --project-name  Project name (skips name prompt)
     --ghagga        Enable GHAGGA review system
+    --mock          Enable mock-first mode (no real API keys needed)
     --batch         Non-interactive mode (auto-proceed, no keyboard input)
     --version       Show version
     --help          Show this help
@@ -58,6 +59,7 @@ const cli = meow(`
     memory:      { type: 'string',  default: '' },
     projectName: { type: 'string',  default: '' },
     ghagga:      { type: 'boolean', default: false },
+    mock:        { type: 'boolean', default: false },
     batch:       { type: 'boolean', default: false },
   }
 })
@@ -134,6 +136,7 @@ switch (subcommand) {
           presetMemory={presetMemory}
           presetName={presetName}
           presetGhagga={cli.flags.ghagga}
+          presetMock={cli.flags.mock ?? false}
         />
       </CIContextProvider>
     )

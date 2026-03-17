@@ -10,6 +10,7 @@ export interface InitOptions {
   aiSync: boolean
   sdd: boolean
   ghagga: boolean
+  mock: boolean
   dryRun: boolean
 }
 

@@ -76,6 +76,7 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
     aiSync: true,
     sdd: true,
     ghagga: true,
+    mock: false,
     dryRun: false,
     ...overrides,
   }

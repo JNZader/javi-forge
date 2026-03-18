@@ -26,6 +26,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+      - name: Install semantic-release plugins
+        run: npm install -g semantic-release @semantic-release/changelog @semantic-release/exec @semantic-release/git conventional-changelog-conventionalcommits
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

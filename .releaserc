@@ -35,8 +35,9 @@
     ["@semantic-release/exec", {
       "prepareCmd": "echo ${nextRelease.version} > .framework-version"
     }],
+    "@semantic-release/npm",
     ["@semantic-release/git", {
-      "assets": ["CHANGELOG.md", ".framework-version"],
+      "assets": ["CHANGELOG.md", "package.json", ".framework-version"],
       "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
     }],
     "@semantic-release/github"

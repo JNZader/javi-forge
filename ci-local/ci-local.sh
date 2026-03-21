@@ -74,6 +74,12 @@ setup_ci_commands() {
     esac
 }
 
+# Check if GHAGGA is available on the host
+GHAGGA_AVAILABLE=false
+if command -v ghagga >/dev/null 2>&1; then
+    GHAGGA_AVAILABLE=true
+fi
+
 # =============================================================================
 # DOCKER
 # =============================================================================
@@ -270,6 +276,7 @@ case "$MODE" in
         [[ -n "$LINT_CMD" ]] && total=$((total + 1))
         [[ -n "$COMPILE_CMD" ]] && total=$((total + 1))
         [[ -n "$TEST_CMD" ]] && total=$((total + 1))
+        if $GHAGGA_AVAILABLE; then total=$((total + 1)); fi
 
         if [[ -n "$LINT_CMD" ]]; then
             echo -e "\n${YELLOW}Step $step/$total: Lint${NC}"
@@ -289,6 +296,17 @@ case "$MODE" in
             echo -e "\n${YELLOW}Step $step/$total: Test${NC}"
             echo -e "  ${CYAN}$TEST_CMD${NC}"
             run_in_ci "cd /home/runner/work && $TEST_CMD"
+            step=$((step + 1))
+        fi
+
+        if $GHAGGA_AVAILABLE; then
+            echo -e "\n${YELLOW}Step $step/$total: GHAGGA Review${NC}"
+            echo -e "  ${CYAN}ghagga review --plain --exit-on-issues${NC}"
+            if ! ghagga review --plain --exit-on-issues; then
+                echo -e "${RED}GHAGGA review found issues!${NC}"
+                exit 1
+            fi
+            step=$((step + 1))
         fi
         ;;
 esac

@@ -6,7 +6,7 @@
 # Usage:
 #   jobs:
 #     build:
-#       uses: JNZader/project-starter-framework/.github/workflows/reusable-build-node.yml@main
+#       uses: JNZader/javi-forge/.github/workflows/reusable-build-node.yml@main
 #       with:
 #         node-version: '20'
 # ===========================================

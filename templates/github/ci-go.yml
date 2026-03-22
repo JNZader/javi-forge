@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   build:
-    uses: JNZader/project-starter-framework/.github/workflows/reusable-build-go.yml@main
+    uses: JNZader/javi-forge/.github/workflows/reusable-build-go.yml@main
     with:
       go-version: '1.23'  # Change to: 1.22, 1.23
       run-lint: true

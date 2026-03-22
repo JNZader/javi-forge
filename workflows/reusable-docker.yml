@@ -6,7 +6,7 @@
 # Usage:
 #   jobs:
 #     docker:
-#       uses: JNZader/project-starter-framework/.github/workflows/reusable-docker.yml@main
+#       uses: JNZader/javi-forge/.github/workflows/reusable-docker.yml@main
 #       with:
 #         dockerfile: './Dockerfile'
 # ===========================================

@@ -6,7 +6,7 @@
 # Usage:
 #   jobs:
 #     build:
-#       uses: JNZader/project-starter-framework/.github/workflows/reusable-build-python.yml@main
+#       uses: JNZader/javi-forge/.github/workflows/reusable-build-python.yml@main
 #       with:
 #         python-version: '3.12'
 # ===========================================

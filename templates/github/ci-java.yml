@@ -3,7 +3,7 @@
 # ===========================================
 # Copy to: .github/workflows/ci.yml
 #
-# This uses reusable workflows from project-starter-framework.
+# This uses reusable workflows from javi-forge.
 # Runs on pushes to main, PRs, and manual triggers.
 # ===========================================
 
@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   build:
-    uses: JNZader/project-starter-framework/.github/workflows/reusable-build-java.yml@main
+    uses: JNZader/javi-forge/.github/workflows/reusable-build-java.yml@main
     with:
       java-version: '21'  # Change to your version: 17, 21, 25
       run-spotless: true

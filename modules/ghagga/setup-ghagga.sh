@@ -50,7 +50,7 @@ concurrency:
 
 jobs:
   review:
-    uses: JNZader/project-starter-framework/.github/workflows/reusable-ghagga-review.yml@main
+    uses: JNZader/javi-forge/.github/workflows/reusable-ghagga-review.yml@main
     with:
       ghagga-url: ${{ vars.GHAGGA_URL }}
       review-mode: simple

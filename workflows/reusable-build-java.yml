@@ -6,7 +6,7 @@
 # Usage in your project:
 #   jobs:
 #     build:
-#       uses: JNZader/project-starter-framework/.github/workflows/reusable-build-java.yml@main
+#       uses: JNZader/javi-forge/.github/workflows/reusable-build-java.yml@main
 #       with:
 #         java-version: '21'
 # ===========================================

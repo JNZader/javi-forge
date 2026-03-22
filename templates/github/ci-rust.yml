@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   build:
-    uses: JNZader/project-starter-framework/.github/workflows/reusable-build-rust.yml@main
+    uses: JNZader/javi-forge/.github/workflows/reusable-build-rust.yml@main
     with:
       toolchain: 'stable'  # Change to: stable, beta, nightly
       run-clippy: true

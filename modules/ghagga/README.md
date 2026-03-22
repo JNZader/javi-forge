@@ -60,7 +60,7 @@ En tu `.github/workflows/ci.yml`:
 ```yaml
 jobs:
   review:
-    uses: JNZader/project-starter-framework/.github/workflows/reusable-ghagga-review.yml@main
+    uses: JNZader/javi-forge/.github/workflows/reusable-ghagga-review.yml@main
     with:
       ghagga-url: ${{ vars.GHAGGA_URL }}
     secrets:
@@ -142,7 +142,7 @@ Ejecuta reglas Semgrep como complemento al analisis LLM, cubriendo patrones de s
 
 ## Integracion con el Framework
 
-Cuando usas GHAGGA con project-starter-framework:
+Cuando usas GHAGGA con javi-forge:
 
 - **CI-Local** valida codigo antes del push (pre-commit, pre-push)
 - **GHAGGA** revisa el PR despues del push (review automatico)

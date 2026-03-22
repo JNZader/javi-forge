@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   build:
-    uses: JNZader/project-starter-framework/.github/workflows/reusable-build-node.yml@main
+    uses: JNZader/javi-forge/.github/workflows/reusable-build-node.yml@main
     with:
       node-version: '20'  # Change to: 18, 20, 22
       package-manager: 'npm'  # Change to: npm, yarn, pnpm

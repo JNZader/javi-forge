@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# lib/common.sh - Shared functions for project-starter-framework
+# lib/common.sh - Shared functions for javi-forge
 # =============================================================================
 # Source from scripts:   source "$(dirname "$0")/../lib/common.sh"
 # Source from ci-local:  source "$(dirname "$0")/../lib/common.sh"
@@ -161,7 +161,7 @@ detect_stack() {
 }
 
 # =============================================================================
-# detect_framework - Locate the project-starter-framework directory
+# detect_framework - Locate the javi-forge directory
 # =============================================================================
 # Sets: FRAMEWORK_DIR (path to framework root, or empty string)
 #       HAS_OPTIONAL  (true/false if optional/ dir exists)

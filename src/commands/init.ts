@@ -153,12 +153,14 @@ export async function initProject(
           await ensureDirExists(moduleDest)
           await fs.copy(moduleSrc, moduleDest, { overwrite: false, errorOnExist: false })
 
-          // If engram, copy .mcp-config-snippet.json to project
+          // If engram, copy .mcp-config-snippet.json to project with placeholder replacement
           if (memory === 'engram') {
             const snippetSrc = path.join(moduleSrc, '.mcp-config-snippet.json')
             if (await fs.pathExists(snippetSrc)) {
               const snippetDest = path.join(projectDir, '.mcp-config-snippet.json')
-              await fs.copy(snippetSrc, snippetDest, { overwrite: false })
+              let content = await fs.readFile(snippetSrc, 'utf-8')
+              content = content.replace(/__PROJECT_NAME__/g, projectName)
+              await fs.writeFile(snippetDest, content, 'utf-8')
             }
           }
         }

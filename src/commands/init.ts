@@ -64,6 +64,11 @@ export async function initProject(
         // Set core.hooksPath to ci-local/hooks
         const hooksDir = path.join(ciLocalDest, 'hooks')
         if (await fs.pathExists(hooksDir)) {
+          // Ensure hooks are executable
+          const hookFiles = await fs.readdir(hooksDir)
+          for (const hook of hookFiles) {
+            await fs.chmod(path.join(hooksDir, hook), 0o755)
+          }
           await execFileAsync('git', ['config', 'core.hooksPath', 'ci-local/hooks'], { cwd: projectDir })
         }
       }

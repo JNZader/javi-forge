@@ -11,7 +11,7 @@ interface OptionItem {
 }
 
 const OPTIONS: OptionItem[] = [
-  { id: 'aiSync', label: 'AI Config Sync',  description: 'Copy agents, skills, and configs to .ai-config/', default: true },
+  { id: 'aiSync', label: 'AI Config Sync',  description: 'Sync AI config via javi-ai',                    default: true },
   { id: 'sdd',    label: 'SDD (openspec/)', description: 'Spec-Driven Development workflow',               default: true },
   { id: 'ghagga', label: 'GHAGGA Review',   description: 'Multi-agent AI code review system',              default: false },
 ]

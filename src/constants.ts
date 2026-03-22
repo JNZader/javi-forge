@@ -15,12 +15,6 @@ export const MODULES_DIR = path.join(FORGE_ROOT, 'modules')
 /** Workflows directory */
 export const WORKFLOWS_DIR = path.join(FORGE_ROOT, 'workflows')
 
-/** AI config directory */
-export const AI_CONFIG_DIR = path.join(FORGE_ROOT, 'ai-config')
-
-/** Schemas directory */
-export const SCHEMAS_DIR = path.join(FORGE_ROOT, 'schemas')
-
 /** CI-local directory */
 export const CI_LOCAL_DIR = path.join(FORGE_ROOT, 'ci-local')
 

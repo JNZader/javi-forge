@@ -4,7 +4,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { detectStack } from '../lib/common.js'
 import { listInstalledPlugins } from '../lib/plugin.js'
-import { FORGE_ROOT, TEMPLATES_DIR, MODULES_DIR, AI_CONFIG_DIR, PLUGINS_DIR } from '../constants.js'
+import { FORGE_ROOT, TEMPLATES_DIR, MODULES_DIR, PLUGINS_DIR } from '../constants.js'
 import type { DoctorResult, DoctorSection, DoctorCheck, ForgeManifest } from '../types/index.js'
 
 const execFileAsync = promisify(execFile)
@@ -85,9 +85,7 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
   const expectedDirs = [
     { path: TEMPLATES_DIR, label: 'templates/' },
     { path: MODULES_DIR, label: 'modules/' },
-    { path: AI_CONFIG_DIR, label: 'ai-config/' },
     { path: path.join(FORGE_ROOT, 'workflows'), label: 'workflows/' },
-    { path: path.join(FORGE_ROOT, 'schemas'), label: 'schemas/' },
     { path: path.join(FORGE_ROOT, 'ci-local'), label: 'ci-local/' },
   ]
 

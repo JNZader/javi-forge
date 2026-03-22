@@ -36,14 +36,15 @@ setup_ci_commands() {
             DOCKERFILE="java.Dockerfile"
             LINT_CMD="./gradlew spotlessCheck --no-daemon"
             # Pre-clean to avoid permission conflicts with host-created build dirs
-            COMPILE_CMD="./gradlew clean classes testClasses --no-daemon"
+            # chown so tests (as runner) can access the output
+            COMPILE_CMD="./gradlew clean classes testClasses --no-daemon && chown -R runner:runner build .gradle 2>/dev/null || true"
             TEST_CMD="./gradlew test --no-daemon"
             ;;
         java-maven)
             DOCKERFILE="java.Dockerfile"
             LINT_CMD="./mvnw spotless:check"
             # Pre-clean to avoid permission conflicts with host-created target dirs
-            COMPILE_CMD="./mvnw clean compile test-compile"
+            COMPILE_CMD="./mvnw clean compile test-compile && chown -R runner:runner target .mvn 2>/dev/null || true"
             TEST_CMD="./mvnw test"
             ;;
         node)
@@ -56,9 +57,10 @@ setup_ci_commands() {
             fi
             # Only set compile if build script exists
             # Pre-clean dist/ and build/ to avoid EACCES errors when the host
-            # created those dirs as a different user (e.g. root from a previous run)
+            # created those dirs as a different user (e.g. root from a previous run).
+            # chown back to runner so subsequent steps can read the output.
             if grep -q '"build"' "$PROJECT_DIR/package.json" 2>/dev/null; then
-                COMPILE_CMD="rm -rf dist build && $BUILD_TOOL run build"
+                COMPILE_CMD="rm -rf dist build && $BUILD_TOOL run build && chown -R runner:runner dist build 2>/dev/null || true"
             else
                 COMPILE_CMD=""
             fi
@@ -79,14 +81,14 @@ setup_ci_commands() {
             DOCKERFILE="go.Dockerfile"
             LINT_CMD="golangci-lint run"
             # Pre-clean to avoid permission conflicts with host-created build cache
-            COMPILE_CMD="go clean -cache && go build ./..."
+            COMPILE_CMD="go clean -cache && go build ./... && chown -R runner:runner . 2>/dev/null || true"
             TEST_CMD="go test ./..."
             ;;
         rust)
             DOCKERFILE="rust.Dockerfile"
             LINT_CMD="cargo clippy -- -D warnings"
             # Pre-clean to avoid permission conflicts with host-created target dir
-            COMPILE_CMD="cargo clean && cargo build"
+            COMPILE_CMD="cargo clean && cargo build && chown -R runner:runner target 2>/dev/null || true"
             TEST_CMD="cargo test"
             ;;
         *)
@@ -215,6 +217,9 @@ ensure_docker_image() {
 run_in_ci() {
     local image_name
     image_name=$(get_image_name)
+    # $1 = command, $2 = user override (default: runner)
+    local cmd="$1"
+    local run_user="${2:-runner}"
     local -a docker_flags=(--rm)
     if [ -t 0 ]; then
         docker_flags+=(-it)
@@ -228,9 +233,10 @@ run_in_ci() {
     docker run "${docker_flags[@]}" \
         --stop-timeout 30 \
         --entrypoint "" \
+        --user "$run_user" \
         -v "$PROJECT_DIR:/home/runner/work" \
         -e CI=true \
-        "$image_name" timeout "$timeout" bash -c "$1"
+        "$image_name" timeout "$timeout" bash -c "$cmd"
 }
 
 # =============================================================================
@@ -275,7 +281,7 @@ case "$MODE" in
         fi
         if [[ -n "$COMPILE_CMD" ]]; then
             echo -e "${CYAN}Compile: $COMPILE_CMD${NC}"
-            run_in_ci "cd /home/runner/work && $COMPILE_CMD"
+            run_in_ci "cd /home/runner/work && $COMPILE_CMD" root
         fi
         ;;
 
@@ -310,7 +316,7 @@ case "$MODE" in
         if [[ -n "$COMPILE_CMD" ]]; then
             echo -e "\n${YELLOW}Step $step/$total: Compile${NC}"
             echo -e "  ${CYAN}$COMPILE_CMD${NC}"
-            run_in_ci "cd /home/runner/work && $COMPILE_CMD"
+            run_in_ci "cd /home/runner/work && $COMPILE_CMD" root
             step=$((step + 1))
         fi
 

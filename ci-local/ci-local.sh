@@ -221,6 +221,7 @@ run_in_ci() {
     fi
     docker run "${docker_flags[@]}" \
         --stop-timeout 30 \
+        --entrypoint "" \
         -v "$PROJECT_DIR:/home/runner/work" \
         -e CI=true \
         "$image_name" timeout "$timeout" bash -c "$1"

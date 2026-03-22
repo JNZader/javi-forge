@@ -182,11 +182,17 @@ export async function initProject(
     if (aiSync) {
       if (!dryRun) {
         try {
-          await execFileAsync('npx', ['javi-ai', 'sync', '--project-dir', projectDir, '--target', 'all'], {
+          const { stderr } = await execFileAsync('npx', ['javi-ai', 'sync', '--project-dir', projectDir, '--target', 'all'], {
             cwd: projectDir,
             timeout: 120_000,
           })
-          report(onStep, stepAI, 'Sync AI config via javi-ai', 'done', 'javi-ai sync --target all')
+          // javi-ai may exit 0 but crash (e.g. Ink raw mode error) — detect via stderr
+          if (stderr && (stderr.includes('Raw mode is not supported') || stderr.includes('ERROR'))) {
+            report(onStep, stepAI, 'Sync AI config via javi-ai', 'error',
+              'javi-ai crashed. Run manually: npx javi-ai sync --project-dir . --target all')
+          } else {
+            report(onStep, stepAI, 'Sync AI config via javi-ai', 'done', 'javi-ai sync --target all')
+          }
         } catch (syncErr: unknown) {
           const msg = syncErr instanceof Error ? syncErr.message : String(syncErr)
           if (msg.includes('ENOENT') || msg.includes('not found') || msg.includes('ERR_MODULE_NOT_FOUND')) {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import React from 'react'
 import { render } from 'ink'
+import { PassThrough } from 'node:stream'
 import meow from 'meow'
 import updateNotifier from 'update-notifier'
 import { createRequire } from 'module'
@@ -99,6 +100,13 @@ const VALID_MEMORY = ['engram', 'obsidian-brain', 'memory-simple', 'none']
 
 const isCI = cli.flags.batch || process.env['CI'] === '1' || process.env['CI'] === 'true'
 
+// When stdin doesn't support raw mode (pipes, subprocesses, CI), provide a fake
+// stdin stream so Ink doesn't crash trying to enable raw mode on a non-TTY pipe.
+const isTTY = process.stdin.isTTY === true
+const fakeStdin = new PassThrough() as unknown as NodeJS.ReadStream
+Object.defineProperty(fakeStdin, 'isTTY', { value: false })
+const inkStdin = isTTY ? process.stdin : fakeStdin
+
 switch (subcommand) {
   case 'ci': {
     const ciMode: CIMode = cli.flags.detect ? 'detect'
@@ -116,7 +124,8 @@ switch (subcommand) {
           noSecurity={cli.flags.noSecurity}
           timeout={cli.flags.timeout}
         />
-      </CIContextProvider>
+      </CIContextProvider>,
+      { stdin: inkStdin }
     )
     break
   }
@@ -125,7 +134,8 @@ switch (subcommand) {
     render(
       <CIContextProvider isCI={isCI}>
         <Doctor />
-      </CIContextProvider>
+      </CIContextProvider>,
+      { stdin: inkStdin }
     )
     break
   }
@@ -134,7 +144,8 @@ switch (subcommand) {
     render(
       <CIContextProvider isCI={isCI}>
         <AnalyzeUI dryRun={cli.flags.dryRun} />
-      </CIContextProvider>
+      </CIContextProvider>,
+      { stdin: inkStdin }
     )
     break
   }
@@ -143,7 +154,8 @@ switch (subcommand) {
     render(
       <CIContextProvider isCI={isCI}>
         <LlmsTxt projectDir={process.cwd()} dryRun={cli.flags.dryRun} />
-      </CIContextProvider>
+      </CIContextProvider>,
+      { stdin: inkStdin }
     )
     break
   }
@@ -157,7 +169,8 @@ switch (subcommand) {
     render(
       <CIContextProvider isCI={isCI}>
         <Plugin action={action} target={target} dryRun={cli.flags.dryRun} />
-      </CIContextProvider>
+      </CIContextProvider>,
+      { stdin: inkStdin }
     )
     break
   }
@@ -186,7 +199,8 @@ switch (subcommand) {
           presetGhagga={cli.flags.ghagga}
           presetMock={cli.flags.mock ?? false}
         />
-      </CIContextProvider>
+      </CIContextProvider>,
+      { stdin: inkStdin }
     )
     break
   }

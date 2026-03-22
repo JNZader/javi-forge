@@ -240,9 +240,9 @@ export async function initProject(
           await ensureDirExists(ghaggaDest)
           await fs.copy(ghaggaSrc, ghaggaDest, { overwrite: false, errorOnExist: false })
 
-          // Copy ghagga workflow to CI provider location
+          // Copy ghagga caller workflow to CI provider location
           if (ciProvider === 'github') {
-            const workflowSrc = path.join(FORGE_ROOT, 'workflows', 'reusable-ghagga-review.yml')
+            const workflowSrc = path.join(FORGE_ROOT, 'templates', 'github', 'ghagga-review.yml')
             if (await fs.pathExists(workflowSrc)) {
               const workflowDest = path.join(projectDir, '.github', 'workflows', 'ghagga-review.yml')
               await ensureDirExists(path.dirname(workflowDest))

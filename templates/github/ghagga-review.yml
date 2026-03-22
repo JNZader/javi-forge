@@ -1,0 +1,28 @@
+# ===========================================
+# GHAGGA AI Code Review
+# ===========================================
+# Triggers AI code review on pull requests.
+# Requires: GHAGGA GitHub Action (JNZader/ghagga@v1)
+#
+# Modes: simple (default), workflow, consensus
+# ===========================================
+
+name: Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: JNZader/ghagga@v1
+        with:
+          mode: simple
+          provider: github

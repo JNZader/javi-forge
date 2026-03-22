@@ -2,13 +2,22 @@
 import React from 'react'
 import { render } from 'ink'
 import meow from 'meow'
+import updateNotifier from 'update-notifier'
+import { createRequire } from 'module'
 import App from './ui/App.js'
 import Doctor from './ui/Doctor.js'
 import AnalyzeUI from './ui/AnalyzeUI.js'
 import Plugin from './ui/Plugin.js'
 import LlmsTxt from './ui/LlmsTxt.js'
+import CI from './ui/CI.js'
 import { CIProvider as CIContextProvider } from './ui/CIContext.js'
 import type { Stack, CIProvider, MemoryOption } from './types/index.js'
+import type { CIMode } from './commands/ci.js'
+
+// Check for updates in background (non-blocking, cached 24h)
+const _require = createRequire(import.meta.url)
+const pkg = _require('../package.json') as { name: string; version: string }
+updateNotifier({ pkg, updateCheckInterval: 1000 * 60 * 60 * 24 }).notify()
 
 const cli = meow(`
   Usage
@@ -16,6 +25,7 @@ const cli = meow(`
 
   Commands
     init              Bootstrap a new project (default)
+    ci                Run CI simulation (lint + compile + test + security + ghagga)
     analyze           Run repoforge skills analysis
     doctor            Show health report
     plugin add        Install a plugin from GitHub (org/repo)
@@ -37,19 +47,28 @@ const cli = meow(`
     --version       Show version
     --help          Show this help
 
+  CI options (javi-forge ci)
+    --quick         Lint + compile only (fast, for pre-commit)
+    --shell         Open interactive shell in CI container
+    --detect        Show detected stack and exit
+    --no-docker     Run commands natively (no Docker)
+    --no-ghagga     Skip GHAGGA review
+    --no-security   Skip Semgrep security scan
+    --timeout N     Per-step timeout in seconds (default: 600)
+
   Examples
     $ javi-forge
     $ javi-forge init --dry-run
     $ javi-forge init --stack node --ci github
-    $ javi-forge init --dry-run --project-name app --stack node --ci github --batch
+    $ javi-forge ci
+    $ javi-forge ci --quick
+    $ javi-forge ci --no-ghagga --no-security
+    $ javi-forge ci --no-docker
+    $ javi-forge ci --shell
     $ javi-forge analyze
-    $ javi-forge analyze --dry-run
     $ javi-forge doctor
     $ javi-forge plugin add mapbox/agent-skills
     $ javi-forge plugin list
-    $ javi-forge plugin search ai
-    $ javi-forge plugin validate ./my-plugin
-    $ javi-forge plugin remove my-plugin
 `, {
   importMeta: import.meta,
   flags: {
@@ -61,6 +80,14 @@ const cli = meow(`
     ghagga:      { type: 'boolean', default: false },
     mock:        { type: 'boolean', default: false },
     batch:       { type: 'boolean', default: false },
+    // CI flags
+    quick:       { type: 'boolean', default: false },
+    shell:       { type: 'boolean', default: false },
+    detect:      { type: 'boolean', default: false },
+    noDocker:    { type: 'boolean', default: false },
+    noGhagga:    { type: 'boolean', default: false },
+    noSecurity:  { type: 'boolean', default: false },
+    timeout:     { type: 'number',  default: 600 },
   }
 })
 
@@ -73,6 +100,27 @@ const VALID_MEMORY = ['engram', 'obsidian-brain', 'memory-simple', 'none']
 const isCI = cli.flags.batch || process.env['CI'] === '1' || process.env['CI'] === 'true'
 
 switch (subcommand) {
+  case 'ci': {
+    const ciMode: CIMode = cli.flags.detect ? 'detect'
+      : cli.flags.shell   ? 'shell'
+      : cli.flags.quick   ? 'quick'
+      : 'full'
+
+    render(
+      <CIContextProvider isCI={true}>
+        <CI
+          projectDir={process.cwd()}
+          mode={ciMode}
+          noDocker={cli.flags.noDocker}
+          noGhagga={cli.flags.noGhagga}
+          noSecurity={cli.flags.noSecurity}
+          timeout={cli.flags.timeout}
+        />
+      </CIContextProvider>
+    )
+    break
+  }
+
   case 'doctor': {
     render(
       <CIContextProvider isCI={isCI}>

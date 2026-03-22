@@ -1,0 +1,91 @@
+# ===========================================
+# Reusable Workflow: Semantic Release
+# ===========================================
+# Automatic versioning based on conventional commits.
+#
+# Usage:
+#   jobs:
+#     release:
+#       uses: JNZader/javi-forge/.github/workflows/reusable-release.yml@main
+#       secrets:
+#         token: ${{ secrets.GITHUB_TOKEN }}
+# ===========================================
+
+name: Release (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      dry-run:
+        description: 'Dry run'
+        required: false
+        default: false
+        type: boolean
+      node-version:
+        description: 'Node.js version'
+        required: false
+        default: '22'
+        type: string
+    secrets:
+      token:
+        description: 'GitHub token with contents:write permission'
+        required: true
+      npm-token:
+        description: 'NPM token for package publishing (optional)'
+        required: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+
+      - name: Cache semantic-release
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: semantic-release-${{ runner.os }}-${{ hashFiles('.releaserc*') }}
+          restore-keys: semantic-release-${{ runner.os }}-
+
+      - name: Install semantic-release
+        run: |
+          npm install -g semantic-release \
+            @semantic-release/commit-analyzer \
+            @semantic-release/release-notes-generator \
+            @semantic-release/changelog \
+            @semantic-release/git \
+            @semantic-release/github \
+            conventional-changelog-conventionalcommits
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.token }}
+          NPM_TOKEN: ${{ secrets.npm-token }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+        run: |
+          if [ "$DRY_RUN" == "true" ]; then
+            npx semantic-release --dry-run
+          else
+            npx semantic-release
+          fi

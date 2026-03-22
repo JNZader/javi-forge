@@ -1,0 +1,111 @@
+# ===========================================
+# Reusable Workflow: Go Build
+# ===========================================
+# Minimal CI for Go projects.
+#
+# Usage:
+#   jobs:
+#     build:
+#       uses: JNZader/javi-forge/.github/workflows/reusable-build-go.yml@main
+#       with:
+#         go-version: '1.23'
+# ===========================================
+
+name: Go Build (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: 'Go version'
+        required: false
+        default: '1.23'
+        type: string
+      run-tests:
+        description: 'Run tests'
+        required: false
+        default: true
+        type: boolean
+      run-lint:
+        description: 'Run golangci-lint'
+        required: false
+        default: true
+        type: boolean
+      working-directory:
+        description: 'Working directory'
+        required: false
+        default: '.'
+        type: string
+      build-flags:
+        description: 'Additional go build flags'
+        required: false
+        default: ''
+        type: string
+      lint-fail-on-error:
+        description: 'Fail the build if linting fails'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        env:
+          ARGS: ${{ inputs.build-flags }}
+        run: |
+          if echo "$ARGS" | grep -qE '[;|&$`(){}<>'"'"'"]'; then
+            echo "::error::Invalid characters in input arguments. Shell metacharacters are not allowed."
+            exit 1
+          fi
+
+      - name: Setup Go ${{ inputs.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build
+        env:
+          BUILD_FLAGS: ${{ inputs.build-flags }}
+        run: go build -v $BUILD_FLAGS ./...
+
+      - name: Lint
+        if: inputs.run-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62
+          working-directory: ${{ inputs.working-directory }}
+          args: --timeout=5m
+        continue-on-error: ${{ !inputs.lint-fail-on-error }}
+
+      - name: Test
+        if: inputs.run-tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        if: inputs.run-tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: ${{ inputs.working-directory }}/coverage.out
+          retention-days: 7

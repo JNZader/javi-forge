@@ -1,0 +1,165 @@
+# ===========================================
+# Reusable Workflow: GHAGGA AI Code Review
+# ===========================================
+# Triggers AI-powered code review on PRs using GHAGGA.
+#
+# Usage:
+#   jobs:
+#     review:
+#       uses: JNZader/javi-forge/.github/workflows/reusable-ghagga-review.yml@main
+#       with:
+#         ghagga-url: ${{ vars.GHAGGA_URL }}
+#       secrets:
+#         ghagga-token: ${{ secrets.GHAGGA_TOKEN }}
+# ===========================================
+
+name: GHAGGA Review (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      ghagga-url:
+        description: 'URL of GHAGGA instance (Supabase Edge Function)'
+        required: true
+        type: string
+      review-mode:
+        description: 'Review mode: simple, workflow, or consensus'
+        required: false
+        default: 'simple'
+        type: string
+      skip-draft:
+        description: 'Skip review on draft PRs'
+        required: false
+        default: true
+        type: boolean
+      file-patterns:
+        description: 'Glob patterns to include (comma-separated, e.g. "src/**,lib/**")'
+        required: false
+        default: '**'
+        type: string
+      exclude-patterns:
+        description: 'Glob patterns to exclude (comma-separated)'
+        required: false
+        default: '**/*.md,**/*.txt,**/package-lock.json,**/yarn.lock,**/pnpm-lock.yaml'
+        type: string
+    secrets:
+      ghagga-token:
+        description: 'Authentication token for GHAGGA API'
+        required: true
+
+jobs:
+  review:
+    name: AI Code Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+
+    # Skip draft PRs if configured
+    if: ${{ !inputs.skip-draft || !github.event.pull_request.draft }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Get changed files
+          CHANGED_FILES=$(gh pr diff "$PR_NUMBER" --name-only)
+          DELIMITER_FILES=$(openssl rand -hex 16)
+          echo "changed_files<<$DELIMITER_FILES" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED_FILES" >> "$GITHUB_OUTPUT"
+          echo "$DELIMITER_FILES" >> "$GITHUB_OUTPUT"
+
+          # Get diff content
+          DIFF=$(gh pr diff "$PR_NUMBER")
+          # Truncate if too large (max 100KB)
+          if [ ${#DIFF} -gt 102400 ]; then
+            DIFF="${DIFF:0:102400}... [truncated]"
+          fi
+          DELIMITER_DIFF=$(openssl rand -hex 16)
+          echo "diff<<$DELIMITER_DIFF" >> "$GITHUB_OUTPUT"
+          echo "$DIFF" >> "$GITHUB_OUTPUT"
+          echo "$DELIMITER_DIFF" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger GHAGGA review
+        id: review
+        env:
+          GHAGGA_URL: ${{ inputs.ghagga-url }}
+          GHAGGA_TOKEN: ${{ secrets.ghagga-token }}
+          PR_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          REVIEW_MODE: ${{ inputs.review-mode }}
+          FILE_PATTERNS: ${{ inputs.file-patterns }}
+          EXCLUDE_PATTERNS: ${{ inputs.exclude-patterns }}
+        run: |
+          RESPONSE=""
+          for attempt in 1 2 3; do
+            RESPONSE=$(curl -fsSL \
+              -X POST "${GHAGGA_URL}/functions/v1/review" \
+              -H "Authorization: Bearer ${GHAGGA_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n \
+                --arg repo "$PR_REPO" \
+                --argjson number "$PR_NUMBER" \
+                --arg head_sha "$PR_HEAD_SHA" \
+                --arg base "$PR_BASE_REF" \
+                --arg head "$PR_HEAD_REF" \
+                --arg title "$PR_TITLE" \
+                --arg mode "$REVIEW_MODE" \
+                --arg patterns "$FILE_PATTERNS" \
+                --arg exclude "$EXCLUDE_PATTERNS" \
+                '{repository: $repo, pull_request_number: $number, head_sha: $head_sha, base_branch: $base, head_branch: $head, title: $title, review_mode: $mode, file_patterns: $patterns, exclude_patterns: $exclude}')") && break
+            echo "::warning::GHAGGA API attempt $attempt failed, retrying..."
+            sleep $((attempt * 5))
+          done
+
+          DELIMITER_RESP=$(openssl rand -hex 16)
+          echo "response<<$DELIMITER_RESP" >> "$GITHUB_OUTPUT"
+          echo "$RESPONSE" >> "$GITHUB_OUTPUT"
+          echo "$DELIMITER_RESP" >> "$GITHUB_OUTPUT"
+
+          # Check if review was successful
+          STATUS=$(echo "$RESPONSE" | jq -r '.status // "error"')
+          if [ "$STATUS" = "error" ]; then
+            echo "::warning::GHAGGA review returned an error"
+            echo "$RESPONSE" | jq -r '.message // "Unknown error"'
+          else
+            echo "Review triggered successfully"
+          fi
+
+      - name: Post review summary
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          REVIEW_RESPONSE: ${{ steps.review.outputs.response }}
+        with:
+          script: |
+            const response = process.env.REVIEW_RESPONSE;
+            let parsed;
+            try {
+              parsed = JSON.parse(response);
+            } catch {
+              console.log('Could not parse GHAGGA response');
+              return;
+            }
+
+            if (parsed.status === 'completed' && parsed.summary) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `### GHAGGA AI Review\n\n${parsed.summary}\n\n---\n*Review mode: ${parsed.review_mode || 'simple'}*`
+              });
+            }

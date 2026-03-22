@@ -17,7 +17,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Source shared library for colors and detect_stack
-source "$SCRIPT_DIR/../lib/common.sh"
+# Look inside ci-local/lib first (self-contained), fallback to project-level lib/
+if [ -f "$SCRIPT_DIR/lib/common.sh" ]; then
+    source "$SCRIPT_DIR/lib/common.sh"
+elif [ -f "$SCRIPT_DIR/../lib/common.sh" ]; then
+    source "$SCRIPT_DIR/../lib/common.sh"
+else
+    echo "ERROR: lib/common.sh not found"
+    exit 1
+fi
 
 # =============================================================================
 # CI COMMAND SETUP (extends shared detect_stack with CI-specific commands)

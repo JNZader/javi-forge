@@ -53,7 +53,7 @@ const cli = meow(`
     --shell         Open interactive shell in CI container
     --detect        Show detected stack and exit
     --no-docker     Run commands natively (no Docker)
-    --no-ghagga     Skip GHAGGA review
+    --no-ci-ghagga  Skip GHAGGA review
     --no-security   Skip Semgrep security scan
     --timeout N     Per-step timeout in seconds (default: 600)
 
@@ -63,7 +63,7 @@ const cli = meow(`
     $ javi-forge init --stack node --ci github
     $ javi-forge ci
     $ javi-forge ci --quick
-    $ javi-forge ci --no-ghagga --no-security
+    $ javi-forge ci --no-ci-ghagga --no-security
     $ javi-forge ci --no-docker
     $ javi-forge ci --shell
     $ javi-forge analyze
@@ -85,9 +85,9 @@ const cli = meow(`
     quick:       { type: 'boolean', default: false },
     shell:       { type: 'boolean', default: false },
     detect:      { type: 'boolean', default: false },
-    noDocker:    { type: 'boolean', default: false },
-    noGhagga:    { type: 'boolean', default: false },
-    noSecurity:  { type: 'boolean', default: false },
+    docker:      { type: 'boolean', default: true },
+    ciGhagga:    { type: 'boolean', default: true },
+    security:    { type: 'boolean', default: true },
     timeout:     { type: 'number',  default: 600 },
   }
 })
@@ -119,9 +119,9 @@ switch (subcommand) {
         <CI
           projectDir={process.cwd()}
           mode={ciMode}
-          noDocker={cli.flags.noDocker}
-          noGhagga={cli.flags.noGhagga}
-          noSecurity={cli.flags.noSecurity}
+          noDocker={!cli.flags.docker}
+          noGhagga={!cli.flags.ciGhagga}
+          noSecurity={!cli.flags.security}
           timeout={cli.flags.timeout}
         />
       </CIContextProvider>,

@@ -9,7 +9,7 @@
 set -e
 
 echo "PRE-COMMIT: Running quick check..."
-javi-forge ci --quick --no-security --no-ghagga || {
+javi-forge ci --quick --no-docker --no-security --no-ghagga || {
     echo ""
     echo "Quick check FAILED — Fix the issues above before committing."
     echo "To skip: git commit --no-verify"

@@ -35,13 +35,15 @@ setup_ci_commands() {
         java-gradle)
             DOCKERFILE="java.Dockerfile"
             LINT_CMD="./gradlew spotlessCheck --no-daemon"
-            COMPILE_CMD="./gradlew classes testClasses --no-daemon"
+            # Pre-clean to avoid permission conflicts with host-created build dirs
+            COMPILE_CMD="./gradlew clean classes testClasses --no-daemon"
             TEST_CMD="./gradlew test --no-daemon"
             ;;
         java-maven)
             DOCKERFILE="java.Dockerfile"
             LINT_CMD="./mvnw spotless:check"
-            COMPILE_CMD="./mvnw compile test-compile"
+            # Pre-clean to avoid permission conflicts with host-created target dirs
+            COMPILE_CMD="./mvnw clean compile test-compile"
             TEST_CMD="./mvnw test"
             ;;
         node)
@@ -53,8 +55,10 @@ setup_ci_commands() {
                 LINT_CMD=""
             fi
             # Only set compile if build script exists
+            # Pre-clean dist/ and build/ to avoid EACCES errors when the host
+            # created those dirs as a different user (e.g. root from a previous run)
             if grep -q '"build"' "$PROJECT_DIR/package.json" 2>/dev/null; then
-                COMPILE_CMD="$BUILD_TOOL run build"
+                COMPILE_CMD="rm -rf dist build && $BUILD_TOOL run build"
             else
                 COMPILE_CMD=""
             fi
@@ -74,13 +78,15 @@ setup_ci_commands() {
         go)
             DOCKERFILE="go.Dockerfile"
             LINT_CMD="golangci-lint run"
-            COMPILE_CMD="go build ./..."
+            # Pre-clean to avoid permission conflicts with host-created build cache
+            COMPILE_CMD="go clean -cache && go build ./..."
             TEST_CMD="go test ./..."
             ;;
         rust)
             DOCKERFILE="rust.Dockerfile"
             LINT_CMD="cargo clippy -- -D warnings"
-            COMPILE_CMD="cargo build"
+            # Pre-clean to avoid permission conflicts with host-created target dir
+            COMPILE_CMD="cargo clean && cargo build"
             TEST_CMD="cargo test"
             ;;
         *)

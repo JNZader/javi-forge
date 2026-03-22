@@ -57,11 +57,16 @@ const cli = meow(`
     --no-security   Skip Semgrep security scan
     --timeout N     Per-step timeout in seconds (default: 600)
 
+  CI hooks (javi-forge ci init)
+    Install git hooks that call javi-forge ci.
+    No files copied — hooks reference the global CLI.
+
   Examples
     $ javi-forge
     $ javi-forge init --dry-run
     $ javi-forge init --stack node --ci github
     $ javi-forge ci
+    $ javi-forge ci init
     $ javi-forge ci --quick
     $ javi-forge ci --no-ci-ghagga --no-security
     $ javi-forge ci --no-docker
@@ -109,6 +114,21 @@ const inkStdin = isTTY ? process.stdin : fakeStdin
 
 switch (subcommand) {
   case 'ci': {
+    // Sub-command: javi-forge ci init → install git hooks
+    if (cli.input[1] === 'init') {
+      const { installCIHooks } = await import('./commands/ci.js')
+      const { installed, errors } = await installCIHooks(process.cwd())
+      if (installed.length > 0) {
+        console.log(`✓ Installed git hooks: ${installed.join(', ')}`)
+        console.log('  Hooks call javi-forge ci (with npx fallback)')
+      }
+      for (const err of errors) {
+        console.error(`✗ ${err}`)
+      }
+      process.exit(errors.length > 0 ? 1 : 0)
+      break
+    }
+
     const ciMode: CIMode = cli.flags.detect ? 'detect'
       : cli.flags.shell   ? 'shell'
       : cli.flags.quick   ? 'quick'

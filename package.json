@@ -16,6 +16,19 @@
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run"
   },
+  "files": [
+    "dist/",
+    "ci-local/",
+    "modules/",
+    "templates/",
+    "workflows/",
+    "lib/",
+    "!dist/**/*.test.*",
+    "!dist/**/__snapshots__",
+    "package.json",
+    "README.md",
+    ".gitignore.template"
+  ],
   "author": "JNZader",
   "license": "MIT",
   "repository": {

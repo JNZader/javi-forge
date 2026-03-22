@@ -124,24 +124,26 @@ async function buildCICommands(
     case 'java-gradle':
       return {
         lintCmd: './gradlew spotlessCheck --no-daemon',
-        compileCmd: './gradlew classes testClasses --no-daemon',
+        compileCmd: './gradlew clean classes testClasses --no-daemon && chown -R runner:runner build/ .gradle/ 2>/dev/null || true',
         testCmd: './gradlew test --no-daemon',
       }
     case 'java-maven':
       return {
         lintCmd: './mvnw spotless:check',
-        compileCmd: './mvnw compile test-compile',
+        compileCmd: './mvnw clean compile test-compile && chown -R runner:runner target/ .mvn/ 2>/dev/null || true',
         testCmd: './mvnw test',
       }
     case 'node': {
       const pkgPath = path.join(projectDir, 'package.json')
       let pkgContent = ''
       try { pkgContent = await fs.readFile(pkgPath, 'utf-8') } catch { /* no package.json */ }
-      // Clean dist/ before build to avoid permission issues from prior Docker builds
+      // Clean dist/ before build and chown after so tests (as runner) can access output.
+      // Runs as root inside the container to handle host-owned output dirs.
       const buildPrefix = 'rm -rf dist/ && '
+      const buildSuffix = ' && chown -R runner:runner dist/ 2>/dev/null || true'
       return {
         lintCmd: pkgContent.includes('"lint"') ? `${buildTool} run lint` : null,
-        compileCmd: pkgContent.includes('"build"') ? `${buildPrefix}${buildTool} run build` : null,
+        compileCmd: pkgContent.includes('"build"') ? `${buildPrefix}${buildTool} run build${buildSuffix}` : null,
         testCmd: pkgContent.includes('"test"') ? `${buildTool} ${buildTool === 'npm' ? 'test' : 'run test'}` : null,
       }
     }
@@ -154,13 +156,13 @@ async function buildCICommands(
     case 'go':
       return {
         lintCmd: 'golangci-lint run',
-        compileCmd: 'go build ./...',
+        compileCmd: 'go clean -cache && go build ./... && chown -R runner:runner . 2>/dev/null || true',
         testCmd: 'go test ./...',
       }
     case 'rust':
       return {
         lintCmd: 'cargo clippy -- -D warnings',
-        compileCmd: 'cargo build',
+        compileCmd: 'cargo clean && cargo build && chown -R runner:runner target/ 2>/dev/null || true',
         testCmd: 'cargo test',
       }
     default:
@@ -268,12 +270,14 @@ export async function runCI(options: CIOptions, onStep: CIStepCallback): Promise
     }
   }
 
-  // ── Compile ──────────────────────────────────────────────────────────────────
+    // ── Compile ──────────────────────────────────────────────────────────────────
   if (stackInfo.compileCmd) {
     const stepCompile = 'compile'
     report(onStep, stepCompile, `Compile: ${stackInfo.compileCmd}`, 'running')
     try {
-      await runStep(stackInfo.compileCmd, projectDir, noDocker, timeout)
+      // Run as root inside the container to rm/build output dirs owned by any host user,
+      // then chown back to runner so subsequent test steps can read the output.
+      await runStep(stackInfo.compileCmd, projectDir, noDocker, timeout, 'root')
       report(onStep, stepCompile, 'Compile passed', 'done')
     } catch (e) {
       report(onStep, stepCompile, 'Compile failed', 'error', String(e))
@@ -339,7 +343,8 @@ async function runStep(
   command: string,
   projectDir: string,
   noDocker: boolean,
-  timeout: number
+  timeout: number,
+  user?: string
 ): Promise<void> {
   if (noDocker) {
     // Run natively
@@ -358,6 +363,7 @@ async function runStep(
       command: `cd /home/runner/work && ${command}`,
       timeout,
       stream: true,
+      user,
     })
     if (result.exitCode !== 0) {
       throw new Error(`Command failed with exit code ${result.exitCode}`)

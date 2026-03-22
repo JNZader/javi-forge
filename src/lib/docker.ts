@@ -20,6 +20,8 @@ export interface DockerRunOptions {
   timeout?: number
   /** Stream output to stdout/stderr (default: true) */
   stream?: boolean
+  /** Override the user to run as inside the container (default: runner) */
+  user?: string
 }
 
 export interface DockerRunResult {
@@ -208,7 +210,7 @@ export async function ensureImage(options: DockerImageOptions): Promise<string> 
  * Streams output to process.stdout/stderr by default.
  */
 export async function runInContainer(options: DockerRunOptions): Promise<DockerRunResult> {
-  const { projectDir, command, timeout = 600, stream = true } = options
+  const { projectDir, command, timeout = 600, stream = true, user } = options
   const stack = await detectStackFromDir(projectDir)
   const imageName = getImageName(stack)
 
@@ -218,6 +220,7 @@ export async function runInContainer(options: DockerRunOptions): Promise<DockerR
     ...(isInteractive ? ['-it'] : []),
     '--stop-timeout', '30',
     '--entrypoint', '',
+    ...(user ? ['--user', user] : []),
     '-v', `${projectDir}:/home/runner/work`,
     '-e', 'CI=true',
     imageName,

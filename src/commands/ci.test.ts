@@ -71,7 +71,9 @@ describe('detectCIStack', () => {
     expect(info.stackType).toBe('go')
     expect(info.buildTool).toBe('go')
     expect(info.lintCmd).toContain('golangci-lint')
-    expect(info.compileCmd).toBe('go build ./...')
+    expect(info.compileCmd).toContain('go build ./...')
+    expect(info.compileCmd).toContain('go clean -cache')
+    expect(info.compileCmd).toContain('chown')
     expect(info.testCmd).toBe('go test ./...')
   })
 
@@ -81,7 +83,9 @@ describe('detectCIStack', () => {
     const info = await detectCIStack(tmpDir)
     expect(info.stackType).toBe('rust')
     expect(info.lintCmd).toContain('clippy')
-    expect(info.compileCmd).toBe('cargo build')
+    expect(info.compileCmd).toContain('cargo build')
+    expect(info.compileCmd).toContain('cargo clean')
+    expect(info.compileCmd).toContain('chown')
     expect(info.testCmd).toBe('cargo test')
   })
 

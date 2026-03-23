@@ -79,12 +79,14 @@ flowchart LR
 | Command | Description |
 |---------|-------------|
 | `init` | Bootstrap a new project (default) |
+| `ci init` | Install git hooks in `.git/hooks/` (recommended for existing repos) |
 | `analyze` | Run repoforge skills analysis on current project |
 | `doctor` | Show comprehensive health report |
 
 ```bash
 npx javi-forge init
 npx javi-forge init --stack node --ci github
+npx javi-forge ci init
 npx javi-forge analyze
 npx javi-forge doctor
 ```
@@ -98,6 +100,8 @@ npx javi-forge doctor
 | `--ci` | string | — | CI provider |
 | `--memory` | string | — | Memory module |
 | `--project-name` | string | — | Project name (skips name prompt) |
+| `--no-docker` | boolean | `false` | Disable Docker in CI hooks |
+| `--no-ci-ghagga` | boolean | `false` | Disable GHAGGA in CI hooks |
 | `--ghagga` | boolean | `false` | Enable GHAGGA review system |
 | `--batch` | boolean | `false` | Non-interactive mode |
 

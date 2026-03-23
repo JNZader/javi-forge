@@ -11,7 +11,7 @@ npx javi-forge init [options]
 ### Steps
 
 1. **git init** — Initialize a git repository (skips if `.git/` exists)
-2. **git hooks** — Copy `ci-local/` and configure `core.hooksPath`
+2. **git hooks** — Copy `ci-local/` and configure `core.hooksPath` (see `ci init` for a lighter alternative)
 3. **CI template** — Generate CI workflow for your stack and provider
 4. **.gitignore** — Copy from template (skip if exists)
 5. **dependabot.yml** — Generate for GitHub (skip for other providers)
@@ -41,6 +41,40 @@ npx javi-forge init --stack node --ci github
 npx javi-forge init --stack go --ci gitlab --memory engram --batch
 npx javi-forge init --dry-run --project-name app --stack node --ci github --batch
 ```
+
+---
+
+## ci init
+
+Install git hooks directly into `.git/hooks/` without copying files into the project. This is the **recommended approach for existing repositories**.
+
+```bash
+npx javi-forge ci init
+```
+
+### What it does
+
+Installs three hooks in `.git/hooks/`:
+
+| Hook | Description |
+|------|-------------|
+| `pre-commit` | Runs `javi-forge ci` with `--no-docker` by default, npx fallback |
+| `pre-push` | Runs `javi-forge ci`, npx fallback |
+| `commit-msg` | Runs `javi-forge ci` commit message validation, npx fallback |
+
+Each hook references `javi-forge ci` directly with an `npx` fallback if the binary is not found. No files are copied into the project tree.
+
+### When to use
+
+- **New projects**: `javi-forge init` handles everything (copies `ci-local/` and configures `core.hooksPath`)
+- **Existing repos**: Use `javi-forge ci init` — lighter, no `ci-local/` directory needed
+
+### Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--no-docker` | boolean | `true` (pre-commit) | Disable Docker in hook execution |
+| `--no-ci-ghagga` | boolean | `false` | Disable GHAGGA checks in hooks |
 
 ---
 

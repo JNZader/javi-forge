@@ -11,7 +11,7 @@ flowchart TB
         AIC["ai-config/<br/>Agents, skills, hooks"]
         WF["workflows/<br/>Reusable GH Actions"]
         SCH["schemas/<br/>JSON validation"]
-        CIL["ci-local/<br/>Git hooks"]
+        CIL["ci-local/<br/>Git hooks<br/>(or ci init → .git/hooks/)"]
     end
 
     SRC --> TPL
@@ -41,6 +41,7 @@ sequenceDiagram
         Forge->>Git: git init
         Forge->>FS: Copy ci-local/hooks
         Forge->>Git: git config core.hooksPath ci-local/hooks
+        Note over Forge,Git: Alternative: javi-forge ci init<br/>(installs hooks in .git/hooks/ directly)
     end
 
     rect rgb(249, 115, 22, 0.1)

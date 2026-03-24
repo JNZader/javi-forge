@@ -1,0 +1,6 @@
+name = "javi-forge"
+compatibility_date = "2026-03-23"
+
+[assets]
+directory = "./docs"
+not_found_handling = "404-page"

@@ -8,17 +8,21 @@
 
 set -e
 
-# Verify Docker is running
-if ! docker info &>/dev/null; then
-    echo "PRE-PUSH: Docker is not running."
-    echo "  Start Docker or use: git push --no-verify"
-    exit 1
+if docker info &>/dev/null; then
+    echo "PRE-PUSH: Running full CI simulation..."
+    javi-forge ci || {
+        echo ""
+        echo "CI FAILED — Push aborted. Fix the issues above before pushing."
+        echo "To skip: git push --no-verify"
+        exit 1
+    }
+else
+    echo "PRE-PUSH: ⚠ Docker not running — running quick checks only (lint + typecheck)"
+    echo "  Start Docker for full CI (security scan, Docker tests)"
+    javi-forge ci --quick --no-docker --no-security --no-ci-ghagga || {
+        echo ""
+        echo "Quick checks FAILED — Push aborted. Fix the issues above before pushing."
+        echo "To skip: git push --no-verify"
+        exit 1
+    }
 fi
-
-echo "PRE-PUSH: Running CI simulation..."
-javi-forge ci || {
-    echo ""
-    echo "CI FAILED — Push aborted. Fix the issues above before pushing."
-    echo "To skip: git push --no-verify"
-    exit 1
-}

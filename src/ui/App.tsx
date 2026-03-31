@@ -52,6 +52,7 @@ export default function App({
   const [memory, setMemory] = useState<MemoryOption>(presetMemory ?? 'engram')
   const [aiSync, setAiSync] = useState(true)
   const [sdd, setSdd] = useState(true)
+  const [contextDir, setContextDir] = useState(true)
   const [ghagga, setGhagga] = useState(presetGhagga)
   const [steps, setSteps] = useState<InitStep[]>([])
   const [startTime] = useState(Date.now())
@@ -77,9 +78,10 @@ export default function App({
     setStage('options')
   }
 
-  const handleOptionsConfirm = async (opts: { aiSync: boolean; sdd: boolean; ghagga: boolean }) => {
+  const handleOptionsConfirm = async (opts: { aiSync: boolean; sdd: boolean; contextDir: boolean; ghagga: boolean }) => {
     setAiSync(opts.aiSync)
     setSdd(opts.sdd)
+    setContextDir(opts.contextDir)
     setGhagga(opts.ghagga)
     setStage('running')
 
@@ -93,6 +95,7 @@ export default function App({
         aiSync: opts.aiSync,
         sdd: opts.sdd,
         ghagga: opts.ghagga,
+        contextDir: opts.contextDir,
         mock: presetMock,
         dryRun,
       },

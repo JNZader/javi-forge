@@ -29,6 +29,14 @@ vi.mock('../lib/template.js', () => ({
   getCIDestination: vi.fn().mockReturnValue('.github/workflows/ci.yml'),
 }))
 
+// ── Mock context module ──────────────────────────────────────────────────────
+vi.mock('../lib/context.js', () => ({
+  generateContextDir: vi.fn().mockResolvedValue({
+    index: '# test — File Index\n',
+    summary: '# test\n',
+  }),
+}))
+
 // ── Mock common module ───────────────────────────────────────────────────────
 vi.mock('../lib/common.js', () => ({
   backupIfExists: vi.fn().mockResolvedValue(false),
@@ -39,11 +47,13 @@ import fs from 'fs-extra'
 import { execFile } from 'child_process'
 import { initProject } from './init.js'
 import { generateCIWorkflow, getCIDestination } from '../lib/template.js'
+import { generateContextDir } from '../lib/context.js'
 
 const mockedFs = vi.mocked(fs)
 const mockedExecFile = vi.mocked(execFile)
 const mockedGenerateCIWorkflow = vi.mocked(generateCIWorkflow)
 const mockedGetCIDestination = vi.mocked(getCIDestination)
+const mockedGenerateContextDir = vi.mocked(generateContextDir)
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -64,6 +74,12 @@ beforeEach(() => {
   // Default: CI workflow available
   mockedGenerateCIWorkflow.mockResolvedValue('ci-workflow-content')
   mockedGetCIDestination.mockReturnValue('.github/workflows/ci.yml')
+
+  // Default: context dir generation
+  mockedGenerateContextDir.mockResolvedValue({
+    index: '# test — File Index\n',
+    summary: '# test\n',
+  })
 })
 
 function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
@@ -77,6 +93,7 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
     sdd: true,
     ghagga: true,
     mock: false,
+    contextDir: true,
     dryRun: false,
     ...overrides,
   }
@@ -295,5 +312,63 @@ describe('initProject', () => {
     const memStep = steps.find(s => s.id === 'memory' && s.status === 'error')
     expect(memStep).toBeDefined()
     expect(memStep!.detail).toContain('module not found')
+  })
+
+  // ── Context directory step ──────────────────────────────────────────────
+
+  it('context-dir step reports done on success', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('.context')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ contextDir: true }))
+    const ctxStep = steps.find(s => s.id === 'context-dir' && s.status === 'done')
+    expect(ctxStep).toBeDefined()
+    expect(ctxStep!.detail).toContain('INDEX.md')
+  })
+
+  it('context-dir step is skipped when contextDir is false', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    const steps = await collectSteps(makeOptions({ contextDir: false }))
+    const ctxStep = steps.find(s => s.id === 'context-dir' && s.status === 'skipped')
+    expect(ctxStep).toBeDefined()
+    expect(ctxStep!.detail).toContain('not selected')
+  })
+
+  it('context-dir step reports already exists when .context/ is present', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    const steps = await collectSteps(makeOptions({ contextDir: true }))
+    const ctxStep = steps.find(s => s.id === 'context-dir' && s.status === 'done' && s.detail === 'already exists')
+    expect(ctxStep).toBeDefined()
+  })
+
+  it('context-dir dry-run writes nothing', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('.context')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ contextDir: true, dryRun: true }))
+    const ctxStep = steps.find(s => s.id === 'context-dir' && s.status === 'done')
+    expect(ctxStep).toBeDefined()
+    expect(ctxStep!.detail).toContain('dry-run')
+  })
+
+  it('manifest includes context module when contextDir is true', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    await collectSteps(makeOptions({ contextDir: true }))
+    expect(mockedFs.writeJson).toHaveBeenCalled()
+    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    expect((manifestData as any).modules).toContain('context')
   })
 })

@@ -5,6 +5,7 @@ import { promisify } from 'util'
 import type { InitOptions, InitStep, ForgeManifest } from '../types/index.js'
 import { backupIfExists, ensureDirExists } from '../lib/common.js'
 import { generateDependabotYml, generateCIWorkflow, getCIDestination } from '../lib/template.js'
+import { generateContextDir } from '../lib/context.js'
 import {
   FORGE_ROOT,
   TEMPLATES_DIR,
@@ -28,7 +29,7 @@ export async function initProject(
   options: InitOptions,
   onStep: StepCallback
 ): Promise<void> {
-  const { projectDir, projectName, stack, ciProvider, memory, aiSync, sdd, ghagga, dryRun } = options
+  const { projectDir, projectName, stack, ciProvider, memory, aiSync, sdd, ghagga, contextDir, dryRun } = options
 
   // Ensure project directory exists before any steps
   if (!dryRun && projectDir) {
@@ -314,7 +315,32 @@ ENABLE_WEBHOOKS=false
     report(onStep, stepMock, 'Configure mock-first mode', 'skipped', 'not selected')
   }
 
-  // ── Step 11: Write manifest ───────────────────────────────────────────────
+  // ── Step 11: Generate .context/ directory ──────────────────────────────────
+  const stepContext = 'context-dir'
+  report(onStep, stepContext, 'Generate .context/ directory', 'running')
+  try {
+    if (contextDir) {
+      const contextDirPath = path.join(projectDir, '.context')
+      if (await fs.pathExists(contextDirPath)) {
+        report(onStep, stepContext, 'Generate .context/ directory', 'done', 'already exists')
+      } else {
+        if (!dryRun) {
+          const { index, summary } = await generateContextDir(options)
+          await ensureDirExists(contextDirPath)
+          await fs.writeFile(path.join(contextDirPath, 'INDEX.md'), index, 'utf-8')
+          await fs.writeFile(path.join(contextDirPath, 'summary.md'), summary, 'utf-8')
+        }
+        report(onStep, stepContext, 'Generate .context/ directory', 'done',
+          dryRun ? 'dry-run: would generate .context/' : '.context/INDEX.md + summary.md')
+      }
+    } else {
+      report(onStep, stepContext, 'Generate .context/ directory', 'skipped', 'not selected')
+    }
+  } catch (e) {
+    report(onStep, stepContext, 'Generate .context/ directory', 'error', String(e))
+  }
+
+  // ── Step 12: Write manifest ───────────────────────────────────────────────
   const stepManifest = 'manifest'
   report(onStep, stepManifest, 'Write forge manifest', 'running')
   try {
@@ -334,6 +360,7 @@ ENABLE_WEBHOOKS=false
           ...(ghagga ? ['ghagga'] : []),
           ...(sdd ? ['sdd'] : []),
           ...(aiSync ? ['ai-config'] : []),
+          ...(contextDir ? ['context'] : []),
         ],
       }
       await fs.writeJson(path.join(manifestDir, 'manifest.json'), manifest, { spaces: 2 })

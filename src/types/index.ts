@@ -11,7 +11,14 @@ export interface InitOptions {
   sdd: boolean
   ghagga: boolean
   mock: boolean
+  contextDir: boolean
   dryRun: boolean
+}
+
+export interface StackContextEntry {
+  tree: string
+  conventions: string
+  entryPoint: string
 }
 
 export interface InitStep {

@@ -46,6 +46,8 @@ const cli = meow(`
     skills budget     Show token cost of loaded skills (add -b N for custom budget)
     skills score      Score a skill on quality dimensions (completeness, clarity, testability, token-efficiency)
     skills benchmark  Benchmark a skill with structural quality checks
+    skills auto-install  Auto-detect project stack and install matching AI skills
+    skill publish     Package a skill directory for marketplace distribution (generates plugin.json)
     security baseline Create security baseline from current audit findings
     security check    Check for regressions against baseline (exits non-zero if found)
     security update   Re-snapshot baseline (acknowledge current vulns)
@@ -63,6 +65,8 @@ const cli = meow(`
     --deep          Enable deep analysis (conflict + duplicate detection)
     --budget, -b    Token budget limit for skills (default: 8000)
     --skills-dir    Custom skills directory path
+    --author        Author name for skill publish
+    --repo          Repository URL for skill publish
     --version       Show version
     --help          Show this help
 
@@ -119,6 +123,9 @@ const cli = meow(`
     deep:        { type: 'boolean', default: false },
     budget:      { type: 'number',  shortFlag: 'b', default: 8000 },
     skillsDir:   { type: 'string',  default: '' },
+    // Skill publish flags
+    author:      { type: 'string',  default: '' },
+    repo:        { type: 'string',  default: '' },
   }
 })
 
@@ -242,14 +249,30 @@ switch (subcommand) {
 
   case 'skills': {
     const skillsAction = cli.input[1] as string | undefined
-    const VALID_SKILLS_ACTIONS = ['doctor', 'budget', 'score', 'benchmark']
+    const VALID_SKILLS_ACTIONS = ['doctor', 'budget', 'score', 'benchmark', 'auto-install']
     if (!skillsAction || !VALID_SKILLS_ACTIONS.includes(skillsAction)) {
-      console.error('Usage: javi-forge skills <doctor|budget|score|benchmark>')
-      console.error('  doctor     Show skills health report (add --deep for conflict detection)')
-      console.error('  budget     Show token cost of loaded skills (add -b N for custom budget)')
-      console.error('  score      Score a skill on quality dimensions (0-100)')
-      console.error('  benchmark  Benchmark a skill with structural quality checks')
+      console.error('Usage: javi-forge skills <doctor|budget|score|benchmark|auto-install>')
+      console.error('  doctor        Show skills health report (add --deep for conflict detection)')
+      console.error('  budget        Show token cost of loaded skills (add -b N for custom budget)')
+      console.error('  score         Score a skill on quality dimensions (0-100)')
+      console.error('  benchmark     Benchmark a skill with structural quality checks')
+      console.error('  auto-install  Auto-detect project stack and install matching AI skills')
       process.exit(1)
+      break
+    }
+
+    // Auto-install is a non-interactive CLI command
+    if (skillsAction === 'auto-install') {
+      const { autoInstallSkills, formatAutoInstallSummary } = await import('./lib/auto-skill-install.js')
+      const result = await autoInstallSkills({
+        projectDir: process.cwd(),
+        skillsSourceDir: cli.flags.skillsDir || undefined,
+        skillsTargetDir: cli.flags.skillsDir || undefined,
+        dryRun: cli.flags.dryRun,
+      })
+      console.log(formatAutoInstallSummary(result))
+      const hasIssues = result.notFound.length > 0
+      process.exit(hasIssues ? 1 : 0)
       break
     }
 
@@ -315,6 +338,41 @@ switch (subcommand) {
       </CIContextProvider>,
       { stdin: inkStdin }
     )
+    break
+  }
+
+  case 'skill': {
+    const skillAction = cli.input[1] as string | undefined
+
+    if (skillAction !== 'publish') {
+      console.error('Usage: javi-forge skill <publish>')
+      console.error('  publish  Package a skill directory for marketplace distribution')
+      process.exit(1)
+      break
+    }
+
+    const targetDir = cli.input[2] ?? process.cwd()
+    const { publishSkill } = await import('./lib/skill-publish.js')
+    const result = await publishSkill({
+      skillDir: path.resolve(targetDir),
+      author: cli.flags.author || undefined,
+      repository: cli.flags.repo || undefined,
+      dryRun: cli.flags.dryRun,
+    })
+
+    if (result.success) {
+      console.log(`\u2713 Published: ${result.manifest?.name}@${result.manifest?.version}`)
+      console.log(`  plugin.json: ${result.pluginJsonPath}`)
+      if (result.manifest?.tags?.length) {
+        console.log(`  tags: ${result.manifest.tags.join(', ')}`)
+      }
+      if (cli.flags.dryRun) {
+        console.log('  (dry-run: no files written)')
+      }
+    } else {
+      console.error(`\u2717 ${result.error}`)
+      process.exit(1)
+    }
     break
   }
 

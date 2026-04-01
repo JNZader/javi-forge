@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react'
 import { Box, Text } from 'ink'
 import Spinner from 'ink-spinner'
 import type { InitStep } from '../types/index.js'
-import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate } from '../commands/plugin.js'
+import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync } from '../commands/plugin.js'
 import { theme } from './theme.js'
 
 interface PluginProps {
-  action: 'add' | 'remove' | 'list' | 'search' | 'validate'
+  action: 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync'
   target?: string
   dryRun: boolean
 }
@@ -63,6 +63,9 @@ export default function Plugin({ action, target, dryRun }: PluginProps) {
           case 'validate':
             if (!target) { onStep({ id: 'err', label: 'Error', status: 'error', detail: 'path required: javi-forge plugin validate <dir>' }); break }
             await runPluginValidate(target, onStep)
+            break
+          case 'sync':
+            await runPluginSync(process.cwd(), dryRun, onStep)
             break
         }
       } catch (e: unknown) {

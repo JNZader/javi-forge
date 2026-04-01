@@ -34,6 +34,7 @@ const cli = meow(`
     plugin list       List installed plugins
     plugin search     Search the plugin registry
     plugin validate   Validate a local plugin directory
+    plugin sync       Auto-detect and wire installed plugins
     llms-txt          Generate AI-friendly llms.txt for current project
 
   Options
@@ -181,8 +182,8 @@ switch (subcommand) {
   }
 
   case 'plugin': {
-    const pluginAction = cli.input[1] as 'add' | 'remove' | 'list' | 'search' | 'validate' | undefined
-    const VALID_PLUGIN_ACTIONS = ['add', 'remove', 'list', 'search', 'validate']
+    const pluginAction = cli.input[1] as 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync' | undefined
+    const VALID_PLUGIN_ACTIONS = ['add', 'remove', 'list', 'search', 'validate', 'sync']
     const action = pluginAction && VALID_PLUGIN_ACTIONS.includes(pluginAction) ? pluginAction : 'list'
     const target = cli.input[2]
 

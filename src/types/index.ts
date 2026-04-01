@@ -138,6 +138,20 @@ export interface AgentSkillsManifest {
   metadata?: { forge_source?: string }
 }
 
+// ── Codex TOML Export ─────────────────────────────────────────────────────
+
+export interface CodexTomlEntry {
+  name: string
+  model: string
+  instructions: string
+}
+
+export interface CodexExportResult {
+  success: boolean
+  files?: string[]
+  error?: string
+}
+
 // ── Security Baseline ──────────────────────────────────────────────────────
 
 export type SecuritySeverity = 'critical' | 'high' | 'moderate' | 'low' | 'info'

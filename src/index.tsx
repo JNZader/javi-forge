@@ -14,6 +14,7 @@ import CI from './ui/CI.js'
 import { CIProvider as CIContextProvider } from './ui/CIContext.js'
 import type { Stack, CIProvider, MemoryOption } from './types/index.js'
 import type { CIMode } from './commands/ci.js'
+import type { SecurityMode } from './commands/security.js'
 
 // Check for updates in background (non-blocking, cached 24h)
 const _require = createRequire(import.meta.url)
@@ -35,6 +36,9 @@ const cli = meow(`
     plugin search     Search the plugin registry
     plugin validate   Validate a local plugin directory
     plugin sync       Auto-detect and wire installed plugins
+    security baseline Create security baseline from current audit findings
+    security check    Check for regressions against baseline (exits non-zero if found)
+    security update   Re-snapshot baseline (acknowledge current vulns)
     llms-txt          Generate AI-friendly llms.txt for current project
 
   Options
@@ -193,6 +197,39 @@ switch (subcommand) {
       </CIContextProvider>,
       { stdin: inkStdin }
     )
+    break
+  }
+
+  case 'security': {
+    const securityAction = cli.input[1] as string | undefined
+    const VALID_SECURITY_ACTIONS = ['baseline', 'check', 'update']
+    if (!securityAction || !VALID_SECURITY_ACTIONS.includes(securityAction)) {
+      console.error('Usage: javi-forge security <baseline|check|update>')
+      console.error('  baseline  Create security baseline from current audit findings')
+      console.error('  check     Check for regressions against baseline')
+      console.error('  update    Re-snapshot baseline (acknowledge current vulns)')
+      process.exit(1)
+      break
+    }
+
+    const { runSecurity } = await import('./commands/security.js')
+    const mode = securityAction as SecurityMode
+    try {
+      const result = await runSecurity(mode, process.cwd(), (step) => {
+        const icon = step.status === 'done' ? '\u2713'
+          : step.status === 'error' ? '\u2717'
+          : step.status === 'skipped' ? '-'
+          : '\u25CB'
+        console.log(`${icon} ${step.label}`)
+        if (step.detail) console.log(`  ${step.detail}`)
+      })
+
+      if (mode === 'check' && result && result.regressions.length > 0) {
+        process.exit(1)
+      }
+    } catch {
+      process.exit(1)
+    }
     break
   }
 

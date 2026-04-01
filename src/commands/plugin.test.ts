@@ -16,9 +16,14 @@ vi.mock('../lib/agent-skills.js', () => ({
   importAgentSkillsPackage: vi.fn(),
 }))
 
+vi.mock('../lib/codex-export.js', () => ({
+  exportPluginAsCodexToml: vi.fn(),
+}))
+
 import { installPlugin, removePlugin, listInstalledPlugins, validatePlugin, searchRegistry, syncPlugins } from '../lib/plugin.js'
 import { exportPluginAsAgentSkills, importAgentSkillsPackage } from '../lib/agent-skills.js'
-import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync, runPluginExport, runPluginImport } from './plugin.js'
+import { exportPluginAsCodexToml } from '../lib/codex-export.js'
+import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync, runPluginExport, runPluginImport, runPluginExportCodex } from './plugin.js'
 
 const mockInstall = vi.mocked(installPlugin)
 const mockRemove = vi.mocked(removePlugin)
@@ -28,6 +33,7 @@ const mockSearch = vi.mocked(searchRegistry)
 const mockSync = vi.mocked(syncPlugins)
 const mockExport = vi.mocked(exportPluginAsAgentSkills)
 const mockImport = vi.mocked(importAgentSkillsPackage)
+const mockExportCodex = vi.mocked(exportPluginAsCodexToml)
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -311,5 +317,41 @@ describe('runPluginImport', () => {
 
     expect(steps[1]!.status).toBe('error')
     expect(steps[1]!.detail).toContain('skills.json not found')
+  })
+})
+
+// ── runPluginExportCodex ──────────────────────────────────────────────────
+
+describe('runPluginExportCodex', () => {
+  it('reports success with file count', async () => {
+    mockExportCodex.mockResolvedValue({ success: true, files: ['/plugins/my-plugin/codex/react-pro.toml'] })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginExportCodex('my-plugin', onStep)
+
+    expect(steps).toHaveLength(2)
+    expect(steps[0]!.status).toBe('running')
+    expect(steps[1]!.status).toBe('done')
+    expect(steps[1]!.detail).toContain('1 TOML file(s)')
+  })
+
+  it('reports error when plugin not installed', async () => {
+    mockExportCodex.mockResolvedValue({ success: false, error: 'plugin "ghost" is not installed' })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginExportCodex('ghost', onStep)
+
+    expect(steps[1]!.status).toBe('error')
+    expect(steps[1]!.detail).toContain('not installed')
+  })
+
+  it('reports error when no valid skills found', async () => {
+    mockExportCodex.mockResolvedValue({ success: false, error: 'no skills with valid frontmatter found' })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginExportCodex('bad-plugin', onStep)
+
+    expect(steps[1]!.status).toBe('error')
+    expect(steps[1]!.detail).toContain('no skills with valid frontmatter found')
   })
 })

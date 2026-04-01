@@ -9,6 +9,7 @@ import App from './ui/App.js'
 import Doctor from './ui/Doctor.js'
 import AnalyzeUI from './ui/AnalyzeUI.js'
 import Plugin from './ui/Plugin.js'
+import Skills from './ui/Skills.js'
 import LlmsTxt from './ui/LlmsTxt.js'
 import CI from './ui/CI.js'
 import { CIProvider as CIContextProvider } from './ui/CIContext.js'
@@ -39,6 +40,8 @@ const cli = meow(`
     plugin sync       Auto-detect and wire installed plugins
     plugin export     Export plugin to Agent Skills spec format (skills.json)
     plugin import     Import an Agent Skills spec package as a javi-forge plugin
+    skills doctor     Show skills health report (add --deep for conflict detection)
+    skills budget     Show token cost of loaded skills (add -b N for custom budget)
     security baseline Create security baseline from current audit findings
     security check    Check for regressions against baseline (exits non-zero if found)
     security update   Re-snapshot baseline (acknowledge current vulns)
@@ -53,6 +56,9 @@ const cli = meow(`
     --ghagga        Enable GHAGGA review system
     --mock          Enable mock-first mode (no real API keys needed)
     --batch         Non-interactive mode (auto-proceed, no keyboard input)
+    --deep          Enable deep analysis (conflict + duplicate detection)
+    --budget, -b    Token budget limit for skills (default: 8000)
+    --skills-dir    Custom skills directory path
     --version       Show version
     --help          Show this help
 
@@ -103,6 +109,10 @@ const cli = meow(`
     ciGhagga:    { type: 'boolean', default: true },
     security:    { type: 'boolean', default: true },
     timeout:     { type: 'number',  default: 600 },
+    // Skills flags
+    deep:        { type: 'boolean', default: false },
+    budget:      { type: 'number',  shortFlag: 'b', default: 8000 },
+    skillsDir:   { type: 'string',  default: '' },
   }
 })
 
@@ -218,6 +228,32 @@ switch (subcommand) {
     render(
       <CIContextProvider isCI={isCI}>
         <Plugin action={action} target={target} dryRun={cli.flags.dryRun} />
+      </CIContextProvider>,
+      { stdin: inkStdin }
+    )
+    break
+  }
+
+  case 'skills': {
+    const skillsAction = cli.input[1] as string | undefined
+    const VALID_SKILLS_ACTIONS = ['doctor', 'budget']
+    if (!skillsAction || !VALID_SKILLS_ACTIONS.includes(skillsAction)) {
+      console.error('Usage: javi-forge skills <doctor|budget>')
+      console.error('  doctor     Show skills health report (add --deep for conflict detection)')
+      console.error('  budget     Show token cost of loaded skills (add -b N for custom budget)')
+      process.exit(1)
+      break
+    }
+
+    const skillsMode = skillsAction as 'doctor' | 'budget'
+    render(
+      <CIContextProvider isCI={isCI}>
+        <Skills
+          mode={skillsMode}
+          budget={cli.flags.budget}
+          deep={cli.flags.deep}
+          skillsDir={cli.flags.skillsDir || undefined}
+        />
       </CIContextProvider>,
       { stdin: inkStdin }
     )

@@ -8,6 +8,7 @@ import {
   syncPlugins,
 } from '../lib/plugin.js'
 import { exportPluginAsAgentSkills, importAgentSkillsPackage } from '../lib/agent-skills.js'
+import { exportPluginAsCodexToml } from '../lib/codex-export.js'
 
 type StepCallback = (step: InitStep) => void
 
@@ -164,6 +165,26 @@ export async function runPluginExport(
       `exported to ${result.path}`)
   } else {
     report(onStep, stepId, `Export plugin: ${name}`, 'error', result.error)
+  }
+}
+
+/**
+ * Export an installed plugin to Codex-compatible TOML subagent files.
+ */
+export async function runPluginExportCodex(
+  name: string,
+  onStep: StepCallback
+): Promise<void> {
+  const stepId = 'plugin-export-codex'
+  report(onStep, stepId, `Export plugin as Codex TOML: ${name}`, 'running')
+
+  const result = await exportPluginAsCodexToml(name)
+
+  if (result.success) {
+    report(onStep, stepId, `Export plugin as Codex TOML: ${name}`, 'done',
+      `exported ${result.files!.length} TOML file(s)`)
+  } else {
+    report(onStep, stepId, `Export plugin as Codex TOML: ${name}`, 'error', result.error)
   }
 }
 

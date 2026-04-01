@@ -115,3 +115,9 @@ export interface InstalledPlugin {
   source: string
   manifest: PluginManifest
 }
+
+export interface PluginSyncResult {
+  added: string[]
+  removed: string[]
+  unchanged: string[]
+}

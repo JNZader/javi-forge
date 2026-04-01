@@ -8,16 +8,18 @@ vi.mock('../lib/plugin.js', () => ({
   listInstalledPlugins: vi.fn(),
   validatePlugin: vi.fn(),
   searchRegistry: vi.fn(),
+  syncPlugins: vi.fn(),
 }))
 
-import { installPlugin, removePlugin, listInstalledPlugins, validatePlugin, searchRegistry } from '../lib/plugin.js'
-import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate } from './plugin.js'
+import { installPlugin, removePlugin, listInstalledPlugins, validatePlugin, searchRegistry, syncPlugins } from '../lib/plugin.js'
+import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync } from './plugin.js'
 
 const mockInstall = vi.mocked(installPlugin)
 const mockRemove = vi.mocked(removePlugin)
 const mockList = vi.mocked(listInstalledPlugins)
 const mockValidate = vi.mocked(validatePlugin)
 const mockSearch = vi.mocked(searchRegistry)
+const mockSync = vi.mocked(syncPlugins)
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -185,5 +187,60 @@ describe('runPluginValidate', () => {
     expect(steps[1]!.status).toBe('error')
     expect(steps[1]!.detail).toContain('1 errors')
     expect(steps[1]!.detail).toContain('name is required')
+  })
+})
+
+// ── runPluginSync ───────────────────────────────────────────────────────
+
+describe('runPluginSync', () => {
+  it('reports added and unchanged plugins', async () => {
+    mockSync.mockResolvedValue({ added: ['alpha'], removed: [], unchanged: ['beta'] })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginSync('/fake/project', false, onStep)
+
+    expect(steps).toHaveLength(2)
+    expect(steps[0]!.status).toBe('running')
+    expect(steps[1]!.status).toBe('done')
+    expect(steps[1]!.detail).toContain('added: alpha')
+    expect(steps[1]!.detail).toContain('unchanged: beta')
+  })
+
+  it('reports removed plugins', async () => {
+    mockSync.mockResolvedValue({ added: [], removed: ['old'], unchanged: [] })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginSync('/fake/project', false, onStep)
+
+    expect(steps[1]!.detail).toContain('removed: old')
+  })
+
+  it('reports no plugins when none detected', async () => {
+    mockSync.mockResolvedValue({ added: [], removed: [], unchanged: [] })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginSync('/fake/project', false, onStep)
+
+    expect(steps[1]!.detail).toContain('no plugins detected')
+  })
+
+  it('prefixes dry-run in detail', async () => {
+    mockSync.mockResolvedValue({ added: ['alpha'], removed: [], unchanged: [] })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginSync('/fake/project', true, onStep)
+
+    expect(steps[1]!.detail).toContain('dry-run:')
+    expect(steps[1]!.detail).toContain('added: alpha')
+  })
+
+  it('reports error when sync throws', async () => {
+    mockSync.mockRejectedValue(new Error('fs exploded'))
+    const { steps, onStep } = collectSteps()
+
+    await runPluginSync('/fake/project', false, onStep)
+
+    expect(steps[1]!.status).toBe('error')
+    expect(steps[1]!.detail).toContain('fs exploded')
   })
 })

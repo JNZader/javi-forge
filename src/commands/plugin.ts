@@ -5,6 +5,7 @@ import {
   listInstalledPlugins,
   validatePlugin,
   searchRegistry,
+  syncPlugins,
 } from '../lib/plugin.js'
 
 type StepCallback = (step: InitStep) => void
@@ -114,5 +115,33 @@ export async function runPluginValidate(
   } else {
     const msgs = result.errors.map(e => `  ${e.path}: ${e.message}`).join('\n')
     report(onStep, stepId, `Validate plugin: ${pluginDir}`, 'error', `${result.errors.length} errors:\n${msgs}`)
+  }
+}
+
+/**
+ * Sync detected plugins into the project manifest.
+ */
+export async function runPluginSync(
+  projectDir: string,
+  dryRun: boolean,
+  onStep: StepCallback
+): Promise<void> {
+  const stepId = 'plugin-sync'
+  report(onStep, stepId, 'Sync plugins', 'running')
+
+  try {
+    const result = await syncPlugins(projectDir, { dryRun })
+
+    const parts: string[] = []
+    if (result.added.length > 0)     parts.push(`added: ${result.added.join(', ')}`)
+    if (result.removed.length > 0)   parts.push(`removed: ${result.removed.join(', ')}`)
+    if (result.unchanged.length > 0) parts.push(`unchanged: ${result.unchanged.join(', ')}`)
+    if (parts.length === 0)          parts.push('no plugins detected')
+
+    const prefix = dryRun ? 'dry-run: ' : ''
+    report(onStep, stepId, 'Sync plugins', 'done', `${prefix}${parts.join(' | ')}`)
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    report(onStep, stepId, 'Sync plugins', 'error', msg)
   }
 }

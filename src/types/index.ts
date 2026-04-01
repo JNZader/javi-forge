@@ -122,6 +122,22 @@ export interface PluginSyncResult {
   unchanged: string[]
 }
 
+// ── Agent Skills Spec ──────────────────────────────────────────────────────
+
+export interface AgentSkillEntry {
+  name: string
+  description: string
+  path: string
+}
+
+export interface AgentSkillsManifest {
+  name: string
+  version: string
+  description: string
+  skills: AgentSkillEntry[]
+  metadata?: { forge_source?: string }
+}
+
 // ── Security Baseline ──────────────────────────────────────────────────────
 
 export type SecuritySeverity = 'critical' | 'high' | 'moderate' | 'low' | 'info'

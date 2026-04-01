@@ -34,6 +34,9 @@ export const PLUGIN_MANIFEST_FILE = 'plugin.json'
 /** Valid plugin asset directories */
 export const PLUGIN_ASSET_DIRS = ['skills', 'commands', 'hooks', 'agents'] as const
 
+/** Agent Skills spec manifest filename */
+export const AGENT_SKILLS_MANIFEST_FILE = 'skills.json'
+
 /** Stack-to-dependabot fragment mapping */
 export const STACK_DEPENDABOT_MAP: Record<string, string[]> = {
   'node':        ['npm'],

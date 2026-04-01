@@ -30,6 +30,12 @@ import {
   findDuplicates,
   runSkillsDoctor,
   parseSkillFile,
+  scoreCompleteness,
+  scoreClarity,
+  scoreTestability,
+  scoreTokenEfficiency,
+  scoreSkill,
+  benchmarkSkill,
 } from './skills.js'
 
 const mockedFs = vi.mocked(fs)
@@ -493,5 +499,275 @@ describe('runSkillsDoctor', () => {
 
     expect(result.conflicts).toHaveLength(0)
     expect(result.duplicates).toHaveLength(0)
+  })
+})
+
+// ── scoreCompleteness ──────────────────────────────────────────────────────
+
+describe('scoreCompleteness', () => {
+  it('scores a well-formed skill highly', () => {
+    const parsed = {
+      name: 'react-19',
+      rules: [
+        'Always use functional components',
+        'Never use class-based components',
+        'Prefer named exports over default exports',
+        'Use TypeScript strict mode always',
+        'Write tests before shipping code',
+        'Follow atomic design for component structure',
+      ],
+      rawContent: 'a'.repeat(1200),
+      triggers: ['writing react components', 'hooks', 'JSX'],
+    }
+    const score = scoreCompleteness(parsed)
+    expect(score).toBeGreaterThanOrEqual(70)
+  })
+
+  it('scores a minimal skill low', () => {
+    const parsed = {
+      name: 'x',
+      rules: [],
+      rawContent: 'short',
+      triggers: [],
+    }
+    const score = scoreCompleteness(parsed)
+    expect(score).toBeLessThan(30)
+  })
+
+  it('gives partial credit for some fields', () => {
+    const parsed = {
+      name: 'my-skill',
+      rules: ['Always use semicolons'],
+      rawContent: 'a'.repeat(300),
+      triggers: [],
+    }
+    const score = scoreCompleteness(parsed)
+    expect(score).toBeGreaterThanOrEqual(30)
+    expect(score).toBeLessThan(80)
+  })
+})
+
+// ── scoreClarity ───────────────────────────────────────────────────────────
+
+describe('scoreClarity', () => {
+  it('scores actionable rules high', () => {
+    const parsed = {
+      name: 'typescript',
+      rules: [
+        'Always use strict mode',
+        'Never use any type',
+        'Prefer interfaces over type aliases',
+        'Must write return types explicitly',
+      ],
+      rawContent: '## Rules\n\n1. Always use strict mode\n2. Never use any type\n',
+      triggers: ['typescript', 'types', 'interfaces'],
+    }
+    const score = scoreClarity(parsed)
+    expect(score).toBeGreaterThanOrEqual(60)
+  })
+
+  it('penalizes vague rules', () => {
+    const parsed = {
+      name: 'vague-skill',
+      rules: [
+        'Do various things with stuff',
+        'Handle some things probably',
+        'Maybe use this etc',
+      ],
+      rawContent: '## Rules\nDo various things\n',
+      triggers: ['test'],
+    }
+    const score = scoreClarity(parsed)
+    expect(score).toBeLessThan(60)
+  })
+
+  it('returns 0 minimum, never negative', () => {
+    const parsed = {
+      name: '',
+      rules: ['stuff things etc various some maybe probably misc'],
+      rawContent: '',
+      triggers: [],
+    }
+    const score = scoreClarity(parsed)
+    expect(score).toBeGreaterThanOrEqual(0)
+  })
+})
+
+// ── scoreTestability ───────────────────────────────────────────────────────
+
+describe('scoreTestability', () => {
+  it('scores skills with Given/When/Then highly', () => {
+    const parsed = {
+      name: 'testable-skill',
+      rules: ['Use `vitest` for testing files', 'Write tests in `*.test.ts` path'],
+      rawContent: [
+        '## Testing',
+        '```typescript',
+        'test("example", () => {})',
+        '```',
+        '#### Scenario: Happy path',
+        'GIVEN a user is logged in',
+        'WHEN they click submit',
+        'THEN the form saves',
+        '#### Scenario: Error',
+        'GIVEN invalid input',
+        'WHEN they submit',
+        'THEN an error shows',
+        '#### Scenario: Edge',
+        'GIVEN empty form',
+        'WHEN submitted',
+        'THEN validation fires',
+      ].join('\n'),
+      triggers: ['testing'],
+    }
+    const score = scoreTestability(parsed)
+    expect(score).toBeGreaterThanOrEqual(60)
+  })
+
+  it('scores skills without scenarios low', () => {
+    const parsed = {
+      name: 'no-tests',
+      rules: ['Do something'],
+      rawContent: 'Just a basic skill with no testing guidance',
+      triggers: [],
+    }
+    const score = scoreTestability(parsed)
+    expect(score).toBeLessThan(30)
+  })
+})
+
+// ── scoreTokenEfficiency ───────────────────────────────────────────────────
+
+describe('scoreTokenEfficiency', () => {
+  it('scores efficient skills high', () => {
+    // 5 rules in ~1000 tokens = 5 rules/kToken → ideal range
+    const parsed = {
+      name: 'efficient',
+      rules: ['Rule 1 always', 'Rule 2 never', 'Rule 3 use this', 'Rule 4 avoid that', 'Rule 5 prefer X'],
+      rawContent: 'a'.repeat(4000), // 1000 tokens
+      triggers: [],
+    }
+    const score = scoreTokenEfficiency(parsed)
+    expect(score).toBeGreaterThanOrEqual(80)
+  })
+
+  it('scores bloated skills low', () => {
+    // 1 rule in 6000 tokens = very bloated
+    const parsed = {
+      name: 'bloated',
+      rules: ['Only one rule here'],
+      rawContent: 'a'.repeat(24000), // 6000 tokens
+      triggers: [],
+    }
+    const score = scoreTokenEfficiency(parsed)
+    expect(score).toBeLessThan(50)
+  })
+
+  it('returns 0 for empty content', () => {
+    const parsed = {
+      name: 'empty',
+      rules: [],
+      rawContent: '',
+      triggers: [],
+    }
+    const score = scoreTokenEfficiency(parsed)
+    expect(score).toBe(0)
+  })
+})
+
+// ── scoreSkill ─────────────────────────────────────────────────────────────
+
+describe('scoreSkill', () => {
+  it('returns null for nonexistent skill', async () => {
+    mockedFs.pathExists.mockResolvedValue(false as never)
+    const result = await scoreSkill('/nonexistent/SKILL.md')
+    expect(result).toBeNull()
+  })
+
+  it('returns a complete score object for a valid skill', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    mockedFs.readFile.mockResolvedValue(
+      '---\nname: test-skill\ndescription: "A skill. Trigger: When testing, debugging"\n---\n\n## Critical Rules\n\n1. Always write tests first\n2. Use strict TypeScript mode\n3. Never skip error handling\n\n## Examples\n\n```ts\ntest("works", () => {})\n```\n' as never
+    )
+    mockedParseFrontmatter.mockReturnValue({
+      data: { name: 'test-skill', description: 'A skill. Trigger: When testing, debugging' },
+      content: '\n## Critical Rules\n\n1. Always write tests first\n2. Use strict TypeScript mode\n3. Never skip error handling\n\n## Examples\n\n```ts\ntest("works", () => {})\n```\n',
+    })
+
+    const result = await scoreSkill('/skills/test/SKILL.md', 50)
+    expect(result).not.toBeNull()
+    expect(result!.skillName).toBe('test-skill')
+    expect(result!.completeness).toBeGreaterThanOrEqual(0)
+    expect(result!.completeness).toBeLessThanOrEqual(100)
+    expect(result!.clarity).toBeGreaterThanOrEqual(0)
+    expect(result!.clarity).toBeLessThanOrEqual(100)
+    expect(result!.testability).toBeGreaterThanOrEqual(0)
+    expect(result!.testability).toBeLessThanOrEqual(100)
+    expect(result!.tokenEfficiency).toBeGreaterThanOrEqual(0)
+    expect(result!.tokenEfficiency).toBeLessThanOrEqual(100)
+    expect(result!.overall).toBeGreaterThanOrEqual(0)
+    expect(result!.overall).toBeLessThanOrEqual(100)
+    expect(result!.threshold).toBe(50)
+    expect(typeof result!.passing).toBe('boolean')
+  })
+
+  it('marks skill as failing when below threshold', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    mockedFs.readFile.mockResolvedValue('minimal content' as never)
+    mockedParseFrontmatter.mockReturnValue(null)
+
+    const result = await scoreSkill('/skills/bad/SKILL.md', 90)
+    expect(result).not.toBeNull()
+    expect(result!.passing).toBe(false)
+    expect(result!.overall).toBeLessThan(90)
+  })
+})
+
+// ── benchmarkSkill ─────────────────────────────────────────────────────────
+
+describe('benchmarkSkill', () => {
+  it('returns null for nonexistent skill', async () => {
+    mockedFs.pathExists.mockResolvedValue(false as never)
+    const result = await benchmarkSkill('/nonexistent/SKILL.md')
+    expect(result).toBeNull()
+  })
+
+  it('runs all benchmark checks on a valid skill', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    mockedFs.readFile.mockResolvedValue(
+      '---\nname: good-skill\ndescription: "Quality skill. Trigger: When coding, testing"\n---\n\n## Purpose\n\nA good skill.\n\n## Critical Rules\n\n1. Always use strict mode for TypeScript\n2. Never skip error handling in production\n3. Prefer composition over inheritance patterns\n\n## Examples\n\n```ts\nconst x = 1\n```\n' as never
+    )
+    mockedParseFrontmatter.mockReturnValue({
+      data: { name: 'good-skill', description: 'Quality skill. Trigger: When coding, testing' },
+      content: '\n## Purpose\n\nA good skill.\n\n## Critical Rules\n\n1. Always use strict mode for TypeScript\n2. Never skip error handling in production\n3. Prefer composition over inheritance patterns\n\n## Examples\n\n```ts\nconst x = 1\n```\n',
+    })
+
+    const result = await benchmarkSkill('/skills/good/SKILL.md')
+    expect(result).not.toBeNull()
+    expect(result!.skillName).toBe('good-skill')
+    expect(result!.checks.length).toBe(8)
+    expect(result!.passRate).toBeGreaterThanOrEqual(0)
+    expect(result!.passRate).toBeLessThanOrEqual(100)
+
+    // Verify specific checks exist
+    const checkNames = result!.checks.map(c => c.name)
+    expect(checkNames).toContain('has-frontmatter-name')
+    expect(checkNames).toContain('has-triggers')
+    expect(checkNames).toContain('has-critical-rules')
+    expect(checkNames).toContain('rules-actionable')
+    expect(checkNames).toContain('has-code-examples')
+    expect(checkNames).toContain('has-sections')
+    expect(checkNames).toContain('token-budget-ok')
+    expect(checkNames).toContain('no-vague-rules')
+  })
+
+  it('fails checks for a poor skill', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    mockedFs.readFile.mockResolvedValue('Just some text with no structure' as never)
+    mockedParseFrontmatter.mockReturnValue(null)
+
+    const result = await benchmarkSkill('/skills/bad/SKILL.md')
+    expect(result).not.toBeNull()
+    expect(result!.passRate).toBeLessThan(50)
   })
 })

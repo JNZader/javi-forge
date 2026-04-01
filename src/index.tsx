@@ -28,6 +28,7 @@ const cli = meow(`
   Commands
     init              Bootstrap a new project (default)
     ci                Run CI simulation (lint + compile + test + security + ghagga)
+    tdd init          Install TDD-enforcing pre-commit hook (auto-detects stack)
     analyze           Run repoforge skills analysis
     doctor            Show health report
     plugin add        Install a plugin from GitHub (org/repo)
@@ -72,6 +73,7 @@ const cli = meow(`
     $ javi-forge init --stack node --ci github
     $ javi-forge ci
     $ javi-forge ci init
+    $ javi-forge tdd init
     $ javi-forge ci --quick
     $ javi-forge ci --no-ci-ghagga --no-security
     $ javi-forge ci --no-docker
@@ -118,6 +120,26 @@ Object.defineProperty(fakeStdin, 'isTTY', { value: false })
 const inkStdin = isTTY ? process.stdin : fakeStdin
 
 switch (subcommand) {
+  case 'tdd': {
+    if (cli.input[1] === 'init') {
+      const { installTddHooks } = await import('./commands/tdd.js')
+      const { installed, errors } = await installTddHooks(process.cwd())
+      if (installed.length > 0) {
+        console.log(`\u2713 Installed TDD hooks: ${installed.join(', ')}`)
+        console.log('  Pre-commit hook enforces tests must pass before commit')
+      }
+      for (const err of errors) {
+        console.error(`\u2717 ${err}`)
+      }
+      process.exit(errors.length > 0 ? 1 : 0)
+    } else {
+      console.error('Usage: javi-forge tdd init')
+      console.error('  init  Install TDD-enforcing pre-commit hook')
+      process.exit(1)
+    }
+    break
+  }
+
   case 'ci': {
     // Sub-command: javi-forge ci init → install git hooks
     if (cli.input[1] === 'init') {

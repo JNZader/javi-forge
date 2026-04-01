@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import path from 'path'
 import React from 'react'
 import { render } from 'ink'
 import { PassThrough } from 'node:stream'
@@ -42,6 +43,8 @@ const cli = meow(`
     plugin import     Import an Agent Skills spec package as a javi-forge plugin
     skills doctor     Show skills health report (add --deep for conflict detection)
     skills budget     Show token cost of loaded skills (add -b N for custom budget)
+    skills score      Score a skill on quality dimensions (completeness, clarity, testability, token-efficiency)
+    skills benchmark  Benchmark a skill with structural quality checks
     security baseline Create security baseline from current audit findings
     security check    Check for regressions against baseline (exits non-zero if found)
     security update   Re-snapshot baseline (acknowledge current vulns)
@@ -236,12 +239,64 @@ switch (subcommand) {
 
   case 'skills': {
     const skillsAction = cli.input[1] as string | undefined
-    const VALID_SKILLS_ACTIONS = ['doctor', 'budget']
+    const VALID_SKILLS_ACTIONS = ['doctor', 'budget', 'score', 'benchmark']
     if (!skillsAction || !VALID_SKILLS_ACTIONS.includes(skillsAction)) {
-      console.error('Usage: javi-forge skills <doctor|budget>')
+      console.error('Usage: javi-forge skills <doctor|budget|score|benchmark>')
       console.error('  doctor     Show skills health report (add --deep for conflict detection)')
       console.error('  budget     Show token cost of loaded skills (add -b N for custom budget)')
+      console.error('  score      Score a skill on quality dimensions (0-100)')
+      console.error('  benchmark  Benchmark a skill with structural quality checks')
       process.exit(1)
+      break
+    }
+
+    // Score and benchmark are non-interactive CLI commands
+    if (skillsAction === 'score' || skillsAction === 'benchmark') {
+      const targetSkill = cli.input[2]
+      if (!targetSkill) {
+        console.error(`Usage: javi-forge skills ${skillsAction} <skill-name>`)
+        process.exit(1)
+        break
+      }
+
+      const skillsDir = cli.flags.skillsDir || path.join(
+        process.env['HOME'] ?? '~', '.claude', 'skills'
+      )
+      const skillPath = path.join(skillsDir, targetSkill, 'SKILL.md')
+
+      if (skillsAction === 'score') {
+        const { scoreSkill } = await import('./commands/skills.js')
+        const result = await scoreSkill(skillPath, cli.flags.budget)
+        if (!result) {
+          console.error(`\u2717 Skill not found: ${skillPath}`)
+          process.exit(1)
+          break
+        }
+        console.log(`\nSkill: ${result.skillName}`)
+        console.log(`  Completeness:      ${result.completeness}/100`)
+        console.log(`  Clarity:           ${result.clarity}/100`)
+        console.log(`  Testability:       ${result.testability}/100`)
+        console.log(`  Token Efficiency:  ${result.tokenEfficiency}/100`)
+        console.log(`  Overall:           ${result.overall}/100`)
+        console.log(`  Threshold:         ${result.threshold}`)
+        console.log(`  Status:            ${result.passing ? '\u2713 PASSING' : '\u2717 FAILING'}`)
+        process.exit(result.passing ? 0 : 1)
+      } else {
+        const { benchmarkSkill } = await import('./commands/skills.js')
+        const result = await benchmarkSkill(skillPath)
+        if (!result) {
+          console.error(`\u2717 Skill not found: ${skillPath}`)
+          process.exit(1)
+          break
+        }
+        console.log(`\nBenchmark: ${result.skillName}`)
+        for (const check of result.checks) {
+          const icon = check.passed ? '\u2713' : '\u2717'
+          console.log(`  ${icon} ${check.name}${check.detail ? ` — ${check.detail}` : ''}`)
+        }
+        console.log(`\n  Pass rate: ${result.passRate}%`)
+        process.exit(result.passRate >= 50 ? 0 : 1)
+      }
       break
     }
 

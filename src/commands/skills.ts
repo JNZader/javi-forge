@@ -8,6 +8,9 @@ import type {
   SkillBudgetResult,
   SkillDuplicate,
   SkillDoctorResult,
+  SkillScore,
+  SkillBenchmarkCheck,
+  SkillBenchmarkResult,
 } from '../types/index.js'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -345,4 +348,307 @@ export async function runSkillsDoctor(
   ])
 
   return { conflicts, budget: budgetResult, duplicates }
+}
+
+// ── Quality Scoring ────────────────────────────────────────────────────────
+
+const DEFAULT_THRESHOLD = 50
+
+/** Vague terms that reduce clarity score */
+const VAGUE_TERMS = [
+  /\bstuff\b/i, /\bthings?\b/i, /\betc\.?\b/i, /\bmisc\b/i,
+  /\bvarious\b/i, /\bsome\b/i, /\bmaybe\b/i, /\bprobably\b/i,
+]
+
+/** Action verbs that indicate actionable rules */
+const ACTION_VERBS = [
+  /\buse\b/i, /\bavoid\b/i, /\bprefer\b/i, /\bnever\b/i,
+  /\balways\b/i, /\bmust\b/i, /\bshould\b/i, /\bshall\b/i,
+  /\bensure\b/i, /\bwrite\b/i, /\bcreate\b/i, /\bfollow\b/i,
+  /\bdo not\b/i, /\bapply\b/i, /\bimplement\b/i, /\brun\b/i,
+]
+
+/**
+ * Score completeness (0-100): frontmatter fields, critical rules, structure.
+ */
+export function scoreCompleteness(parsed: {
+  name: string
+  rules: string[]
+  rawContent: string
+  triggers: string[]
+}): number {
+  let score = 0
+  const max = 100
+
+  // Has a name (10 pts)
+  if (parsed.name && parsed.name.length > 0) score += 10
+
+  // Has triggers / description with "Trigger:" (15 pts)
+  if (parsed.triggers.length > 0) score += 15
+
+  // Has critical rules section (20 pts)
+  if (parsed.rules.length > 0) score += 20
+
+  // Number of rules: 1-2 = 10, 3-5 = 20, 6+ = 25
+  if (parsed.rules.length >= 6) score += 25
+  else if (parsed.rules.length >= 3) score += 20
+  else if (parsed.rules.length >= 1) score += 10
+
+  // Has substantial content (>= 200 chars = 10, >= 500 = 20, >= 1000 = 30)
+  const len = parsed.rawContent.length
+  if (len >= 1000) score += 30
+  else if (len >= 500) score += 20
+  else if (len >= 200) score += 10
+
+  return Math.min(score, max)
+}
+
+/**
+ * Score clarity (0-100): description quality, rule actionability, no vague terms.
+ */
+export function scoreClarity(parsed: {
+  name: string
+  rules: string[]
+  rawContent: string
+  triggers: string[]
+}): number {
+  let score = 0
+  const max = 100
+
+  // Trigger description exists and is meaningful (>= 50 chars in raw = 20 pts)
+  if (parsed.rawContent.length >= 50) score += 20
+
+  // Rules contain action verbs (up to 40 pts)
+  if (parsed.rules.length > 0) {
+    const actionableCount = parsed.rules.filter(rule =>
+      ACTION_VERBS.some(verb => verb.test(rule))
+    ).length
+    const ratio = actionableCount / parsed.rules.length
+    score += Math.round(ratio * 40)
+  }
+
+  // Penalty for vague terms in rules (-5 each, max -20)
+  let penalty = 0
+  for (const rule of parsed.rules) {
+    for (const vague of VAGUE_TERMS) {
+      if (vague.test(rule)) { penalty += 5; break }
+    }
+  }
+  score -= Math.min(penalty, 20)
+
+  // Name is descriptive (not single char) (10 pts)
+  if (parsed.name.length >= 3) score += 10
+
+  // Has multiple triggers (10 pts for >= 2, 20 for >= 3)
+  if (parsed.triggers.length >= 3) score += 20
+  else if (parsed.triggers.length >= 2) score += 10
+
+  // Base content score for having structured sections (10 pts)
+  if (/^#+\s/m.test(parsed.rawContent)) score += 10
+
+  return Math.max(0, Math.min(score, max))
+}
+
+/**
+ * Score testability (0-100): Given/When/Then scenarios, specific rules.
+ */
+export function scoreTestability(parsed: {
+  name: string
+  rules: string[]
+  rawContent: string
+  triggers: string[]
+}): number {
+  let score = 0
+  const max = 100
+
+  // Has Given/When/Then scenarios (40 pts)
+  const gwtMatches = parsed.rawContent.match(/\bGIVEN\b.*\bWHEN\b.*\bTHEN\b/gis)
+  const gwtCount = gwtMatches?.length ?? 0
+  if (gwtCount >= 3) score += 40
+  else if (gwtCount >= 1) score += 25
+
+  // Rules are specific enough (contain file paths, code refs, or patterns)
+  const specificRules = parsed.rules.filter(rule =>
+    /[`'"]/.test(rule) || /\.\w+/.test(rule) || /\bfile\b/i.test(rule) || /\bpath\b/i.test(rule)
+  ).length
+
+  if (parsed.rules.length > 0) {
+    const specificity = specificRules / parsed.rules.length
+    score += Math.round(specificity * 30)
+  }
+
+  // Has examples or code blocks (20 pts)
+  const codeBlocks = (parsed.rawContent.match(/```/g) ?? []).length / 2
+  if (codeBlocks >= 2) score += 20
+  else if (codeBlocks >= 1) score += 10
+
+  // Has a "Testing" or "Test" section (10 pts)
+  if (/^#+\s.*test/im.test(parsed.rawContent)) score += 10
+
+  return Math.min(score, max)
+}
+
+/**
+ * Score token efficiency (0-100): information density (rules per 1000 tokens).
+ */
+export function scoreTokenEfficiency(parsed: {
+  name: string
+  rules: string[]
+  rawContent: string
+  triggers: string[]
+}): number {
+  const tokens = estimateTokens(parsed.rawContent)
+  if (tokens === 0) return 0
+
+  // Rules per 1000 tokens — higher is more efficient
+  const rulesPerKToken = (parsed.rules.length / tokens) * 1000
+
+  // Ideal: 3-8 rules per 1000 tokens
+  // < 1 = bloated, > 10 = maybe too terse
+  let score: number
+  if (rulesPerKToken >= 3 && rulesPerKToken <= 8) {
+    score = 100
+  } else if (rulesPerKToken >= 2) {
+    score = 80
+  } else if (rulesPerKToken >= 1) {
+    score = 60
+  } else if (rulesPerKToken > 0) {
+    score = 40
+  } else {
+    score = 10
+  }
+
+  // Bonus for small total size (under 2000 tokens = +0, under 1000 = already great)
+  // Penalty for huge skills (> 5000 tokens = -20)
+  if (tokens > 5000) score -= 20
+  else if (tokens > 3000) score -= 10
+
+  return Math.max(0, Math.min(score, 100))
+}
+
+/**
+ * Score a skill on all 4 dimensions and compute overall.
+ */
+export async function scoreSkill(
+  skillPath: string,
+  threshold: number = DEFAULT_THRESHOLD
+): Promise<SkillScore | null> {
+  const parsed = await parseSkillFile(skillPath)
+  if (!parsed) return null
+
+  const completeness = scoreCompleteness(parsed)
+  const clarity = scoreClarity(parsed)
+  const testability = scoreTestability(parsed)
+  const tokenEfficiency = scoreTokenEfficiency(parsed)
+
+  // Weighted average: completeness 30%, clarity 25%, testability 25%, token-efficiency 20%
+  const overall = Math.round(
+    completeness * 0.30 +
+    clarity * 0.25 +
+    testability * 0.25 +
+    tokenEfficiency * 0.20
+  )
+
+  return {
+    skillName: parsed.name,
+    completeness,
+    clarity,
+    testability,
+    tokenEfficiency,
+    overall,
+    threshold,
+    passing: overall >= threshold,
+  }
+}
+
+// ── Benchmarking ───────────────────────────────────────────────────────────
+
+/**
+ * Run structural quality benchmark checks against a skill.
+ */
+export async function benchmarkSkill(
+  skillPath: string
+): Promise<SkillBenchmarkResult | null> {
+  const parsed = await parseSkillFile(skillPath)
+  if (!parsed) return null
+
+  const checks: SkillBenchmarkCheck[] = []
+
+  // Check 1: Has YAML frontmatter with name
+  checks.push({
+    name: 'has-frontmatter-name',
+    passed: parsed.name.length > 0 && parsed.name !== path.basename(path.dirname(skillPath)),
+    detail: parsed.name.length > 0 ? `name: ${parsed.name}` : 'No explicit name in frontmatter',
+  })
+
+  // Check 2: Has trigger keywords
+  checks.push({
+    name: 'has-triggers',
+    passed: parsed.triggers.length > 0,
+    detail: parsed.triggers.length > 0
+      ? `${parsed.triggers.length} trigger(s) found`
+      : 'No "Trigger:" in description',
+  })
+
+  // Check 3: Has critical rules (>= 3)
+  checks.push({
+    name: 'has-critical-rules',
+    passed: parsed.rules.length >= 3,
+    detail: `${parsed.rules.length} rule(s) found`,
+  })
+
+  // Check 4: Rules are actionable (contain verbs)
+  const actionableRules = parsed.rules.filter(rule =>
+    ACTION_VERBS.some(verb => verb.test(rule))
+  )
+  checks.push({
+    name: 'rules-actionable',
+    passed: parsed.rules.length > 0 && actionableRules.length / parsed.rules.length >= 0.5,
+    detail: `${actionableRules.length}/${parsed.rules.length} rules have action verbs`,
+  })
+
+  // Check 5: Has code examples
+  const codeBlocks = (parsed.rawContent.match(/```/g) ?? []).length / 2
+  checks.push({
+    name: 'has-code-examples',
+    passed: codeBlocks >= 1,
+    detail: `${Math.floor(codeBlocks)} code block(s)`,
+  })
+
+  // Check 6: Has structured sections (headings)
+  const headings = (parsed.rawContent.match(/^#+\s/gm) ?? []).length
+  checks.push({
+    name: 'has-sections',
+    passed: headings >= 3,
+    detail: `${headings} section heading(s)`,
+  })
+
+  // Check 7: Token budget reasonable (< 3000 tokens)
+  const tokens = estimateTokens(parsed.rawContent)
+  checks.push({
+    name: 'token-budget-ok',
+    passed: tokens <= 3000,
+    detail: `~${tokens} tokens`,
+  })
+
+  // Check 8: No vague terms in rules
+  const vagueRules = parsed.rules.filter(rule =>
+    VAGUE_TERMS.some(vague => vague.test(rule))
+  )
+  checks.push({
+    name: 'no-vague-rules',
+    passed: vagueRules.length === 0,
+    detail: vagueRules.length > 0
+      ? `${vagueRules.length} rule(s) contain vague terms`
+      : 'All rules are specific',
+  })
+
+  const passedCount = checks.filter(c => c.passed).length
+  const passRate = Math.round((passedCount / checks.length) * 100)
+
+  return {
+    skillName: parsed.name,
+    checks,
+    passRate,
+  }
 }

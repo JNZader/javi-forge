@@ -6,6 +6,7 @@ import type { InitOptions, InitStep, ForgeManifest } from '../types/index.js'
 import { backupIfExists, ensureDirExists } from '../lib/common.js'
 import { generateDependabotYml, generateCIWorkflow, getCIDestination } from '../lib/template.js'
 import { generateContextDir } from '../lib/context.js'
+import { generateClaudeMd } from '../lib/claudemd.js'
 import {
   FORGE_ROOT,
   TEMPLATES_DIR,
@@ -29,7 +30,7 @@ export async function initProject(
   options: InitOptions,
   onStep: StepCallback
 ): Promise<void> {
-  const { projectDir, projectName, stack, ciProvider, memory, aiSync, sdd, ghagga, contextDir, dryRun } = options
+  const { projectDir, projectName, stack, ciProvider, memory, aiSync, sdd, ghagga, contextDir, claudeMd, dryRun } = options
 
   // Ensure project directory exists before any steps
   if (!dryRun && projectDir) {
@@ -340,7 +341,30 @@ ENABLE_WEBHOOKS=false
     report(onStep, stepContext, 'Generate .context/ directory', 'error', String(e))
   }
 
-  // ── Step 12: Write manifest ───────────────────────────────────────────────
+  // ── Step 12: Generate CLAUDE.md ────────────────────────────────────────────
+  const stepClaudeMd = 'claude-md'
+  report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'running')
+  try {
+    if (claudeMd) {
+      const claudeMdPath = path.join(projectDir, 'CLAUDE.md')
+      if (await fs.pathExists(claudeMdPath)) {
+        report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'done', 'already exists')
+      } else {
+        if (!dryRun) {
+          const content = generateClaudeMd(options)
+          await fs.writeFile(claudeMdPath, content, 'utf-8')
+        }
+        report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'done',
+          dryRun ? 'dry-run: would generate CLAUDE.md' : 'CLAUDE.md')
+      }
+    } else {
+      report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'skipped', 'not selected')
+    }
+  } catch (e) {
+    report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'error', String(e))
+  }
+
+  // ── Step 13: Write manifest ───────────────────────────────────────────────
   const stepManifest = 'manifest'
   report(onStep, stepManifest, 'Write forge manifest', 'running')
   try {
@@ -361,6 +385,7 @@ ENABLE_WEBHOOKS=false
           ...(sdd ? ['sdd'] : []),
           ...(aiSync ? ['ai-config'] : []),
           ...(contextDir ? ['context'] : []),
+          ...(claudeMd ? ['claude-md'] : []),
         ],
       }
       await fs.writeJson(path.join(manifestDir, 'manifest.json'), manifest, { spaces: 2 })

@@ -43,17 +43,24 @@ vi.mock('../lib/common.js', () => ({
   ensureDirExists: vi.fn().mockResolvedValue(undefined),
 }))
 
+// ── Mock claudemd module ────────────────────────────────────────────────────
+vi.mock('../lib/claudemd.js', () => ({
+  generateClaudeMd: vi.fn().mockReturnValue('# test-project\n\n## Stack\n'),
+}))
+
 import fs from 'fs-extra'
 import { execFile } from 'child_process'
 import { initProject } from './init.js'
 import { generateCIWorkflow, getCIDestination } from '../lib/template.js'
 import { generateContextDir } from '../lib/context.js'
+import { generateClaudeMd } from '../lib/claudemd.js'
 
 const mockedFs = vi.mocked(fs)
 const mockedExecFile = vi.mocked(execFile)
 const mockedGenerateCIWorkflow = vi.mocked(generateCIWorkflow)
 const mockedGetCIDestination = vi.mocked(getCIDestination)
 const mockedGenerateContextDir = vi.mocked(generateContextDir)
+const mockedGenerateClaudeMd = vi.mocked(generateClaudeMd)
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -80,6 +87,9 @@ beforeEach(() => {
     index: '# test — File Index\n',
     summary: '# test\n',
   })
+
+  // Default: claudemd generation
+  mockedGenerateClaudeMd.mockReturnValue('# test-project\n\n## Stack\n')
 })
 
 function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
@@ -94,6 +104,7 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
     ghagga: true,
     mock: false,
     contextDir: true,
+    claudeMd: true,
     dryRun: false,
     ...overrides,
   }
@@ -370,5 +381,69 @@ describe('initProject', () => {
     expect(mockedFs.writeJson).toHaveBeenCalled()
     const [, manifestData] = mockedFs.writeJson.mock.calls[0]
     expect((manifestData as any).modules).toContain('context')
+  })
+
+  // ── CLAUDE.md step ────────────────────────────────────────────────────
+
+  it('claude-md step reports done when claudeMd is true', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('CLAUDE.md')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ claudeMd: true }))
+    const claudeStep = steps.find(s => s.id === 'claude-md' && s.status === 'done')
+    expect(claudeStep).toBeDefined()
+    expect(mockedGenerateClaudeMd).toHaveBeenCalled()
+  })
+
+  it('claude-md step reports skipped when claudeMd is false', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    const steps = await collectSteps(makeOptions({ claudeMd: false }))
+    const claudeStep = steps.find(s => s.id === 'claude-md' && s.status === 'skipped')
+    expect(claudeStep).toBeDefined()
+  })
+
+  it('claude-md step skips write when CLAUDE.md already exists', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+
+    const steps = await collectSteps(makeOptions({ claudeMd: true }))
+    const claudeStep = steps.find(s => s.id === 'claude-md' && s.status === 'done' && s.detail === 'already exists')
+    expect(claudeStep).toBeDefined()
+    expect(mockedGenerateClaudeMd).not.toHaveBeenCalled()
+  })
+
+  it('claude-md dry-run does not write file', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('CLAUDE.md')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ claudeMd: true, dryRun: true }))
+    const claudeStep = steps.find(s => s.id === 'claude-md' && s.status === 'done')
+    expect(claudeStep).toBeDefined()
+    expect(claudeStep!.detail).toContain('dry-run')
+    // writeFile should NOT be called with CLAUDE.md path
+    const claudeMdWrites = mockedFs.writeFile.mock.calls.filter(
+      (call: any[]) => String(call[0]).includes('CLAUDE.md')
+    )
+    expect(claudeMdWrites).toHaveLength(0)
+  })
+
+  it('manifest includes claude-md module when claudeMd is true', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    await collectSteps(makeOptions({ claudeMd: true }))
+    expect(mockedFs.writeJson).toHaveBeenCalled()
+    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    expect((manifestData as any).modules).toContain('claude-md')
   })
 })

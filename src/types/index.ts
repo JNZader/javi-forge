@@ -165,3 +165,47 @@ export interface SecurityCheckResult {
   regressions: SecurityFinding[]
   resolved: SecurityFinding[]
 }
+
+// ── Skills Doctor ────────────────────────────────────────────────────────────
+
+export interface SkillCriticalRule {
+  skillName: string
+  skillPath: string
+  rule: string
+  /** Normalized rule for comparison (lowercase, trimmed) */
+  normalized: string
+}
+
+export interface SkillConflict {
+  ruleA: SkillCriticalRule
+  ruleB: SkillCriticalRule
+  reason: string
+}
+
+export interface SkillBudgetEntry {
+  skillName: string
+  skillPath: string
+  tokens: number
+}
+
+export interface SkillBudgetResult {
+  entries: SkillBudgetEntry[]
+  totalTokens: number
+  budget: number
+  overBudget: boolean
+  suggestions: string[]
+}
+
+export interface SkillDuplicate {
+  skillA: string
+  skillB: string
+  /** Overlapping trigger keywords */
+  sharedTriggers: string[]
+  similarity: number
+}
+
+export interface SkillDoctorResult {
+  conflicts: SkillConflict[]
+  budget: SkillBudgetResult
+  duplicates: SkillDuplicate[]
+}

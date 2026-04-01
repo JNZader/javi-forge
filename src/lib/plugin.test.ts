@@ -24,7 +24,7 @@ vi.mock('child_process', () => ({
 }))
 
 import fs from 'fs-extra'
-import { validatePlugin, installPlugin, removePlugin, listInstalledPlugins, searchRegistry, normalizeGitUrl } from './plugin.js'
+import { validatePlugin, installPlugin, removePlugin, listInstalledPlugins, searchRegistry, normalizeGitUrl, detectProjectPlugins, syncPlugins } from './plugin.js'
 
 const mockFs = vi.mocked(fs)
 
@@ -425,5 +425,168 @@ describe('searchRegistry', () => {
     const result = await searchRegistry('security')
     expect(result).toHaveLength(1)
     expect(result[0]!.id).toBe('org/a')
+  })
+})
+
+// ── detectProjectPlugins ────────────────────────────────────────────────
+
+describe('detectProjectPlugins', () => {
+  it('returns empty array when plugins dir does not exist', async () => {
+    mockFs.pathExists.mockResolvedValue(false as never)
+
+    const result = await detectProjectPlugins('/fake/project')
+    expect(result).toEqual([])
+  })
+
+  it('detects plugins with valid .installed.json', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('.installed.json')) return true as never
+      return true as never
+    })
+    mockFs.readdir.mockResolvedValue(['beta', 'alpha'] as never)
+    mockFs.readJson.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.includes('alpha')) return { name: 'alpha' } as never
+      if (typeof p === 'string' && p.includes('beta')) return { name: 'beta' } as never
+      return {} as never
+    })
+
+    const result = await detectProjectPlugins('/fake/project')
+    expect(result).toEqual(['alpha', 'beta']) // sorted
+  })
+
+  it('skips dot-prefixed directories', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readdir.mockResolvedValue(['.tmp', '.git'] as never)
+
+    const result = await detectProjectPlugins('/fake/project')
+    expect(result).toEqual([])
+  })
+
+  it('skips entries with corrupt .installed.json', async () => {
+    mockFs.pathExists.mockResolvedValue(true as never)
+    mockFs.readdir.mockResolvedValue(['corrupt'] as never)
+    mockFs.readJson.mockRejectedValue(new Error('parse error') as never)
+
+    const result = await detectProjectPlugins('/fake/project')
+    expect(result).toEqual([])
+  })
+
+  it('skips entries without .installed.json', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('.installed.json')) return false as never
+      return true as never
+    })
+    mockFs.readdir.mockResolvedValue(['no-meta'] as never)
+
+    const result = await detectProjectPlugins('/fake/project')
+    expect(result).toEqual([])
+  })
+})
+
+// ── syncPlugins ─────────────────────────────────────────────────────────
+
+describe('syncPlugins', () => {
+  it('reports added plugins when manifest has no plugins field', async () => {
+    // detectProjectPlugins returns ['alpha', 'beta']
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('manifest.json')) return true as never
+      if (typeof p === 'string' && p.endsWith('.installed.json')) return true as never
+      return true as never
+    })
+    mockFs.readdir.mockResolvedValue(['alpha', 'beta'] as never)
+    mockFs.readJson.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('manifest.json')) {
+        return { version: '0.1.0', projectName: 'test', stack: 'node', ciProvider: 'github', memory: 'none', createdAt: '', updatedAt: '', modules: [] } as never
+      }
+      if (typeof p === 'string' && p.includes('alpha')) return { name: 'alpha' } as never
+      if (typeof p === 'string' && p.includes('beta')) return { name: 'beta' } as never
+      return {} as never
+    })
+    mockFs.ensureDir.mockResolvedValue(undefined as never)
+    mockFs.writeJson.mockResolvedValue(undefined as never)
+
+    const result = await syncPlugins('/fake/project')
+    expect(result.added).toEqual(['alpha', 'beta'])
+    expect(result.removed).toEqual([])
+    expect(result.unchanged).toEqual([])
+    expect(mockFs.writeJson).toHaveBeenCalled()
+  })
+
+  it('reports removed plugins', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('manifest.json')) return true as never
+      if (typeof p === 'string' && p.includes('plugins') && !p.endsWith('manifest.json')) return false as never
+      return true as never
+    })
+    mockFs.readJson.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('manifest.json')) {
+        return { version: '0.1.0', projectName: 'test', stack: 'node', ciProvider: 'github', memory: 'none', createdAt: '', updatedAt: '', modules: [], plugins: ['old-plugin'] } as never
+      }
+      return {} as never
+    })
+    mockFs.ensureDir.mockResolvedValue(undefined as never)
+    mockFs.writeJson.mockResolvedValue(undefined as never)
+
+    const result = await syncPlugins('/fake/project')
+    expect(result.added).toEqual([])
+    expect(result.removed).toEqual(['old-plugin'])
+    expect(result.unchanged).toEqual([])
+  })
+
+  it('reports unchanged when nothing changed', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('.installed.json')) return true as never
+      return true as never
+    })
+    mockFs.readdir.mockResolvedValue(['alpha'] as never)
+    mockFs.readJson.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('manifest.json')) {
+        return { version: '0.1.0', projectName: 'test', stack: 'node', ciProvider: 'github', memory: 'none', createdAt: '', updatedAt: '', modules: [], plugins: ['alpha'] } as never
+      }
+      return { name: 'alpha' } as never
+    })
+
+    const result = await syncPlugins('/fake/project')
+    expect(result.added).toEqual([])
+    expect(result.removed).toEqual([])
+    expect(result.unchanged).toEqual(['alpha'])
+    expect(mockFs.writeJson).not.toHaveBeenCalled()
+  })
+
+  it('does not write in dry-run mode', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('.installed.json')) return true as never
+      return true as never
+    })
+    mockFs.readdir.mockResolvedValue(['alpha'] as never)
+    mockFs.readJson.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('manifest.json')) {
+        return { version: '0.1.0', projectName: 'test', stack: 'node', ciProvider: 'github', memory: 'none', createdAt: '', updatedAt: '', modules: [] } as never
+      }
+      return { name: 'alpha' } as never
+    })
+
+    const result = await syncPlugins('/fake/project', { dryRun: true })
+    expect(result.added).toEqual(['alpha'])
+    expect(mockFs.writeJson).not.toHaveBeenCalled()
+  })
+
+  it('creates manifest when it does not exist', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.endsWith('manifest.json')) return false as never
+      if (typeof p === 'string' && p.endsWith('.installed.json')) return true as never
+      return true as never
+    })
+    mockFs.readdir.mockResolvedValue(['alpha'] as never)
+    mockFs.readJson.mockImplementation(async (p: string) => {
+      if (typeof p === 'string' && p.includes('alpha')) return { name: 'alpha' } as never
+      return {} as never
+    })
+    mockFs.ensureDir.mockResolvedValue(undefined as never)
+    mockFs.writeJson.mockResolvedValue(undefined as never)
+
+    const result = await syncPlugins('/fake/project')
+    expect(result.added).toEqual(['alpha'])
+    expect(mockFs.writeJson).toHaveBeenCalled()
   })
 })

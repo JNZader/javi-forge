@@ -9,6 +9,8 @@ import type {
   InstalledPlugin,
   PluginRegistry,
   PluginRegistryEntry,
+  PluginSyncResult,
+  ForgeManifest,
 } from '../types/index.js'
 import { PLUGINS_DIR, PLUGIN_MANIFEST_FILE, PLUGIN_ASSET_DIRS, PLUGIN_REGISTRY_URL } from '../constants.js'
 
@@ -243,6 +245,83 @@ export async function searchRegistry(query?: string): Promise<PluginRegistryEntr
   } catch {
     return []
   }
+}
+
+// ── Sync ───────────────────────────────────────────────────────────────
+
+/**
+ * Detect installed plugins in a project's .javi-forge/plugins/ directory.
+ * Returns an array of plugin names (sorted alphabetically).
+ */
+export async function detectProjectPlugins(projectDir: string): Promise<string[]> {
+  const pluginsDir = path.join(projectDir, '.javi-forge', 'plugins')
+
+  if (!await fs.pathExists(pluginsDir)) return []
+
+  const entries = await fs.readdir(pluginsDir)
+  const plugins: string[] = []
+
+  for (const entry of entries) {
+    if (entry.startsWith('.')) continue
+    const metaPath = path.join(pluginsDir, entry, '.installed.json')
+    if (await fs.pathExists(metaPath)) {
+      try {
+        const meta = await fs.readJson(metaPath) as InstalledPlugin
+        if (meta.name) {
+          plugins.push(meta.name)
+        }
+      } catch { /* skip corrupt entries */ }
+    }
+  }
+
+  return plugins.sort()
+}
+
+/**
+ * Sync detected plugins into the project manifest.
+ * Returns a report of added, removed, and unchanged plugins.
+ */
+export async function syncPlugins(
+  projectDir: string,
+  options: { dryRun?: boolean } = {}
+): Promise<PluginSyncResult> {
+  const { dryRun = false } = options
+  const detected = await detectProjectPlugins(projectDir)
+
+  const manifestPath = path.join(projectDir, '.javi-forge', 'manifest.json')
+  let manifest: ForgeManifest & { plugins?: string[] }
+
+  if (await fs.pathExists(manifestPath)) {
+    manifest = await fs.readJson(manifestPath) as ForgeManifest & { plugins?: string[] }
+  } else {
+    // No manifest yet — treat current plugins as empty
+    manifest = {
+      version: '0.1.0',
+      projectName: path.basename(projectDir),
+      stack: 'node',
+      ciProvider: 'github',
+      memory: 'none',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      modules: [],
+    }
+  }
+
+  const previous = new Set(manifest.plugins ?? [])
+  const current = new Set(detected)
+
+  const added = detected.filter(p => !previous.has(p))
+  const removed = [...previous].filter(p => !current.has(p))
+  const unchanged = detected.filter(p => previous.has(p))
+
+  if (!dryRun && (added.length > 0 || removed.length > 0)) {
+    manifest.plugins = detected
+    manifest.updatedAt = new Date().toISOString()
+    await fs.ensureDir(path.dirname(manifestPath))
+    await fs.writeJson(manifestPath, manifest, { spaces: 2 })
+  }
+
+  return { added, removed, unchanged }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

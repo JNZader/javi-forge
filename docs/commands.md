@@ -19,7 +19,10 @@ npx javi-forge init [options]
 7. **AI sync** — Run `javi-ai sync --target all` to generate per-CLI configs
 8. **SDD** — Create `openspec/` directory with README
 9. **GHAGGA** — Install review system and copy workflow (optional)
-10. **Manifest** — Write `.javi-forge/manifest.json`
+10. **Mock mode** — Generate `.env.example` and `.env` with mock values (optional)
+11. **.context/** — Generate `INDEX.md` and `summary.md` with stack-aware project context
+12. **CLAUDE.md** — Generate project-aware `CLAUDE.md` with stack, conventions, skills
+13. **Manifest** — Write `.javi-forge/manifest.json`
 
 ### Options
 
@@ -31,6 +34,7 @@ npx javi-forge init [options]
 | `--memory` | string | — | Memory: `engram`, `obsidian-brain`, `memory-simple`, `none` |
 | `--project-name` | string | — | Project name |
 | `--ghagga` | boolean | `false` | Enable GHAGGA review |
+| `--mock` | boolean | `false` | Enable mock-first mode |
 | `--batch` | boolean | `false` | Non-interactive mode |
 
 ### Examples
@@ -122,3 +126,140 @@ npx javi-forge doctor
 | **Stack Detection** | Looks for package.json, go.mod, Cargo.toml, build.gradle, pom.xml, etc. |
 | **Project Manifest** | `.javi-forge/manifest.json` — project name, stack, creation date |
 | **Installed Modules** | engram, obsidian-brain, memory-simple, ghagga |
+
+---
+
+## tdd init
+
+Install a TDD-enforcing pre-commit hook that requires tests to pass before committing.
+
+```bash
+npx javi-forge tdd init
+```
+
+### What it does
+
+Auto-detects your project stack and installs a `.git/hooks/pre-commit` hook with the correct test command:
+
+| Stack | Test Command |
+|-------|-------------|
+| **node** | `npm test` / `pnpm run test` / `yarn run test` |
+| **python** | `pytest` |
+| **go** | `go test ./...` |
+
+To bypass the hook: `git commit --no-verify`.
+
+---
+
+## plugin
+
+Manage javi-forge plugins.
+
+```bash
+npx javi-forge plugin <action> [target] [options]
+```
+
+### Actions
+
+| Action | Description |
+|--------|-------------|
+| `add <org/repo>` | Install a plugin from GitHub |
+| `remove <name>` | Remove an installed plugin |
+| `list` | List installed plugins |
+| `search [query]` | Search the plugin registry |
+| `validate <dir>` | Validate a local plugin directory |
+| `sync` | Auto-detect and wire installed plugins |
+| `export <name>` | Export to Agent Skills spec (`skills.json`) |
+| `export <name> --codex` | Export to Codex-compatible TOML subagent files |
+| `import <dir>` | Import an Agent Skills spec package as a plugin |
+
+### Examples
+
+```bash
+npx javi-forge plugin add mapbox/agent-skills
+npx javi-forge plugin remove agent-skills
+npx javi-forge plugin list
+npx javi-forge plugin sync
+npx javi-forge plugin export my-plugin
+npx javi-forge plugin export my-plugin --codex
+npx javi-forge plugin import ./agent-skills-pkg
+```
+
+---
+
+## skills
+
+Analyze and score installed AI skills.
+
+```bash
+npx javi-forge skills <action> [options]
+```
+
+### Actions
+
+| Action | Description |
+|--------|-------------|
+| `doctor` | Health report (add `--deep` for conflict + duplicate detection) |
+| `budget` | Token cost of loaded skills (add `-b N` for custom budget) |
+| `score <name>` | Score a skill on quality dimensions (0-100) |
+| `benchmark <name>` | Structural quality checks with pass/fail |
+
+### Options
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--deep` | boolean | `false` | Enable conflict + duplicate detection (doctor) |
+| `--budget, -b` | number | `8000` | Token budget limit |
+| `--skills-dir` | string | `~/.claude/skills` | Custom skills directory |
+
+### Examples
+
+```bash
+npx javi-forge skills doctor
+npx javi-forge skills doctor --deep
+npx javi-forge skills budget -b 12000
+npx javi-forge skills score react-19
+npx javi-forge skills benchmark typescript
+```
+
+---
+
+## security
+
+Track and detect security regressions with baseline snapshots.
+
+```bash
+npx javi-forge security <action>
+```
+
+### Actions
+
+| Action | Description |
+|--------|-------------|
+| `baseline` | Create baseline from current audit findings |
+| `check` | Check for regressions (exits non-zero if found) |
+| `update` | Re-snapshot baseline (acknowledge current vulns) |
+
+Supports: **node** (npm/pnpm/yarn), **python** (pip-audit), **go** (govulncheck), **rust** (cargo audit).
+
+Baseline stored in `.javi-forge/security-baseline.json`.
+
+### Examples
+
+```bash
+npx javi-forge security baseline
+npx javi-forge security check
+npx javi-forge security update
+```
+
+---
+
+## llms-txt
+
+Generate an AI-friendly `llms.txt` with compact project notation.
+
+```bash
+npx javi-forge llms-txt [--dry-run]
+```
+
+Scans project structure, dependencies, and entry points. Output is ~75% smaller than full documentation in token cost.

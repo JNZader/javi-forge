@@ -22,6 +22,8 @@ The TUI walks you through:
 4. **Memory module** — engram, obsidian-brain, memory-simple, or none
 5. **SDD** — enable Spec-Driven Development
 6. **GHAGGA** — enable AI code review
+7. **.context/** — generate project context directory for AI tools
+8. **CLAUDE.md** — generate project-aware Claude configuration
 
 ## Step 2: Non-Interactive Mode
 
@@ -74,6 +76,9 @@ sequenceDiagram
     AI-->>Forge: Config synced
     Forge->>Forge: Create openspec/
     Forge->>Forge: Install GHAGGA (optional)
+    Forge->>Forge: Configure mock mode (optional)
+    Forge->>Forge: Generate .context/
+    Forge->>Forge: Generate CLAUDE.md
     Forge->>Forge: Write manifest
     Forge-->>User: Project ready
 ```

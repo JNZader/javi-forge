@@ -14,11 +14,12 @@ const OPTIONS: OptionItem[] = [
   { id: 'aiSync',     label: 'AI Config Sync',      description: 'Sync AI config via javi-ai',       default: true },
   { id: 'sdd',        label: 'SDD (openspec/)',     description: 'Spec-Driven Development workflow',  default: true },
   { id: 'contextDir', label: '.context/ Directory', description: 'AI-ready project context files',    default: true },
+  { id: 'claudeMd',   label: 'CLAUDE.md',           description: 'AI agent project instructions',     default: true },
   { id: 'ghagga',     label: 'GHAGGA Review',       description: 'Multi-agent AI code review system', default: false },
 ]
 
 interface Props {
-  onConfirm: (selected: { aiSync: boolean; sdd: boolean; contextDir: boolean; ghagga: boolean }) => void
+  onConfirm: (selected: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean }) => void
   presetGhagga?: boolean
 }
 
@@ -38,6 +39,7 @@ export default function OptionSelector({ onConfirm, presetGhagga = false }: Prop
         aiSync:     selected.has('aiSync'),
         sdd:        selected.has('sdd'),
         contextDir: selected.has('contextDir'),
+        claudeMd:   selected.has('claudeMd'),
         ghagga:     selected.has('ghagga'),
       })
     }
@@ -59,6 +61,7 @@ export default function OptionSelector({ onConfirm, presetGhagga = false }: Prop
         aiSync:     selected.has('aiSync'),
         sdd:        selected.has('sdd'),
         contextDir: selected.has('contextDir'),
+        claudeMd:   selected.has('claudeMd'),
         ghagga:     selected.has('ghagga'),
       })
     }

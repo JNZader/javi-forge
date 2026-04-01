@@ -53,6 +53,7 @@ export default function App({
   const [aiSync, setAiSync] = useState(true)
   const [sdd, setSdd] = useState(true)
   const [contextDir, setContextDir] = useState(true)
+  const [claudeMd, setClaudeMd] = useState(true)
   const [ghagga, setGhagga] = useState(presetGhagga)
   const [steps, setSteps] = useState<InitStep[]>([])
   const [startTime] = useState(Date.now())
@@ -78,10 +79,11 @@ export default function App({
     setStage('options')
   }
 
-  const handleOptionsConfirm = async (opts: { aiSync: boolean; sdd: boolean; contextDir: boolean; ghagga: boolean }) => {
+  const handleOptionsConfirm = async (opts: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean }) => {
     setAiSync(opts.aiSync)
     setSdd(opts.sdd)
     setContextDir(opts.contextDir)
+    setClaudeMd(opts.claudeMd)
     setGhagga(opts.ghagga)
     setStage('running')
 
@@ -96,6 +98,7 @@ export default function App({
         sdd: opts.sdd,
         ghagga: opts.ghagga,
         contextDir: opts.contextDir,
+        claudeMd: opts.claudeMd,
         mock: presetMock,
         dryRun,
       },

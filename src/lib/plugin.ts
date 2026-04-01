@@ -13,6 +13,7 @@ import type {
   ForgeManifest,
 } from '../types/index.js'
 import { PLUGINS_DIR, PLUGIN_MANIFEST_FILE, PLUGIN_ASSET_DIRS, PLUGIN_REGISTRY_URL } from '../constants.js'
+import { generateAgentSkillsManifest } from './agent-skills.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -160,6 +161,9 @@ export async function installPlugin(
         manifest: validation.manifest,
       }
       await fs.writeJson(path.join(destDir, '.installed.json'), installedPlugin, { spaces: 2 })
+
+      // Generate Agent Skills spec manifest for cross-agent compatibility
+      await generateAgentSkillsManifest(destDir, source).catch(() => {})
     }
 
     return { success: true, name: pluginName }

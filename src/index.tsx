@@ -37,6 +37,8 @@ const cli = meow(`
     plugin search     Search the plugin registry
     plugin validate   Validate a local plugin directory
     plugin sync       Auto-detect and wire installed plugins
+    plugin export     Export plugin to Agent Skills spec format (skills.json)
+    plugin import     Import an Agent Skills spec package as a javi-forge plugin
     security baseline Create security baseline from current audit findings
     security check    Check for regressions against baseline (exits non-zero if found)
     security update   Re-snapshot baseline (acknowledge current vulns)
@@ -208,8 +210,8 @@ switch (subcommand) {
   }
 
   case 'plugin': {
-    const pluginAction = cli.input[1] as 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync' | undefined
-    const VALID_PLUGIN_ACTIONS = ['add', 'remove', 'list', 'search', 'validate', 'sync']
+    const pluginAction = cli.input[1] as 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync' | 'export' | 'import' | undefined
+    const VALID_PLUGIN_ACTIONS = ['add', 'remove', 'list', 'search', 'validate', 'sync', 'export', 'import']
     const action = pluginAction && VALID_PLUGIN_ACTIONS.includes(pluginAction) ? pluginAction : 'list'
     const target = cli.input[2]
 

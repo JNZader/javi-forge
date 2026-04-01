@@ -7,6 +7,7 @@ import {
   searchRegistry,
   syncPlugins,
 } from '../lib/plugin.js'
+import { exportPluginAsAgentSkills, importAgentSkillsPackage } from '../lib/agent-skills.js'
 
 type StepCallback = (step: InitStep) => void
 
@@ -143,5 +144,46 @@ export async function runPluginSync(
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     report(onStep, stepId, 'Sync plugins', 'error', msg)
+  }
+}
+
+/**
+ * Export an installed plugin to Agent Skills spec format.
+ */
+export async function runPluginExport(
+  name: string,
+  onStep: StepCallback
+): Promise<void> {
+  const stepId = 'plugin-export'
+  report(onStep, stepId, `Export plugin: ${name}`, 'running')
+
+  const result = await exportPluginAsAgentSkills(name)
+
+  if (result.success) {
+    report(onStep, stepId, `Export plugin: ${name}`, 'done',
+      `exported to ${result.path}`)
+  } else {
+    report(onStep, stepId, `Export plugin: ${name}`, 'error', result.error)
+  }
+}
+
+/**
+ * Import an Agent Skills spec package and convert to javi-forge plugin format.
+ */
+export async function runPluginImport(
+  sourceDir: string,
+  dryRun: boolean,
+  onStep: StepCallback
+): Promise<void> {
+  const stepId = 'plugin-import'
+  report(onStep, stepId, `Import agent-skills package: ${sourceDir}`, 'running')
+
+  const result = await importAgentSkillsPackage(sourceDir, { dryRun })
+
+  if (result.success) {
+    report(onStep, stepId, `Import agent-skills package: ${sourceDir}`, 'done',
+      dryRun ? `dry-run: would import ${result.name}` : `imported ${result.name}`)
+  } else {
+    report(onStep, stepId, `Import agent-skills package: ${sourceDir}`, 'error', result.error)
   }
 }

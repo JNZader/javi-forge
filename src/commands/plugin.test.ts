@@ -11,8 +11,14 @@ vi.mock('../lib/plugin.js', () => ({
   syncPlugins: vi.fn(),
 }))
 
+vi.mock('../lib/agent-skills.js', () => ({
+  exportPluginAsAgentSkills: vi.fn(),
+  importAgentSkillsPackage: vi.fn(),
+}))
+
 import { installPlugin, removePlugin, listInstalledPlugins, validatePlugin, searchRegistry, syncPlugins } from '../lib/plugin.js'
-import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync } from './plugin.js'
+import { exportPluginAsAgentSkills, importAgentSkillsPackage } from '../lib/agent-skills.js'
+import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync, runPluginExport, runPluginImport } from './plugin.js'
 
 const mockInstall = vi.mocked(installPlugin)
 const mockRemove = vi.mocked(removePlugin)
@@ -20,6 +26,8 @@ const mockList = vi.mocked(listInstalledPlugins)
 const mockValidate = vi.mocked(validatePlugin)
 const mockSearch = vi.mocked(searchRegistry)
 const mockSync = vi.mocked(syncPlugins)
+const mockExport = vi.mocked(exportPluginAsAgentSkills)
+const mockImport = vi.mocked(importAgentSkillsPackage)
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -242,5 +250,66 @@ describe('runPluginSync', () => {
 
     expect(steps[1]!.status).toBe('error')
     expect(steps[1]!.detail).toContain('fs exploded')
+  })
+})
+
+// ── runPluginExport ─────────────────────────────────────────────────────────
+
+describe('runPluginExport', () => {
+  it('reports success when export succeeds', async () => {
+    mockExport.mockResolvedValue({ success: true, path: '/plugins/my-plugin/skills.json' })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginExport('my-plugin', onStep)
+
+    expect(steps).toHaveLength(2)
+    expect(steps[0]!.status).toBe('running')
+    expect(steps[1]!.status).toBe('done')
+    expect(steps[1]!.detail).toContain('exported to')
+  })
+
+  it('reports error when plugin not installed', async () => {
+    mockExport.mockResolvedValue({ success: false, error: 'plugin "ghost" is not installed' })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginExport('ghost', onStep)
+
+    expect(steps[1]!.status).toBe('error')
+    expect(steps[1]!.detail).toContain('not installed')
+  })
+})
+
+// ── runPluginImport ─────────────────────────────────────────────────────────
+
+describe('runPluginImport', () => {
+  it('reports success when import succeeds', async () => {
+    mockImport.mockResolvedValue({ success: true, name: 'imported-skill' })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginImport('/path/to/package', false, onStep)
+
+    expect(steps).toHaveLength(2)
+    expect(steps[0]!.status).toBe('running')
+    expect(steps[1]!.status).toBe('done')
+    expect(steps[1]!.detail).toContain('imported imported-skill')
+  })
+
+  it('reports dry-run on success', async () => {
+    mockImport.mockResolvedValue({ success: true, name: 'imported-skill' })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginImport('/path/to/package', true, onStep)
+
+    expect(steps[1]!.detail).toContain('dry-run')
+  })
+
+  it('reports error when skills.json not found', async () => {
+    mockImport.mockResolvedValue({ success: false, error: 'skills.json not found' })
+    const { steps, onStep } = collectSteps()
+
+    await runPluginImport('/bad/path', false, onStep)
+
+    expect(steps[1]!.status).toBe('error')
+    expect(steps[1]!.detail).toContain('skills.json not found')
   })
 })

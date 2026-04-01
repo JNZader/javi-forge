@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react'
 import { Box, Text } from 'ink'
 import Spinner from 'ink-spinner'
 import type { InitStep } from '../types/index.js'
-import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync } from '../commands/plugin.js'
+import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync, runPluginExport, runPluginImport } from '../commands/plugin.js'
 import { theme } from './theme.js'
 
 interface PluginProps {
-  action: 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync'
+  action: 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync' | 'export' | 'import'
   target?: string
   dryRun: boolean
 }
@@ -66,6 +66,14 @@ export default function Plugin({ action, target, dryRun }: PluginProps) {
             break
           case 'sync':
             await runPluginSync(process.cwd(), dryRun, onStep)
+            break
+          case 'export':
+            if (!target) { onStep({ id: 'err', label: 'Error', status: 'error', detail: 'name required: javi-forge plugin export <name>' }); break }
+            await runPluginExport(target, onStep)
+            break
+          case 'import':
+            if (!target) { onStep({ id: 'err', label: 'Error', status: 'error', detail: 'path required: javi-forge plugin import <dir>' }); break }
+            await runPluginImport(target, dryRun, onStep)
             break
         }
       } catch (e: unknown) {

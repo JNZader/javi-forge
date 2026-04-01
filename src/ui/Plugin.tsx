@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react'
 import { Box, Text } from 'ink'
 import Spinner from 'ink-spinner'
 import type { InitStep } from '../types/index.js'
-import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync, runPluginExport, runPluginImport } from '../commands/plugin.js'
+import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync, runPluginExport, runPluginExportCodex, runPluginImport } from '../commands/plugin.js'
 import { theme } from './theme.js'
 
 interface PluginProps {
   action: 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync' | 'export' | 'import'
   target?: string
   dryRun: boolean
+  codex?: boolean
 }
 
 const STATUS_ICON: Record<string, string> = {
@@ -26,7 +27,7 @@ const STATUS_COLOR: Record<string, string> = {
   skipped: theme.muted,
 }
 
-export default function Plugin({ action, target, dryRun }: PluginProps) {
+export default function Plugin({ action, target, dryRun, codex = false }: PluginProps) {
   const [steps, setSteps] = useState<InitStep[]>([])
   const [done, setDone] = useState(false)
 
@@ -69,7 +70,11 @@ export default function Plugin({ action, target, dryRun }: PluginProps) {
             break
           case 'export':
             if (!target) { onStep({ id: 'err', label: 'Error', status: 'error', detail: 'name required: javi-forge plugin export <name>' }); break }
-            await runPluginExport(target, onStep)
+            if (codex) {
+              await runPluginExportCodex(target, onStep)
+            } else {
+              await runPluginExport(target, onStep)
+            }
             break
           case 'import':
             if (!target) { onStep({ id: 'err', label: 'Error', status: 'error', detail: 'path required: javi-forge plugin import <dir>' }); break }

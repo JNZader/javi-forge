@@ -40,6 +40,7 @@ const cli = meow(`
     plugin validate   Validate a local plugin directory
     plugin sync       Auto-detect and wire installed plugins
     plugin export     Export plugin to Agent Skills spec format (skills.json)
+    plugin export     --codex: Export plugin to Codex-compatible TOML subagent files
     plugin import     Import an Agent Skills spec package as a javi-forge plugin
     skills doctor     Show skills health report (add --deep for conflict detection)
     skills budget     Show token cost of loaded skills (add -b N for custom budget)
@@ -112,6 +113,8 @@ const cli = meow(`
     ciGhagga:    { type: 'boolean', default: true },
     security:    { type: 'boolean', default: true },
     timeout:     { type: 'number',  default: 600 },
+    // Plugin flags
+    codex:       { type: 'boolean', default: false },
     // Skills flags
     deep:        { type: 'boolean', default: false },
     budget:      { type: 'number',  shortFlag: 'b', default: 8000 },
@@ -230,7 +233,7 @@ switch (subcommand) {
 
     render(
       <CIContextProvider isCI={isCI}>
-        <Plugin action={action} target={target} dryRun={cli.flags.dryRun} />
+        <Plugin action={action} target={target} dryRun={cli.flags.dryRun} codex={cli.flags.codex} />
       </CIContextProvider>,
       { stdin: inkStdin }
     )

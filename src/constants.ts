@@ -1,6 +1,6 @@
 import path from 'path'
 import { fileURLToPath } from 'url'
-import type { StackContextEntry } from './types/index.js'
+import type { StackContextEntry, StackClaudeMdEntry } from './types/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -43,6 +43,50 @@ export const STACK_DEPENDABOT_MAP: Record<string, string[]> = {
   'java-gradle': ['gradle'],
   'java-maven':  ['maven'],
   'elixir':      [],
+}
+
+/** Stack-to-CLAUDE.md metadata mapping */
+export const STACK_CLAUDEMD_MAP: Record<string, StackClaudeMdEntry> = {
+  node: {
+    skills: ['typescript', 'react-19', 'tailwind-4'],
+    conventions: 'TypeScript strict, ESM modules, functional components',
+    testFramework: 'vitest',
+  },
+  python: {
+    skills: ['pytest', 'django-drf'],
+    conventions: 'PEP 8, type hints, ruff linting',
+    testFramework: 'pytest',
+  },
+  go: {
+    skills: [],
+    conventions: 'gofmt, golangci-lint, table-driven tests',
+    testFramework: 'go test',
+  },
+  rust: {
+    skills: [],
+    conventions: 'cargo fmt, clippy, edition 2021+',
+    testFramework: 'cargo test',
+  },
+  'java-gradle': {
+    skills: [],
+    conventions: 'Gradle Kotlin DSL, JUnit 5, Checkstyle',
+    testFramework: 'JUnit 5',
+  },
+  'java-maven': {
+    skills: [],
+    conventions: 'Maven standard layout, JUnit 5, Checkstyle',
+    testFramework: 'JUnit 5',
+  },
+  elixir: {
+    skills: [],
+    conventions: 'mix format, Credo, OTP conventions',
+    testFramework: 'ExUnit',
+  },
+  default: {
+    skills: [],
+    conventions: 'Follow language-specific best practices',
+    testFramework: 'project default',
+  },
 }
 
 /** Stack-to-context template mapping */

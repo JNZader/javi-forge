@@ -12,7 +12,14 @@ export interface InitOptions {
   ghagga: boolean
   mock: boolean
   contextDir: boolean
+  claudeMd: boolean
   dryRun: boolean
+}
+
+export interface StackClaudeMdEntry {
+  skills: string[]
+  conventions: string
+  testFramework: string
 }
 
 export interface StackContextEntry {

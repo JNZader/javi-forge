@@ -121,3 +121,31 @@ export interface PluginSyncResult {
   removed: string[]
   unchanged: string[]
 }
+
+// ── Security Baseline ──────────────────────────────────────────────────────
+
+export type SecuritySeverity = 'critical' | 'high' | 'moderate' | 'low' | 'info'
+
+export interface SecurityFinding {
+  id: string
+  severity: SecuritySeverity
+  package: string
+  title: string
+  url?: string
+}
+
+export interface SecurityBaseline {
+  version: string
+  createdAt: string
+  stack: string
+  buildTool: string
+  findings: SecurityFinding[]
+  findingKeys: string[]
+}
+
+export interface SecurityCheckResult {
+  baseline: SecurityBaseline
+  current: SecurityFinding[]
+  regressions: SecurityFinding[]
+  resolved: SecurityFinding[]
+}

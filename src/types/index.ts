@@ -209,3 +209,28 @@ export interface SkillDoctorResult {
   budget: SkillBudgetResult
   duplicates: SkillDuplicate[]
 }
+
+// ── Quality Scoring ─────────────────────────────────────────────────────────
+
+export interface SkillScore {
+  skillName: string
+  completeness: number
+  clarity: number
+  testability: number
+  tokenEfficiency: number
+  overall: number
+  threshold: number
+  passing: boolean
+}
+
+export interface SkillBenchmarkCheck {
+  name: string
+  passed: boolean
+  detail?: string
+}
+
+export interface SkillBenchmarkResult {
+  skillName: string
+  checks: SkillBenchmarkCheck[]
+  passRate: number
+}

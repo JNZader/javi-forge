@@ -173,6 +173,24 @@ export interface AgentSkillsManifest {
   metadata?: { forge_source?: string }
 }
 
+/**
+ * Aggregated skills.json that merges multiple plugins into a single
+ * Agent Skills spec manifest. Used by `npx skills add` and 40+ AI agents.
+ */
+export interface AggregatedSkillsManifest {
+  name: string
+  version: string
+  description: string
+  skills: AgentSkillEntry[]
+  sources: AgentSkillSource[]
+}
+
+export interface AgentSkillSource {
+  plugin: string
+  version: string
+  repository?: string
+}
+
 // ── Codex TOML Export ─────────────────────────────────────────────────────
 
 export interface CodexTomlEntry {
@@ -244,10 +262,14 @@ export interface SkillCriticalRule {
   normalized: string
 }
 
+export type ConflictKind = 'regex-pair' | 'directive-clash'
+
 export interface SkillConflict {
   ruleA: SkillCriticalRule
   ruleB: SkillCriticalRule
   reason: string
+  /** How the conflict was detected */
+  kind: ConflictKind
 }
 
 export interface SkillBudgetEntry {
@@ -256,12 +278,25 @@ export interface SkillBudgetEntry {
   tokens: number
 }
 
+export interface SkillBudgetSuggestion {
+  /** Skills to disable in this suggestion set */
+  disableSkills: string[]
+  /** Total tokens freed by disabling these skills */
+  tokensSaved: number
+  /** Remaining tokens after disabling */
+  remainingTokens: number
+  /** Whether this set brings usage under budget */
+  meetsbudget: boolean
+}
+
 export interface SkillBudgetResult {
   entries: SkillBudgetEntry[]
   totalTokens: number
   budget: number
   overBudget: boolean
   suggestions: string[]
+  /** Structured optimization sets: minimal combinations to meet budget */
+  optimizations: SkillBudgetSuggestion[]
 }
 
 export interface SkillDuplicate {
@@ -280,15 +315,27 @@ export interface SkillDoctorResult {
 
 // ── Quality Scoring ─────────────────────────────────────────────────────────
 
+export type SkillGrade = 'A' | 'B' | 'C' | 'D' | 'F'
+
 export interface SkillScore {
   skillName: string
   completeness: number
   clarity: number
   testability: number
   tokenEfficiency: number
+  safety: number
+  agentReadiness: number
   overall: number
+  grade: SkillGrade
   threshold: number
   passing: boolean
+}
+
+export interface SkillRegistryGateResult {
+  skillName: string
+  score: SkillScore
+  accepted: boolean
+  reason?: string
 }
 
 export interface SkillBenchmarkCheck {

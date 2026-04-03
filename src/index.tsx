@@ -11,6 +11,7 @@ import Doctor from './ui/Doctor.js'
 import AnalyzeUI from './ui/AnalyzeUI.js'
 import Plugin from './ui/Plugin.js'
 import Skills from './ui/Skills.js'
+import AutoSkills from './ui/AutoSkills.js'
 import LlmsTxt from './ui/LlmsTxt.js'
 import CI from './ui/CI.js'
 import { CIProvider as CIContextProvider } from './ui/CIContext.js'
@@ -42,12 +43,15 @@ const cli = meow(`
     plugin sync       Auto-detect and wire installed plugins
     plugin export     Export plugin to Agent Skills spec format (skills.json)
     plugin export     --codex: Export plugin to Codex-compatible TOML subagent files
+    plugin export-skills  Generate aggregated skills.json from all installed plugins
+    plugin export-skills global  Generate global skills.json from all globally installed plugins
     plugin import     Import an Agent Skills spec package as a javi-forge plugin
     skills doctor     Show skills health report (add --deep for conflict detection)
     skills budget     Show token cost of loaded skills (add -b N for custom budget)
     skills score      Score a skill on quality dimensions (completeness, clarity, testability, token-efficiency)
     skills benchmark  Benchmark a skill with structural quality checks
-    skills auto-install  Auto-detect project stack and install matching AI skills
+    skills auto       Auto-detect project stack and suggest/install matching AI skills
+    skills auto-install  Alias for skills auto
     skill publish     Package a skill directory for marketplace distribution (generates plugin.json)
     security baseline   Create security baseline from current audit findings
     security check      Check for regressions against baseline (exits non-zero if found)
@@ -255,8 +259,8 @@ switch (subcommand) {
   }
 
   case 'plugin': {
-    const pluginAction = cli.input[1] as 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync' | 'export' | 'import' | undefined
-    const VALID_PLUGIN_ACTIONS = ['add', 'remove', 'list', 'search', 'validate', 'sync', 'export', 'import']
+    const pluginAction = cli.input[1] as 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync' | 'export' | 'import' | 'export-skills' | undefined
+    const VALID_PLUGIN_ACTIONS = ['add', 'remove', 'list', 'search', 'validate', 'sync', 'export', 'import', 'export-skills']
     const action = pluginAction && VALID_PLUGIN_ACTIONS.includes(pluginAction) ? pluginAction : 'list'
     const target = cli.input[2]
 
@@ -271,30 +275,31 @@ switch (subcommand) {
 
   case 'skills': {
     const skillsAction = cli.input[1] as string | undefined
-    const VALID_SKILLS_ACTIONS = ['doctor', 'budget', 'score', 'benchmark', 'auto-install']
+    const VALID_SKILLS_ACTIONS = ['doctor', 'budget', 'score', 'benchmark', 'auto', 'auto-install']
     if (!skillsAction || !VALID_SKILLS_ACTIONS.includes(skillsAction)) {
-      console.error('Usage: javi-forge skills <doctor|budget|score|benchmark|auto-install>')
+      console.error('Usage: javi-forge skills <doctor|budget|score|benchmark|auto>')
       console.error('  doctor        Show skills health report (add --deep for conflict detection)')
       console.error('  budget        Show token cost of loaded skills (add -b N for custom budget)')
       console.error('  score         Score a skill on quality dimensions (0-100)')
       console.error('  benchmark     Benchmark a skill with structural quality checks')
-      console.error('  auto-install  Auto-detect project stack and install matching AI skills')
+      console.error('  auto          Auto-detect project stack and suggest/install matching AI skills')
+      console.error('  auto-install  Alias for auto')
       process.exit(1)
       break
     }
 
-    // Auto-install is a non-interactive CLI command
-    if (skillsAction === 'auto-install') {
-      const { autoInstallSkills, formatAutoInstallSummary } = await import('./lib/auto-skill-install.js')
-      const result = await autoInstallSkills({
-        projectDir: process.cwd(),
-        skillsSourceDir: cli.flags.skillsDir || undefined,
-        skillsTargetDir: cli.flags.skillsDir || undefined,
-        dryRun: cli.flags.dryRun,
-      })
-      console.log(formatAutoInstallSummary(result))
-      const hasIssues = result.notFound.length > 0
-      process.exit(hasIssues ? 1 : 0)
+    // Auto / auto-install: render interactive Ink UI
+    if (skillsAction === 'auto' || skillsAction === 'auto-install') {
+      render(
+        <CIContextProvider isCI={isCI}>
+          <AutoSkills
+            projectDir={process.cwd()}
+            skillsDir={cli.flags.skillsDir || undefined}
+            dryRun={cli.flags.dryRun}
+          />
+        </CIContextProvider>,
+        { stdin: inkStdin }
+      )
       break
     }
 
@@ -325,7 +330,11 @@ switch (subcommand) {
         console.log(`  Clarity:           ${result.clarity}/100`)
         console.log(`  Testability:       ${result.testability}/100`)
         console.log(`  Token Efficiency:  ${result.tokenEfficiency}/100`)
+        console.log(`  Safety:            ${result.safety}/100`)
+        console.log(`  Agent Readiness:   ${result.agentReadiness}/100`)
+        console.log(`  ─────────────────────────`)
         console.log(`  Overall:           ${result.overall}/100`)
+        console.log(`  Grade:             ${result.grade}`)
         console.log(`  Threshold:         ${result.threshold}`)
         console.log(`  Status:            ${result.passing ? '\u2713 PASSING' : '\u2717 FAILING'}`)
         process.exit(result.passing ? 0 : 1)

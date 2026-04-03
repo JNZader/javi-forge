@@ -7,7 +7,7 @@ import {
   searchRegistry,
   syncPlugins,
 } from '../lib/plugin.js'
-import { exportPluginAsAgentSkills, importAgentSkillsPackage } from '../lib/agent-skills.js'
+import { exportPluginAsAgentSkills, importAgentSkillsPackage, generateProjectSkillsJson, generateGlobalSkillsJson } from '../lib/agent-skills.js'
 import { exportPluginAsCodexToml } from '../lib/codex-export.js'
 
 type StepCallback = (step: InitStep) => void
@@ -208,5 +208,49 @@ export async function runPluginImport(
       dryRun ? `dry-run: would import ${result.name}` : `imported ${result.name}`)
   } else {
     report(onStep, stepId, `Import agent-skills package: ${sourceDir}`, 'error', result.error)
+  }
+}
+
+/**
+ * Generate a project-level skills.json from all installed plugins.
+ * Makes the project discoverable by `npx skills add` and 40+ AI agents.
+ */
+export async function runPluginExportSkillsJson(
+  projectDir: string,
+  dryRun: boolean,
+  onStep: StepCallback
+): Promise<void> {
+  const stepId = 'plugin-export-skills-json'
+  report(onStep, stepId, 'Generate project skills.json', 'running')
+
+  const result = await generateProjectSkillsJson(projectDir, { dryRun })
+
+  if (result.success) {
+    const prefix = dryRun ? 'dry-run: would generate' : 'generated'
+    report(onStep, stepId, 'Generate project skills.json', 'done',
+      `${prefix} ${result.path} (${result.skillCount} skills from ${result.pluginCount} plugins)`)
+  } else {
+    report(onStep, stepId, 'Generate project skills.json', 'error', result.error)
+  }
+}
+
+/**
+ * Generate a global skills.json from all globally installed plugins.
+ */
+export async function runPluginExportGlobalSkillsJson(
+  dryRun: boolean,
+  onStep: StepCallback
+): Promise<void> {
+  const stepId = 'plugin-export-global-skills-json'
+  report(onStep, stepId, 'Generate global skills.json', 'running')
+
+  const result = await generateGlobalSkillsJson({ dryRun })
+
+  if (result.success) {
+    const prefix = dryRun ? 'dry-run: would generate' : 'generated'
+    report(onStep, stepId, 'Generate global skills.json', 'done',
+      `${prefix} ${result.path} (${result.skillCount} skills from ${result.pluginCount} plugins)`)
+  } else {
+    report(onStep, stepId, 'Generate global skills.json', 'error', result.error)
   }
 }

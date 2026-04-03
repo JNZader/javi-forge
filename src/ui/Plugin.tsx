@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react'
 import { Box, Text } from 'ink'
 import Spinner from 'ink-spinner'
 import type { InitStep } from '../types/index.js'
-import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync, runPluginExport, runPluginExportCodex, runPluginImport } from '../commands/plugin.js'
+import { runPluginAdd, runPluginRemove, runPluginList, runPluginSearch, runPluginValidate, runPluginSync, runPluginExport, runPluginExportCodex, runPluginImport, runPluginExportSkillsJson, runPluginExportGlobalSkillsJson } from '../commands/plugin.js'
 import { theme } from './theme.js'
 
 interface PluginProps {
-  action: 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync' | 'export' | 'import'
+  action: 'add' | 'remove' | 'list' | 'search' | 'validate' | 'sync' | 'export' | 'import' | 'export-skills'
   target?: string
   dryRun: boolean
   codex?: boolean
@@ -79,6 +79,13 @@ export default function Plugin({ action, target, dryRun, codex = false }: Plugin
           case 'import':
             if (!target) { onStep({ id: 'err', label: 'Error', status: 'error', detail: 'path required: javi-forge plugin import <dir>' }); break }
             await runPluginImport(target, dryRun, onStep)
+            break
+          case 'export-skills':
+            if (target === 'global') {
+              await runPluginExportGlobalSkillsJson(dryRun, onStep)
+            } else {
+              await runPluginExportSkillsJson(target ?? process.cwd(), dryRun, onStep)
+            }
             break
         }
       } catch (e: unknown) {

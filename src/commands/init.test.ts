@@ -32,7 +32,7 @@ vi.mock('../lib/template.js', () => ({
 // ── Mock context module ──────────────────────────────────────────────────────
 vi.mock('../lib/context.js', () => ({
   generateContextDir: vi.fn().mockResolvedValue({
-    index: '# test — File Index\n',
+    index: '# test — Project Index\n',
     summary: '# test\n',
   }),
 }))
@@ -45,7 +45,16 @@ vi.mock('../lib/common.js', () => ({
 
 // ── Mock claudemd module ────────────────────────────────────────────────────
 vi.mock('../lib/claudemd.js', () => ({
-  generateClaudeMd: vi.fn().mockReturnValue('# test-project\n\n## Stack\n'),
+  generateSmartClaudeMd: vi.fn().mockReturnValue('# test-project\n\n## Stack\n'),
+}))
+
+// ── Mock stack-detector module ──────────────────────────────────────────────
+vi.mock('../lib/stack-detector.js', () => ({
+  detectProjectStack: vi.fn().mockResolvedValue({
+    stack: 'node',
+    signals: [],
+    recommendedSkills: ['typescript', 'react-19'],
+  }),
 }))
 
 import fs from 'fs-extra'
@@ -53,14 +62,16 @@ import { execFile } from 'child_process'
 import { initProject } from './init.js'
 import { generateCIWorkflow, getCIDestination } from '../lib/template.js'
 import { generateContextDir } from '../lib/context.js'
-import { generateClaudeMd } from '../lib/claudemd.js'
+import { generateSmartClaudeMd } from '../lib/claudemd.js'
+import { detectProjectStack } from '../lib/stack-detector.js'
 
 const mockedFs = vi.mocked(fs)
 const mockedExecFile = vi.mocked(execFile)
 const mockedGenerateCIWorkflow = vi.mocked(generateCIWorkflow)
 const mockedGetCIDestination = vi.mocked(getCIDestination)
 const mockedGenerateContextDir = vi.mocked(generateContextDir)
-const mockedGenerateClaudeMd = vi.mocked(generateClaudeMd)
+const mockedGenerateSmartClaudeMd = vi.mocked(generateSmartClaudeMd)
+const mockedDetectProjectStack = vi.mocked(detectProjectStack)
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -84,12 +95,19 @@ beforeEach(() => {
 
   // Default: context dir generation
   mockedGenerateContextDir.mockResolvedValue({
-    index: '# test — File Index\n',
+    index: '# test — Project Index\n',
     summary: '# test\n',
   })
 
   // Default: claudemd generation
-  mockedGenerateClaudeMd.mockReturnValue('# test-project\n\n## Stack\n')
+  mockedGenerateSmartClaudeMd.mockReturnValue('# test-project\n\n## Stack\n')
+
+  // Default: stack detection
+  mockedDetectProjectStack.mockResolvedValue({
+    stack: 'node',
+    signals: [],
+    recommendedSkills: ['typescript', 'react-19'],
+  })
 })
 
 function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
@@ -396,7 +414,7 @@ describe('initProject', () => {
     const steps = await collectSteps(makeOptions({ claudeMd: true }))
     const claudeStep = steps.find(s => s.id === 'claude-md' && s.status === 'done')
     expect(claudeStep).toBeDefined()
-    expect(mockedGenerateClaudeMd).toHaveBeenCalled()
+    expect(mockedGenerateSmartClaudeMd).toHaveBeenCalled()
   })
 
   it('claude-md step reports skipped when claudeMd is false', async () => {
@@ -412,7 +430,7 @@ describe('initProject', () => {
     const steps = await collectSteps(makeOptions({ claudeMd: true }))
     const claudeStep = steps.find(s => s.id === 'claude-md' && s.status === 'done' && s.detail === 'already exists')
     expect(claudeStep).toBeDefined()
-    expect(mockedGenerateClaudeMd).not.toHaveBeenCalled()
+    expect(mockedGenerateSmartClaudeMd).not.toHaveBeenCalled()
   })
 
   it('claude-md dry-run does not write file', async () => {

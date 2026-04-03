@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { generateClaudeMd, buildClaudeMd } from './claudemd.js'
+import { generateClaudeMd, buildClaudeMd, generateSmartClaudeMd, buildSmartClaudeMd } from './claudemd.js'
 import { STACK_CLAUDEMD_MAP } from '../constants.js'
 import type { InitOptions } from '../types/index.js'
+import type { StackDetectionResult } from './stack-detector.js'
 
 const ALL_STACKS = ['node', 'python', 'go', 'rust', 'java-gradle', 'java-maven', 'elixir'] as const
 
@@ -175,5 +176,162 @@ describe('buildClaudeMd', () => {
 
     expect(result).toContain('## Modules')
     expect(result).toContain('ai-sync, sdd')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// buildSmartClaudeMd
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('buildSmartClaudeMd', () => {
+  it('includes detected skills in Skills section', () => {
+    const entry = STACK_CLAUDEMD_MAP['node']
+    const result = buildSmartClaudeMd('my-app', 'node', entry, ['react-19', 'zustand-5'], false, [])
+
+    expect(result).toContain('## Skills (auto-detected)')
+    expect(result).toContain('~/.claude/skills/react-19/SKILL.md')
+    expect(result).toContain('~/.claude/skills/zustand-5/SKILL.md')
+  })
+
+  it('merges detected skills with static entry skills (deduped)', () => {
+    const entry = { skills: ['typescript', 'react-19'], conventions: 'test', testFramework: 'vitest' }
+    const result = buildSmartClaudeMd('proj', 'node', entry, ['react-19', 'tailwind-4'], false, [])
+
+    // react-19 should appear only once
+    const matches = result.match(/react-19\/SKILL\.md/g)
+    expect(matches).toHaveLength(1)
+
+    // All three skills should be present
+    expect(result).toContain('typescript/SKILL.md')
+    expect(result).toContain('react-19/SKILL.md')
+    expect(result).toContain('tailwind-4/SKILL.md')
+  })
+
+  it('includes Architecture Patterns section for detected skills', () => {
+    const entry = STACK_CLAUDEMD_MAP['node']
+    const result = buildSmartClaudeMd('proj', 'node', entry, ['react-19', 'zustand-5'], false, [])
+
+    expect(result).toContain('## Architecture Patterns')
+    expect(result).toContain('Container-Presentational pattern')
+    expect(result).toContain('Slice pattern for store modules')
+  })
+
+  it('omits Architecture Patterns when no patterns match', () => {
+    const entry = STACK_CLAUDEMD_MAP['go']
+    const result = buildSmartClaudeMd('proj', 'go', entry, [], false, [])
+
+    expect(result).not.toContain('## Architecture Patterns')
+  })
+
+  it('includes Plugin instructions for matching skills', () => {
+    const entry = STACK_CLAUDEMD_MAP['node']
+    const result = buildSmartClaudeMd('proj', 'node', entry, ['react-19', 'typescript'], false, [])
+
+    expect(result).toContain('## Plugins')
+    expect(result).toContain('merge-checks')
+    expect(result).toContain('javi-forge skills doctor')
+  })
+
+  it('omits Plugins section when no hints match', () => {
+    const entry = STACK_CLAUDEMD_MAP['go']
+    const result = buildSmartClaudeMd('proj', 'go', entry, [], false, [])
+
+    expect(result).not.toContain('## Plugins')
+  })
+
+  it('deduplicates plugin hints across skills', () => {
+    const entry = STACK_CLAUDEMD_MAP['node']
+    // react-19 and nextjs-15 both map to the same merge-checks hint
+    const result = buildSmartClaudeMd('proj', 'node', entry, ['react-19', 'nextjs-15'], false, [])
+
+    const matches = result.match(/merge-checks/g)
+    expect(matches).toHaveLength(1)
+  })
+
+  it('includes Project Context when contextDir is true', () => {
+    const entry = STACK_CLAUDEMD_MAP['node']
+    const result = buildSmartClaudeMd('proj', 'node', entry, ['typescript'], true, [])
+
+    expect(result).toContain('## Project Context')
+    expect(result).toContain('.context/INDEX.md')
+  })
+
+  it('includes Modules section when modules are provided', () => {
+    const entry = STACK_CLAUDEMD_MAP['node']
+    const result = buildSmartClaudeMd('proj', 'node', entry, [], false, ['sdd', 'engram'])
+
+    expect(result).toContain('## Modules')
+    expect(result).toContain('sdd, engram')
+  })
+
+  it('output is under 8000 chars for a fully-loaded project', () => {
+    const entry = STACK_CLAUDEMD_MAP['node']
+    const allSkills = ['react-19', 'nextjs-15', 'typescript', 'tailwind-4', 'zustand-5', 'zod-4', 'playwright']
+    const result = buildSmartClaudeMd('mega-proj', 'node', entry, allSkills, true, ['sdd', 'engram', 'ghagga'])
+
+    expect(result.length).toBeLessThan(8000)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// generateSmartClaudeMd
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('generateSmartClaudeMd', () => {
+  const detection: StackDetectionResult = {
+    stack: 'node',
+    signals: [
+      { signal: 'react', source: 'package.json', skills: ['react-19'] },
+      { signal: 'tailwindcss', source: 'package.json', skills: ['tailwind-4'] },
+      { signal: 'tsconfig.json', source: 'file exists', skills: ['typescript'] },
+    ],
+    recommendedSkills: ['react-19', 'tailwind-4', 'typescript'],
+  }
+
+  it('uses detected skills when detection result is provided', () => {
+    const result = generateSmartClaudeMd(makeOptions({ stack: 'node' }), detection)
+
+    expect(result).toContain('## Skills (auto-detected)')
+    expect(result).toContain('react-19/SKILL.md')
+    expect(result).toContain('tailwind-4/SKILL.md')
+    expect(result).toContain('typescript/SKILL.md')
+  })
+
+  it('falls back to static generation when detection is null', () => {
+    const result = generateSmartClaudeMd(makeOptions({ stack: 'node' }), null)
+
+    // Should use the old-style section name
+    expect(result).toContain('## Recommended Skills')
+    expect(result).not.toContain('## Skills (auto-detected)')
+  })
+
+  it('falls back to static generation when no skills detected', () => {
+    const emptyDetection: StackDetectionResult = {
+      stack: 'go',
+      signals: [],
+      recommendedSkills: [],
+    }
+
+    const result = generateSmartClaudeMd(makeOptions({ stack: 'go' }), emptyDetection)
+
+    // Should use static generation (go has no skills, so no section)
+    expect(result).not.toContain('## Skills (auto-detected)')
+  })
+
+  it('includes architecture patterns from detected skills', () => {
+    const result = generateSmartClaudeMd(makeOptions({ stack: 'node' }), detection)
+
+    expect(result).toContain('## Architecture Patterns')
+    expect(result).toContain('Container-Presentational pattern')
+    expect(result).toContain('Utility-first CSS')
+  })
+
+  it('includes modules from options', () => {
+    const result = generateSmartClaudeMd(
+      makeOptions({ stack: 'node', aiSync: true, sdd: true }),
+      detection
+    )
+
+    expect(result).toContain('## Modules')
+    expect(result).toContain('ai-sync')
+    expect(result).toContain('sdd')
   })
 })

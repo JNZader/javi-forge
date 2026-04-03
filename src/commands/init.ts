@@ -6,7 +6,8 @@ import type { InitOptions, InitStep, ForgeManifest } from '../types/index.js'
 import { backupIfExists, ensureDirExists } from '../lib/common.js'
 import { generateDependabotYml, generateCIWorkflow, getCIDestination } from '../lib/template.js'
 import { generateContextDir } from '../lib/context.js'
-import { generateClaudeMd } from '../lib/claudemd.js'
+import { generateSmartClaudeMd } from '../lib/claudemd.js'
+import { detectProjectStack } from '../lib/stack-detector.js'
 import {
   FORGE_ROOT,
   TEMPLATES_DIR,
@@ -341,7 +342,7 @@ ENABLE_WEBHOOKS=false
     report(onStep, stepContext, 'Generate .context/ directory', 'error', String(e))
   }
 
-  // ── Step 12: Generate CLAUDE.md ────────────────────────────────────────────
+  // ── Step 12: Generate CLAUDE.md (smart: project-aware) ─────────────────────
   const stepClaudeMd = 'claude-md'
   report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'running')
   try {
@@ -351,11 +352,19 @@ ENABLE_WEBHOOKS=false
         report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'done', 'already exists')
       } else {
         if (!dryRun) {
-          const content = generateClaudeMd(options)
+          // Detect project stack for smart CLAUDE.md generation
+          const detection = await detectProjectStack(projectDir).catch(() => null)
+          const content = generateSmartClaudeMd(options, detection)
           await fs.writeFile(claudeMdPath, content, 'utf-8')
+          const skillCount = detection?.recommendedSkills.length ?? 0
+          report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'done',
+            skillCount > 0
+              ? `CLAUDE.md (${skillCount} skills detected)`
+              : 'CLAUDE.md')
+        } else {
+          report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'done',
+            'dry-run: would generate CLAUDE.md')
         }
-        report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'done',
-          dryRun ? 'dry-run: would generate CLAUDE.md' : 'CLAUDE.md')
       }
     } else {
       report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'skipped', 'not selected')

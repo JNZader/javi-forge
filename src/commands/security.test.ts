@@ -13,6 +13,12 @@ import {
   detectRegressions,
   readBaseline,
   writeBaseline,
+  severityAtOrAbove,
+  filterBySeverity,
+  filterAllowlisted,
+  checkStaleness,
+  baselineAgeDays,
+  computeSummary,
 } from './security.js'
 import type { SecurityFinding, SecurityBaseline } from '../types/index.js'
 
@@ -263,17 +269,18 @@ describe('makeFindingKey', () => {
 // =============================================================================
 
 describe('detectRegressions', () => {
-  const makeBaseline = (findings: SecurityFinding[]): SecurityBaseline => ({
-    version: '1.0.0',
+  const makeBaseline = (findings: SecurityFinding[], extra?: Partial<SecurityBaseline>): SecurityBaseline => ({
+    version: '2.0.0',
     createdAt: '2025-01-01T00:00:00.000Z',
     stack: 'node',
     buildTool: 'npm',
     findings,
     findingKeys: findings.map(makeFindingKey),
+    ...extra,
   })
 
-  const finding = (id: string, pkg: string): SecurityFinding => ({
-    id, severity: 'high', package: pkg, title: `vuln ${id}`,
+  const finding = (id: string, pkg: string, severity: SecurityFinding['severity'] = 'high'): SecurityFinding => ({
+    id, severity, package: pkg, title: `vuln ${id}`,
   })
 
   it('reports no regressions when current matches baseline', () => {
@@ -284,6 +291,7 @@ describe('detectRegressions', () => {
 
     expect(result.regressions).toHaveLength(0)
     expect(result.resolved).toHaveLength(0)
+    expect(result.filteredRegressions).toHaveLength(0)
   })
 
   it('detects new findings as regressions', () => {
@@ -295,6 +303,7 @@ describe('detectRegressions', () => {
 
     expect(result.regressions).toHaveLength(1)
     expect(result.regressions[0].id).toBe('CVE-3')
+    expect(result.filteredRegressions).toHaveLength(1)
   })
 
   it('detects resolved findings', () => {
@@ -322,6 +331,193 @@ describe('detectRegressions', () => {
 
     expect(result.resolved).toHaveLength(1)
     expect(result.regressions).toHaveLength(0)
+  })
+
+  it('filters regressions by minSeverity', () => {
+    const fLow = finding('CVE-1', 'a', 'low')
+    const fHigh = finding('CVE-2', 'b', 'high')
+    const fCritical = finding('CVE-3', 'c', 'critical')
+    const baseline = makeBaseline([])
+    const result = detectRegressions(baseline, [fLow, fHigh, fCritical], { minSeverity: 'high' })
+
+    expect(result.regressions).toHaveLength(3)
+    expect(result.filteredRegressions).toHaveLength(2)
+    expect(result.filteredRegressions.map(f => f.id)).toEqual(['CVE-2', 'CVE-3'])
+  })
+
+  it('excludes allowlisted findings from regressions', () => {
+    const fNew = finding('CVE-1', 'a')
+    const fNew2 = finding('CVE-2', 'b')
+    const baseline = makeBaseline([], { allowlist: ['CVE-1:a'] })
+    const result = detectRegressions(baseline, [fNew, fNew2])
+
+    expect(result.regressions).toHaveLength(1)
+    expect(result.regressions[0].id).toBe('CVE-2')
+  })
+
+  it('includes summary with severity breakdown', () => {
+    const fLow = finding('CVE-1', 'a', 'low')
+    const fHigh = finding('CVE-2', 'b', 'high')
+    const baseline = makeBaseline([fLow])
+    const result = detectRegressions(baseline, [fLow, fHigh])
+
+    expect(result.summary.total).toBe(2)
+    expect(result.summary.bySeverity.high).toBe(1)
+    expect(result.summary.bySeverity.low).toBe(1)
+    expect(result.summary.regressionCount).toBe(1)
+  })
+
+  it('detects stale baseline', () => {
+    const oldDate = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString()
+    const baseline = makeBaseline([], { createdAt: oldDate })
+    const result = detectRegressions(baseline, [], { staleDays: 30 })
+
+    expect(result.staleWarning).toBeDefined()
+    expect(result.staleWarning).toContain('45 days old')
+  })
+
+  it('no stale warning when baseline is fresh', () => {
+    const recentDate = new Date().toISOString()
+    const baseline = makeBaseline([], { createdAt: recentDate })
+    const result = detectRegressions(baseline, [], { staleDays: 30 })
+
+    expect(result.staleWarning).toBeUndefined()
+  })
+})
+
+// =============================================================================
+// severityAtOrAbove
+// =============================================================================
+
+describe('severityAtOrAbove', () => {
+  it('critical is at or above all levels', () => {
+    expect(severityAtOrAbove('critical', 'info')).toBe(true)
+    expect(severityAtOrAbove('critical', 'low')).toBe(true)
+    expect(severityAtOrAbove('critical', 'moderate')).toBe(true)
+    expect(severityAtOrAbove('critical', 'high')).toBe(true)
+    expect(severityAtOrAbove('critical', 'critical')).toBe(true)
+  })
+
+  it('info is only at or above info', () => {
+    expect(severityAtOrAbove('info', 'info')).toBe(true)
+    expect(severityAtOrAbove('info', 'low')).toBe(false)
+    expect(severityAtOrAbove('info', 'critical')).toBe(false)
+  })
+
+  it('moderate is at or above low but not high', () => {
+    expect(severityAtOrAbove('moderate', 'low')).toBe(true)
+    expect(severityAtOrAbove('moderate', 'moderate')).toBe(true)
+    expect(severityAtOrAbove('moderate', 'high')).toBe(false)
+  })
+})
+
+// =============================================================================
+// filterBySeverity
+// =============================================================================
+
+describe('filterBySeverity', () => {
+  const finding = (sev: SecurityFinding['severity']): SecurityFinding => ({
+    id: `f-${sev}`, severity: sev, package: 'pkg', title: `${sev} vuln`,
+  })
+
+  it('filters findings below threshold', () => {
+    const findings = [finding('info'), finding('low'), finding('moderate'), finding('high'), finding('critical')]
+    const filtered = filterBySeverity(findings, 'high')
+    expect(filtered).toHaveLength(2)
+    expect(filtered.map(f => f.severity)).toEqual(['high', 'critical'])
+  })
+
+  it('returns all when threshold is info', () => {
+    const findings = [finding('info'), finding('critical')]
+    expect(filterBySeverity(findings, 'info')).toHaveLength(2)
+  })
+})
+
+// =============================================================================
+// filterAllowlisted
+// =============================================================================
+
+describe('filterAllowlisted', () => {
+  it('removes findings matching allowlist keys', () => {
+    const findings: SecurityFinding[] = [
+      { id: 'CVE-1', severity: 'high', package: 'a', title: 'A' },
+      { id: 'CVE-2', severity: 'low', package: 'b', title: 'B' },
+    ]
+    const result = filterAllowlisted(findings, ['CVE-1:a'])
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('CVE-2')
+  })
+
+  it('returns all findings when allowlist is empty', () => {
+    const findings: SecurityFinding[] = [
+      { id: 'CVE-1', severity: 'high', package: 'a', title: 'A' },
+    ]
+    expect(filterAllowlisted(findings, [])).toHaveLength(1)
+  })
+})
+
+// =============================================================================
+// checkStaleness
+// =============================================================================
+
+describe('checkStaleness', () => {
+  const makeBaseline = (createdAt: string, updatedAt?: string): SecurityBaseline => ({
+    version: '2.0.0', createdAt, updatedAt, stack: 'node', buildTool: 'npm',
+    findings: [], findingKeys: [],
+  })
+
+  it('returns warning when baseline exceeds staleDays', () => {
+    const old = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString()
+    expect(checkStaleness(makeBaseline(old), 30)).toBeDefined()
+  })
+
+  it('returns undefined when baseline is fresh', () => {
+    expect(checkStaleness(makeBaseline(new Date().toISOString()), 30)).toBeUndefined()
+  })
+
+  it('uses updatedAt when available', () => {
+    const old = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString()
+    const recent = new Date().toISOString()
+    expect(checkStaleness(makeBaseline(old, recent), 30)).toBeUndefined()
+  })
+})
+
+// =============================================================================
+// baselineAgeDays
+// =============================================================================
+
+describe('baselineAgeDays', () => {
+  it('returns age in days', () => {
+    const daysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString()
+    const baseline: SecurityBaseline = {
+      version: '2.0.0', createdAt: daysAgo, stack: 'node', buildTool: 'npm',
+      findings: [], findingKeys: [],
+    }
+    expect(baselineAgeDays(baseline)).toBe(10)
+  })
+})
+
+// =============================================================================
+// computeSummary
+// =============================================================================
+
+describe('computeSummary', () => {
+  it('computes severity breakdown', () => {
+    const current: SecurityFinding[] = [
+      { id: '1', severity: 'high', package: 'a', title: 'a' },
+      { id: '2', severity: 'high', package: 'b', title: 'b' },
+      { id: '3', severity: 'low', package: 'c', title: 'c' },
+    ]
+    const baseline: SecurityBaseline = {
+      version: '2.0.0', createdAt: new Date().toISOString(), stack: 'node', buildTool: 'npm',
+      findings: [], findingKeys: [],
+    }
+    const summary = computeSummary(current, [current[2]], [], [current[2]], baseline)
+    expect(summary.total).toBe(3)
+    expect(summary.bySeverity.high).toBe(2)
+    expect(summary.bySeverity.low).toBe(1)
+    expect(summary.regressionCount).toBe(1)
+    expect(summary.filteredCount).toBe(1)
   })
 })
 

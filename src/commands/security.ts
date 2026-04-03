@@ -2,7 +2,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import fs from 'fs-extra'
 import path from 'path'
-import type { Stack, SecurityFinding, SecurityBaseline, SecurityCheckResult } from '../types/index.js'
+import type { Stack, SecurityFinding, SecurityBaseline, SecurityCheckResult, SecurityCheckOptions, SecuritySeverity, SecuritySummary } from '../types/index.js'
 import { detectCIStack } from './ci.js'
 
 const execFileAsync = promisify(execFile)
@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile)
 // Types
 // =============================================================================
 
-export type SecurityMode = 'baseline' | 'check' | 'update'
+export type SecurityMode = 'baseline' | 'check' | 'update' | 'allowlist'
 
 export type SecurityStepStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped'
 
@@ -30,7 +30,17 @@ export type SecurityStepCallback = (step: SecurityStep) => void
 
 const BASELINE_DIR = '.javi-forge'
 const BASELINE_FILE = 'security-baseline.json'
-const BASELINE_VERSION = '1.0.0'
+const BASELINE_VERSION = '2.0.0'
+
+const SEVERITY_ORDER: Record<SecuritySeverity, number> = {
+  critical: 5,
+  high: 4,
+  moderate: 3,
+  low: 2,
+  info: 1,
+}
+
+const DEFAULT_STALE_DAYS = 30
 
 // =============================================================================
 // Audit command resolution
@@ -190,18 +200,105 @@ export function parseAuditOutput(stack: Stack, raw: string): SecurityFinding[] {
 }
 
 // =============================================================================
+// Severity helpers
+// =============================================================================
+
+export function severityAtOrAbove(severity: SecuritySeverity, threshold: SecuritySeverity): boolean {
+  return SEVERITY_ORDER[severity] >= SEVERITY_ORDER[threshold]
+}
+
+export function filterBySeverity(findings: SecurityFinding[], minSeverity: SecuritySeverity): SecurityFinding[] {
+  return findings.filter(f => severityAtOrAbove(f.severity, minSeverity))
+}
+
+// =============================================================================
+// Allowlist filtering
+// =============================================================================
+
+export function filterAllowlisted(findings: SecurityFinding[], allowlist: string[]): SecurityFinding[] {
+  if (allowlist.length === 0) return findings
+  const allowSet = new Set(allowlist)
+  return findings.filter(f => !allowSet.has(makeFindingKey(f)))
+}
+
+// =============================================================================
+// Staleness detection
+// =============================================================================
+
+export function checkStaleness(baseline: SecurityBaseline, staleDays: number): string | undefined {
+  const refDate = baseline.updatedAt ?? baseline.createdAt
+  const ageMs = Date.now() - new Date(refDate).getTime()
+  const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24))
+  if (ageDays > staleDays) {
+    return `Baseline is ${ageDays} days old (threshold: ${staleDays}). Consider running \`javi-forge security update\`.`
+  }
+  return undefined
+}
+
+export function baselineAgeDays(baseline: SecurityBaseline): number {
+  const refDate = baseline.updatedAt ?? baseline.createdAt
+  const ageMs = Date.now() - new Date(refDate).getTime()
+  return Math.floor(ageMs / (1000 * 60 * 60 * 24))
+}
+
+// =============================================================================
+// Summary computation
+// =============================================================================
+
+export function computeSummary(
+  current: SecurityFinding[],
+  regressions: SecurityFinding[],
+  resolved: SecurityFinding[],
+  filteredRegressions: SecurityFinding[],
+  baseline: SecurityBaseline
+): SecuritySummary {
+  const bySeverity: Record<SecuritySeverity, number> = {
+    critical: 0, high: 0, moderate: 0, low: 0, info: 0,
+  }
+  for (const f of current) {
+    bySeverity[f.severity]++
+  }
+  return {
+    total: current.length,
+    bySeverity,
+    regressionCount: regressions.length,
+    resolvedCount: resolved.length,
+    filteredCount: filteredRegressions.length,
+    baselineAge: baselineAgeDays(baseline),
+  }
+}
+
+// =============================================================================
 // Regression detection
 // =============================================================================
 
-export function detectRegressions(baseline: SecurityBaseline, current: SecurityFinding[]): SecurityCheckResult {
+export function detectRegressions(
+  baseline: SecurityBaseline,
+  current: SecurityFinding[],
+  options: SecurityCheckOptions = {}
+): SecurityCheckResult {
   const baselineKeySet = new Set(baseline.findingKeys)
   const currentKeys = current.map(makeFindingKey)
   const currentKeySet = new Set(currentKeys)
 
-  const regressions = current.filter(f => !baselineKeySet.has(makeFindingKey(f)))
+  let regressions = current.filter(f => !baselineKeySet.has(makeFindingKey(f)))
   const resolved = baseline.findings.filter(f => !currentKeySet.has(makeFindingKey(f)))
 
-  return { baseline, current, regressions, resolved }
+  // Apply allowlist filtering
+  const allowlist = baseline.allowlist ?? []
+  regressions = filterAllowlisted(regressions, allowlist)
+
+  // Apply severity threshold
+  const minSeverity = options.minSeverity ?? 'low'
+  const filteredRegressions = filterBySeverity(regressions, minSeverity)
+
+  // Check staleness
+  const staleDays = options.staleDays ?? DEFAULT_STALE_DAYS
+  const staleWarning = checkStaleness(baseline, staleDays)
+
+  const summary = computeSummary(current, regressions, resolved, filteredRegressions, baseline)
+
+  return { baseline, current, regressions, resolved, filteredRegressions, staleWarning, summary }
 }
 
 // =============================================================================
@@ -265,7 +362,8 @@ function report(onStep: SecurityStepCallback, id: string, label: string, status:
 export async function runSecurity(
   mode: SecurityMode,
   projectDir: string,
-  onStep: SecurityStepCallback
+  onStep: SecurityStepCallback,
+  options: SecurityCheckOptions = {}
 ): Promise<SecurityCheckResult | null> {
   // ── Detect stack ────────────────────────────────────────────────────────
   report(onStep, 'detect', 'Detecting stack', 'running')
@@ -305,13 +403,27 @@ export async function runSecurity(
     case 'baseline':
     case 'update': {
       report(onStep, 'save', mode === 'update' ? 'Updating baseline' : 'Creating baseline', 'running')
+
+      // Preserve createdAt and allowlist on update
+      let createdAt = new Date().toISOString()
+      let allowlist: string[] = []
+      if (mode === 'update') {
+        const existing = await readBaseline(projectDir)
+        if (existing) {
+          createdAt = existing.createdAt
+          allowlist = existing.allowlist ?? []
+        }
+      }
+
       const baseline: SecurityBaseline = {
         version: BASELINE_VERSION,
-        createdAt: new Date().toISOString(),
+        createdAt,
+        updatedAt: mode === 'update' ? new Date().toISOString() : undefined,
         stack: stackInfo.stackType,
         buildTool: stackInfo.buildTool,
         findings,
         findingKeys: findings.map(makeFindingKey),
+        allowlist,
       }
       await writeBaseline(projectDir, baseline)
       report(onStep, 'save',
@@ -329,22 +441,66 @@ export async function runSecurity(
         throw new Error('No security baseline found. Run `javi-forge security baseline` first.')
       }
 
-      const result = detectRegressions(existing, findings)
+      const result = detectRegressions(existing, findings, options)
 
-      if (result.regressions.length === 0) {
+      // Staleness warning
+      if (result.staleWarning) {
+        report(onStep, 'stale', 'Baseline staleness', 'skipped', result.staleWarning)
+      }
+
+      // Summary line
+      const { summary } = result
+      const sevBreakdown = Object.entries(summary.bySeverity)
+        .filter(([, count]) => count > 0)
+        .map(([sev, count]) => `${count} ${sev}`)
+        .join(', ')
+      if (sevBreakdown) {
+        report(onStep, 'summary', `Current findings: ${summary.total} (${sevBreakdown})`, 'done')
+      }
+
+      // Use filteredRegressions (severity-filtered + allowlist-filtered) for pass/fail
+      if (result.filteredRegressions.length === 0) {
         const resolvedMsg = result.resolved.length > 0
           ? ` (${result.resolved.length} resolved)`
           : ''
-        report(onStep, 'check', `No new vulnerabilities${resolvedMsg}`, 'done')
+        const belowThreshold = result.regressions.length > result.filteredRegressions.length
+          ? ` (${result.regressions.length - result.filteredRegressions.length} below threshold)`
+          : ''
+        report(onStep, 'check', `No actionable regressions${resolvedMsg}${belowThreshold}`, 'done')
       } else {
-        const details = result.regressions
+        const details = result.filteredRegressions
           .map(r => `  ${r.severity.toUpperCase()} ${r.package}: ${r.title}`)
           .join('\n')
         report(onStep, 'check',
-          `${result.regressions.length} regression(s) found`, 'error', details)
+          `${result.filteredRegressions.length} regression(s) found`, 'error', details)
       }
 
       return result
+    }
+
+    case 'allowlist': {
+      report(onStep, 'allowlist', 'Updating allowlist', 'running')
+      const existing = await readBaseline(projectDir)
+      if (!existing) {
+        report(onStep, 'allowlist', 'No baseline found', 'error',
+          'Run `javi-forge security baseline` first to create a baseline')
+        throw new Error('No security baseline found. Run `javi-forge security baseline` first.')
+      }
+
+      // Add all current findings to the allowlist
+      const currentKeys = findings.map(makeFindingKey)
+      const existingAllowlist = new Set(existing.allowlist ?? [])
+      for (const key of currentKeys) {
+        existingAllowlist.add(key)
+      }
+
+      existing.allowlist = [...existingAllowlist]
+      existing.updatedAt = new Date().toISOString()
+      await writeBaseline(projectDir, existing)
+      report(onStep, 'allowlist',
+        `Allowlist updated: ${existingAllowlist.size} finding(s) allowed`, 'done',
+        baselinePath(projectDir))
+      return null
     }
   }
 }

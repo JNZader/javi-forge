@@ -13,6 +13,10 @@ export interface InitOptions {
   mock: boolean
   contextDir: boolean
   claudeMd: boolean
+  securityHooks: boolean
+  dockerDeploy: boolean
+  /** Service name for docker rollout (default: 'app') */
+  dockerServiceName: string
   dryRun: boolean
 }
 
@@ -65,6 +69,17 @@ export interface DoctorSection {
 
 export interface DoctorResult {
   sections: DoctorSection[]
+}
+
+// ── TDD Pipeline Enforcement ────────────────────────────────────────────────
+
+export type TddPipelineMode = 'strict' | 'warn'
+
+export interface TddPipelineResult {
+  installed: string[]
+  skipped: string[]
+  errors: string[]
+  mode: TddPipelineMode
 }
 
 // ── Plugin Marketplace ──────────────────────────────────────────────────────
@@ -187,10 +202,17 @@ export interface SecurityFinding {
 export interface SecurityBaseline {
   version: string
   createdAt: string
+  updatedAt?: string
   stack: string
   buildTool: string
   findings: SecurityFinding[]
   findingKeys: string[]
+  allowlist?: string[]
+}
+
+export interface SecurityCheckOptions {
+  minSeverity?: SecuritySeverity
+  staleDays?: number
 }
 
 export interface SecurityCheckResult {
@@ -198,6 +220,18 @@ export interface SecurityCheckResult {
   current: SecurityFinding[]
   regressions: SecurityFinding[]
   resolved: SecurityFinding[]
+  filteredRegressions: SecurityFinding[]
+  staleWarning?: string
+  summary: SecuritySummary
+}
+
+export interface SecuritySummary {
+  total: number
+  bySeverity: Record<SecuritySeverity, number>
+  regressionCount: number
+  resolvedCount: number
+  filteredCount: number
+  baselineAge: number
 }
 
 // ── Skills Doctor ────────────────────────────────────────────────────────────

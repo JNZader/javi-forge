@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "repoforge": {
+      "command": "npx",
+      "args": ["-y", "repoforge", "mcp"],
+      "env": {
+        "REPOFORGE_PROJECT": "__PROJECT_NAME__"
+      }
+    }
+  }
+}

@@ -1,0 +1,45 @@
+# ===========================================
+# RepoForge Call Graph — keep graph fresh on every push
+# ===========================================
+# Copy to: .github/workflows/repoforge-graph.yml
+# ===========================================
+
+name: RepoForge Graph
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repoforge-graph-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install repoforge
+        run: npm install -g repoforge
+
+      - name: Generate call graph
+        run: repoforge graph --type calls --output .repoforge/call-graph.json
+
+      - name: Upload graph artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: call-graph
+          path: .repoforge/call-graph.json
+          retention-days: 30

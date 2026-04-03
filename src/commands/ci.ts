@@ -4,6 +4,7 @@ import fs from 'fs-extra'
 import path from 'path'
 import type { Stack } from '../types/index.js'
 import { isDockerAvailable, ensureImage, runInContainer, openShell } from '../lib/docker.js'
+import { refreshContextDir } from '../lib/context.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -255,6 +256,21 @@ export async function runCI(options: CIOptions, onStep: CIStepCallback): Promise
       report(onStep, stepImage, 'Building Docker image', 'error', String(e))
       throw e
     }
+  }
+
+  // ── Refresh .context/ ────────────────────────────────────────────────────────
+  const stepContext = 'context-refresh'
+  report(onStep, stepContext, 'Refresh .context/ directory', 'running')
+  try {
+    const ctxResult = await refreshContextDir(projectDir)
+    if (ctxResult) {
+      report(onStep, stepContext, 'Refresh .context/ directory', 'done', 'INDEX.md + summary.md updated')
+    } else {
+      report(onStep, stepContext, 'Refresh .context/ directory', 'skipped', 'no .context/ or no manifest')
+    }
+  } catch (e) {
+    // Non-fatal: context refresh failure should not block CI
+    report(onStep, stepContext, 'Refresh .context/ directory', 'error', String(e))
   }
 
   // ── Lint ─────────────────────────────────────────────────────────────────────

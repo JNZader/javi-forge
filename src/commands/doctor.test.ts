@@ -42,16 +42,23 @@ vi.mock('../lib/plugin.js', () => ({
   listInstalledPlugins: vi.fn().mockResolvedValue([]),
 }))
 
+// ── Mock context module ─────────────────────────────────────────────────────
+vi.mock('../lib/context.js', () => ({
+  refreshContextDir: vi.fn().mockResolvedValue(null),
+}))
+
 import fs from 'fs-extra'
 import { execFile } from 'child_process'
 import { runDoctor } from './doctor.js'
 import { detectStack } from '../lib/common.js'
 import { listInstalledPlugins } from '../lib/plugin.js'
+import { refreshContextDir } from '../lib/context.js'
 
 const mockedFs = vi.mocked(fs)
 const mockedExecFile = vi.mocked(execFile)
 const mockedDetectStack = vi.mocked(detectStack)
 const mockedListPlugins = vi.mocked(listInstalledPlugins)
+const mockedRefreshContext = vi.mocked(refreshContextDir)
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -214,5 +221,36 @@ describe('runDoctor', () => {
     const structSection = result.sections.find(s => s.title === 'Framework Structure')!
     // Filtered: file1, file2 → 2 entries
     expect(structSection.checks[0].detail).toBe('2 entries')
+  })
+
+  it('shows context refresh ok when .context/ is updated', async () => {
+    mockedRefreshContext.mockResolvedValue({
+      index: '# test\n',
+      summary: '# test\n',
+      updated: true,
+    })
+
+    const result = await runDoctor('/test/project')
+    const ctxSection = result.sections.find(s => s.title === 'Context Directory')!
+    expect(ctxSection).toBeDefined()
+    expect(ctxSection.checks[0].status).toBe('ok')
+    expect(ctxSection.checks[0].detail).toContain('updated')
+  })
+
+  it('shows context refresh skip when no context dir', async () => {
+    mockedRefreshContext.mockResolvedValue(null)
+
+    const result = await runDoctor('/test/project')
+    const ctxSection = result.sections.find(s => s.title === 'Context Directory')!
+    expect(ctxSection.checks[0].status).toBe('skip')
+  })
+
+  it('shows context refresh fail on error', async () => {
+    mockedRefreshContext.mockRejectedValue(new Error('disk full'))
+
+    const result = await runDoctor('/test/project')
+    const ctxSection = result.sections.find(s => s.title === 'Context Directory')!
+    expect(ctxSection.checks[0].status).toBe('fail')
+    expect(ctxSection.checks[0].detail).toContain('disk full')
   })
 })

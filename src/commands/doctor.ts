@@ -4,6 +4,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { detectStack } from '../lib/common.js'
 import { listInstalledPlugins } from '../lib/plugin.js'
+import { refreshContextDir } from '../lib/context.js'
 import { FORGE_ROOT, TEMPLATES_DIR, MODULES_DIR, PLUGINS_DIR } from '../constants.js'
 import type { DoctorResult, DoctorSection, DoctorCheck, ForgeManifest } from '../types/index.js'
 
@@ -178,6 +179,32 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
     pluginChecks.push({ label: 'Plugins directory', status: 'skip', detail: 'not created yet' })
   }
   sections.push({ title: 'Plugins', checks: pluginChecks })
+
+  // ── 7. Context Directory Refresh ───────────────────────────────────────────
+  const contextChecks: DoctorCheck[] = []
+  try {
+    const result = await refreshContextDir(cwd)
+    if (result) {
+      contextChecks.push({
+        label: '.context/ refresh',
+        status: 'ok',
+        detail: 'INDEX.md + summary.md updated',
+      })
+    } else {
+      contextChecks.push({
+        label: '.context/ refresh',
+        status: 'skip',
+        detail: 'no .context/ or no manifest found',
+      })
+    }
+  } catch (e) {
+    contextChecks.push({
+      label: '.context/ refresh',
+      status: 'fail',
+      detail: `refresh failed: ${String(e)}`,
+    })
+  }
+  sections.push({ title: 'Context Directory', checks: contextChecks })
 
   return { sections }
 }

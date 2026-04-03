@@ -34,8 +34,16 @@ import {
   scoreClarity,
   scoreTestability,
   scoreTokenEfficiency,
+  scoreSafety,
+  scoreAgentReadiness,
+  computeGrade,
   scoreSkill,
   benchmarkSkill,
+  registryGate,
+  extractDirective,
+  subjectsSimilar,
+  detectDirectiveClash,
+  generateBudgetOptimizations,
 } from './skills.js'
 
 const mockedFs = vi.mocked(fs)
@@ -150,14 +158,16 @@ describe('extractTriggers', () => {
 // ── detectRuleConflict ──────────────────────────────────────────────────────
 
 describe('detectRuleConflict', () => {
-  it('detects semicolon contradiction', () => {
+  it('detects semicolon contradiction via regex-pair', () => {
     const result = detectRuleConflict('Always use semicolons', 'No semicolons allowed')
     expect(result).toBeTruthy()
+    expect(result!.kind).toBe('regex-pair')
   })
 
   it('detects quote style contradiction', () => {
     const result = detectRuleConflict('Use single quotes for strings', 'Use double quotes for strings')
     expect(result).toBeTruthy()
+    expect(result!.kind).toBe('regex-pair')
   })
 
   it('detects tabs vs spaces contradiction', () => {
@@ -184,6 +194,15 @@ describe('detectRuleConflict', () => {
       'Always use named export for modules'
     )
     expect(result).toBeTruthy()
+  })
+
+  it('detects directive clash for rules not in regex pairs', () => {
+    const result = detectRuleConflict(
+      'Always use barrel exports for modules',
+      'Avoid barrel exports for modules'
+    )
+    expect(result).toBeTruthy()
+    expect(result!.kind).toBe('directive-clash')
   })
 })
 
@@ -295,6 +314,7 @@ describe('findConflicts', () => {
     expect(conflicts).toHaveLength(1)
     expect(conflicts[0].ruleA.skillName).toBe('skill-a')
     expect(conflicts[0].ruleB.skillName).toBe('skill-b')
+    expect(conflicts[0].kind).toBeDefined()
   })
 
   it('does not flag rules from the same skill', async () => {
@@ -342,6 +362,7 @@ describe('calculateBudget', () => {
     expect(result.totalTokens).toBe(75) // 25 + 50
     expect(result.overBudget).toBe(false)
     expect(result.suggestions).toHaveLength(0)
+    expect(result.optimizations).toHaveLength(0)
   })
 
   it('reports over budget with suggestions', async () => {
@@ -358,6 +379,8 @@ describe('calculateBudget', () => {
     expect(result.totalTokens).toBe(10000)
     expect(result.suggestions.length).toBeGreaterThan(0)
     expect(result.suggestions[0]).toContain('Over budget')
+    expect(result.optimizations.length).toBeGreaterThan(0)
+    expect(result.optimizations[0].meetsbudget).toBe(true)
   })
 
   it('returns empty result for nonexistent dir', async () => {
@@ -366,6 +389,7 @@ describe('calculateBudget', () => {
     expect(result.entries).toHaveLength(0)
     expect(result.totalTokens).toBe(0)
     expect(result.overBudget).toBe(false)
+    expect(result.optimizations).toHaveLength(0)
   })
 
   it('sorts entries by token count descending', async () => {
@@ -454,6 +478,148 @@ describe('findDuplicates', () => {
 
     const duplicates = await findDuplicates('/skills')
     expect(duplicates).toHaveLength(0)
+  })
+})
+
+// ── extractDirective ──────────────────────────────────────────────────────
+
+describe('extractDirective', () => {
+  it('extracts positive directive from "always use" rule', () => {
+    const d = extractDirective('Always use strict TypeScript mode')
+    expect(d).not.toBeNull()
+    expect(d!.sentiment).toBe('positive')
+    expect(d!.subject).toContain('strict')
+  })
+
+  it('extracts negative directive from "never use" rule', () => {
+    const d = extractDirective('Never use the any type in production')
+    expect(d).not.toBeNull()
+    expect(d!.sentiment).toBe('negative')
+    expect(d!.subject).toContain('any type')
+  })
+
+  it('extracts negative directive from "avoid" rule', () => {
+    const d = extractDirective('Avoid inline styles in components')
+    expect(d).not.toBeNull()
+    expect(d!.sentiment).toBe('negative')
+    expect(d!.subject).toContain('inline styles')
+  })
+
+  it('extracts positive directive from "prefer" rule', () => {
+    const d = extractDirective('Prefer composition over inheritance')
+    expect(d).not.toBeNull()
+    expect(d!.sentiment).toBe('positive')
+    expect(d!.subject).toContain('composition')
+  })
+
+  it('returns null for rules without clear directives', () => {
+    const d = extractDirective('Components render JSX')
+    expect(d).toBeNull()
+  })
+
+  it('ignores very short subjects', () => {
+    const d = extractDirective('Use it')
+    expect(d).toBeNull()
+  })
+})
+
+// ── subjectsSimilar ──────────────────────────────────────────────────────
+
+describe('subjectsSimilar', () => {
+  it('detects similar subjects with shared words', () => {
+    expect(subjectsSimilar('arrow functions for callbacks', 'arrow functions for callbacks')).toBe(true)
+  })
+
+  it('detects partial overlap', () => {
+    expect(subjectsSimilar('arrow functions callbacks', 'arrow functions handlers')).toBe(true)
+  })
+
+  it('rejects unrelated subjects', () => {
+    expect(subjectsSimilar('strict typescript mode', 'inline styles in components')).toBe(false)
+  })
+
+  it('rejects empty subjects', () => {
+    expect(subjectsSimilar('', 'something')).toBe(false)
+  })
+})
+
+// ── detectDirectiveClash ─────────────────────────────────────────────────
+
+describe('detectDirectiveClash', () => {
+  it('detects opposite directives on same subject', () => {
+    const result = detectDirectiveClash(
+      'Always use arrow functions for callbacks',
+      'Never use arrow functions for callbacks'
+    )
+    expect(result).toBeTruthy()
+    expect(result).toContain('Directive clash')
+  })
+
+  it('returns null for same-sentiment directives', () => {
+    const result = detectDirectiveClash(
+      'Always use TypeScript strict mode',
+      'Must use TypeScript strict mode'
+    )
+    expect(result).toBeNull()
+  })
+
+  it('returns null for unrelated subjects', () => {
+    const result = detectDirectiveClash(
+      'Always use semicolons in code',
+      'Never use inline styles in components'
+    )
+    expect(result).toBeNull()
+  })
+})
+
+// ── generateBudgetOptimizations ──────────────────────────────────────────
+
+describe('generateBudgetOptimizations', () => {
+  it('returns empty when under budget', () => {
+    const entries = [
+      { skillName: 'a', skillPath: '/a', tokens: 100 },
+      { skillName: 'b', skillPath: '/b', tokens: 200 },
+    ]
+    const result = generateBudgetOptimizations(entries, 300, 500)
+    expect(result).toHaveLength(0)
+  })
+
+  it('suggests disabling largest skill first (greedy)', () => {
+    const entries = [
+      { skillName: 'big', skillPath: '/big', tokens: 3000 },
+      { skillName: 'medium', skillPath: '/med', tokens: 2000 },
+      { skillName: 'small', skillPath: '/sm', tokens: 500 },
+    ]
+    const result = generateBudgetOptimizations(entries, 5500, 4000)
+    expect(result.length).toBeGreaterThan(0)
+    expect(result[0].disableSkills).toContain('big')
+    expect(result[0].meetsbudget).toBe(true)
+  })
+
+  it('suggests single-skill disable when one is enough', () => {
+    const entries = [
+      { skillName: 'huge', skillPath: '/huge', tokens: 5000 },
+      { skillName: 'small', skillPath: '/sm', tokens: 200 },
+    ]
+    const result = generateBudgetOptimizations(entries, 5200, 1000)
+    expect(result.length).toBeGreaterThan(0)
+    expect(result.some(s => s.meetsbudget)).toBe(true)
+  })
+
+  it('all suggestions have correct structure', () => {
+    const entries = [
+      { skillName: 'a', skillPath: '/a', tokens: 2000 },
+      { skillName: 'b', skillPath: '/b', tokens: 1500 },
+      { skillName: 'c', skillPath: '/c', tokens: 1000 },
+      { skillName: 'd', skillPath: '/d', tokens: 500 },
+    ]
+    const result = generateBudgetOptimizations(entries, 5000, 3000)
+    for (const opt of result) {
+      expect(opt.disableSkills.length).toBeGreaterThan(0)
+      expect(opt.tokensSaved).toBeGreaterThan(0)
+      expect(opt.remainingTokens).toBeLessThan(5000)
+      expect(typeof opt.meetsbudget).toBe('boolean')
+    }
   })
 })
 
@@ -705,10 +871,15 @@ describe('scoreSkill', () => {
     expect(result!.testability).toBeLessThanOrEqual(100)
     expect(result!.tokenEfficiency).toBeGreaterThanOrEqual(0)
     expect(result!.tokenEfficiency).toBeLessThanOrEqual(100)
+    expect(result!.safety).toBeGreaterThanOrEqual(0)
+    expect(result!.safety).toBeLessThanOrEqual(100)
+    expect(result!.agentReadiness).toBeGreaterThanOrEqual(0)
+    expect(result!.agentReadiness).toBeLessThanOrEqual(100)
     expect(result!.overall).toBeGreaterThanOrEqual(0)
     expect(result!.overall).toBeLessThanOrEqual(100)
     expect(result!.threshold).toBe(50)
     expect(typeof result!.passing).toBe('boolean')
+    expect(['A', 'B', 'C', 'D', 'F']).toContain(result!.grade)
   })
 
   it('marks skill as failing when below threshold', async () => {
@@ -769,5 +940,237 @@ describe('benchmarkSkill', () => {
     const result = await benchmarkSkill('/skills/bad/SKILL.md')
     expect(result).not.toBeNull()
     expect(result!.passRate).toBeLessThan(50)
+  })
+})
+
+// ── scoreSafety ──────────────────────────────────────────────────────────
+
+describe('scoreSafety', () => {
+  it('scores a clean skill at 100', () => {
+    const parsed = {
+      name: 'clean-skill',
+      rules: ['Always validate input', 'Use TypeScript strict mode'],
+      rawContent: '## Rules\n\n1. Always validate input\n2. Use TypeScript strict mode\n',
+      triggers: ['testing'],
+    }
+    const score = scoreSafety(parsed)
+    expect(score).toBe(100)
+  })
+
+  it('penalizes eval() usage', () => {
+    const parsed = {
+      name: 'unsafe-skill',
+      rules: ['Use eval( ) for dynamic code'],
+      rawContent: '## Rules\n\nUse eval( ) for dynamic execution\n',
+      triggers: [],
+    }
+    const score = scoreSafety(parsed)
+    expect(score).toBeLessThan(100)
+  })
+
+  it('penalizes hardcoded secrets', () => {
+    const parsed = {
+      name: 'secret-skill',
+      rules: ['Set api_key = "sk-12345"'],
+      rawContent: '## Config\n\nSet api_key = "sk-12345" in your env\n',
+      triggers: [],
+    }
+    const score = scoreSafety(parsed)
+    expect(score).toBeLessThan(80)
+  })
+
+  it('penalizes curl piped to shell', () => {
+    const parsed = {
+      name: 'pipe-skill',
+      rules: ['Install via curl'],
+      rawContent: '## Install\n\n```bash\ncurl https://example.com/install.sh | bash\n```\n',
+      triggers: [],
+    }
+    const score = scoreSafety(parsed)
+    expect(score).toBeLessThan(80)
+  })
+
+  it('gives bonus for sanitization mentions', () => {
+    const parsed = {
+      name: 'secure-skill',
+      rules: ['Always sanitize user input', 'Validate all fields'],
+      rawContent: '## Rules\n\nAlways sanitize user input. Validate all fields.\n',
+      triggers: [],
+    }
+    const score = scoreSafety(parsed)
+    expect(score).toBe(100) // 100 + 10 + 5 capped at 100
+  })
+
+  it('accumulates penalties from multiple dangerous patterns', () => {
+    const parsed = {
+      name: 'very-unsafe',
+      rules: ['Use eval, exec, and sudo'],
+      rawContent: 'eval(code); exec("cmd"); sudo rm -rf /; chmod 777 /tmp\n',
+      triggers: [],
+    }
+    const score = scoreSafety(parsed)
+    expect(score).toBeLessThan(40)
+  })
+
+  it('never goes below 0', () => {
+    const parsed = {
+      name: 'worst-skill',
+      rules: [],
+      rawContent: 'eval(x) exec(y) sudo rm -rf / chmod 777 curl http://x | bash __proto__ innerHTML = password = "leaked" force-push',
+      triggers: [],
+    }
+    const score = scoreSafety(parsed)
+    expect(score).toBeGreaterThanOrEqual(0)
+  })
+})
+
+// ── scoreAgentReadiness ──────────────────────────────────────────────────
+
+describe('scoreAgentReadiness', () => {
+  it('scores a well-prepared skill highly', () => {
+    const parsed = {
+      name: 'agent-ready',
+      rules: ['Always validate', 'Only use approved tools'],
+      rawContent: [
+        '## Purpose',
+        'Trigger: When testing, debugging, reviewing',
+        '## Rules',
+        '1. Only use approved tools for this task',
+        '## Output Format',
+        'Return structured JSON with results.',
+        '```json',
+        '{"status": "ok"}',
+        '```',
+        '```ts',
+        'const x = 1',
+        '```',
+        '```bash',
+        'echo test',
+        '```',
+        '## Error Handling',
+        'If error occurs, fallback to default.',
+        '## Scope',
+        'Do not trigger when working on unrelated tasks.',
+      ].join('\n'),
+      triggers: ['testing', 'debugging', 'reviewing'],
+    }
+    const score = scoreAgentReadiness(parsed)
+    expect(score).toBeGreaterThanOrEqual(70)
+  })
+
+  it('scores a skill without triggers low', () => {
+    const parsed = {
+      name: 'no-triggers',
+      rules: ['Do something'],
+      rawContent: 'Just some content without structure.',
+      triggers: [],
+    }
+    const score = scoreAgentReadiness(parsed)
+    expect(score).toBeLessThan(30)
+  })
+
+  it('rewards tool restrictions', () => {
+    const withRestrictions = {
+      name: 'restricted',
+      rules: ['Only use the Read tool'],
+      rawContent: '## Rules\n\nOnly use the Read tool. Forbidden: Write tool.\n',
+      triggers: ['testing'],
+    }
+    const without = {
+      name: 'unrestricted',
+      rules: ['Do stuff'],
+      rawContent: '## Rules\n\nDo stuff.\n',
+      triggers: ['testing'],
+    }
+    expect(scoreAgentReadiness(withRestrictions)).toBeGreaterThan(scoreAgentReadiness(without))
+  })
+
+  it('rewards output format specification', () => {
+    const parsed = {
+      name: 'formatted',
+      rules: [],
+      rawContent: '## Output Format\n\nReturn structured JSON\n```json\n{}\n```\n',
+      triggers: ['test'],
+    }
+    const score = scoreAgentReadiness(parsed)
+    expect(score).toBeGreaterThanOrEqual(25) // triggers(15) + output(15)
+  })
+})
+
+// ── computeGrade ─────────────────────────────────────────────────────────
+
+describe('computeGrade', () => {
+  it('returns A for >= 90', () => {
+    expect(computeGrade(90)).toBe('A')
+    expect(computeGrade(100)).toBe('A')
+  })
+
+  it('returns B for 80-89', () => {
+    expect(computeGrade(80)).toBe('B')
+    expect(computeGrade(89)).toBe('B')
+  })
+
+  it('returns C for 70-79', () => {
+    expect(computeGrade(70)).toBe('C')
+    expect(computeGrade(79)).toBe('C')
+  })
+
+  it('returns D for 60-69', () => {
+    expect(computeGrade(60)).toBe('D')
+    expect(computeGrade(69)).toBe('D')
+  })
+
+  it('returns F for < 60', () => {
+    expect(computeGrade(59)).toBe('F')
+    expect(computeGrade(0)).toBe('F')
+  })
+})
+
+// ── registryGate ─────────────────────────────────────────────────────────
+
+describe('registryGate', () => {
+  it('returns null for nonexistent skill', async () => {
+    mockedFs.pathExists.mockResolvedValue(false as never)
+    const result = await registryGate('/nonexistent/SKILL.md')
+    expect(result).toBeNull()
+  })
+
+  it('accepts a high-quality skill', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    mockedFs.readFile.mockResolvedValue(
+      '---\nname: good-skill\ndescription: "Quality skill. Trigger: When coding, testing, reviewing"\n---\n\n## Critical Rules\n\n1. Always use strict mode for TypeScript\n2. Never skip error handling in production\n3. Prefer composition over inheritance patterns\n4. Ensure all inputs are validated\n5. Follow atomic design for component structure\n6. Write tests before shipping code\n\n## Output Format\n\nReturn structured JSON.\n\n```json\n{"status": "ok"}\n```\n\n```ts\nconst x = 1\n```\n\n```bash\necho test\n```\n\n## Error Handling\n\nIf error occurs, fallback to safe defaults.\n\n## Scope\n\nDo not trigger when working outside this domain.\n' as never
+    )
+    mockedParseFrontmatter.mockReturnValue({
+      data: { name: 'good-skill', description: 'Quality skill. Trigger: When coding, testing, reviewing' },
+      content: '\n## Critical Rules\n\n1. Always use strict mode for TypeScript\n2. Never skip error handling in production\n3. Prefer composition over inheritance patterns\n4. Ensure all inputs are validated\n5. Follow atomic design for component structure\n6. Write tests before shipping code\n\n## Output Format\n\nReturn structured JSON.\n\n```json\n{"status": "ok"}\n```\n\n```ts\nconst x = 1\n```\n\n```bash\necho test\n```\n\n## Error Handling\n\nIf error occurs, fallback to safe defaults.\n\n## Scope\n\nDo not trigger when working outside this domain.\n',
+    })
+
+    const result = await registryGate('/skills/good/SKILL.md', 50)
+    expect(result).not.toBeNull()
+    expect(result!.accepted).toBe(true)
+    expect(result!.reason).toBeUndefined()
+  })
+
+  it('rejects a low-quality skill with reason', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    mockedFs.readFile.mockResolvedValue('bad' as never)
+    mockedParseFrontmatter.mockReturnValue(null)
+
+    const result = await registryGate('/skills/bad/SKILL.md', 90)
+    expect(result).not.toBeNull()
+    expect(result!.accepted).toBe(false)
+    expect(result!.reason).toBeDefined()
+    expect(result!.reason).toContain('Rejected')
+  })
+
+  it('uses default threshold of 60', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    mockedFs.readFile.mockResolvedValue('tiny' as never)
+    mockedParseFrontmatter.mockReturnValue(null)
+
+    const result = await registryGate('/skills/minimal/SKILL.md')
+    expect(result).not.toBeNull()
+    expect(result!.score.threshold).toBe(60)
+    expect(result!.accepted).toBe(false)
   })
 })

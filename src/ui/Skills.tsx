@@ -96,6 +96,23 @@ export default function Skills({ mode, budget, deep, skillsDir }: SkillsProps) {
             ))}
           </Box>
 
+          {/* Budget Optimizations */}
+          {result.budget.optimizations.length > 0 && (
+            <Box flexDirection="column" marginBottom={1}>
+              <Text bold color={theme.warning}>
+                {'  '}Optimization Suggestions
+              </Text>
+              {result.budget.optimizations.map((opt, i) => (
+                <Box key={`opt-${i}`} flexDirection="column" marginLeft={4}>
+                  <Text color={opt.meetsbudget ? theme.success : theme.warning}>
+                    {opt.meetsbudget ? '\u2713' : '~'}{' '}
+                    Disable [{opt.disableSkills.join(', ')}] {'\u2192'} save ~{opt.tokensSaved} tokens ({opt.remainingTokens} remaining)
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+          )}
+
           {/* Conflicts Section (deep mode) */}
           {result.conflicts.length > 0 && (
             <Box flexDirection="column" marginBottom={1}>
@@ -106,6 +123,7 @@ export default function Skills({ mode, budget, deep, skillsDir }: SkillsProps) {
                 <Box key={`conflict-${i}`} flexDirection="column" marginLeft={4}>
                   <Text color={theme.error}>
                     {'\u2717'} {c.ruleA.skillName} vs {c.ruleB.skillName}
+                    <Text color={theme.muted} dimColor> [{c.kind}]</Text>
                   </Text>
                   <Text color={theme.muted} dimColor>
                     {'  '}{c.reason}

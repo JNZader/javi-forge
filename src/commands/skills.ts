@@ -6,11 +6,15 @@ import type {
   SkillConflict,
   SkillBudgetEntry,
   SkillBudgetResult,
+  SkillBudgetSuggestion,
   SkillDuplicate,
   SkillDoctorResult,
   SkillScore,
+  SkillGrade,
   SkillBenchmarkCheck,
   SkillBenchmarkResult,
+  SkillRegistryGateResult,
+  ConflictKind,
 } from '../types/index.js'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -43,6 +47,199 @@ const CONTRADICTION_PAIRS: [RegExp, RegExp][] = [
   [/\bavoid\b/i,                  /\bprefer\b/i],
   [/\bdo not\b/i,                 /\bmust\b/i],
 ]
+
+// ── Directive extraction (semantic conflict detection) ─────────────────────
+
+/** A directive is a sentiment + subject extracted from a rule */
+export interface RuleDirective {
+  sentiment: 'positive' | 'negative'
+  subject: string
+}
+
+/**
+ * Positive and negative signal patterns.
+ * Order matters — first match wins, so more specific patterns go first.
+ */
+const POSITIVE_SIGNALS: RegExp[] = [
+  /\balways use\b/i, /\bmust use\b/i, /\bprefer\b/i,
+  /\balways\b/i, /\bmust\b/i, /\brequire\b/i,
+  /\buse\b/i, /\benable\b/i, /\bshould\b/i,
+]
+
+const NEGATIVE_SIGNALS: RegExp[] = [
+  /\bnever use\b/i, /\bdo not use\b/i, /\bdon't use\b/i,
+  /\bnever\b/i, /\bavoid\b/i, /\bdo not\b/i, /\bdon't\b/i,
+  /\bdisable\b/i, /\bno\b/i, /\bforbid\b/i,
+]
+
+/**
+ * Extract a directive (sentiment + subject) from a rule string.
+ * Returns null if the rule has no clear directive.
+ */
+export function extractDirective(rule: string): RuleDirective | null {
+  const norm = rule.toLowerCase().trim()
+
+  // Try negative first (more specific: "never use X" before "use X")
+  for (const pattern of NEGATIVE_SIGNALS) {
+    const match = norm.match(pattern)
+    if (match) {
+      const subject = norm.slice(match.index! + match[0].length).trim()
+        .replace(/^(the|a|an)\s+/i, '')
+        .replace(/[.;,!]+$/, '')
+        .trim()
+      if (subject.length >= 3) {
+        return { sentiment: 'negative', subject }
+      }
+    }
+  }
+
+  for (const pattern of POSITIVE_SIGNALS) {
+    const match = norm.match(pattern)
+    if (match) {
+      const subject = norm.slice(match.index! + match[0].length).trim()
+        .replace(/^(the|a|an)\s+/i, '')
+        .replace(/[.;,!]+$/, '')
+        .trim()
+      if (subject.length >= 3) {
+        return { sentiment: 'positive', subject }
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Check if two subjects are similar enough to be "about the same thing".
+ * Uses simple word-overlap (Jaccard-like) — no external NLP needed.
+ */
+export function subjectsSimilar(a: string, b: string, threshold = 0.5): boolean {
+  const wordsA = new Set(a.split(/\s+/).filter(w => w.length > 2))
+  const wordsB = new Set(b.split(/\s+/).filter(w => w.length > 2))
+
+  if (wordsA.size === 0 || wordsB.size === 0) return false
+
+  let intersection = 0
+  for (const w of wordsA) {
+    if (wordsB.has(w)) intersection++
+  }
+
+  const union = new Set([...wordsA, ...wordsB]).size
+  return union > 0 && (intersection / union) >= threshold
+}
+
+/**
+ * Detect a directive clash between two rules:
+ * opposite sentiments about the same subject.
+ */
+export function detectDirectiveClash(ruleA: string, ruleB: string): string | null {
+  const dA = extractDirective(ruleA)
+  const dB = extractDirective(ruleB)
+
+  if (!dA || !dB) return null
+  if (dA.sentiment === dB.sentiment) return null
+
+  if (subjectsSimilar(dA.subject, dB.subject)) {
+    const posRule = dA.sentiment === 'positive' ? ruleA : ruleB
+    const negRule = dA.sentiment === 'negative' ? ruleA : ruleB
+    return `Directive clash on "${dA.subject}": positive="${posRule.slice(0, 50)}" vs negative="${negRule.slice(0, 50)}"`
+  }
+
+  return null
+}
+
+// ── Budget Optimization ─────────────────────────────────────────────────────
+
+/**
+ * Generate minimal disable sets to bring total tokens under budget.
+ * Uses a greedy approach: disable largest skills first until under budget.
+ * Returns up to 3 alternative optimization suggestions.
+ */
+export function generateBudgetOptimizations(
+  entries: SkillBudgetEntry[],
+  totalTokens: number,
+  budget: number,
+): SkillBudgetSuggestion[] {
+  if (totalTokens <= budget) return []
+
+  const excess = totalTokens - budget
+  const suggestions: SkillBudgetSuggestion[] = []
+
+  // Strategy 1: Greedy — disable largest skills first
+  const greedy = greedyDisableSet(entries, excess)
+  suggestions.push(makeSuggestion(greedy, entries, totalTokens, budget))
+
+  // Strategy 2: Minimal count — find smallest number of skills to disable
+  // (try single-skill solutions first, then pairs)
+  const singles = entries.filter(e => e.tokens >= excess)
+  if (singles.length > 0) {
+    // Pick the smallest single that still meets budget
+    const sorted = [...singles].sort((a, b) => a.tokens - b.tokens)
+    const minimal = sorted[0]
+    if (minimal.skillName !== greedy[0]?.skillName) {
+      suggestions.push(makeSuggestion([minimal], entries, totalTokens, budget))
+    }
+  }
+
+  // Strategy 3: If we have many small skills, show a "trim many" approach
+  // Disable the bottom 50% by token count (many small skills)
+  if (entries.length >= 4) {
+    const sortedAsc = [...entries].sort((a, b) => a.tokens - b.tokens)
+    const halfCount = Math.ceil(sortedAsc.length / 2)
+    const bottomHalf = sortedAsc.slice(0, halfCount)
+    const saved = bottomHalf.reduce((s, e) => s + e.tokens, 0)
+    if (saved >= excess) {
+      const trimSet = greedyDisableSet(
+        [...bottomHalf].sort((a, b) => b.tokens - a.tokens),
+        excess,
+      )
+      const names = new Set(trimSet.map(e => e.skillName))
+      const alreadySuggested = suggestions.some(s =>
+        s.disableSkills.length === names.size &&
+        s.disableSkills.every(n => names.has(n)),
+      )
+      if (!alreadySuggested) {
+        suggestions.push(makeSuggestion(trimSet, entries, totalTokens, budget))
+      }
+    }
+  }
+
+  return suggestions
+}
+
+/** Greedy: pick largest entries until saved >= excess */
+function greedyDisableSet(
+  entries: SkillBudgetEntry[],
+  excess: number,
+): SkillBudgetEntry[] {
+  const sorted = [...entries].sort((a, b) => b.tokens - a.tokens)
+  const result: SkillBudgetEntry[] = []
+  let saved = 0
+
+  for (const entry of sorted) {
+    if (saved >= excess) break
+    result.push(entry)
+    saved += entry.tokens
+  }
+
+  return result
+}
+
+function makeSuggestion(
+  disableSet: SkillBudgetEntry[],
+  _allEntries: SkillBudgetEntry[],
+  totalTokens: number,
+  budget: number,
+): SkillBudgetSuggestion {
+  const tokensSaved = disableSet.reduce((s, e) => s + e.tokens, 0)
+  const remaining = totalTokens - tokensSaved
+  return {
+    disableSkills: disableSet.map(e => e.skillName),
+    tokensSaved,
+    remainingTokens: remaining,
+    meetsbudget: remaining <= budget,
+  }
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -161,18 +358,31 @@ export async function discoverSkills(skillsDir: string): Promise<string[]> {
 
 // ── Conflict Detection ──────────────────────────────────────────────────────
 
-/** Check if two rules contradict each other */
-export function detectRuleConflict(ruleA: string, ruleB: string): string | null {
+/** Check if two rules contradict each other (regex pairs + directive clash) */
+export function detectRuleConflict(
+  ruleA: string,
+  ruleB: string,
+): { reason: string; kind: ConflictKind } | null {
   const normA = ruleA.toLowerCase().trim()
   const normB = ruleB.toLowerCase().trim()
 
+  // Strategy 1: Hardcoded regex pairs (fast, high confidence)
   for (const [patternA, patternB] of CONTRADICTION_PAIRS) {
     if (
       (patternA.test(normA) && patternB.test(normB)) ||
       (patternB.test(normA) && patternA.test(normB))
     ) {
-      return `"${ruleA.slice(0, 60)}" vs "${ruleB.slice(0, 60)}"`
+      return {
+        reason: `"${ruleA.slice(0, 60)}" vs "${ruleB.slice(0, 60)}"`,
+        kind: 'regex-pair',
+      }
     }
+  }
+
+  // Strategy 2: Semantic directive clash (broader, medium confidence)
+  const clashReason = detectDirectiveClash(ruleA, ruleB)
+  if (clashReason) {
+    return { reason: clashReason, kind: 'directive-clash' }
   }
 
   return null
@@ -208,9 +418,9 @@ export async function findConflicts(skillsDir: string): Promise<SkillConflict[]>
       // Skip rules from the same skill
       if (a.skillName === b.skillName) continue
 
-      const reason = detectRuleConflict(a.rule, b.rule)
-      if (reason) {
-        conflicts.push({ ruleA: a, ruleB: b, reason })
+      const result = detectRuleConflict(a.rule, b.rule)
+      if (result) {
+        conflicts.push({ ruleA: a, ruleB: b, reason: result.reason, kind: result.kind })
       }
     }
   }
@@ -261,7 +471,9 @@ export async function calculateBudget(
     }
   }
 
-  return { entries, totalTokens, budget, overBudget, suggestions }
+  const optimizations = generateBudgetOptimizations(entries, totalTokens, budget)
+
+  return { entries, totalTokens, budget, overBudget, suggestions, optimizations }
 }
 
 // ── Duplicate Detection ─────────────────────────────────────────────────────
@@ -367,6 +579,27 @@ const ACTION_VERBS = [
   /\bensure\b/i, /\bwrite\b/i, /\bcreate\b/i, /\bfollow\b/i,
   /\bdo not\b/i, /\bapply\b/i, /\bimplement\b/i, /\brun\b/i,
 ]
+
+/** Dangerous patterns in skill content that indicate safety risks */
+const DANGEROUS_PATTERNS: { pattern: RegExp; label: string; weight: number }[] = [
+  { pattern: /\beval\s*\(/i, label: 'eval() usage', weight: 20 },
+  { pattern: /\bexec\s*\(/i, label: 'exec() usage', weight: 15 },
+  { pattern: /\bchild_process\b/i, label: 'child_process reference', weight: 10 },
+  { pattern: /\brm\s+-rf\b/i, label: 'rm -rf command', weight: 20 },
+  { pattern: /\bcurl\b.*\|\s*(?:sh|bash)\b/i, label: 'curl piped to shell', weight: 25 },
+  { pattern: /\bsudo\b/i, label: 'sudo usage', weight: 15 },
+  { pattern: /\bchmod\s+777\b/i, label: 'chmod 777', weight: 15 },
+  { pattern: /\b(?:password|secret|token|api_key)\s*[:=]\s*['"][^'"]+['"]/i, label: 'hardcoded secret', weight: 25 },
+  { pattern: /\b__proto__\b|\bconstructor\s*\[/i, label: 'prototype pollution', weight: 20 },
+  { pattern: /\binnerHTML\s*=/i, label: 'innerHTML assignment (XSS risk)', weight: 10 },
+  { pattern: /\bdangerouslySetInnerHTML\b/i, label: 'dangerouslySetInnerHTML', weight: 10 },
+  { pattern: /\bno[- ]?verify\b.*\bgit\b|\bgit\b.*\bno[- ]?verify\b/i, label: 'git --no-verify bypass', weight: 10 },
+  { pattern: /\bforce[- ]?push\b|\bpush\s+--force\b/i, label: 'force push instruction', weight: 10 },
+  { pattern: /\bdisable.*(?:eslint|typescript|security)\b/i, label: 'linter/security disable', weight: 10 },
+]
+
+/** Default registry quality threshold */
+const DEFAULT_REGISTRY_THRESHOLD = 60
 
 /**
  * Score completeness (0-100): frontmatter fields, critical rules, structure.
@@ -527,7 +760,93 @@ export function scoreTokenEfficiency(parsed: {
 }
 
 /**
- * Score a skill on all 4 dimensions and compute overall.
+ * Score safety (0-100): absence of dangerous patterns, injection risks, credential leaks.
+ * Starts at 100 and deducts for each dangerous pattern found.
+ */
+export function scoreSafety(parsed: {
+  name: string
+  rules: string[]
+  rawContent: string
+  triggers: string[]
+}): number {
+  let score = 100
+
+  for (const { pattern, weight } of DANGEROUS_PATTERNS) {
+    if (pattern.test(parsed.rawContent)) {
+      score -= weight
+    }
+  }
+
+  // Bonus: skill explicitly mentions security best practices (+10, capped at 100)
+  if (/\bsanitiz/i.test(parsed.rawContent) || /\bescap/i.test(parsed.rawContent)) {
+    score += 10
+  }
+  if (/\bvalidat/i.test(parsed.rawContent)) {
+    score += 5
+  }
+
+  return Math.max(0, Math.min(score, 100))
+}
+
+/**
+ * Score agent readiness (0-100): how well-prepared a skill is for AI agent consumption.
+ * Checks for triggers, tool restrictions, examples, structured output, and error handling.
+ */
+export function scoreAgentReadiness(parsed: {
+  name: string
+  rules: string[]
+  rawContent: string
+  triggers: string[]
+}): number {
+  let score = 0
+
+  // Has triggers for auto-activation (25 pts)
+  if (parsed.triggers.length >= 3) score += 25
+  else if (parsed.triggers.length >= 1) score += 15
+
+  // Has tool restrictions or permissions (e.g., "only use", "do not use", "allowed tools") (20 pts)
+  if (/\b(?:only use|allowed tools?|restricted to|do not use|forbidden|prohibited)\b/i.test(parsed.rawContent)) {
+    score += 20
+  }
+
+  // Has examples with expected input/output or code blocks (20 pts)
+  const codeBlocks = (parsed.rawContent.match(/```/g) ?? []).length / 2
+  if (codeBlocks >= 3) score += 20
+  else if (codeBlocks >= 1) score += 10
+
+  // Has structured output format (JSON, YAML, or explicit format section) (15 pts)
+  if (/\boutput format\b/i.test(parsed.rawContent) || /\breturn.*(?:json|yaml|structured)\b/i.test(parsed.rawContent)) {
+    score += 15
+  } else if (/```(?:json|yaml)/i.test(parsed.rawContent)) {
+    score += 10
+  }
+
+  // Has error handling guidance ("if error", "when fails", "fallback") (10 pts)
+  if (/\b(?:if.*(?:error|fail)|fallback|edge case|error handling)\b/i.test(parsed.rawContent)) {
+    score += 10
+  }
+
+  // Has a clear "when NOT to use" or scope boundary (10 pts)
+  if (/\b(?:do not trigger|not applicable|out of scope|when not to)\b/i.test(parsed.rawContent)) {
+    score += 10
+  }
+
+  return Math.min(score, 100)
+}
+
+/**
+ * Convert numeric score to letter grade.
+ */
+export function computeGrade(overall: number): SkillGrade {
+  if (overall >= 90) return 'A'
+  if (overall >= 80) return 'B'
+  if (overall >= 70) return 'C'
+  if (overall >= 60) return 'D'
+  return 'F'
+}
+
+/**
+ * Score a skill on all 6 dimensions and compute overall with letter grade.
  */
 export async function scoreSkill(
   skillPath: string,
@@ -540,14 +859,21 @@ export async function scoreSkill(
   const clarity = scoreClarity(parsed)
   const testability = scoreTestability(parsed)
   const tokenEfficiency = scoreTokenEfficiency(parsed)
+  const safety = scoreSafety(parsed)
+  const agentReadiness = scoreAgentReadiness(parsed)
 
-  // Weighted average: completeness 30%, clarity 25%, testability 25%, token-efficiency 20%
+  // Weighted average: completeness 20%, clarity 20%, testability 15%,
+  // token-efficiency 15%, safety 15%, agent-readiness 15%
   const overall = Math.round(
-    completeness * 0.30 +
-    clarity * 0.25 +
-    testability * 0.25 +
-    tokenEfficiency * 0.20
+    completeness * 0.20 +
+    clarity * 0.20 +
+    testability * 0.15 +
+    tokenEfficiency * 0.15 +
+    safety * 0.15 +
+    agentReadiness * 0.15
   )
+
+  const grade = computeGrade(overall)
 
   return {
     skillName: parsed.name,
@@ -555,9 +881,45 @@ export async function scoreSkill(
     clarity,
     testability,
     tokenEfficiency,
+    safety,
+    agentReadiness,
     overall,
+    grade,
     threshold,
     passing: overall >= threshold,
+  }
+}
+
+/**
+ * Gate check for registry inclusion. Rejects skills below the configured threshold.
+ */
+export async function registryGate(
+  skillPath: string,
+  threshold: number = DEFAULT_REGISTRY_THRESHOLD
+): Promise<SkillRegistryGateResult | null> {
+  const score = await scoreSkill(skillPath, threshold)
+  if (!score) return null
+
+  const accepted = score.passing
+  let reason: string | undefined
+
+  if (!accepted) {
+    const failures: string[] = []
+    if (score.safety < 60) failures.push(`safety=${score.safety}`)
+    if (score.completeness < 40) failures.push(`completeness=${score.completeness}`)
+    if (score.clarity < 40) failures.push(`clarity=${score.clarity}`)
+    if (score.agentReadiness < 30) failures.push(`agent-readiness=${score.agentReadiness}`)
+
+    reason = failures.length > 0
+      ? `Rejected (${score.grade}, ${score.overall}/100): weak dimensions — ${failures.join(', ')}`
+      : `Rejected (${score.grade}, ${score.overall}/100): below threshold ${threshold}`
+  }
+
+  return {
+    skillName: score.skillName,
+    score,
+    accepted,
+    reason,
   }
 }
 

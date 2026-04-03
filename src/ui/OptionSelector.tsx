@@ -15,11 +15,12 @@ const OPTIONS: OptionItem[] = [
   { id: 'sdd',        label: 'SDD (openspec/)',     description: 'Spec-Driven Development workflow',  default: true },
   { id: 'contextDir', label: '.context/ Directory', description: 'AI-ready project context files',    default: true },
   { id: 'claudeMd',   label: 'CLAUDE.md',           description: 'AI agent project instructions',     default: true },
-  { id: 'ghagga',     label: 'GHAGGA Review',       description: 'Multi-agent AI code review system', default: false },
+  { id: 'ghagga',        label: 'GHAGGA Review',       description: 'Multi-agent AI code review system',       default: false },
+  { id: 'securityHooks', label: 'Security Hooks',      description: '6-layer git hooks + runtime AI guardrails', default: true },
 ]
 
 interface Props {
-  onConfirm: (selected: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean }) => void
+  onConfirm: (selected: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean; securityHooks: boolean }) => void
   presetGhagga?: boolean
 }
 
@@ -36,11 +37,12 @@ export default function OptionSelector({ onConfirm, presetGhagga = false }: Prop
   useEffect(() => {
     if (isCI) {
       onConfirm({
-        aiSync:     selected.has('aiSync'),
-        sdd:        selected.has('sdd'),
-        contextDir: selected.has('contextDir'),
-        claudeMd:   selected.has('claudeMd'),
-        ghagga:     selected.has('ghagga'),
+        aiSync:        selected.has('aiSync'),
+        sdd:           selected.has('sdd'),
+        contextDir:    selected.has('contextDir'),
+        claudeMd:      selected.has('claudeMd'),
+        ghagga:        selected.has('ghagga'),
+        securityHooks: selected.has('securityHooks'),
       })
     }
   }, [isCI]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -58,11 +60,12 @@ export default function OptionSelector({ onConfirm, presetGhagga = false }: Prop
     }
     if (key.return) {
       onConfirm({
-        aiSync:     selected.has('aiSync'),
-        sdd:        selected.has('sdd'),
-        contextDir: selected.has('contextDir'),
-        claudeMd:   selected.has('claudeMd'),
-        ghagga:     selected.has('ghagga'),
+        aiSync:        selected.has('aiSync'),
+        sdd:           selected.has('sdd'),
+        contextDir:    selected.has('contextDir'),
+        claudeMd:      selected.has('claudeMd'),
+        ghagga:        selected.has('ghagga'),
+        securityHooks: selected.has('securityHooks'),
       })
     }
   }, { isActive: !isCI })

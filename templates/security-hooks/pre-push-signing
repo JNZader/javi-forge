@@ -1,0 +1,67 @@
+#!/bin/bash
+# =============================================================================
+# SECURITY LAYER 4: Code Signing Verification (pre-push)
+# =============================================================================
+# Checks that commits being pushed are GPG/SSH signed (if configured).
+# Warns but does not block if signing is not configured.
+#
+# To skip:  git push --no-verify (NOT recommended)
+# =============================================================================
+
+set -e
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+echo "SECURITY [4/6]: Code signing check..."
+
+# Check if commit signing is configured
+SIGN_KEY=$(git config --get user.signingkey 2>/dev/null || echo "")
+GPG_SIGN=$(git config --get commit.gpgsign 2>/dev/null || echo "false")
+GPG_FORMAT=$(git config --get gpg.format 2>/dev/null || echo "openpgp")
+
+if [ -z "$SIGN_KEY" ] || [ "$GPG_SIGN" != "true" ]; then
+    echo -e "${YELLOW}  Commit signing not configured. Skipping verification.${NC}"
+    echo -e "${CYAN}  To enable: git config --global commit.gpgsign true${NC}"
+    echo -e "${CYAN}  GPG:  git config --global user.signingkey <KEY_ID>${NC}"
+    echo -e "${CYAN}  SSH:  git config --global gpg.format ssh && git config --global user.signingkey ~/.ssh/id_ed25519.pub${NC}"
+    exit 0
+fi
+
+# Verify recent commits are signed
+REMOTE="$1"
+URL="$2"
+
+while read -r LOCAL_REF LOCAL_OID REMOTE_REF REMOTE_OID; do
+    if [ "$LOCAL_OID" = "0000000000000000000000000000000000000000" ]; then
+        continue  # Branch deletion
+    fi
+
+    # Check last 10 commits (or all new ones)
+    RANGE=""
+    if [ "$REMOTE_OID" = "0000000000000000000000000000000000000000" ]; then
+        RANGE="$LOCAL_OID"
+    else
+        RANGE="$REMOTE_OID..$LOCAL_OID"
+    fi
+
+    UNSIGNED=$(git log --format='%H %G?' "$RANGE" 2>/dev/null | grep -E ' N$' | head -5 || true)
+
+    if [ -n "$UNSIGNED" ]; then
+        echo -e "${YELLOW}  Warning: unsigned commits detected:${NC}"
+        echo "$UNSIGNED" | while read -r hash status; do
+            MSG=$(git log --format='%s' -1 "$hash" 2>/dev/null)
+            echo -e "${YELLOW}    ${hash:0:8} $MSG${NC}"
+        done
+        echo -e "${YELLOW}  Signing is configured but some commits are unsigned.${NC}"
+        echo -e "${CYAN}  To sign: git commit -S -m 'message'${NC}"
+        echo -e "${CYAN}  To amend: git commit --amend -S${NC}"
+        # Warning only, don't block
+    fi
+done
+
+echo -e "${GREEN}  Signing check complete.${NC}"
+exit 0

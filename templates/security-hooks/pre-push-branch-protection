@@ -1,0 +1,62 @@
+#!/bin/bash
+# =============================================================================
+# SECURITY LAYER 5: Branch Protection (pre-push)
+# =============================================================================
+# Prevents direct pushes to protected branches (main, master, release/*).
+# Forces use of pull requests for protected branches.
+#
+# To skip:  git push --no-verify (NOT recommended)
+# =============================================================================
+
+set -e
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+echo "SECURITY [5/6]: Branch protection check..."
+
+# Protected branch patterns
+PROTECTED_BRANCHES=(
+    "main"
+    "master"
+    "release/*"
+    "production"
+    "staging"
+)
+
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+
+if [ -z "$CURRENT_BRANCH" ]; then
+    echo -e "${YELLOW}  Could not determine current branch. Skipping.${NC}"
+    exit 0
+fi
+
+for pattern in "${PROTECTED_BRANCHES[@]}"; do
+    # Support glob patterns
+    if [[ "$CURRENT_BRANCH" == $pattern ]]; then
+        # Check if we're on CI (allow CI pushes)
+        if [ -n "$CI" ] || [ -n "$GITHUB_ACTIONS" ] || [ -n "$GITLAB_CI" ]; then
+            echo -e "${GREEN}  CI environment detected. Allowing push to $CURRENT_BRANCH.${NC}"
+            exit 0
+        fi
+
+        echo -e ""
+        echo -e "${RED}PUSH BLOCKED: Direct push to protected branch '$CURRENT_BRANCH'.${NC}"
+        echo -e ""
+        echo -e "${YELLOW}  Protected branches require pull requests:${NC}"
+        for b in "${PROTECTED_BRANCHES[@]}"; do
+            echo -e "${YELLOW}    - $b${NC}"
+        done
+        echo -e ""
+        echo -e "${YELLOW}  Create a feature branch and open a PR instead:${NC}"
+        echo -e "${GREEN}    git checkout -b feat/my-feature${NC}"
+        echo -e "${GREEN}    git push -u origin feat/my-feature${NC}"
+        echo -e "${GREEN}    gh pr create${NC}"
+        exit 1
+    fi
+done
+
+echo -e "${GREEN}  Branch '$CURRENT_BRANCH' is not protected. OK.${NC}"
+exit 0

@@ -1,0 +1,83 @@
+#!/bin/bash
+# =============================================================================
+# SECURITY LAYER 2: Dependency Audit (pre-push)
+# =============================================================================
+# Runs dependency vulnerability audit before pushing.
+# Checks for known CVEs in project dependencies.
+#
+# Supports: npm/pnpm/yarn, pip-audit, cargo audit, govulncheck
+# To skip:  git push --no-verify (NOT recommended)
+# =============================================================================
+
+set -e
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+echo "SECURITY [2/6]: Dependency audit..."
+
+# Auto-detect stack and run appropriate audit
+if [ -f "package.json" ]; then
+    if [ -f "pnpm-lock.yaml" ]; then
+        echo -e "${YELLOW}  Running: pnpm audit${NC}"
+        pnpm audit --audit-level=high 2>/dev/null || {
+            echo -e "${RED}  High/critical vulnerabilities found in dependencies.${NC}"
+            echo -e "${YELLOW}  Run 'pnpm audit' for details, 'pnpm audit --fix' to auto-fix.${NC}"
+            exit 1
+        }
+    elif [ -f "yarn.lock" ]; then
+        echo -e "${YELLOW}  Running: yarn npm audit${NC}"
+        yarn npm audit --severity high 2>/dev/null || {
+            echo -e "${RED}  High/critical vulnerabilities found in dependencies.${NC}"
+            echo -e "${YELLOW}  Run 'yarn npm audit' for details.${NC}"
+            exit 1
+        }
+    else
+        echo -e "${YELLOW}  Running: npm audit${NC}"
+        npm audit --audit-level=high 2>/dev/null || {
+            echo -e "${RED}  High/critical vulnerabilities found in dependencies.${NC}"
+            echo -e "${YELLOW}  Run 'npm audit' for details, 'npm audit fix' to auto-fix.${NC}"
+            exit 1
+        }
+    fi
+elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
+    if command -v pip-audit &>/dev/null; then
+        echo -e "${YELLOW}  Running: pip-audit${NC}"
+        pip-audit 2>/dev/null || {
+            echo -e "${RED}  Vulnerabilities found in Python dependencies.${NC}"
+            echo -e "${YELLOW}  Run 'pip-audit' for details.${NC}"
+            exit 1
+        }
+    else
+        echo -e "${YELLOW}  pip-audit not installed. Skipping. Install: pip install pip-audit${NC}"
+    fi
+elif [ -f "Cargo.toml" ]; then
+    if command -v cargo-audit &>/dev/null; then
+        echo -e "${YELLOW}  Running: cargo audit${NC}"
+        cargo audit 2>/dev/null || {
+            echo -e "${RED}  Vulnerabilities found in Rust dependencies.${NC}"
+            echo -e "${YELLOW}  Run 'cargo audit' for details.${NC}"
+            exit 1
+        }
+    else
+        echo -e "${YELLOW}  cargo-audit not installed. Skipping. Install: cargo install cargo-audit${NC}"
+    fi
+elif [ -f "go.mod" ]; then
+    if command -v govulncheck &>/dev/null; then
+        echo -e "${YELLOW}  Running: govulncheck${NC}"
+        govulncheck ./... 2>/dev/null || {
+            echo -e "${RED}  Vulnerabilities found in Go dependencies.${NC}"
+            echo -e "${YELLOW}  Run 'govulncheck ./...' for details.${NC}"
+            exit 1
+        }
+    else
+        echo -e "${YELLOW}  govulncheck not installed. Skipping. Install: go install golang.org/x/vuln/cmd/govulncheck@latest${NC}"
+    fi
+else
+    echo -e "${YELLOW}  No supported dependency manifest found. Skipping.${NC}"
+fi
+
+echo -e "${GREEN}  Dependency audit passed.${NC}"
+exit 0

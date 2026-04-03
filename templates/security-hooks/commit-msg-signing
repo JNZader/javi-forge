@@ -1,0 +1,29 @@
+#!/bin/bash
+# =============================================================================
+# SECURITY LAYER 6: Commit Message Signing Reminder (commit-msg)
+# =============================================================================
+# Reminds developers to sign commits if signing is configured but the
+# current commit is not signed. Non-blocking — just a nudge.
+#
+# This complements layer 4 (pre-push signing) with an earlier reminder.
+# =============================================================================
+
+set -e
+
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+echo "SECURITY [6/6]: Commit signing reminder..."
+
+GPG_SIGN=$(git config --get commit.gpgsign 2>/dev/null || echo "false")
+
+if [ "$GPG_SIGN" = "true" ]; then
+    echo -e "${GREEN}  Commit signing is enabled. Good.${NC}"
+else
+    echo -e "${YELLOW}  Tip: Enable commit signing for supply-chain security.${NC}"
+    echo -e "${CYAN}  git config commit.gpgsign true${NC}"
+fi
+
+exit 0

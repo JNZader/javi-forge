@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/claude-code/main/settings-schema.json",
+  "_comment": "Runtime security hooks (kiteguard-style) — scaffolded by javi-forge",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hook": "COMMAND=\"$CLAUDE_TOOL_INPUT\"\nBLOCKED_PATTERNS=(\n  'rm -rf /'\n  'rm -rf ~'\n  'chmod 777'\n  'curl.*|.*sh'\n  'wget.*|.*sh'\n  'eval.*\\$'\n  'base64.*-d.*|.*sh'\n  ':(){:|:&};:'\n)\nfor pattern in \"${BLOCKED_PATTERNS[@]}\"; do\n  if echo \"$COMMAND\" | grep -qE \"$pattern\"; then\n    echo \"BLOCKED: Dangerous command pattern detected: $pattern\"\n    exit 2\n  fi\ndone\nexit 0",
+        "description": "Block dangerous shell commands (rm -rf /, chmod 777, pipe-to-sh, fork bombs)"
+      },
+      {
+        "matcher": "Bash",
+        "hook": "COMMAND=\"$CLAUDE_TOOL_INPUT\"\nSENSITIVE_PATHS=(\n  '.env'\n  '.env.local'\n  '.env.production'\n  'credentials'\n  'secrets'\n  '.ssh'\n  '.gnupg'\n  '.aws/credentials'\n)\nfor path in \"${SENSITIVE_PATHS[@]}\"; do\n  if echo \"$COMMAND\" | grep -qE \"(cat|less|head|tail|bat|read).*$path\"; then\n    echo \"BLOCKED: Attempt to read sensitive file: $path\"\n    exit 2\n  fi\ndone\nexit 0",
+        "description": "Prevent reading sensitive files (.env, credentials, SSH keys)"
+      },
+      {
+        "matcher": "Write|Edit",
+        "hook": "INPUT=\"$CLAUDE_TOOL_INPUT\"\nPROTECTED_FILES=(\n  '.env'\n  '.env.production'\n  'credentials.json'\n  'serviceAccountKey.json'\n  '.ssh/'\n  '.gnupg/'\n)\nfor pf in \"${PROTECTED_FILES[@]}\"; do\n  if echo \"$INPUT\" | grep -q \"$pf\"; then\n    echo \"BLOCKED: Cannot modify protected file: $pf\"\n    exit 2\n  fi\ndone\nexit 0",
+        "description": "Prevent writing to credential and secret files"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hook": "OUTPUT=\"$CLAUDE_TOOL_OUTPUT\"\nLEAK_PATTERNS=(\n  'AKIA[0-9A-Z]{16}'\n  'ghp_[A-Za-z0-9]{36}'\n  'sk_live_[0-9a-zA-Z]{24,}'\n  'xox[baprs]-[0-9a-zA-Z-]+'\n  '-----BEGIN.*PRIVATE KEY-----'\n)\nfor pattern in \"${LEAK_PATTERNS[@]}\"; do\n  if echo \"$OUTPUT\" | grep -qE \"$pattern\"; then\n    echo \"WARNING: Command output may contain secrets. Review carefully.\"\n    exit 0\n  fi\ndone\nexit 0",
+        "description": "Warn if command output contains potential secrets"
+      }
+    ]
+  }
+}

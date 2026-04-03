@@ -43,6 +43,9 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
     mock: false,
     contextDir: true,
     claudeMd: false,
+    securityHooks: false,
+    dockerDeploy: false,
+    dockerServiceName: 'app',
     dryRun: false,
     ...overrides,
   }

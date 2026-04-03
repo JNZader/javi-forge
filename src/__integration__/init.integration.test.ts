@@ -47,6 +47,11 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
     sdd: true,
     ghagga: true,
     mock: false,
+    contextDir: true,
+    claudeMd: true,
+    securityHooks: false,
+    dockerDeploy: false,
+    dockerServiceName: 'app',
     dryRun: false,
     ...overrides,
     // Always override projectDir based on projectName

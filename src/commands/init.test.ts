@@ -7,10 +7,12 @@ vi.mock('fs-extra', () => {
     pathExists: vi.fn(),
     readFile: vi.fn(),
     readJson: vi.fn(),
+    readdir: vi.fn(),
     writeFile: vi.fn(),
     writeJson: vi.fn(),
     copy: vi.fn(),
     ensureDir: vi.fn(),
+    chmod: vi.fn(),
   }
   return { default: mockFs, ...mockFs }
 })
@@ -27,6 +29,8 @@ vi.mock('../lib/template.js', () => ({
   generateDependabotYml: vi.fn().mockResolvedValue('dependabot-content'),
   generateCIWorkflow: vi.fn().mockResolvedValue('ci-workflow-content'),
   getCIDestination: vi.fn().mockReturnValue('.github/workflows/ci.yml'),
+  generateDeployWorkflow: vi.fn().mockResolvedValue('deploy-workflow-content'),
+  getDeployDestination: vi.fn().mockReturnValue('.github/workflows/deploy.yml'),
 }))
 
 // ── Mock context module ──────────────────────────────────────────────────────
@@ -60,7 +64,7 @@ vi.mock('../lib/stack-detector.js', () => ({
 import fs from 'fs-extra'
 import { execFile } from 'child_process'
 import { initProject } from './init.js'
-import { generateCIWorkflow, getCIDestination } from '../lib/template.js'
+import { generateCIWorkflow, getCIDestination, generateDeployWorkflow, getDeployDestination } from '../lib/template.js'
 import { generateContextDir } from '../lib/context.js'
 import { generateSmartClaudeMd } from '../lib/claudemd.js'
 import { detectProjectStack } from '../lib/stack-detector.js'
@@ -69,6 +73,8 @@ const mockedFs = vi.mocked(fs)
 const mockedExecFile = vi.mocked(execFile)
 const mockedGenerateCIWorkflow = vi.mocked(generateCIWorkflow)
 const mockedGetCIDestination = vi.mocked(getCIDestination)
+const mockedGenerateDeployWorkflow = vi.mocked(generateDeployWorkflow)
+const mockedGetDeployDestination = vi.mocked(getDeployDestination)
 const mockedGenerateContextDir = vi.mocked(generateContextDir)
 const mockedGenerateSmartClaudeMd = vi.mocked(generateSmartClaudeMd)
 const mockedDetectProjectStack = vi.mocked(detectProjectStack)
@@ -82,6 +88,8 @@ beforeEach(() => {
   mockedFs.writeJson.mockResolvedValue(undefined as never)
   mockedFs.copy.mockResolvedValue(undefined as never)
   mockedFs.ensureDir.mockResolvedValue(undefined as never)
+  mockedFs.readdir.mockResolvedValue(['pre-commit-secrets', 'pre-push-deps', 'pre-commit-permissions', 'pre-push-signing', 'pre-push-branch-protection', 'commit-msg-signing', 'claude-settings-security.json'] as never)
+  mockedFs.chmod.mockResolvedValue(undefined as never)
 
   // Default: execFile succeeds (promisified version)
   mockedExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
@@ -92,6 +100,10 @@ beforeEach(() => {
   // Default: CI workflow available
   mockedGenerateCIWorkflow.mockResolvedValue('ci-workflow-content')
   mockedGetCIDestination.mockReturnValue('.github/workflows/ci.yml')
+
+  // Default: deploy workflow available
+  mockedGenerateDeployWorkflow.mockResolvedValue('deploy-workflow-content')
+  mockedGetDeployDestination.mockReturnValue('.github/workflows/deploy.yml')
 
   // Default: context dir generation
   mockedGenerateContextDir.mockResolvedValue({
@@ -123,6 +135,9 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
     mock: false,
     contextDir: true,
     claudeMd: true,
+    securityHooks: true,
+    dockerDeploy: false,
+    dockerServiceName: 'app',
     dryRun: false,
     ...overrides,
   }
@@ -463,5 +478,159 @@ describe('initProject', () => {
     expect(mockedFs.writeJson).toHaveBeenCalled()
     const [, manifestData] = mockedFs.writeJson.mock.calls[0]
     expect((manifestData as any).modules).toContain('claude-md')
+  })
+
+  // ── Docker zero-downtime deploy step ────────────��───────────────────────
+
+  it('docker-deploy step reports done when dockerDeploy is true', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('deploy.yml')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ dockerDeploy: true }))
+    const deployStep = steps.find(s => s.id === 'docker-deploy' && s.status === 'done')
+    expect(deployStep).toBeDefined()
+    expect(deployStep!.detail).toContain('deploy.yml')
+    expect(mockedGenerateDeployWorkflow).toHaveBeenCalledWith('github', 'app')
+  })
+
+  it('docker-deploy step is skipped when dockerDeploy is false', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    const steps = await collectSteps(makeOptions({ dockerDeploy: false }))
+    const deployStep = steps.find(s => s.id === 'docker-deploy' && s.status === 'skipped')
+    expect(deployStep).toBeDefined()
+    expect(deployStep!.detail).toContain('not selected')
+  })
+
+  it('docker-deploy step reports already exists when deploy.yml is present', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    const steps = await collectSteps(makeOptions({ dockerDeploy: true }))
+    const deployStep = steps.find(s => s.id === 'docker-deploy' && s.status === 'done' && s.detail === 'already exists')
+    expect(deployStep).toBeDefined()
+  })
+
+  it('docker-deploy uses custom service name', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('deploy.yml')) return false as never
+      return true as never
+    })
+
+    await collectSteps(makeOptions({ dockerDeploy: true, dockerServiceName: 'web' }))
+    expect(mockedGenerateDeployWorkflow).toHaveBeenCalledWith('github', 'web')
+  })
+
+  it('docker-deploy dry-run does not write file', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('deploy.yml')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ dockerDeploy: true, dryRun: true }))
+    const deployStep = steps.find(s => s.id === 'docker-deploy' && s.status === 'done')
+    expect(deployStep).toBeDefined()
+    expect(deployStep!.detail).toContain('dry-run')
+    const deployWrites = mockedFs.writeFile.mock.calls.filter(
+      (call: any[]) => String(call[0]).includes('deploy.yml')
+    )
+    expect(deployWrites).toHaveLength(0)
+  })
+
+  it('manifest includes docker-deploy module when dockerDeploy is true', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    await collectSteps(makeOptions({ dockerDeploy: true }))
+    expect(mockedFs.writeJson).toHaveBeenCalled()
+    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    expect((manifestData as any).modules).toContain('docker-deploy')
+  })
+
+  // ── Security hooks step ──────────────────────────────────────────────────
+
+  it('security-hooks step copies git hooks and runtime settings when enabled', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      // settings.json does not exist yet
+      if (s.endsWith('settings.json')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ securityHooks: true }))
+    const secStep = steps.find(s => s.id === 'security-hooks' && s.status === 'done')
+    expect(secStep).toBeDefined()
+    expect(secStep!.detail).toContain('6 git layers')
+
+    // Should copy hook files (6 git hooks, not the JSON)
+    const copyCalls = mockedFs.copy.mock.calls.map((c: any[]) => String(c[0]))
+    const securityCopies = copyCalls.filter((p: string) => p.includes('security-hooks'))
+    expect(securityCopies.length).toBeGreaterThanOrEqual(6)
+
+    // Should chmod each git hook
+    expect(mockedFs.chmod).toHaveBeenCalled()
+  })
+
+  it('security-hooks step is skipped when securityHooks is false', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    const steps = await collectSteps(makeOptions({ securityHooks: false }))
+    const secStep = steps.find(s => s.id === 'security-hooks' && s.status === 'skipped')
+    expect(secStep).toBeDefined()
+    expect(secStep!.detail).toContain('not selected')
+  })
+
+  it('security-hooks dry-run writes nothing', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ securityHooks: true, dryRun: true }))
+    const secStep = steps.find(s => s.id === 'security-hooks' && s.status === 'done')
+    expect(secStep).toBeDefined()
+    expect(secStep!.detail).toContain('dry-run')
+
+    // No copy calls for security hooks in dry-run
+    const securityCopies = mockedFs.copy.mock.calls.filter(
+      (call: any[]) => String(call[0]).includes('security-hooks')
+    )
+    expect(securityCopies).toHaveLength(0)
+  })
+
+  it('security-hooks reports error when templates not found', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.includes('security-hooks') && !s.includes('.javi-forge')) return false as never
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ securityHooks: true }))
+    const secStep = steps.find(s => s.id === 'security-hooks' && s.status === 'error')
+    expect(secStep).toBeDefined()
+    expect(secStep!.detail).toContain('templates not found')
+  })
+
+  it('manifest includes security-hooks module when securityHooks is true', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    await collectSteps(makeOptions({ securityHooks: true }))
+    expect(mockedFs.writeJson).toHaveBeenCalled()
+    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    expect((manifestData as any).modules).toContain('security-hooks')
   })
 })

@@ -4,7 +4,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { InitOptions, InitStep, ForgeManifest } from '../types/index.js'
 import { backupIfExists, ensureDirExists } from '../lib/common.js'
-import { generateDependabotYml, generateCIWorkflow, getCIDestination } from '../lib/template.js'
+import { generateDependabotYml, generateCIWorkflow, getCIDestination, generateDeployWorkflow, getDeployDestination } from '../lib/template.js'
 import { generateContextDir } from '../lib/context.js'
 import { generateSmartClaudeMd } from '../lib/claudemd.js'
 import { detectProjectStack } from '../lib/stack-detector.js'
@@ -13,6 +13,7 @@ import {
   TEMPLATES_DIR,
   MODULES_DIR,
   CI_LOCAL_DIR,
+  SECURITY_HOOKS_DIR,
 } from '../constants.js'
 
 const execFileAsync = promisify(execFile)
@@ -31,7 +32,7 @@ export async function initProject(
   options: InitOptions,
   onStep: StepCallback
 ): Promise<void> {
-  const { projectDir, projectName, stack, ciProvider, memory, aiSync, sdd, ghagga, contextDir, claudeMd, dryRun } = options
+  const { projectDir, projectName, stack, ciProvider, memory, aiSync, sdd, ghagga, contextDir, claudeMd, securityHooks, dryRun } = options
 
   // Ensure project directory exists before any steps
   if (!dryRun && projectDir) {
@@ -373,7 +374,84 @@ ENABLE_WEBHOOKS=false
     report(onStep, stepClaudeMd, 'Generate CLAUDE.md', 'error', String(e))
   }
 
-  // ── Step 13: Write manifest ───────────────────────────────────────────────
+  // ── Step 13: Docker zero-downtime deploy ───────────────────────────────────
+  const stepDeploy = 'docker-deploy'
+  report(onStep, stepDeploy, 'Scaffold Docker zero-downtime deploy', 'running')
+  try {
+    if (options.dockerDeploy) {
+      const deployDest = getDeployDestination(ciProvider)
+      if (deployDest) {
+        const fullDest = path.join(projectDir, deployDest)
+        if (await fs.pathExists(fullDest)) {
+          report(onStep, stepDeploy, 'Scaffold Docker zero-downtime deploy', 'done', 'already exists')
+        } else {
+          const serviceName = options.dockerServiceName || 'app'
+          const content = await generateDeployWorkflow(ciProvider, serviceName)
+          if (content) {
+            if (!dryRun) {
+              await backupIfExists(fullDest)
+              await ensureDirExists(path.dirname(fullDest))
+              await fs.writeFile(fullDest, content, 'utf-8')
+            }
+            report(onStep, stepDeploy, 'Scaffold Docker zero-downtime deploy', 'done',
+              dryRun ? `dry-run: would create ${deployDest}` : deployDest)
+          } else {
+            report(onStep, stepDeploy, 'Scaffold Docker zero-downtime deploy', 'error', `no deploy template for ${ciProvider}`)
+          }
+        }
+      } else {
+        report(onStep, stepDeploy, 'Scaffold Docker zero-downtime deploy', 'error', `no deploy destination for ${ciProvider}`)
+      }
+    } else {
+      report(onStep, stepDeploy, 'Scaffold Docker zero-downtime deploy', 'skipped', 'not selected')
+    }
+  } catch (e) {
+    report(onStep, stepDeploy, 'Scaffold Docker zero-downtime deploy', 'error', String(e))
+  }
+
+  // ── Step 14: Security hooks scaffold ────────────────────────────────────────
+  const stepSecurity = 'security-hooks'
+  report(onStep, stepSecurity, 'Scaffold security hooks', 'running')
+  try {
+    if (securityHooks) {
+      if (await fs.pathExists(SECURITY_HOOKS_DIR)) {
+        if (!dryRun) {
+          // Copy 6-layer git security hooks into ci-local/hooks/security/
+          const secHooksDest = path.join(projectDir, 'ci-local', 'hooks', 'security')
+          await ensureDirExists(secHooksDest)
+          const hookFiles = await fs.readdir(SECURITY_HOOKS_DIR)
+          const gitHooks = hookFiles.filter(f => !f.endsWith('.json'))
+          for (const hook of gitHooks) {
+            const src = path.join(SECURITY_HOOKS_DIR, hook)
+            const dest = path.join(secHooksDest, hook)
+            await fs.copy(src, dest, { overwrite: false })
+            await fs.chmod(dest, 0o755)
+          }
+
+          // Copy runtime security settings (kiteguard-style) to .claude/
+          const settingsSrc = path.join(SECURITY_HOOKS_DIR, 'claude-settings-security.json')
+          if (await fs.pathExists(settingsSrc)) {
+            const claudeDir = path.join(projectDir, '.claude')
+            await ensureDirExists(claudeDir)
+            const settingsDest = path.join(claudeDir, 'settings.json')
+            if (!await fs.pathExists(settingsDest)) {
+              await fs.copy(settingsSrc, settingsDest)
+            }
+          }
+        }
+        report(onStep, stepSecurity, 'Scaffold security hooks', 'done',
+          dryRun ? 'dry-run: would scaffold security hooks' : '6 git layers + runtime hooks')
+      } else {
+        report(onStep, stepSecurity, 'Scaffold security hooks', 'error', 'security-hooks templates not found')
+      }
+    } else {
+      report(onStep, stepSecurity, 'Scaffold security hooks', 'skipped', 'not selected')
+    }
+  } catch (e) {
+    report(onStep, stepSecurity, 'Scaffold security hooks', 'error', String(e))
+  }
+
+  // ── Step 15: Write manifest ───────────────────────────────────────────────
   const stepManifest = 'manifest'
   report(onStep, stepManifest, 'Write forge manifest', 'running')
   try {
@@ -395,6 +473,8 @@ ENABLE_WEBHOOKS=false
           ...(aiSync ? ['ai-config'] : []),
           ...(contextDir ? ['context'] : []),
           ...(claudeMd ? ['claude-md'] : []),
+          ...(options.dockerDeploy ? ['docker-deploy'] : []),
+          ...(securityHooks ? ['security-hooks'] : []),
         ],
       }
       await fs.writeJson(path.join(manifestDir, 'manifest.json'), manifest, { spaces: 2 })

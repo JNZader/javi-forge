@@ -19,6 +19,9 @@ export const WORKFLOWS_DIR = path.join(FORGE_ROOT, 'workflows')
 /** CI-local directory */
 export const CI_LOCAL_DIR = path.join(FORGE_ROOT, 'ci-local')
 
+/** Security hooks template directory */
+export const SECURITY_HOOKS_DIR = path.join(TEMPLATES_DIR, 'security-hooks')
+
 /** Dependabot fragment directory */
 export const DEPENDABOT_FRAGMENTS_DIR = path.join(TEMPLATES_DIR, 'common', 'dependabot')
 
@@ -178,6 +181,20 @@ export const STACK_CONTEXT_MAP: Record<string, StackContextEntry> = {
     conventions: 'Follow language-specific best practices',
     entryPoint: 'src/index',
   },
+}
+
+/** Deploy template filename mapping (per CI provider) */
+export const DEPLOY_TEMPLATE_MAP: Record<string, string> = {
+  github: 'deploy-docker-zero-downtime.yml',
+  gitlab: 'deploy-docker-zero-downtime.yml',
+  woodpecker: 'deploy-docker-zero-downtime.yml',
+}
+
+/** Deploy destination path mapping (per CI provider) */
+export const DEPLOY_DESTINATION_MAP: Record<string, string> = {
+  github: '.github/workflows/deploy.yml',
+  gitlab: '.gitlab-ci-deploy.yml',
+  woodpecker: '.woodpecker/deploy.yml',
 }
 
 /** Stack-to-CI template filename mapping */

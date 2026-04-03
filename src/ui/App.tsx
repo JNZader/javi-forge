@@ -55,6 +55,7 @@ export default function App({
   const [contextDir, setContextDir] = useState(true)
   const [claudeMd, setClaudeMd] = useState(true)
   const [ghagga, setGhagga] = useState(presetGhagga)
+  const [securityHooks, setSecurityHooks] = useState(true)
   const [steps, setSteps] = useState<InitStep[]>([])
   const [startTime] = useState(Date.now())
 
@@ -79,12 +80,13 @@ export default function App({
     setStage('options')
   }
 
-  const handleOptionsConfirm = async (opts: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean }) => {
+  const handleOptionsConfirm = async (opts: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean; securityHooks: boolean }) => {
     setAiSync(opts.aiSync)
     setSdd(opts.sdd)
     setContextDir(opts.contextDir)
     setClaudeMd(opts.claudeMd)
     setGhagga(opts.ghagga)
+    setSecurityHooks(opts.securityHooks)
     setStage('running')
 
     await initProject(
@@ -99,6 +101,7 @@ export default function App({
         ghagga: opts.ghagga,
         contextDir: opts.contextDir,
         claudeMd: opts.claudeMd,
+        securityHooks: opts.securityHooks,
         mock: presetMock,
         dryRun,
       },

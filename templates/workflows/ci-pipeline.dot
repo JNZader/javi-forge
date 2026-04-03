@@ -1,0 +1,15 @@
+digraph "CI Pipeline" {
+  rankdir=LR
+
+  lint [label="Lint" check="has-linter"]
+  test [label="Test" check="has-tests"]
+  security [label="Security Scan" check="has-security"]
+  build [label="Build"]
+  deploy [label="Deploy" check="has-dockerfile"]
+
+  lint -> test
+  lint -> security
+  test -> build
+  security -> build
+  build -> deploy
+}

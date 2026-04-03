@@ -14,9 +14,12 @@ export interface InitOptions {
   contextDir: boolean
   claudeMd: boolean
   securityHooks: boolean
+  codeGraph: boolean
   dockerDeploy: boolean
   /** Service name for docker rollout (default: 'app') */
   dockerServiceName: string
+  /** Scaffold local AI dev stack (Ollama + optional services) */
+  localAi: boolean
   dryRun: boolean
 }
 
@@ -348,4 +351,55 @@ export interface SkillBenchmarkResult {
   skillName: string
   checks: SkillBenchmarkCheck[]
   passRate: number
+}
+
+// ── Workflow Graphs ─────────────────────────────────────────────────────────
+
+const WORKFLOW_FORMAT = {
+  DOT: 'dot',
+  MERMAID: 'mermaid',
+} as const
+
+export type WorkflowFormat = (typeof WORKFLOW_FORMAT)[keyof typeof WORKFLOW_FORMAT]
+
+const WORKFLOW_VALIDATION_STATUS = {
+  PASS: 'pass',
+  FAIL: 'fail',
+  SKIP: 'skip',
+} as const
+
+export type WorkflowValidationStatus = (typeof WORKFLOW_VALIDATION_STATUS)[keyof typeof WORKFLOW_VALIDATION_STATUS]
+
+export { WORKFLOW_FORMAT, WORKFLOW_VALIDATION_STATUS }
+
+export interface WorkflowNode {
+  id: string
+  label: string
+  check?: string
+  metadata?: Record<string, string>
+}
+
+export interface WorkflowEdge {
+  from: string
+  to: string
+  label?: string
+}
+
+export interface WorkflowGraph {
+  name: string
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+  format: WorkflowFormat
+}
+
+export interface WorkflowValidationResult {
+  node: string
+  status: WorkflowValidationStatus
+  detail?: string
+}
+
+export interface WorkflowDiscoveryEntry {
+  name: string
+  path: string
+  format: WorkflowFormat
 }

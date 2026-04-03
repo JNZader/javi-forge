@@ -35,6 +35,9 @@ const cli = meow(`
     tdd pipeline      Install TDD pipeline pre-push hook (--mode strict|warn)
     analyze           Run repoforge skills analysis
     doctor            Show health report
+    workflow show     Render a workflow graph as ASCII (--template <name> or file path)
+    workflow validate Validate project state against a workflow graph
+    workflow list     List available workflows and built-in templates
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
     plugin list       List installed plugins
@@ -67,6 +70,7 @@ const cli = meow(`
     --project-name  Project name (skips name prompt)
     --ghagga        Enable GHAGGA review system
     --mock          Enable mock-first mode (no real API keys needed)
+    --local-ai      Include local AI dev stack (Ollama + Docker Compose)
     --batch         Non-interactive mode (auto-proceed, no keyboard input)
     --deep          Enable deep analysis (conflict + duplicate detection)
     --budget, -b    Token budget limit for skills (default: 8000)
@@ -114,6 +118,7 @@ const cli = meow(`
     projectName: { type: 'string',  default: '' },
     ghagga:      { type: 'boolean', default: false },
     mock:        { type: 'boolean', default: false },
+    localAi:     { type: 'boolean', default: false },
     batch:       { type: 'boolean', default: false },
     // CI flags
     quick:       { type: 'boolean', default: false },
@@ -136,6 +141,8 @@ const cli = meow(`
     // Skill publish flags
     author:      { type: 'string',  default: '' },
     repo:        { type: 'string',  default: '' },
+    // Workflow flags
+    template:    { type: 'string',  default: '' },
   }
 })
 
@@ -245,6 +252,53 @@ switch (subcommand) {
       </CIContextProvider>,
       { stdin: inkStdin }
     )
+    break
+  }
+
+  case 'workflow': {
+    const workflowAction = cli.input[1] as string | undefined
+    const VALID_WORKFLOW_ACTIONS = ['show', 'validate', 'list']
+    if (!workflowAction || !VALID_WORKFLOW_ACTIONS.includes(workflowAction)) {
+      console.error('Usage: javi-forge workflow <show|validate|list>')
+      console.error('  show      Render a workflow graph as ASCII')
+      console.error('  validate  Validate project state against a workflow graph')
+      console.error('  list      List available workflows and built-in templates')
+      console.error('')
+      console.error('  Options:')
+      console.error('    --template <name>  Use a built-in template (ci-pipeline, release, feature-flow)')
+      console.error('    <file>             Path to a .dot or .mermaid file')
+      process.exit(1)
+      break
+    }
+
+    const { runWorkflowShow, runWorkflowValidate, runWorkflowList } = await import('./commands/workflow.js')
+    const workflowTarget = cli.input[2]
+    const workflowTemplate = cli.flags.template || undefined
+    const onStep = (step: { id: string; label: string; status: string; detail?: string }) => {
+      const icon = step.status === 'done' ? '\u2713'
+        : step.status === 'error' ? '\u2717'
+        : '\u25CB'
+      console.log(`${icon} ${step.label}`)
+      if (step.detail) console.log(`  ${step.detail}`)
+    }
+
+    try {
+      if (workflowAction === 'show') {
+        const output = await runWorkflowShow(process.cwd(), onStep, { target: workflowTarget, template: workflowTemplate })
+        if (output) console.log('\n' + output)
+        else process.exit(1)
+      } else if (workflowAction === 'validate') {
+        const output = await runWorkflowValidate(process.cwd(), onStep, { target: workflowTarget, template: workflowTemplate })
+        if (output) console.log('\n' + output)
+        else process.exit(1)
+      } else {
+        const output = await runWorkflowList(process.cwd(), onStep)
+        console.log('\n' + output)
+      }
+    } catch (e) {
+      console.error(`\u2717 ${e instanceof Error ? e.message : String(e)}`)
+      process.exit(1)
+    }
     break
   }
 
@@ -484,6 +538,7 @@ switch (subcommand) {
           presetName={presetName}
           presetGhagga={cli.flags.ghagga}
           presetMock={cli.flags.mock ?? false}
+          presetLocalAi={cli.flags.localAi ?? false}
         />
       </CIContextProvider>,
       { stdin: inkStdin }

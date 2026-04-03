@@ -1,0 +1,21 @@
+digraph "Feature Flow" {
+  rankdir=LR
+
+  branch [label="Create Branch"]
+  implement [label="Implement"]
+  lint [label="Lint" check="has-linter"]
+  test [label="Test" check="has-tests"]
+  review [label="Code Review"]
+  ci [label="CI Check" check="has-ci"]
+  merge [label="Merge"]
+  docs [label="Update Docs" check="has-docs"]
+
+  branch -> implement
+  implement -> lint
+  implement -> test
+  lint -> review
+  test -> review
+  review -> ci
+  ci -> merge
+  merge -> docs
+}

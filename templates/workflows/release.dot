@@ -1,0 +1,16 @@
+digraph "Release Pipeline" {
+  rankdir=LR
+
+  lint [label="Lint" check="has-linter"]
+  test [label="Test" check="has-tests"]
+  build [label="Build"]
+  changelog [label="Changelog" check="has-changelog"]
+  tag [label="Tag Release"]
+  publish [label="Publish"]
+
+  lint -> test
+  test -> build
+  build -> changelog
+  changelog -> tag
+  tag -> publish
+}

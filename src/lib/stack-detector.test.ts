@@ -11,7 +11,7 @@ vi.mock('fs-extra', () => {
 })
 
 import fs from 'fs-extra'
-import { detectProjectStack, SIGNAL_SKILL_MAP } from './stack-detector.js'
+import { detectProjectStack, SIGNAL_SKILL_MAP, detectDockerPresence, DOCKER_FILES } from './stack-detector.js'
 
 const mockFs = vi.mocked(fs)
 
@@ -199,5 +199,49 @@ describe('detectProjectStack', () => {
     // react-19 should appear only once despite being in both next and react signals
     const reactCount = result.recommendedSkills.filter(s => s === 'react-19').length
     expect(reactCount).toBe(1)
+  })
+})
+
+// ── detectDockerPresence ──────────────────────────────────────────────────
+
+describe('detectDockerPresence', () => {
+  it('returns true when Dockerfile exists', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (p.endsWith('Dockerfile')) return true
+      return false
+    })
+
+    expect(await detectDockerPresence('/test/project')).toBe(true)
+  })
+
+  it('returns true when docker-compose.yml exists', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (p.endsWith('docker-compose.yml')) return true
+      return false
+    })
+
+    expect(await detectDockerPresence('/test/project')).toBe(true)
+  })
+
+  it('returns true when compose.yaml exists', async () => {
+    mockFs.pathExists.mockImplementation(async (p: string) => {
+      if (p.endsWith('compose.yaml')) return true
+      return false
+    })
+
+    expect(await detectDockerPresence('/test/project')).toBe(true)
+  })
+
+  it('returns false when no Docker files exist', async () => {
+    mockFs.pathExists.mockResolvedValue(false as never)
+    expect(await detectDockerPresence('/test/project')).toBe(false)
+  })
+
+  it('DOCKER_FILES contains all expected filenames', () => {
+    expect(DOCKER_FILES).toContain('Dockerfile')
+    expect(DOCKER_FILES).toContain('docker-compose.yml')
+    expect(DOCKER_FILES).toContain('docker-compose.yaml')
+    expect(DOCKER_FILES).toContain('compose.yml')
+    expect(DOCKER_FILES).toContain('compose.yaml')
   })
 })

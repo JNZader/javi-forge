@@ -14,7 +14,7 @@ vi.mock('fs-extra', () => {
 })
 
 import fs from 'fs-extra'
-import { renderTemplate, generateDependabotYml, getCITemplatePath, getCIDestination, generateCIWorkflow } from './template.js'
+import { renderTemplate, generateDependabotYml, getCITemplatePath, getCIDestination, generateCIWorkflow, getDeployTemplatePath, getDeployDestination, generateDeployWorkflow } from './template.js'
 import type { Stack, CIProvider } from '../types/index.js'
 
 const mockedFs = vi.mocked(fs)
@@ -222,5 +222,90 @@ describe('generateCIWorkflow', () => {
     mockedFs.pathExists.mockResolvedValue(false as never)
     const result = await generateCIWorkflow('node', 'github')
     expect(result).toBeNull()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// getDeployTemplatePath (pure function)
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('getDeployTemplatePath', () => {
+  it('returns correct path for github', () => {
+    const result = getDeployTemplatePath('github')
+    expect(result).not.toBeNull()
+    expect(result).toContain('github')
+    expect(result).toContain('deploy-docker-zero-downtime.yml')
+  })
+
+  it('returns correct path for gitlab', () => {
+    const result = getDeployTemplatePath('gitlab')
+    expect(result).not.toBeNull()
+    expect(result).toContain('gitlab')
+  })
+
+  it('returns correct path for woodpecker', () => {
+    const result = getDeployTemplatePath('woodpecker')
+    expect(result).not.toBeNull()
+    expect(result).toContain('woodpecker')
+  })
+
+  it('returns null for unknown provider', () => {
+    const result = getDeployTemplatePath('bitbucket' as CIProvider)
+    expect(result).toBeNull()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// getDeployDestination (pure function)
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('getDeployDestination', () => {
+  it('returns .github/workflows/deploy.yml for github', () => {
+    expect(getDeployDestination('github')).toBe('.github/workflows/deploy.yml')
+  })
+
+  it('returns gitlab deploy path for gitlab', () => {
+    expect(getDeployDestination('gitlab')).toBe('.gitlab-ci-deploy.yml')
+  })
+
+  it('returns woodpecker deploy path for woodpecker', () => {
+    expect(getDeployDestination('woodpecker')).toBe('.woodpecker/deploy.yml')
+  })
+
+  it('returns null for unknown provider', () => {
+    expect(getDeployDestination('bitbucket' as CIProvider)).toBeNull()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// generateDeployWorkflow
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('generateDeployWorkflow', () => {
+  it('returns template content with service name replaced', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    mockedFs.readFile.mockResolvedValue('service: __SERVICE_NAME__\nrollout __SERVICE_NAME__' as never)
+
+    const result = await generateDeployWorkflow('github', 'web')
+    expect(result).not.toBeNull()
+    expect(result).toContain('service: web')
+    expect(result).toContain('rollout web')
+    expect(result).not.toContain('__SERVICE_NAME__')
+  })
+
+  it('returns null when no template mapping exists', async () => {
+    const result = await generateDeployWorkflow('bitbucket' as CIProvider, 'app')
+    expect(result).toBeNull()
+  })
+
+  it('returns null when template file does not exist on disk', async () => {
+    mockedFs.pathExists.mockResolvedValue(false as never)
+    const result = await generateDeployWorkflow('github', 'app')
+    expect(result).toBeNull()
+  })
+
+  it('defaults service name in replacement', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    mockedFs.readFile.mockResolvedValue('docker rollout "__SERVICE_NAME__"' as never)
+
+    const result = await generateDeployWorkflow('github', 'api')
+    expect(result).toBe('docker rollout "api"')
   })
 })

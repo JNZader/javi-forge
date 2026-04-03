@@ -6,6 +6,8 @@ import {
   DEPENDABOT_FRAGMENTS_DIR,
   STACK_DEPENDABOT_MAP,
   STACK_CI_MAP,
+  DEPLOY_TEMPLATE_MAP,
+  DEPLOY_DESTINATION_MAP,
 } from '../constants.js'
 
 /**
@@ -96,4 +98,38 @@ export function getCIDestination(provider: CIProvider): string {
     case 'woodpecker':
       return '.woodpecker.yml'
   }
+}
+
+/**
+ * Get the template path for the zero-downtime Docker deploy workflow.
+ * Returns null if no template exists for the given provider.
+ */
+export function getDeployTemplatePath(provider: CIProvider): string | null {
+  const filename = DEPLOY_TEMPLATE_MAP[provider]
+  if (!filename) return null
+  return path.join(TEMPLATES_DIR, provider, filename)
+}
+
+/**
+ * Get the destination path for the deploy workflow file within a project.
+ * Returns null if no mapping exists for the given provider.
+ */
+export function getDeployDestination(provider: CIProvider): string | null {
+  return DEPLOY_DESTINATION_MAP[provider] ?? null
+}
+
+/**
+ * Generate the zero-downtime Docker deploy workflow content.
+ * Replaces __SERVICE_NAME__ with the provided service name.
+ */
+export async function generateDeployWorkflow(
+  provider: CIProvider,
+  serviceName: string
+): Promise<string | null> {
+  const templatePath = getDeployTemplatePath(provider)
+  if (!templatePath) return null
+
+  if (!await fs.pathExists(templatePath)) return null
+
+  return renderTemplate(templatePath, { SERVICE_NAME: serviceName })
 }

@@ -57,6 +57,30 @@ const FILE_SIGNALS: Array<{ files: string[]; skills: string[] }> = [
   { files: ['next.config.js', 'next.config.mjs', 'next.config.ts'],              skills: ['nextjs-15', 'react-19'] },
 ]
 
+/**
+ * Docker-related files that indicate a containerized project.
+ * Used by the init command to suggest Docker zero-downtime deploy scaffolding.
+ */
+export const DOCKER_FILES = [
+  'Dockerfile',
+  'docker-compose.yml',
+  'docker-compose.yaml',
+  'compose.yml',
+  'compose.yaml',
+]
+
+/**
+ * Detect whether the project uses Docker (Dockerfile or compose file present).
+ */
+export async function detectDockerPresence(projectDir: string): Promise<boolean> {
+  for (const file of DOCKER_FILES) {
+    if (await fs.pathExists(path.join(projectDir, file))) {
+      return true
+    }
+  }
+  return false
+}
+
 // ── Detection Result ───────────────────────────────────────────────────────
 
 export interface StackDetectionResult {

@@ -1,0 +1,140 @@
+# ===========================================
+# Zero-Downtime Docker Deploy (docker rollout)
+# ===========================================
+# Copy to: .github/workflows/deploy.yml
+#
+# Requires:
+#   - SSH access to the deploy target (secrets.DEPLOY_HOST, secrets.DEPLOY_USER, secrets.DEPLOY_KEY)
+#   - docker-rollout installed on the target: https://github.com/Wowu/docker-rollout
+#   - A docker-compose.yml on the target with healthcheck-enabled services
+#
+# Flow:
+#   1. Build & push image to registry
+#   2. SSH into deploy target
+#   3. Pull new image
+#   4. `docker rollout <service>` — spins up new container, waits for healthcheck, drains old
+# ===========================================
+
+name: Deploy (Zero-Downtime)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to deploy (from docker-compose.yml)'
+        required: true
+        default: '__SERVICE_NAME__'
+      skip_build:
+        description: 'Skip image build (deploy existing latest)'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel in-progress deploys
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+  DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+
+jobs:
+  build-and-push:
+    if: ${{ github.event.inputs.skip_build != 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    needs: [build-and-push]
+    if: always() && (needs.build-and-push.result == 'success' || github.event.inputs.skip_build == 'true')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy via SSH + docker rollout
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ env.DEPLOY_HOST }}
+          username: ${{ env.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -euo pipefail
+
+            cd ${{ secrets.DEPLOY_DIR || '~/app' }}
+
+            # Pull latest images
+            docker compose pull
+
+            # Zero-downtime rollout for the target service
+            SERVICE="${{ github.event.inputs.service || '__SERVICE_NAME__' }}"
+            echo "::group::Rolling out ${SERVICE}"
+            docker rollout "${SERVICE}"
+            echo "::endgroup::"
+
+            # Cleanup dangling images
+            docker image prune -f
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ env.DEPLOY_HOST }}
+          username: ${{ env.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -euo pipefail
+            cd ${{ secrets.DEPLOY_DIR || '~/app' }}
+            SERVICE="${{ github.event.inputs.service || '__SERVICE_NAME__' }}"
+
+            # Wait for healthcheck (max 60s)
+            TIMEOUT=60
+            ELAPSED=0
+            while [ $ELAPSED -lt $TIMEOUT ]; do
+              HEALTH=$(docker compose ps "${SERVICE}" --format json | jq -r '.[0].Health // "none"' 2>/dev/null || echo "unknown")
+              if [ "$HEALTH" = "healthy" ]; then
+                echo "✅ ${SERVICE} is healthy"
+                exit 0
+              fi
+              sleep 5
+              ELAPSED=$((ELAPSED + 5))
+              echo "⏳ Waiting for healthcheck... (${ELAPSED}s/${TIMEOUT}s)"
+            done
+
+            echo "❌ ${SERVICE} did not become healthy within ${TIMEOUT}s"
+            docker compose logs --tail=50 "${SERVICE}"
+            exit 1

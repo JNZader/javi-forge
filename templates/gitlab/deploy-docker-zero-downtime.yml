@@ -1,0 +1,57 @@
+# ===========================================
+# Zero-Downtime Docker Deploy (docker rollout)
+# ===========================================
+# Merge into: .gitlab-ci.yml
+#
+# Requires:
+#   - CI/CD variables: DEPLOY_HOST, DEPLOY_USER, DEPLOY_KEY, DEPLOY_DIR
+#   - docker-rollout installed on target: https://github.com/Wowu/docker-rollout
+#   - A docker-compose.yml on the target with healthcheck-enabled services
+# ===========================================
+
+stages:
+  - build
+  - deploy
+
+variables:
+  SERVICE_NAME: "__SERVICE_NAME__"
+
+build-image:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" -t "$CI_REGISTRY_IMAGE:latest" .
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - docker push "$CI_REGISTRY_IMAGE:latest"
+  only:
+    - main
+
+deploy-zero-downtime:
+  stage: deploy
+  image: alpine:latest
+  needs: ["build-image"]
+  before_script:
+    - apk add --no-cache openssh-client
+    - eval "$(ssh-agent -s)"
+    - echo "$DEPLOY_KEY" | ssh-add -
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+  script:
+    - |
+      ssh "$DEPLOY_USER@$DEPLOY_HOST" << 'ENDSSH'
+        set -euo pipefail
+        cd ${DEPLOY_DIR:-~/app}
+        docker compose pull
+        docker rollout "${SERVICE_NAME}"
+        docker image prune -f
+        echo "Deploy complete"
+      ENDSSH
+  environment:
+    name: production
+  only:
+    - main
+  when: manual

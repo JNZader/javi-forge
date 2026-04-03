@@ -1,0 +1,50 @@
+# ===========================================
+# Zero-Downtime Docker Deploy (docker rollout)
+# ===========================================
+# Copy to: .woodpecker/deploy.yml
+#
+# Requires:
+#   - Secrets: deploy_host, deploy_user, deploy_key, deploy_dir
+#   - docker-rollout installed on target: https://github.com/Wowu/docker-rollout
+#   - A docker-compose.yml on the target with healthcheck-enabled services
+# ===========================================
+
+when:
+  branch: main
+  event: push
+
+variables:
+  - &service_name "__SERVICE_NAME__"
+
+steps:
+  build-and-push:
+    image: plugins/docker
+    settings:
+      registry: ${CI_FORGE_URL}
+      repo: ${CI_REPO}
+      tags:
+        - ${CI_COMMIT_SHA:0:8}
+        - latest
+      username:
+        from_secret: registry_user
+      password:
+        from_secret: registry_password
+
+  deploy:
+    image: appleboy/drone-ssh
+    settings:
+      host:
+        from_secret: deploy_host
+      username:
+        from_secret: deploy_user
+      key:
+        from_secret: deploy_key
+      script:
+        - set -euo pipefail
+        - cd ${DEPLOY_DIR:-~/app}
+        - docker compose pull
+        - docker rollout *service_name
+        - docker image prune -f
+        - echo "Deploy complete"
+    depends_on:
+      - build-and-push

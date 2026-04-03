@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { InitOptions, InitStep } from '../types/index.js'
+import type { ChildProcess } from 'child_process'
+import type { InitOptions, InitStep, ForgeManifest } from '../types/index.js'
 
 // ── Mock fs-extra ────────────────────────────────────────────────────────────
 vi.mock('fs-extra', () => {
@@ -94,7 +95,7 @@ beforeEach(() => {
   // Default: execFile succeeds (promisified version)
   mockedExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
     if (typeof cb === 'function') cb(null, { stdout: '', stderr: '' })
-    return undefined as any
+    return undefined as unknown as ChildProcess
   })
 
   // Default: CI workflow available
@@ -269,10 +270,10 @@ describe('initProject', () => {
       ciProvider: 'github',
       memory: 'engram',
     })
-    expect((manifestData as any).modules).toContain('engram')
-    expect((manifestData as any).modules).toContain('ghagga')
-    expect((manifestData as any).modules).toContain('sdd')
-    expect((manifestData as any).modules).toContain('ai-config')
+    expect((manifestData as ForgeManifest).modules).toContain('engram')
+    expect((manifestData as ForgeManifest).modules).toContain('ghagga')
+    expect((manifestData as ForgeManifest).modules).toContain('sdd')
+    expect((manifestData as ForgeManifest).modules).toContain('ai-config')
   })
 
   it('reports error with helpful message when javi-ai not found', async () => {
@@ -291,7 +292,7 @@ describe('initProject', () => {
       } else {
         if (typeof cb === 'function') cb(null, { stdout: '', stderr: '' })
       }
-      return undefined as any
+      return undefined as unknown as ChildProcess
     })
 
     const steps = await collectSteps(makeOptions({ aiSync: true }))
@@ -415,7 +416,7 @@ describe('initProject', () => {
     await collectSteps(makeOptions({ contextDir: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
     const [, manifestData] = mockedFs.writeJson.mock.calls[0]
-    expect((manifestData as any).modules).toContain('context')
+    expect((manifestData as ForgeManifest).modules).toContain('context')
   })
 
   // ── CLAUDE.md step ────────────────────────────────────────────────────
@@ -464,7 +465,7 @@ describe('initProject', () => {
     expect(claudeStep!.detail).toContain('dry-run')
     // writeFile should NOT be called with CLAUDE.md path
     const claudeMdWrites = mockedFs.writeFile.mock.calls.filter(
-      (call: any[]) => String(call[0]).includes('CLAUDE.md')
+      (call: unknown[]) => String(call[0]).includes('CLAUDE.md')
     )
     expect(claudeMdWrites).toHaveLength(0)
   })
@@ -479,7 +480,7 @@ describe('initProject', () => {
     await collectSteps(makeOptions({ claudeMd: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
     const [, manifestData] = mockedFs.writeJson.mock.calls[0]
-    expect((manifestData as any).modules).toContain('claude-md')
+    expect((manifestData as ForgeManifest).modules).toContain('claude-md')
   })
 
   // ── Docker zero-downtime deploy step ────────────��───────────────────────
@@ -539,7 +540,7 @@ describe('initProject', () => {
     expect(deployStep).toBeDefined()
     expect(deployStep!.detail).toContain('dry-run')
     const deployWrites = mockedFs.writeFile.mock.calls.filter(
-      (call: any[]) => String(call[0]).includes('deploy.yml')
+      (call: unknown[]) => String(call[0]).includes('deploy.yml')
     )
     expect(deployWrites).toHaveLength(0)
   })
@@ -554,7 +555,7 @@ describe('initProject', () => {
     await collectSteps(makeOptions({ dockerDeploy: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
     const [, manifestData] = mockedFs.writeJson.mock.calls[0]
-    expect((manifestData as any).modules).toContain('docker-deploy')
+    expect((manifestData as ForgeManifest).modules).toContain('docker-deploy')
   })
 
   // ── Security hooks step ──────────────────────────────────────────────────
@@ -574,7 +575,7 @@ describe('initProject', () => {
     expect(secStep!.detail).toContain('6 git layers')
 
     // Should copy hook files (6 git hooks, not the JSON)
-    const copyCalls = mockedFs.copy.mock.calls.map((c: any[]) => String(c[0]))
+    const copyCalls = mockedFs.copy.mock.calls.map((c: unknown[]) => String(c[0]))
     const securityCopies = copyCalls.filter((p: string) => p.includes('security-hooks'))
     expect(securityCopies.length).toBeGreaterThanOrEqual(6)
 
@@ -604,7 +605,7 @@ describe('initProject', () => {
 
     // No copy calls for security hooks in dry-run
     const securityCopies = mockedFs.copy.mock.calls.filter(
-      (call: any[]) => String(call[0]).includes('security-hooks')
+      (call: unknown[]) => String(call[0]).includes('security-hooks')
     )
     expect(securityCopies).toHaveLength(0)
   })
@@ -633,7 +634,7 @@ describe('initProject', () => {
     await collectSteps(makeOptions({ securityHooks: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
     const [, manifestData] = mockedFs.writeJson.mock.calls[0]
-    expect((manifestData as any).modules).toContain('security-hooks')
+    expect((manifestData as ForgeManifest).modules).toContain('security-hooks')
   })
 
   // ── Code graph step ───────────────────────────────────────────────────
@@ -653,12 +654,12 @@ describe('initProject', () => {
     expect(graphStep!.detail).toContain('.repoforge.yaml')
 
     // Should copy the repoforge config
-    const copyCalls = mockedFs.copy.mock.calls.map((c: any[]) => String(c[1]))
+    const copyCalls = mockedFs.copy.mock.calls.map((c: unknown[]) => String(c[1]))
     const repoforgeConfigCopy = copyCalls.find((p: string) => p.includes('.repoforge.yaml'))
     expect(repoforgeConfigCopy).toBeDefined()
 
     // Should write MCP snippet with project name replaced
-    const writeCalls = mockedFs.writeFile.mock.calls.map((c: any[]) => String(c[0]))
+    const writeCalls = mockedFs.writeFile.mock.calls.map((c: unknown[]) => String(c[0]))
     const mcpSnippetWrite = writeCalls.find((p: string) => p.includes('mcp-config-snippet.json'))
     expect(mcpSnippetWrite).toBeDefined()
   })
@@ -685,7 +686,7 @@ describe('initProject', () => {
 
     // No copy calls for repoforge in dry-run
     const repoforgeConfigCopies = mockedFs.copy.mock.calls.filter(
-      (call: any[]) => String(call[1]).includes('.repoforge.yaml')
+      (call: unknown[]) => String(call[1]).includes('.repoforge.yaml')
     )
     expect(repoforgeConfigCopies).toHaveLength(0)
   })
@@ -700,7 +701,7 @@ describe('initProject', () => {
     await collectSteps(makeOptions({ codeGraph: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
     const [, manifestData] = mockedFs.writeJson.mock.calls[0]
-    expect((manifestData as any).modules).toContain('code-graph')
+    expect((manifestData as ForgeManifest).modules).toContain('code-graph')
   })
 
   // ── Local AI stack step ──────────────────────────────────────────────────
@@ -720,7 +721,7 @@ describe('initProject', () => {
     expect(aiStep!.detail).toContain('docker-compose.yml')
 
     // Should copy docker-compose.yml
-    const copyCalls = mockedFs.copy.mock.calls.map((c: any[]) => String(c[1]))
+    const copyCalls = mockedFs.copy.mock.calls.map((c: unknown[]) => String(c[1]))
     const composeCopy = copyCalls.find((p: string) => p.includes('docker-compose.yml'))
     expect(composeCopy).toBeDefined()
   })
@@ -747,7 +748,7 @@ describe('initProject', () => {
 
     // No copy calls for local-ai in dry-run
     const composeCopies = mockedFs.copy.mock.calls.filter(
-      (call: any[]) => String(call[1]).includes('docker-compose.yml')
+      (call: unknown[]) => String(call[1]).includes('docker-compose.yml')
     )
     expect(composeCopies).toHaveLength(0)
   })
@@ -762,6 +763,6 @@ describe('initProject', () => {
     await collectSteps(makeOptions({ localAi: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
     const [, manifestData] = mockedFs.writeJson.mock.calls[0]
-    expect((manifestData as any).modules).toContain('local-ai')
+    expect((manifestData as ForgeManifest).modules).toContain('local-ai')
   })
 })

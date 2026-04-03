@@ -92,7 +92,7 @@ export default function Doctor() {
                 </Text>
                 {section.checks.map((check, ci) => (
                   <Box key={`section-${si}-check-${ci}-${check.label}`}>
-                    <Text color={STATUS_COLOR[check.status] as any}>
+                    <Text color={STATUS_COLOR[check.status]}>
                       {'  '}
                       {STATUS_ICON[check.status]}
                       {' '}

@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { ChildProcess } from 'child_process'
 import type { InitStep } from '../types/index.js'
 
 // ── Mock child_process ───────────────────────────────────────────────────────
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, cb: unknown) => {
     if (typeof cb === 'function') cb(null, { stdout: '', stderr: '' })
-    return undefined as any
+    return undefined as unknown as ChildProcess
   }),
 }))
 
@@ -34,7 +35,7 @@ describe('runAnalyze', () => {
         const callback = typeof _opts === 'function' ? _opts : cb
         if (typeof callback === 'function') (callback as Function)(new Error('not found'))
       }
-      return undefined as any
+      return undefined as unknown as ChildProcess
     })
 
     const steps = await collectSteps('/project', false)
@@ -54,7 +55,7 @@ describe('runAnalyze', () => {
         const callback = typeof _opts === 'function' ? _opts : cb
         if (typeof callback === 'function') (callback as Function)(null, { stdout: 'Analysis complete\nGenerated 5 skills', stderr: '' })
       }
-      return undefined as any
+      return undefined as unknown as ChildProcess
     })
 
     const steps = await collectSteps('/project', false)
@@ -75,7 +76,7 @@ describe('runAnalyze', () => {
         const callback = typeof _opts === 'function' ? _opts : cb
         if (typeof callback === 'function') (callback as Function)(null, { stdout: '', stderr: '' })
       }
-      return undefined as any
+      return undefined as unknown as ChildProcess
     })
 
     await collectSteps('/project', true)
@@ -92,7 +93,7 @@ describe('runAnalyze', () => {
         const callback = typeof _opts === 'function' ? _opts : cb
         if (typeof callback === 'function') (callback as Function)(new Error('Analysis crashed'))
       }
-      return undefined as any
+      return undefined as unknown as ChildProcess
     })
 
     const steps = await collectSteps('/project', false)
@@ -111,7 +112,7 @@ describe('runAnalyze', () => {
         const callback = typeof _opts === 'function' ? _opts : cb
         if (typeof callback === 'function') (callback as Function)(null, { stdout: '', stderr: '' })
       }
-      return undefined as any
+      return undefined as unknown as ChildProcess
     })
 
     const steps = await collectSteps('/project', true)
@@ -133,7 +134,7 @@ describe('runAnalyze', () => {
           stderr: 'Warning: deprecated API\nWarning: slow scan',
         })
       }
-      return undefined as any
+      return undefined as unknown as ChildProcess
     })
 
     const steps = await collectSteps('/project', false)

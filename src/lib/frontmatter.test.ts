@@ -178,7 +178,7 @@ describe('validateFrontmatter', () => {
 
   it('returns error for non-string name', () => {
     const fm = { name: 42, description: 'Valid description here' }
-    const errors = validateFrontmatter(fm as any, 'agent')
+    const errors = validateFrontmatter(fm as Record<string, unknown>, 'agent')
     expect(errors.some(e => e.field === 'name')).toBe(true)
   })
 

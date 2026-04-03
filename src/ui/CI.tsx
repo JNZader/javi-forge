@@ -93,7 +93,7 @@ export default function CI(props: CIProps) {
       <Box flexDirection="column" marginBottom={1}>
         {steps.map(step => (
           <Box key={step.id}>
-            <Text color={STATUS_COLOR[step.status] as any}>
+            <Text color={STATUS_COLOR[step.status]}>
               {step.status === 'running'
                 ? <Spinner type="dots" />
                 : `${STATUS_ICON[step.status]} `

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { ChildProcess } from 'child_process'
 
 // ── Mock fs-extra ────────────────────────────────────────────────────────────
 vi.mock('fs-extra', () => {
@@ -17,7 +18,7 @@ vi.mock('fs-extra', () => {
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, _args: string[], cb: unknown) => {
     if (typeof cb === 'function') cb(null, { stdout: '', stderr: '' })
-    return undefined as any
+    return undefined as unknown as ChildProcess
   }),
 }))
 
@@ -78,7 +79,7 @@ beforeEach(() => {
     } else {
       if (typeof cb === 'function') cb(null, { stdout: 'v1.0.0', stderr: '' })
     }
-    return undefined as any
+    return undefined as unknown as ChildProcess
   })
 
   // Default: no stack detected
@@ -105,7 +106,7 @@ describe('runDoctor', () => {
       } else {
         if (typeof cb === 'function') cb(null, { stdout: 'v1.0.0', stderr: '' })
       }
-      return undefined as any
+      return undefined as unknown as ChildProcess
     })
 
     const result = await runDoctor('/test/project')
@@ -125,7 +126,7 @@ describe('runDoctor', () => {
       } else {
         if (typeof cb === 'function') cb(null, { stdout: 'v1.0.0', stderr: '' })
       }
-      return undefined as any
+      return undefined as unknown as ChildProcess
     })
 
     const result = await runDoctor('/test/project')

@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "createdAt": "2026-04-01T16:32:55.375Z",
+  "stack": "node",
+  "buildTool": "pnpm",
+  "findings": [],
+  "findingKeys": []
+}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { generateClaudeMd, buildClaudeMd, generateSmartClaudeMd, buildSmartClaudeMd } from './claudemd.js'
 import { STACK_CLAUDEMD_MAP } from '../constants.js'
-import type { InitOptions } from '../types/index.js'
+import type { InitOptions, Stack } from '../types/index.js'
 import type { StackDetectionResult } from './stack-detector.js'
 
 const ALL_STACKS = ['node', 'python', 'go', 'rust', 'java-gradle', 'java-maven', 'elixir'] as const
@@ -65,7 +65,7 @@ describe('generateClaudeMd', () => {
   })
 
   it('falls back to default for unknown stack', () => {
-    const result = generateClaudeMd(makeOptions({ stack: 'haskell' as any }))
+    const result = generateClaudeMd(makeOptions({ stack: 'haskell' as Stack }))
 
     const defaultEntry = STACK_CLAUDEMD_MAP['default']
     expect(result).toContain(defaultEntry.conventions)

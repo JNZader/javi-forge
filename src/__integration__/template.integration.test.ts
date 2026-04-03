@@ -65,7 +65,7 @@ describe('generateDependabotYml() — integration', () => {
     expect(parsed.version).toBe(2)
     expect(parsed.updates).toBeInstanceOf(Array)
 
-    const ecosystems = parsed.updates.map((u: any) => u['package-ecosystem'])
+    const ecosystems = parsed.updates.map((u: Record<string, unknown>) => u['package-ecosystem'])
     expect(ecosystems).toContain('npm')
     expect(ecosystems).toContain('github-actions')
   })
@@ -73,14 +73,14 @@ describe('generateDependabotYml() — integration', () => {
   it('python: generates with pip ecosystem', async () => {
     const content = await generateDependabotYml(['python'], true)
     const parsed = yaml.parse(content)
-    const ecosystems = parsed.updates.map((u: any) => u['package-ecosystem'])
+    const ecosystems = parsed.updates.map((u: Record<string, unknown>) => u['package-ecosystem'])
     expect(ecosystems).toContain('pip')
   })
 
   it('go: generates with gomod ecosystem', async () => {
     const content = await generateDependabotYml(['go'], false)
     const parsed = yaml.parse(content)
-    const ecosystems = parsed.updates.map((u: any) => u['package-ecosystem'])
+    const ecosystems = parsed.updates.map((u: Record<string, unknown>) => u['package-ecosystem'])
     expect(ecosystems).toContain('gomod')
     expect(ecosystems).not.toContain('github-actions')
   })
@@ -88,28 +88,28 @@ describe('generateDependabotYml() — integration', () => {
   it('rust: generates with cargo ecosystem', async () => {
     const content = await generateDependabotYml(['rust'], true)
     const parsed = yaml.parse(content)
-    const ecosystems = parsed.updates.map((u: any) => u['package-ecosystem'])
+    const ecosystems = parsed.updates.map((u: Record<string, unknown>) => u['package-ecosystem'])
     expect(ecosystems).toContain('cargo')
   })
 
   it('java-gradle: generates with gradle ecosystem', async () => {
     const content = await generateDependabotYml(['java-gradle'], true)
     const parsed = yaml.parse(content)
-    const ecosystems = parsed.updates.map((u: any) => u['package-ecosystem'])
+    const ecosystems = parsed.updates.map((u: Record<string, unknown>) => u['package-ecosystem'])
     expect(ecosystems).toContain('gradle')
   })
 
   it('java-maven: generates with maven ecosystem', async () => {
     const content = await generateDependabotYml(['java-maven'], true)
     const parsed = yaml.parse(content)
-    const ecosystems = parsed.updates.map((u: any) => u['package-ecosystem'])
+    const ecosystems = parsed.updates.map((u: Record<string, unknown>) => u['package-ecosystem'])
     expect(ecosystems).toContain('maven')
   })
 
   it('deduplicates fragments when same ecosystem appears twice', async () => {
     const content = await generateDependabotYml(['node', 'node'], true)
     const parsed = yaml.parse(content)
-    const npmCount = parsed.updates.filter((u: any) => u['package-ecosystem'] === 'npm').length
+    const npmCount = parsed.updates.filter((u: Record<string, unknown>) => u['package-ecosystem'] === 'npm').length
     expect(npmCount).toBe(1)
   })
 })

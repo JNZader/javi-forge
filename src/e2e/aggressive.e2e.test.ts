@@ -58,11 +58,12 @@ async function runInit(
       }
     )
     return { stdout, stderr, exitCode: 0 }
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const err = e as Record<string, unknown>
     return {
-      stdout: e.stdout ?? '',
-      stderr: e.stderr ?? '',
-      exitCode: e.code ?? 1,
+      stdout: (err.stdout as string) ?? '',
+      stderr: (err.stderr as string) ?? '',
+      exitCode: (err.code as number) ?? 1,
     }
   }
 }

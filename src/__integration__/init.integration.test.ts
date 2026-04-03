@@ -28,7 +28,7 @@ vi.mock('util', async () => {
       if (fn.name === 'execFile' || fn.name === 'mockConstructor') {
         return async (...args: unknown[]) => ({ stdout: '', stderr: '' })
       }
-      return actual.promisify(fn as any)
+      return actual.promisify(fn as (...args: unknown[]) => unknown)
     },
   }
 })
@@ -121,7 +121,7 @@ describe('initProject() — integration', () => {
     expect(parsed.version).toBe(2)
     expect(parsed.updates).toBeInstanceOf(Array)
 
-    const ecosystems = parsed.updates.map((u: any) => u['package-ecosystem'])
+    const ecosystems = parsed.updates.map((u: Record<string, unknown>) => u['package-ecosystem'])
     expect(ecosystems).toContain('npm')
     expect(ecosystems).toContain('github-actions')
   })

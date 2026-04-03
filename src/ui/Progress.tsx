@@ -75,7 +75,7 @@ export default function Progress({ steps, projectName, contextLine, onDone }: Pr
                 {step.detail ? <Text color={theme.muted} dimColor>  {step.detail}</Text> : null}
               </Text>
             ) : (
-              <Text color={STATUS_COLOR[step.status] as any}>
+              <Text color={STATUS_COLOR[step.status]}>
                 {STATUS_ICON[step.status]} {step.label}
                 {step.detail ? <Text color={theme.muted} dimColor>  {step.detail}</Text> : null}
               </Text>

@@ -208,7 +208,7 @@ describe('runPluginValidate', () => {
 
 describe('runPluginSync', () => {
   it('reports added and unchanged plugins', async () => {
-    mockSync.mockResolvedValue({ added: ['alpha'], removed: [], unchanged: ['beta'] })
+    mockSync.mockResolvedValue({ added: ['alpha'], removed: [], unchanged: ['beta'], wired: [], unwired: [] })
     const { steps, onStep } = collectSteps()
 
     await runPluginSync('/fake/project', false, onStep)
@@ -221,7 +221,7 @@ describe('runPluginSync', () => {
   })
 
   it('reports removed plugins', async () => {
-    mockSync.mockResolvedValue({ added: [], removed: ['old'], unchanged: [] })
+    mockSync.mockResolvedValue({ added: [], removed: ['old'], unchanged: [], wired: [], unwired: [] })
     const { steps, onStep } = collectSteps()
 
     await runPluginSync('/fake/project', false, onStep)
@@ -230,7 +230,7 @@ describe('runPluginSync', () => {
   })
 
   it('reports no plugins when none detected', async () => {
-    mockSync.mockResolvedValue({ added: [], removed: [], unchanged: [] })
+    mockSync.mockResolvedValue({ added: [], removed: [], unchanged: [], wired: [], unwired: [] })
     const { steps, onStep } = collectSteps()
 
     await runPluginSync('/fake/project', false, onStep)
@@ -239,7 +239,7 @@ describe('runPluginSync', () => {
   })
 
   it('prefixes dry-run in detail', async () => {
-    mockSync.mockResolvedValue({ added: ['alpha'], removed: [], unchanged: [] })
+    mockSync.mockResolvedValue({ added: ['alpha'], removed: [], unchanged: [], wired: [], unwired: [] })
     const { steps, onStep } = collectSteps()
 
     await runPluginSync('/fake/project', true, onStep)
@@ -249,7 +249,7 @@ describe('runPluginSync', () => {
   })
 
   it('reports error when sync throws', async () => {
-    mockSync.mockRejectedValue(new Error('fs exploded'))
+    mockSync.mockRejectedValue(new Error('fs exploded') as never)
     const { steps, onStep } = collectSteps()
 
     await runPluginSync('/fake/project', false, onStep)

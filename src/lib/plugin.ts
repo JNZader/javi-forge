@@ -14,6 +14,7 @@ import type {
 } from '../types/index.js'
 import { PLUGINS_DIR, PLUGIN_MANIFEST_FILE, PLUGIN_ASSET_DIRS, PLUGIN_REGISTRY_URL } from '../constants.js'
 import { generateAgentSkillsManifest } from './agent-skills.js'
+import { autoWirePlugins } from './auto-wire.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -258,12 +259,21 @@ export async function searchRegistry(query?: string): Promise<PluginRegistryEntr
  * Returns an array of plugin names (sorted alphabetically).
  */
 export async function detectProjectPlugins(projectDir: string): Promise<string[]> {
+  const full = await detectProjectPluginsFull(projectDir)
+  return full.map(p => p.name).sort()
+}
+
+/**
+ * Detect installed plugins with full metadata (including manifest).
+ * Used by auto-wiring to read plugin capabilities.
+ */
+export async function detectProjectPluginsFull(projectDir: string): Promise<InstalledPlugin[]> {
   const pluginsDir = path.join(projectDir, '.javi-forge', 'plugins')
 
   if (!await fs.pathExists(pluginsDir)) return []
 
   const entries = await fs.readdir(pluginsDir)
-  const plugins: string[] = []
+  const plugins: InstalledPlugin[] = []
 
   for (const entry of entries) {
     if (entry.startsWith('.')) continue
@@ -272,25 +282,27 @@ export async function detectProjectPlugins(projectDir: string): Promise<string[]
       try {
         const meta = await fs.readJson(metaPath) as InstalledPlugin
         if (meta.name) {
-          plugins.push(meta.name)
+          plugins.push(meta)
         }
       } catch { /* skip corrupt entries */ }
     }
   }
 
-  return plugins.sort()
+  return plugins.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /**
- * Sync detected plugins into the project manifest.
- * Returns a report of added, removed, and unchanged plugins.
+ * Sync detected plugins into the project manifest and auto-wire
+ * their capabilities into CLAUDE.md and .claude/settings.json.
+ * Returns a report of added, removed, unchanged, wired, and unwired plugins.
  */
 export async function syncPlugins(
   projectDir: string,
   options: { dryRun?: boolean } = {}
 ): Promise<PluginSyncResult> {
   const { dryRun = false } = options
-  const detected = await detectProjectPlugins(projectDir)
+  const detectedFull = await detectProjectPluginsFull(projectDir)
+  const detected = detectedFull.map(p => p.name).sort()
 
   const manifestPath = path.join(projectDir, '.javi-forge', 'manifest.json')
   let manifest: ForgeManifest & { plugins?: string[] }
@@ -325,7 +337,16 @@ export async function syncPlugins(
     await fs.writeJson(manifestPath, manifest, { spaces: 2 })
   }
 
-  return { added, removed, unchanged }
+  // ── Auto-wire plugin capabilities ──────────────────────────────────
+  const wireResult = await autoWirePlugins(projectDir, detectedFull, { dryRun })
+
+  return {
+    added,
+    removed,
+    unchanged,
+    wired: wireResult.wired,
+    unwired: wireResult.unwired,
+  }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

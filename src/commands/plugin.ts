@@ -138,6 +138,8 @@ export async function runPluginSync(
     if (result.added.length > 0)     parts.push(`added: ${result.added.join(', ')}`)
     if (result.removed.length > 0)   parts.push(`removed: ${result.removed.join(', ')}`)
     if (result.unchanged.length > 0) parts.push(`unchanged: ${result.unchanged.join(', ')}`)
+    if (result.wired.length > 0)     parts.push(`wired: ${result.wired.length} capabilities`)
+    if (result.unwired.length > 0)   parts.push(`unwired: ${result.unwired.length} capabilities`)
     if (parts.length === 0)          parts.push('no plugins detected')
 
     const prefix = dryRun ? 'dry-run: ' : ''

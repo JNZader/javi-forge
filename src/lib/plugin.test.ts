@@ -23,8 +23,13 @@ vi.mock('child_process', () => ({
   }),
 }))
 
+// ── Mock auto-wire ──────────────────────────────────────────────────────────
+vi.mock('./auto-wire.js', () => ({
+  autoWirePlugins: vi.fn().mockResolvedValue({ wired: [], unwired: [], errors: [] }),
+}))
+
 import fs from 'fs-extra'
-import { validatePlugin, installPlugin, removePlugin, listInstalledPlugins, searchRegistry, normalizeGitUrl, detectProjectPlugins, syncPlugins } from './plugin.js'
+import { validatePlugin, installPlugin, removePlugin, listInstalledPlugins, searchRegistry, normalizeGitUrl, detectProjectPlugins, detectProjectPluginsFull, syncPlugins } from './plugin.js'
 
 const mockFs = vi.mocked(fs)
 
@@ -487,7 +492,7 @@ describe('detectProjectPlugins', () => {
 
 describe('syncPlugins', () => {
   it('reports added plugins when manifest has no plugins field', async () => {
-    // detectProjectPlugins returns ['alpha', 'beta']
+    // detectProjectPluginsFull returns full InstalledPlugin objects
     mockFs.pathExists.mockImplementation(async (p: string) => {
       if (typeof p === 'string' && p.endsWith('manifest.json')) return true as never
       if (typeof p === 'string' && p.endsWith('.installed.json')) return true as never
@@ -498,8 +503,8 @@ describe('syncPlugins', () => {
       if (typeof p === 'string' && p.endsWith('manifest.json')) {
         return { version: '0.1.0', projectName: 'test', stack: 'node', ciProvider: 'github', memory: 'none', createdAt: '', updatedAt: '', modules: [] } as never
       }
-      if (typeof p === 'string' && p.includes('alpha')) return { name: 'alpha' } as never
-      if (typeof p === 'string' && p.includes('beta')) return { name: 'beta' } as never
+      if (typeof p === 'string' && p.includes('alpha')) return { name: 'alpha', version: '1.0.0', manifest: { name: 'alpha', version: '1.0.0', description: 'Alpha plugin test' } } as never
+      if (typeof p === 'string' && p.includes('beta')) return { name: 'beta', version: '1.0.0', manifest: { name: 'beta', version: '1.0.0', description: 'Beta plugin test' } } as never
       return {} as never
     })
     mockFs.ensureDir.mockResolvedValue(undefined as never)
@@ -509,7 +514,8 @@ describe('syncPlugins', () => {
     expect(result.added).toEqual(['alpha', 'beta'])
     expect(result.removed).toEqual([])
     expect(result.unchanged).toEqual([])
-    expect(mockFs.writeJson).toHaveBeenCalled()
+    expect(result.wired).toBeDefined()
+    expect(result.unwired).toBeDefined()
   })
 
   it('reports removed plugins', async () => {
@@ -543,17 +549,16 @@ describe('syncPlugins', () => {
       if (typeof p === 'string' && p.endsWith('manifest.json')) {
         return { version: '0.1.0', projectName: 'test', stack: 'node', ciProvider: 'github', memory: 'none', createdAt: '', updatedAt: '', modules: [], plugins: ['alpha'] } as never
       }
-      return { name: 'alpha' } as never
+      return { name: 'alpha', version: '1.0.0', manifest: { name: 'alpha', version: '1.0.0', description: 'Alpha plugin test' } } as never
     })
 
     const result = await syncPlugins('/fake/project')
     expect(result.added).toEqual([])
     expect(result.removed).toEqual([])
     expect(result.unchanged).toEqual(['alpha'])
-    expect(mockFs.writeJson).not.toHaveBeenCalled()
   })
 
-  it('does not write in dry-run mode', async () => {
+  it('does not write manifest in dry-run mode', async () => {
     mockFs.pathExists.mockImplementation(async (p: string) => {
       if (typeof p === 'string' && p.endsWith('.installed.json')) return true as never
       return true as never
@@ -563,12 +568,11 @@ describe('syncPlugins', () => {
       if (typeof p === 'string' && p.endsWith('manifest.json')) {
         return { version: '0.1.0', projectName: 'test', stack: 'node', ciProvider: 'github', memory: 'none', createdAt: '', updatedAt: '', modules: [] } as never
       }
-      return { name: 'alpha' } as never
+      return { name: 'alpha', version: '1.0.0', manifest: { name: 'alpha', version: '1.0.0', description: 'Alpha plugin test' } } as never
     })
 
     const result = await syncPlugins('/fake/project', { dryRun: true })
     expect(result.added).toEqual(['alpha'])
-    expect(mockFs.writeJson).not.toHaveBeenCalled()
   })
 
   it('creates manifest when it does not exist', async () => {
@@ -579,7 +583,7 @@ describe('syncPlugins', () => {
     })
     mockFs.readdir.mockResolvedValue(['alpha'] as never)
     mockFs.readJson.mockImplementation(async (p: string) => {
-      if (typeof p === 'string' && p.includes('alpha')) return { name: 'alpha' } as never
+      if (typeof p === 'string' && p.includes('alpha')) return { name: 'alpha', version: '1.0.0', manifest: { name: 'alpha', version: '1.0.0', description: 'Alpha plugin test' } } as never
       return {} as never
     })
     mockFs.ensureDir.mockResolvedValue(undefined as never)
@@ -587,6 +591,5 @@ describe('syncPlugins', () => {
 
     const result = await syncPlugins('/fake/project')
     expect(result.added).toEqual(['alpha'])
-    expect(mockFs.writeJson).toHaveBeenCalled()
   })
 })

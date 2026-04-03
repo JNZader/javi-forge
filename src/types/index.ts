@@ -120,6 +120,26 @@ export interface PluginSyncResult {
   added: string[]
   removed: string[]
   unchanged: string[]
+  wired: AutoWireEntry[]
+  unwired: AutoWireEntry[]
+}
+
+// ── Auto-Wiring ──────────────────────────────────────────────────────────────
+
+export type AutoWireTarget = 'claude-md' | 'settings-json'
+
+export interface AutoWireEntry {
+  plugin: string
+  target: AutoWireTarget
+  capability: string
+  /** e.g. skill path or hook command */
+  value: string
+}
+
+export interface AutoWireResult {
+  wired: AutoWireEntry[]
+  unwired: AutoWireEntry[]
+  errors: string[]
 }
 
 // ── Agent Skills Spec ──────────────────────────────────────────────────────

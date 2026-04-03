@@ -14,6 +14,7 @@ import {
   MODULES_DIR,
   CI_LOCAL_DIR,
   SECURITY_HOOKS_DIR,
+  LOCAL_AI_TEMPLATE_DIR,
 } from '../constants.js'
 
 const execFileAsync = promisify(execFile)
@@ -451,7 +452,86 @@ ENABLE_WEBHOOKS=false
     report(onStep, stepSecurity, 'Scaffold security hooks', 'error', String(e))
   }
 
-  // ── Step 15: Write manifest ───────────────────────────────────────────────
+  // ── Step 15: RepoForge code graph scaffolding ───────────────────────────────
+  const stepGraph = 'code-graph'
+  report(onStep, stepGraph, 'Scaffold RepoForge code graph', 'running')
+  try {
+    if (options.codeGraph) {
+      if (!dryRun) {
+        // 1. Copy .repoforge.yaml config
+        const repoforgeConfigSrc = path.join(TEMPLATES_DIR, 'common', 'repoforge', 'repoforge.yaml')
+        const repoforgeConfigDest = path.join(projectDir, '.repoforge.yaml')
+        if (!await fs.pathExists(repoforgeConfigDest)) {
+          await fs.copy(repoforgeConfigSrc, repoforgeConfigDest)
+        }
+
+        // 2. Ensure .repoforge/ output dir exists
+        await ensureDirExists(path.join(projectDir, '.repoforge'))
+
+        // 3. Copy CI workflow for graph generation (GitHub only)
+        if (ciProvider === 'github') {
+          const graphWorkflowSrc = path.join(TEMPLATES_DIR, 'github', 'repoforge-graph.yml')
+          if (await fs.pathExists(graphWorkflowSrc)) {
+            const graphWorkflowDest = path.join(projectDir, '.github', 'workflows', 'repoforge-graph.yml')
+            await ensureDirExists(path.dirname(graphWorkflowDest))
+            await backupIfExists(graphWorkflowDest)
+            await fs.copy(graphWorkflowSrc, graphWorkflowDest, { overwrite: false })
+          }
+        }
+
+        // 4. Copy MCP config snippet for repoforge code intelligence
+        const mcpSnippetSrc = path.join(TEMPLATES_DIR, 'common', 'repoforge', 'mcp-repoforge-snippet.json')
+        if (await fs.pathExists(mcpSnippetSrc)) {
+          const mcpSnippetDest = path.join(projectDir, '.repoforge', 'mcp-config-snippet.json')
+          let content = await fs.readFile(mcpSnippetSrc, 'utf-8')
+          content = content.replace(/__PROJECT_NAME__/g, projectName)
+          await fs.writeFile(mcpSnippetDest, content, 'utf-8')
+        }
+      }
+      report(onStep, stepGraph, 'Scaffold RepoForge code graph', 'done',
+        dryRun ? 'dry-run: would scaffold .repoforge.yaml + CI + MCP' : '.repoforge.yaml + CI + MCP snippet')
+    } else {
+      report(onStep, stepGraph, 'Scaffold RepoForge code graph', 'skipped', 'not selected')
+    }
+  } catch (e) {
+    report(onStep, stepGraph, 'Scaffold RepoForge code graph', 'error', String(e))
+  }
+
+  // ── Step 16: Local AI dev stack ────────────────────────────────────────────
+  const stepLocalAi = 'local-ai'
+  report(onStep, stepLocalAi, 'Scaffold local AI dev stack', 'running')
+  try {
+    if (options.localAi) {
+      if (await fs.pathExists(LOCAL_AI_TEMPLATE_DIR)) {
+        const composeDest = path.join(projectDir, 'docker-compose.yml')
+        const envDest = path.join(projectDir, '.env.local-ai')
+        if (!dryRun) {
+          // Copy docker-compose.yml (skip if exists)
+          if (!await fs.pathExists(composeDest)) {
+            await fs.copy(
+              path.join(LOCAL_AI_TEMPLATE_DIR, 'docker-compose.yml'),
+              composeDest
+            )
+          }
+          // Copy .env.example as .env.local-ai
+          const envSrc = path.join(LOCAL_AI_TEMPLATE_DIR, '.env.example')
+          if (await fs.pathExists(envSrc) && !await fs.pathExists(envDest)) {
+            await fs.copy(envSrc, envDest)
+          }
+        }
+        report(onStep, stepLocalAi, 'Scaffold local AI dev stack', 'done',
+          dryRun ? 'dry-run: would create docker-compose.yml + .env.local-ai' : 'docker-compose.yml + .env.local-ai')
+      } else {
+        report(onStep, stepLocalAi, 'Scaffold local AI dev stack', 'error', 'local-ai template not found')
+      }
+    } else {
+      report(onStep, stepLocalAi, 'Scaffold local AI dev stack', 'skipped', 'not selected')
+    }
+  } catch (e) {
+    report(onStep, stepLocalAi, 'Scaffold local AI dev stack', 'error', String(e))
+  }
+
+  // ── Step 17: Write manifest ───────────────────────────────────────────────
   const stepManifest = 'manifest'
   report(onStep, stepManifest, 'Write forge manifest', 'running')
   try {
@@ -475,6 +555,8 @@ ENABLE_WEBHOOKS=false
           ...(claudeMd ? ['claude-md'] : []),
           ...(options.dockerDeploy ? ['docker-deploy'] : []),
           ...(securityHooks ? ['security-hooks'] : []),
+          ...(options.codeGraph ? ['code-graph'] : []),
+          ...(options.localAi ? ['local-ai'] : []),
         ],
       }
       await fs.writeJson(path.join(manifestDir, 'manifest.json'), manifest, { spaces: 2 })

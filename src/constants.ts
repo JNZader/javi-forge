@@ -22,6 +22,9 @@ export const CI_LOCAL_DIR = path.join(FORGE_ROOT, 'ci-local')
 /** Security hooks template directory */
 export const SECURITY_HOOKS_DIR = path.join(TEMPLATES_DIR, 'security-hooks')
 
+/** Local AI stack template directory */
+export const LOCAL_AI_TEMPLATE_DIR = path.join(TEMPLATES_DIR, 'local-ai')
+
 /** Dependabot fragment directory */
 export const DEPENDABOT_FRAGMENTS_DIR = path.join(TEMPLATES_DIR, 'common', 'dependabot')
 

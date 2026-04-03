@@ -17,19 +17,23 @@ const OPTIONS: OptionItem[] = [
   { id: 'claudeMd',   label: 'CLAUDE.md',           description: 'AI agent project instructions',     default: true },
   { id: 'ghagga',        label: 'GHAGGA Review',       description: 'Multi-agent AI code review system',       default: false },
   { id: 'securityHooks', label: 'Security Hooks',      description: '6-layer git hooks + runtime AI guardrails', default: true },
+  { id: 'codeGraph',     label: 'Code Graph',           description: 'RepoForge call-graph scaffolding + CI',      default: false },
+  { id: 'localAi',      label: 'Local AI Stack',       description: 'Ollama + Open WebUI + n8n + Supabase (Docker)', default: false },
 ]
 
 interface Props {
-  onConfirm: (selected: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean; securityHooks: boolean }) => void
+  onConfirm: (selected: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean; securityHooks: boolean; codeGraph: boolean; localAi: boolean }) => void
   presetGhagga?: boolean
+  presetLocalAi?: boolean
 }
 
-export default function OptionSelector({ onConfirm, presetGhagga = false }: Props) {
+export default function OptionSelector({ onConfirm, presetGhagga = false, presetLocalAi = false }: Props) {
   const isCI = useCIMode()
   const [cursor, setCursor] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(() => {
     const defaults = new Set(OPTIONS.filter(o => o.default).map(o => o.id))
     if (presetGhagga) defaults.add('ghagga')
+    if (presetLocalAi) defaults.add('localAi')
     return defaults
   })
 
@@ -43,6 +47,8 @@ export default function OptionSelector({ onConfirm, presetGhagga = false }: Prop
         claudeMd:      selected.has('claudeMd'),
         ghagga:        selected.has('ghagga'),
         securityHooks: selected.has('securityHooks'),
+        codeGraph:     selected.has('codeGraph'),
+        localAi:       selected.has('localAi'),
       })
     }
   }, [isCI]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -66,6 +72,8 @@ export default function OptionSelector({ onConfirm, presetGhagga = false }: Prop
         claudeMd:      selected.has('claudeMd'),
         ghagga:        selected.has('ghagga'),
         securityHooks: selected.has('securityHooks'),
+        codeGraph:     selected.has('codeGraph'),
+        localAi:       selected.has('localAi'),
       })
     }
   }, { isActive: !isCI })

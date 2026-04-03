@@ -31,6 +31,7 @@ interface AppProps {
   presetName?: string
   presetGhagga?: boolean
   presetMock?: boolean
+  presetLocalAi?: boolean
 }
 
 export default function App({
@@ -41,6 +42,7 @@ export default function App({
   presetName,
   presetGhagga = false,
   presetMock = false,
+  presetLocalAi = false,
 }: AppProps) {
   const [stage, setStage] = useState<Stage>('welcome')
   const [projectName, setProjectName] = useState(presetName ?? '')
@@ -56,6 +58,8 @@ export default function App({
   const [claudeMd, setClaudeMd] = useState(true)
   const [ghagga, setGhagga] = useState(presetGhagga)
   const [securityHooks, setSecurityHooks] = useState(true)
+  const [codeGraph, setCodeGraph] = useState(false)
+  const [localAi, setLocalAi] = useState(false)
   const [steps, setSteps] = useState<InitStep[]>([])
   const [startTime] = useState(Date.now())
 
@@ -80,13 +84,15 @@ export default function App({
     setStage('options')
   }
 
-  const handleOptionsConfirm = async (opts: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean; securityHooks: boolean }) => {
+  const handleOptionsConfirm = async (opts: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean; securityHooks: boolean; codeGraph: boolean; localAi: boolean }) => {
     setAiSync(opts.aiSync)
     setSdd(opts.sdd)
     setContextDir(opts.contextDir)
     setClaudeMd(opts.claudeMd)
     setGhagga(opts.ghagga)
     setSecurityHooks(opts.securityHooks)
+    setCodeGraph(opts.codeGraph)
+    setLocalAi(opts.localAi)
     setStage('running')
 
     await initProject(
@@ -102,6 +108,10 @@ export default function App({
         contextDir: opts.contextDir,
         claudeMd: opts.claudeMd,
         securityHooks: opts.securityHooks,
+        codeGraph: opts.codeGraph,
+        localAi: opts.localAi,
+        dockerDeploy: false,
+        dockerServiceName: 'app',
         mock: presetMock,
         dryRun,
       },
@@ -163,7 +173,7 @@ export default function App({
         <MemorySelector onConfirm={handleMemoryConfirm} />
       )}
       {stage === 'options' && (
-        <OptionSelector onConfirm={handleOptionsConfirm} presetGhagga={presetGhagga} />
+        <OptionSelector onConfirm={handleOptionsConfirm} presetGhagga={presetGhagga} presetLocalAi={presetLocalAi} />
       )}
       {stage === 'running' && (
         <Progress

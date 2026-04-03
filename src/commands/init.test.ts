@@ -136,8 +136,10 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
     contextDir: true,
     claudeMd: true,
     securityHooks: true,
+    codeGraph: false,
     dockerDeploy: false,
     dockerServiceName: 'app',
+    localAi: false,
     dryRun: false,
     ...overrides,
   }
@@ -632,5 +634,134 @@ describe('initProject', () => {
     expect(mockedFs.writeJson).toHaveBeenCalled()
     const [, manifestData] = mockedFs.writeJson.mock.calls[0]
     expect((manifestData as any).modules).toContain('security-hooks')
+  })
+
+  // ── Code graph step ───────────────────────────────────────────────────
+
+  it('code-graph step copies config, CI workflow, and MCP snippet when enabled', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('.repoforge.yaml')) return false as never
+      return true as never
+    })
+    mockedFs.readFile.mockResolvedValue('{"mcpServers":{"repoforge":{"env":{"REPOFORGE_PROJECT":"__PROJECT_NAME__"}}}}' as never)
+
+    const steps = await collectSteps(makeOptions({ codeGraph: true }))
+    const graphStep = steps.find(s => s.id === 'code-graph' && s.status === 'done')
+    expect(graphStep).toBeDefined()
+    expect(graphStep!.detail).toContain('.repoforge.yaml')
+
+    // Should copy the repoforge config
+    const copyCalls = mockedFs.copy.mock.calls.map((c: any[]) => String(c[1]))
+    const repoforgeConfigCopy = copyCalls.find((p: string) => p.includes('.repoforge.yaml'))
+    expect(repoforgeConfigCopy).toBeDefined()
+
+    // Should write MCP snippet with project name replaced
+    const writeCalls = mockedFs.writeFile.mock.calls.map((c: any[]) => String(c[0]))
+    const mcpSnippetWrite = writeCalls.find((p: string) => p.includes('mcp-config-snippet.json'))
+    expect(mcpSnippetWrite).toBeDefined()
+  })
+
+  it('code-graph step is skipped when codeGraph is false', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    const steps = await collectSteps(makeOptions({ codeGraph: false }))
+    const graphStep = steps.find(s => s.id === 'code-graph' && s.status === 'skipped')
+    expect(graphStep).toBeDefined()
+    expect(graphStep!.detail).toContain('not selected')
+  })
+
+  it('code-graph dry-run writes nothing', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ codeGraph: true, dryRun: true }))
+    const graphStep = steps.find(s => s.id === 'code-graph' && s.status === 'done')
+    expect(graphStep).toBeDefined()
+    expect(graphStep!.detail).toContain('dry-run')
+
+    // No copy calls for repoforge in dry-run
+    const repoforgeConfigCopies = mockedFs.copy.mock.calls.filter(
+      (call: any[]) => String(call[1]).includes('.repoforge.yaml')
+    )
+    expect(repoforgeConfigCopies).toHaveLength(0)
+  })
+
+  it('manifest includes code-graph module when codeGraph is true', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    await collectSteps(makeOptions({ codeGraph: true }))
+    expect(mockedFs.writeJson).toHaveBeenCalled()
+    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    expect((manifestData as any).modules).toContain('code-graph')
+  })
+
+  // ── Local AI stack step ──────────────────────────────────────────────────
+
+  it('local-ai step copies docker-compose.yml and .env.local-ai when enabled', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('docker-compose.yml')) return false as never
+      if (s.endsWith('.env.local-ai')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ localAi: true }))
+    const aiStep = steps.find(s => s.id === 'local-ai' && s.status === 'done')
+    expect(aiStep).toBeDefined()
+    expect(aiStep!.detail).toContain('docker-compose.yml')
+
+    // Should copy docker-compose.yml
+    const copyCalls = mockedFs.copy.mock.calls.map((c: any[]) => String(c[1]))
+    const composeCopy = copyCalls.find((p: string) => p.includes('docker-compose.yml'))
+    expect(composeCopy).toBeDefined()
+  })
+
+  it('local-ai step is skipped when localAi is false', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+    const steps = await collectSteps(makeOptions({ localAi: false }))
+    const aiStep = steps.find(s => s.id === 'local-ai' && s.status === 'skipped')
+    expect(aiStep).toBeDefined()
+    expect(aiStep!.detail).toContain('not selected')
+  })
+
+  it('local-ai dry-run writes nothing', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ localAi: true, dryRun: true }))
+    const aiStep = steps.find(s => s.id === 'local-ai' && s.status === 'done')
+    expect(aiStep).toBeDefined()
+    expect(aiStep!.detail).toContain('dry-run')
+
+    // No copy calls for local-ai in dry-run
+    const composeCopies = mockedFs.copy.mock.calls.filter(
+      (call: any[]) => String(call[1]).includes('docker-compose.yml')
+    )
+    expect(composeCopies).toHaveLength(0)
+  })
+
+  it('manifest includes local-ai module when localAi is true', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    await collectSteps(makeOptions({ localAi: true }))
+    expect(mockedFs.writeJson).toHaveBeenCalled()
+    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    expect((manifestData as any).modules).toContain('local-ai')
   })
 })

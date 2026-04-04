@@ -1,8 +1,12 @@
-import fs from 'fs-extra'
-import path from 'path'
-import type { Stack, TddPipelineMode, TddPipelineResult } from '../types/index.js'
-import { detectCIStack } from './ci.js'
-import { getTddTestCommand } from './tdd.js'
+import fs from "fs-extra";
+import path from "path";
+import type {
+	Stack,
+	TddPipelineMode,
+	TddPipelineResult,
+} from "../types/index.js";
+import { detectCIStack } from "./ci.js";
+import { getTddTestCommand } from "./tdd.js";
 
 // =============================================================================
 // Hook generation
@@ -17,12 +21,12 @@ import { getTddTestCommand } from './tdd.js'
  * If testCmd is null, generates a skip-only hook regardless of mode.
  */
 export function generateTddPipelineHook(
-  mode: TddPipelineMode,
-  testCmd: string | null,
-  stack: Stack
+	mode: TddPipelineMode,
+	testCmd: string | null,
+	stack: Stack,
 ): string {
-  if (!testCmd) {
-    return `#!/bin/bash
+	if (!testCmd) {
+		return `#!/bin/bash
 # =============================================================================
 # TDD PIPELINE (pre-push): No test command detected for stack "${stack}"
 # =============================================================================
@@ -31,11 +35,11 @@ export function generateTddPipelineHook(
 
 echo "TDD PIPELINE: No test command configured for stack '${stack}' — skipping."
 exit 0
-`
-  }
+`;
+	}
 
-  if (mode === 'warn') {
-    return `#!/bin/bash
+	if (mode === "warn") {
+		return `#!/bin/bash
 # =============================================================================
 # TDD PIPELINE (pre-push): WARN mode
 # =============================================================================
@@ -61,11 +65,11 @@ ${testCmd} && {
 }
 
 exit 0
-`
-  }
+`;
+	}
 
-  // strict mode (default)
-  return `#!/bin/bash
+	// strict mode (default)
+	return `#!/bin/bash
 # =============================================================================
 # TDD PIPELINE (pre-push): STRICT mode
 # =============================================================================
@@ -93,7 +97,7 @@ ${testCmd} || {
 
 echo ""
 echo "TDD PIPELINE [STRICT]: All tests passed. Push allowed."
-`
+`;
 }
 
 // =============================================================================
@@ -106,52 +110,69 @@ echo "TDD PIPELINE [STRICT]: All tests passed. Push allowed."
  * Backs up any existing pre-push hook to pre-push.bak.
  */
 export async function installTddPipelineHook(
-  projectDir: string,
-  mode: TddPipelineMode
+	projectDir: string,
+	mode: TddPipelineMode,
 ): Promise<TddPipelineResult> {
-  const result: TddPipelineResult = { installed: [], skipped: [], errors: [], mode }
+	const result: TddPipelineResult = {
+		installed: [],
+		skipped: [],
+		errors: [],
+		mode,
+	};
 
-  const gitDir = path.join(projectDir, '.git')
-  if (!await fs.pathExists(gitDir)) {
-    result.errors.push('Not a git repository. Run git init first.')
-    return result
-  }
+	const gitDir = path.join(projectDir, ".git");
+	if (!(await fs.pathExists(gitDir))) {
+		result.errors.push("Not a git repository. Run git init first.");
+		return result;
+	}
 
-  const hooksDir = path.join(gitDir, 'hooks')
-  await fs.ensureDir(hooksDir)
+	const hooksDir = path.join(gitDir, "hooks");
+	await fs.ensureDir(hooksDir);
 
-  // Detect stack
-  let stackInfo
-  try {
-    stackInfo = await detectCIStack(projectDir)
-  } catch {
-    result.errors.push('Failed to detect project stack.')
-    return result
-  }
+	// Detect stack
+	let stackInfo: Awaited<ReturnType<typeof detectCIStack>> | undefined;
+	try {
+		stackInfo = await detectCIStack(projectDir);
+	} catch {
+		result.errors.push("Failed to detect project stack.");
+		return result;
+	}
 
-  const testCmd = await getTddTestCommand(stackInfo.stackType, stackInfo.buildTool, projectDir)
-  const hookContent = generateTddPipelineHook(mode, testCmd, stackInfo.stackType)
+	const testCmd = await getTddTestCommand(
+		stackInfo.stackType,
+		stackInfo.buildTool,
+		projectDir,
+	);
+	const hookContent = generateTddPipelineHook(
+		mode,
+		testCmd,
+		stackInfo.stackType,
+	);
 
-  const hookPath = path.join(hooksDir, 'pre-push')
+	const hookPath = path.join(hooksDir, "pre-push");
 
-  // Backup existing hook
-  if (await fs.pathExists(hookPath)) {
-    const backupPath = path.join(hooksDir, 'pre-push.bak')
-    try {
-      await fs.copy(hookPath, backupPath, { overwrite: true })
-      result.skipped.push('pre-push (backed up to pre-push.bak)')
-    } catch (e) {
-      result.errors.push(`backup: ${e instanceof Error ? e.message : String(e)}`)
-      return result
-    }
-  }
+	// Backup existing hook
+	if (await fs.pathExists(hookPath)) {
+		const backupPath = path.join(hooksDir, "pre-push.bak");
+		try {
+			await fs.copy(hookPath, backupPath, { overwrite: true });
+			result.skipped.push("pre-push (backed up to pre-push.bak)");
+		} catch (e) {
+			result.errors.push(
+				`backup: ${e instanceof Error ? e.message : String(e)}`,
+			);
+			return result;
+		}
+	}
 
-  try {
-    await fs.writeFile(hookPath, hookContent, { mode: 0o755 })
-    result.installed.push('pre-push')
-  } catch (e) {
-    result.errors.push(`pre-push: ${e instanceof Error ? e.message : String(e)}`)
-  }
+	try {
+		await fs.writeFile(hookPath, hookContent, { mode: 0o755 });
+		result.installed.push("pre-push");
+	} catch (e) {
+		result.errors.push(
+			`pre-push: ${e instanceof Error ? e.message : String(e)}`,
+		);
+	}
 
-  return result
+	return result;
 }

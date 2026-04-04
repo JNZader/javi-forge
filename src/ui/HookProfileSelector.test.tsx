@@ -1,8 +1,8 @@
-import React from 'react'
-import { describe, it, expect, vi } from 'vitest'
-import { render } from 'ink-testing-library'
-import HookProfileSelector from './HookProfileSelector.js'
-import { CIProvider } from './CIContext.js'
+import { render } from "ink-testing-library";
+import React from "react";
+import { describe, expect, it, vi } from "vitest";
+import { CIProvider } from "./CIContext.js";
+import HookProfileSelector from "./HookProfileSelector.js";
 
 /**
  * HookProfileSelector — single-select for hook reliability profiles.
@@ -12,155 +12,153 @@ import { CIProvider } from './CIContext.js'
  */
 
 function renderWithCI(ui: React.ReactElement, isCI = false) {
-  return render(
-    React.createElement(CIProvider, { isCI }, ui)
-  )
+	return render(React.createElement(CIProvider, { isCI }, ui));
 }
 
-describe('HookProfileSelector', () => {
-  it('renders all three profiles', () => {
-    const onConfirm = vi.fn()
-    const { lastFrame } = renderWithCI(
-      React.createElement(HookProfileSelector, { onConfirm })
-    )
+describe("HookProfileSelector", () => {
+	it("renders all three profiles", () => {
+		const onConfirm = vi.fn();
+		const { lastFrame } = renderWithCI(
+			React.createElement(HookProfileSelector, { onConfirm }),
+		);
 
-    const frame = lastFrame()!
-    expect(frame).toContain('Minimal')
-    expect(frame).toContain('Standard')
-    expect(frame).toContain('Strict')
-  })
+		const frame = lastFrame()!;
+		expect(frame).toContain("Minimal");
+		expect(frame).toContain("Standard");
+		expect(frame).toContain("Strict");
+	});
 
-  it('renders profile descriptions', () => {
-    const onConfirm = vi.fn()
-    const { lastFrame } = renderWithCI(
-      React.createElement(HookProfileSelector, { onConfirm })
-    )
+	it("renders profile descriptions", () => {
+		const onConfirm = vi.fn();
+		const { lastFrame } = renderWithCI(
+			React.createElement(HookProfileSelector, { onConfirm }),
+		);
 
-    const frame = lastFrame()!
-    expect(frame).toContain('pre-commit only')
-    expect(frame).toContain('pre-push')
-    expect(frame).toContain('commit-msg')
-  })
+		const frame = lastFrame()!;
+		expect(frame).toContain("pre-commit only");
+		expect(frame).toContain("pre-push");
+		expect(frame).toContain("commit-msg");
+	});
 
-  it('defaults to Standard profile (index 1)', () => {
-    const onConfirm = vi.fn()
-    const { lastFrame } = renderWithCI(
-      React.createElement(HookProfileSelector, { onConfirm })
-    )
+	it("defaults to Standard profile (index 1)", () => {
+		const onConfirm = vi.fn();
+		const { lastFrame } = renderWithCI(
+			React.createElement(HookProfileSelector, { onConfirm }),
+		);
 
-    // Standard should be highlighted (shown with filled circle ◉)
-    const frame = lastFrame()!
-    // The cursor arrow should be next to Standard
-    const lines = frame.split('\n')
-    const standardLine = lines.find(l => l.includes('Standard'))
-    expect(standardLine).toBeDefined()
-    expect(standardLine).toContain('▶')
-  })
+		// Standard should be highlighted (shown with filled circle ◉)
+		const frame = lastFrame()!;
+		// The cursor arrow should be next to Standard
+		const lines = frame.split("\n");
+		const standardLine = lines.find((l) => l.includes("Standard"));
+		expect(standardLine).toBeDefined();
+		expect(standardLine).toContain("▶");
+	});
 
-  it('shows navigation hint', () => {
-    const onConfirm = vi.fn()
-    const { lastFrame } = renderWithCI(
-      React.createElement(HookProfileSelector, { onConfirm })
-    )
+	it("shows navigation hint", () => {
+		const onConfirm = vi.fn();
+		const { lastFrame } = renderWithCI(
+			React.createElement(HookProfileSelector, { onConfirm }),
+		);
 
-    const frame = lastFrame()!
-    expect(frame).toContain('navigate')
-    expect(frame).toContain('confirm')
-  })
+		const frame = lastFrame()!;
+		expect(frame).toContain("navigate");
+		expect(frame).toContain("confirm");
+	});
 
-  it('auto-confirms with standard profile in CI mode', async () => {
-    const onConfirm = vi.fn()
-    renderWithCI(
-      React.createElement(HookProfileSelector, { onConfirm }),
-      true
-    )
+	it("auto-confirms with standard profile in CI mode", async () => {
+		const onConfirm = vi.fn();
+		renderWithCI(React.createElement(HookProfileSelector, { onConfirm }), true);
 
-    await vi.waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledTimes(1)
-    })
+		await vi.waitFor(() => {
+			expect(onConfirm).toHaveBeenCalledTimes(1);
+		});
 
-    expect(onConfirm.mock.calls[0][0]).toBe('standard')
-  })
+		expect(onConfirm.mock.calls[0][0]).toBe("standard");
+	});
 
-  it('respects presetProfile prop', async () => {
-    const onConfirm = vi.fn()
-    renderWithCI(
-      React.createElement(HookProfileSelector, { onConfirm, presetProfile: 'strict' }),
-      true
-    )
+	it("respects presetProfile prop", async () => {
+		const onConfirm = vi.fn();
+		renderWithCI(
+			React.createElement(HookProfileSelector, {
+				onConfirm,
+				presetProfile: "strict",
+			}),
+			true,
+		);
 
-    await vi.waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledTimes(1)
-    })
+		await vi.waitFor(() => {
+			expect(onConfirm).toHaveBeenCalledTimes(1);
+		});
 
-    expect(onConfirm.mock.calls[0][0]).toBe('strict')
-  })
+		expect(onConfirm.mock.calls[0][0]).toBe("strict");
+	});
 
-  it('confirms selection on Enter', async () => {
-    const onConfirm = vi.fn()
-    const { stdin } = renderWithCI(
-      React.createElement(HookProfileSelector, { onConfirm })
-    )
+	it("confirms selection on Enter", async () => {
+		const onConfirm = vi.fn();
+		const { stdin } = renderWithCI(
+			React.createElement(HookProfileSelector, { onConfirm }),
+		);
 
-    stdin.write('\r')
+		stdin.write("\r");
 
-    await vi.waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledTimes(1)
-    })
+		await vi.waitFor(() => {
+			expect(onConfirm).toHaveBeenCalledTimes(1);
+		});
 
-    // Default is standard
-    expect(onConfirm.mock.calls[0][0]).toBe('standard')
-  })
+		// Default is standard
+		expect(onConfirm.mock.calls[0][0]).toBe("standard");
+	});
 
-  it('navigates down to strict and confirms', async () => {
-    const onConfirm = vi.fn()
-    const { stdin, lastFrame } = renderWithCI(
-      React.createElement(HookProfileSelector, { onConfirm })
-    )
+	it("navigates down to strict and confirms", async () => {
+		const onConfirm = vi.fn();
+		const { stdin, lastFrame } = renderWithCI(
+			React.createElement(HookProfileSelector, { onConfirm }),
+		);
 
-    // cursor starts at Standard (1), move down to Strict (2)
-    stdin.write('\u001B[B') // down arrow
+		// cursor starts at Standard (1), move down to Strict (2)
+		stdin.write("\u001B[B"); // down arrow
 
-    // Wait for the cursor to move (Strict line should now have the arrow)
-    await vi.waitFor(() => {
-      const frame = lastFrame()!
-      const lines = frame.split('\n')
-      const strictLine = lines.find(l => l.includes('Strict'))
-      expect(strictLine).toContain('▶')
-    })
+		// Wait for the cursor to move (Strict line should now have the arrow)
+		await vi.waitFor(() => {
+			const frame = lastFrame()!;
+			const lines = frame.split("\n");
+			const strictLine = lines.find((l) => l.includes("Strict"));
+			expect(strictLine).toContain("▶");
+		});
 
-    stdin.write('\r')
+		stdin.write("\r");
 
-    await vi.waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledTimes(1)
-    })
+		await vi.waitFor(() => {
+			expect(onConfirm).toHaveBeenCalledTimes(1);
+		});
 
-    expect(onConfirm.mock.calls[0][0]).toBe('strict')
-  })
+		expect(onConfirm.mock.calls[0][0]).toBe("strict");
+	});
 
-  it('navigates up to minimal and confirms', async () => {
-    const onConfirm = vi.fn()
-    const { stdin, lastFrame } = renderWithCI(
-      React.createElement(HookProfileSelector, { onConfirm })
-    )
+	it("navigates up to minimal and confirms", async () => {
+		const onConfirm = vi.fn();
+		const { stdin, lastFrame } = renderWithCI(
+			React.createElement(HookProfileSelector, { onConfirm }),
+		);
 
-    // cursor starts at Standard (1), move up to Minimal (0)
-    stdin.write('\u001B[A') // up arrow
+		// cursor starts at Standard (1), move up to Minimal (0)
+		stdin.write("\u001B[A"); // up arrow
 
-    // Wait for the cursor to move (Minimal line should now have the arrow)
-    await vi.waitFor(() => {
-      const frame = lastFrame()!
-      const lines = frame.split('\n')
-      const minimalLine = lines.find(l => l.includes('Minimal'))
-      expect(minimalLine).toContain('▶')
-    })
+		// Wait for the cursor to move (Minimal line should now have the arrow)
+		await vi.waitFor(() => {
+			const frame = lastFrame()!;
+			const lines = frame.split("\n");
+			const minimalLine = lines.find((l) => l.includes("Minimal"));
+			expect(minimalLine).toContain("▶");
+		});
 
-    stdin.write('\r')
+		stdin.write("\r");
 
-    await vi.waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledTimes(1)
-    })
+		await vi.waitFor(() => {
+			expect(onConfirm).toHaveBeenCalledTimes(1);
+		});
 
-    expect(onConfirm.mock.calls[0][0]).toBe('minimal')
-  })
-})
+		expect(onConfirm.mock.calls[0][0]).toBe("minimal");
+	});
+});

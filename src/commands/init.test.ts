@@ -137,6 +137,7 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
     contextDir: true,
     claudeMd: true,
     securityHooks: true,
+    hookProfile: 'standard',
     codeGraph: false,
     dockerDeploy: false,
     dockerServiceName: 'app',
@@ -261,7 +262,9 @@ describe('initProject', () => {
     }))
 
     expect(mockedFs.writeJson).toHaveBeenCalled()
-    const [manifestPath, manifestData] = mockedFs.writeJson.mock.calls[0]
+    const manifestCall = mockedFs.writeJson.mock.calls.find(args => String(args[0]).includes('manifest.json'))
+    expect(manifestCall).toBeDefined()
+    const [manifestPath, manifestData] = manifestCall!
     expect(String(manifestPath)).toContain('manifest.json')
     expect(manifestData).toMatchObject({
       version: '0.1.0',
@@ -415,7 +418,7 @@ describe('initProject', () => {
 
     await collectSteps(makeOptions({ contextDir: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
-    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    const [, manifestData] = mockedFs.writeJson.mock.calls.find(args => String(args[0]).includes('manifest.json'))!
     expect((manifestData as ForgeManifest).modules).toContain('context')
   })
 
@@ -479,7 +482,7 @@ describe('initProject', () => {
 
     await collectSteps(makeOptions({ claudeMd: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
-    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    const [, manifestData] = mockedFs.writeJson.mock.calls.find(args => String(args[0]).includes('manifest.json'))!
     expect((manifestData as ForgeManifest).modules).toContain('claude-md')
   })
 
@@ -554,7 +557,7 @@ describe('initProject', () => {
 
     await collectSteps(makeOptions({ dockerDeploy: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
-    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    const [, manifestData] = mockedFs.writeJson.mock.calls.find(args => String(args[0]).includes('manifest.json'))!
     expect((manifestData as ForgeManifest).modules).toContain('docker-deploy')
   })
 
@@ -633,7 +636,7 @@ describe('initProject', () => {
 
     await collectSteps(makeOptions({ securityHooks: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
-    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    const [, manifestData] = mockedFs.writeJson.mock.calls.find(args => String(args[0]).includes('manifest.json'))!
     expect((manifestData as ForgeManifest).modules).toContain('security-hooks')
   })
 
@@ -700,7 +703,7 @@ describe('initProject', () => {
 
     await collectSteps(makeOptions({ codeGraph: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
-    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    const [, manifestData] = mockedFs.writeJson.mock.calls.find(args => String(args[0]).includes('manifest.json'))!
     expect((manifestData as ForgeManifest).modules).toContain('code-graph')
   })
 
@@ -762,7 +765,7 @@ describe('initProject', () => {
 
     await collectSteps(makeOptions({ localAi: true }))
     expect(mockedFs.writeJson).toHaveBeenCalled()
-    const [, manifestData] = mockedFs.writeJson.mock.calls[0]
+    const [, manifestData] = mockedFs.writeJson.mock.calls.find(args => String(args[0]).includes('manifest.json'))!
     expect((manifestData as ForgeManifest).modules).toContain('local-ai')
   })
 
@@ -832,5 +835,77 @@ describe('initProject', () => {
 
     expect(skillsIdx).toBeGreaterThan(localAiIdx)
     expect(skillsIdx).toBeLessThan(manifestIdx)
+  })
+
+  // ── Hook profile step ───────────────────────────────────────────────────────
+
+  it('hook-profile step writes profile.json with selected profile', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+
+    await collectSteps(makeOptions({ securityHooks: true, hookProfile: 'strict' }))
+
+    const writeJsonCalls = mockedFs.writeJson.mock.calls
+    const profileCall = writeJsonCalls.find(args => String(args[0]).endsWith('profile.json'))
+    expect(profileCall).toBeDefined()
+    expect(profileCall![1]).toEqual({ profile: 'strict' })
+  })
+
+  it('hook-profile step defaults to standard when hookProfile is not set', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+
+    await collectSteps(makeOptions({ securityHooks: true, hookProfile: 'standard' }))
+
+    const writeJsonCalls = mockedFs.writeJson.mock.calls
+    const profileCall = writeJsonCalls.find(args => String(args[0]).endsWith('profile.json'))
+    expect(profileCall).toBeDefined()
+    expect(profileCall![1]).toEqual({ profile: 'standard' })
+  })
+
+  it('hook-profile step is skipped when securityHooks is false', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+
+    const steps = await collectSteps(makeOptions({ securityHooks: false, hookProfile: 'minimal' }))
+    const profileStep = steps.find(s => s.id === 'hook-profile' && s.status === 'skipped')
+    expect(profileStep).toBeDefined()
+    expect(profileStep!.detail).toContain('security hooks not selected')
+  })
+
+  it('hook-profile step reports done with profile name in detail', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+
+    const steps = await collectSteps(makeOptions({ securityHooks: true, hookProfile: 'minimal' }))
+    const profileStep = steps.find(s => s.id === 'hook-profile' && s.status === 'done')
+    expect(profileStep).toBeDefined()
+    expect(profileStep!.detail).toContain('minimal')
+    expect(profileStep!.detail).toContain('profile.json')
+  })
+
+  it('hook-profile step runs after security-hooks', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ securityHooks: true, hookProfile: 'standard' }))
+    const stepIds = steps.map(s => s.id)
+    const securityIdx = stepIds.lastIndexOf('security-hooks')
+    const profileIdx = stepIds.indexOf('hook-profile')
+
+    expect(profileIdx).toBeGreaterThan(securityIdx)
+  })
+
+  it('hook-profile step is dry-run aware', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+
+    const steps = await collectSteps(makeOptions({ securityHooks: true, hookProfile: 'strict', dryRun: true }))
+    const profileStep = steps.find(s => s.id === 'hook-profile' && s.status === 'done')
+    expect(profileStep).toBeDefined()
+    expect(profileStep!.detail).toContain('dry-run')
+
+    // writeJson should NOT have been called in dry-run
+    const writeJsonCalls = mockedFs.writeJson.mock.calls
+    const profileCall = writeJsonCalls.find(args => String(args[0]).endsWith('profile.json'))
+    expect(profileCall).toBeUndefined()
   })
 })

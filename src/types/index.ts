@@ -1,6 +1,8 @@
 export type Stack = 'node' | 'python' | 'go' | 'rust' | 'java-gradle' | 'java-maven' | 'elixir'
 export type CIProvider = 'github' | 'gitlab' | 'woodpecker'
 export type MemoryOption = 'engram' | 'obsidian-brain' | 'memory-simple' | 'none'
+export type HookProfile = 'minimal' | 'standard' | 'strict'
+
 export interface InitOptions {
   projectName: string
   projectDir: string
@@ -14,6 +16,7 @@ export interface InitOptions {
   contextDir: boolean
   claudeMd: boolean
   securityHooks: boolean
+  hookProfile: HookProfile
   codeGraph: boolean
   dockerDeploy: boolean
   /** Service name for docker rollout (default: 'app') */

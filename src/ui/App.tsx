@@ -8,10 +8,11 @@ import StackSelector from './StackSelector.js'
 import CISelector from './CISelector.js'
 import MemorySelector from './MemorySelector.js'
 import OptionSelector from './OptionSelector.js'
+import HookProfileSelector from './HookProfileSelector.js'
 import Progress from './Progress.js'
 import Summary from './Summary.js'
 import { initProject } from '../commands/init.js'
-import type { Stack, CIProvider, MemoryOption, InitStep } from '../types/index.js'
+import type { Stack, CIProvider, MemoryOption, HookProfile, InitStep } from '../types/index.js'
 
 type Stage =
   | 'welcome'
@@ -20,6 +21,7 @@ type Stage =
   | 'ci'
   | 'memory'
   | 'options'
+  | 'hook-profile'
   | 'running'
   | 'done'
 
@@ -32,6 +34,7 @@ interface AppProps {
   presetGhagga?: boolean
   presetMock?: boolean
   presetLocalAi?: boolean
+  presetHookProfile?: HookProfile
 }
 
 export default function App({
@@ -43,6 +46,7 @@ export default function App({
   presetGhagga = false,
   presetMock = false,
   presetLocalAi = false,
+  presetHookProfile,
 }: AppProps) {
   const [stage, setStage] = useState<Stage>('welcome')
   const [projectName, setProjectName] = useState(presetName ?? '')
@@ -58,6 +62,7 @@ export default function App({
   const [claudeMd, setClaudeMd] = useState(true)
   const [ghagga, setGhagga] = useState(presetGhagga)
   const [securityHooks, setSecurityHooks] = useState(true)
+  const [hookProfile, setHookProfile] = useState<HookProfile>(presetHookProfile ?? 'standard')
   const [codeGraph, setCodeGraph] = useState(false)
   const [localAi, setLocalAi] = useState(false)
   const [steps, setSteps] = useState<InitStep[]>([])
@@ -84,7 +89,7 @@ export default function App({
     setStage('options')
   }
 
-  const handleOptionsConfirm = async (opts: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean; securityHooks: boolean; codeGraph: boolean; localAi: boolean }) => {
+  const handleOptionsConfirm = (opts: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean; securityHooks: boolean; codeGraph: boolean; localAi: boolean }) => {
     setAiSync(opts.aiSync)
     setSdd(opts.sdd)
     setContextDir(opts.contextDir)
@@ -93,6 +98,20 @@ export default function App({
     setSecurityHooks(opts.securityHooks)
     setCodeGraph(opts.codeGraph)
     setLocalAi(opts.localAi)
+    // If securityHooks is selected, ask for profile; otherwise skip to running
+    if (opts.securityHooks) {
+      setStage('hook-profile')
+    } else {
+      void runInit({ ...opts, hookProfile })
+    }
+  }
+
+  const handleHookProfileConfirm = (profile: HookProfile) => {
+    setHookProfile(profile)
+    void runInit({ aiSync, sdd, contextDir, claudeMd, ghagga, securityHooks, codeGraph, localAi, hookProfile: profile })
+  }
+
+  const runInit = async (opts: { aiSync: boolean; sdd: boolean; contextDir: boolean; claudeMd: boolean; ghagga: boolean; securityHooks: boolean; codeGraph: boolean; localAi: boolean; hookProfile: HookProfile }) => {
     setStage('running')
 
     await initProject(
@@ -108,6 +127,7 @@ export default function App({
         contextDir: opts.contextDir,
         claudeMd: opts.claudeMd,
         securityHooks: opts.securityHooks,
+        hookProfile: opts.hookProfile,
         codeGraph: opts.codeGraph,
         localAi: opts.localAi,
         dockerDeploy: false,
@@ -174,6 +194,9 @@ export default function App({
       )}
       {stage === 'options' && (
         <OptionSelector onConfirm={handleOptionsConfirm} presetGhagga={presetGhagga} presetLocalAi={presetLocalAi} />
+      )}
+      {stage === 'hook-profile' && (
+        <HookProfileSelector onConfirm={handleHookProfileConfirm} presetProfile={presetHookProfile} />
       )}
       {stage === 'running' && (
         <Progress

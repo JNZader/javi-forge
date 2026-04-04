@@ -2,7 +2,7 @@ import fs from 'fs-extra'
 import path from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import type { InitOptions, InitStep, ForgeManifest } from '../types/index.js'
+import type { InitOptions, InitStep, ForgeManifest, HookProfile } from '../types/index.js'
 import { backupIfExists, ensureDirExists } from '../lib/common.js'
 import { generateDependabotYml, generateCIWorkflow, getCIDestination, generateDeployWorkflow, getDeployDestination } from '../lib/template.js'
 import { generateContextDir } from '../lib/context.js'
@@ -35,7 +35,7 @@ export async function initProject(
   options: InitOptions,
   onStep: StepCallback
 ): Promise<void> {
-  const { projectDir, projectName, stack, ciProvider, memory, aiSync, sdd, ghagga, contextDir, claudeMd, securityHooks, dryRun } = options
+  const { projectDir, projectName, stack, ciProvider, memory, aiSync, sdd, ghagga, contextDir, claudeMd, securityHooks, hookProfile, dryRun } = options
 
   // Ensure project directory exists before any steps
   if (!dryRun && projectDir) {
@@ -452,6 +452,27 @@ ENABLE_WEBHOOKS=false
     }
   } catch (e) {
     report(onStep, stepSecurity, 'Scaffold security hooks', 'error', String(e))
+  }
+
+  // ── Step 14b: Write hook profile ─────────────────────────────────────────────
+  const stepHookProfile = 'hook-profile'
+  report(onStep, stepHookProfile, 'Write hook reliability profile', 'running')
+  try {
+    if (securityHooks) {
+      if (!dryRun) {
+        const hooksDir = path.join(projectDir, 'ci-local', 'hooks')
+        await ensureDirExists(hooksDir)
+        const profilePath = path.join(hooksDir, 'profile.json')
+        const resolvedProfile: HookProfile = hookProfile ?? 'standard'
+        await fs.writeJson(profilePath, { profile: resolvedProfile }, { spaces: 2 })
+      }
+      report(onStep, stepHookProfile, 'Write hook reliability profile', 'done',
+        dryRun ? `dry-run: would write profile.json (${hookProfile ?? 'standard'})` : `ci-local/hooks/profile.json (${hookProfile ?? 'standard'})`)
+    } else {
+      report(onStep, stepHookProfile, 'Write hook reliability profile', 'skipped', 'security hooks not selected')
+    }
+  } catch (e) {
+    report(onStep, stepHookProfile, 'Write hook reliability profile', 'error', String(e))
   }
 
   // ── Step 15: RepoForge code graph scaffolding ───────────────────────────────

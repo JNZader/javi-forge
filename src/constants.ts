@@ -1,6 +1,6 @@
 import path from 'path'
 import { fileURLToPath } from 'url'
-import type { StackContextEntry, StackClaudeMdEntry } from './types/index.js'
+import type { StackContextEntry, StackClaudeMdEntry, HookProfile } from './types/index.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -198,6 +198,29 @@ export const DEPLOY_DESTINATION_MAP: Record<string, string> = {
   github: '.github/workflows/deploy.yml',
   gitlab: '.gitlab-ci-deploy.yml',
   woodpecker: '.woodpecker/deploy.yml',
+}
+
+/** Hook reliability profile definitions */
+export const HOOK_PROFILES: Record<HookProfile, {
+  label: string
+  description: string
+  hooks: string[]
+}> = {
+  minimal: {
+    label: 'Minimal',
+    description: 'pre-commit only: lint + format check',
+    hooks: ['pre-commit'],
+  },
+  standard: {
+    label: 'Standard',
+    description: 'pre-commit + pre-push + CI gate check',
+    hooks: ['pre-commit', 'pre-push', 'ci-gate'],
+  },
+  strict: {
+    label: 'Strict',
+    description: 'all standard + commit-msg validation + security scan on every push',
+    hooks: ['pre-commit', 'pre-push', 'ci-gate', 'commit-msg', 'security-scan'],
+  },
 }
 
 /** Stack-to-CI template filename mapping */

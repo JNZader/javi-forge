@@ -765,4 +765,72 @@ describe('initProject', () => {
     const [, manifestData] = mockedFs.writeJson.mock.calls[0]
     expect((manifestData as ForgeManifest).modules).toContain('local-ai')
   })
+
+  // ── Agent Skills manifest step ────────────────────────────────────────────
+
+  it('agent-skills step generates skills.json in project root', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('skills.json')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions())
+    const skillsStep = steps.find(s => s.id === 'agent-skills' && s.status === 'done')
+    expect(skillsStep).toBeDefined()
+    expect(skillsStep!.detail).toContain('skills.json')
+
+    const writeJsonCalls = mockedFs.writeJson.mock.calls
+    const skillsCall = writeJsonCalls.find((call: unknown[]) => String(call[0]).endsWith('skills.json'))
+    expect(skillsCall).toBeDefined()
+    const manifest = skillsCall![1] as { name: string; version: string; skills: unknown[] }
+    expect(manifest.name).toBe('test-project')
+    expect(manifest.version).toBe('0.1.0')
+    expect(manifest.skills).toEqual([])
+  })
+
+  it('agent-skills step reports already exists when skills.json is present', async () => {
+    mockedFs.pathExists.mockResolvedValue(true as never)
+
+    const steps = await collectSteps(makeOptions())
+    const skillsStep = steps.find(s => s.id === 'agent-skills' && s.status === 'done' && s.detail === 'already exists')
+    expect(skillsStep).toBeDefined()
+  })
+
+  it('agent-skills dry-run does not write skills.json', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      if (s.endsWith('skills.json')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions({ dryRun: true }))
+    const skillsStep = steps.find(s => s.id === 'agent-skills' && s.status === 'done')
+    expect(skillsStep).toBeDefined()
+    expect(skillsStep!.detail).toContain('dry-run')
+
+    const skillsWrites = mockedFs.writeJson.mock.calls.filter(
+      (call: unknown[]) => String(call[0]).endsWith('skills.json')
+    )
+    expect(skillsWrites).toHaveLength(0)
+  })
+
+  it('agent-skills step runs after local-ai and before manifest', async () => {
+    mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+      const s = String(p)
+      if (s.endsWith('.git')) return false as never
+      return true as never
+    })
+
+    const steps = await collectSteps(makeOptions())
+    const stepIds = steps.map(s => s.id)
+    const localAiIdx = stepIds.lastIndexOf('local-ai')
+    const skillsIdx = stepIds.indexOf('agent-skills')
+    const manifestIdx = stepIds.indexOf('manifest')
+
+    expect(skillsIdx).toBeGreaterThan(localAiIdx)
+    expect(skillsIdx).toBeLessThan(manifestIdx)
+  })
 })

@@ -15,7 +15,9 @@ import {
   CI_LOCAL_DIR,
   SECURITY_HOOKS_DIR,
   LOCAL_AI_TEMPLATE_DIR,
+  AGENT_SKILLS_MANIFEST_FILE,
 } from '../constants.js'
+import type { AgentSkillsManifest } from '../types/index.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -531,7 +533,32 @@ ENABLE_WEBHOOKS=false
     report(onStep, stepLocalAi, 'Scaffold local AI dev stack', 'error', String(e))
   }
 
-  // ── Step 17: Write manifest ───────────────────────────────────────────────
+  // ── Step 17: Generate Agent Skills manifest (skills.json) ─────────────────
+  const stepSkills = 'agent-skills'
+  report(onStep, stepSkills, 'Generate Agent Skills manifest (skills.json)', 'running')
+  try {
+    if (!dryRun) {
+      const skillsManifest: AgentSkillsManifest = {
+        name: projectName,
+        version: '0.1.0',
+        description: `Agent Skills manifest for ${projectName}`,
+        skills: [],
+      }
+      const skillsJsonPath = path.join(projectDir, AGENT_SKILLS_MANIFEST_FILE)
+      if (!await fs.pathExists(skillsJsonPath)) {
+        await fs.writeJson(skillsJsonPath, skillsManifest, { spaces: 2 })
+        report(onStep, stepSkills, 'Generate Agent Skills manifest (skills.json)', 'done', AGENT_SKILLS_MANIFEST_FILE)
+      } else {
+        report(onStep, stepSkills, 'Generate Agent Skills manifest (skills.json)', 'done', 'already exists')
+      }
+    } else {
+      report(onStep, stepSkills, 'Generate Agent Skills manifest (skills.json)', 'done', `dry-run: would generate ${AGENT_SKILLS_MANIFEST_FILE}`)
+    }
+  } catch (e) {
+    report(onStep, stepSkills, 'Generate Agent Skills manifest (skills.json)', 'error', String(e))
+  }
+
+  // ── Step 18: Write manifest ───────────────────────────────────────────────
   const stepManifest = 'manifest'
   report(onStep, stepManifest, 'Write forge manifest', 'running')
   try {

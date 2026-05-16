@@ -107,8 +107,8 @@ export function renderAscii(
 			chain.push(
 				formatNode(current, labelMap.get(current) ?? current, resultMap),
 			);
-			const children = adjacency.get(current) ?? [];
-			const next = children[0];
+			const children: string[] = adjacency.get(current) ?? [];
+			const next: string | undefined = children[0];
 			if (next) {
 				const edgeKey = `${current}->${next}`;
 				const edgeLabel = edgeLabelMap.get(edgeKey);

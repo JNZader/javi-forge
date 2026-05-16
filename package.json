@@ -14,19 +14,21 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:mutation": "stryker run"
+    "test:mutation": "stryker run",
+    "package:check": "npm pack --dry-run --json --cache /tmp/javi-forge-npm-pack-cache > /tmp/javi-forge-pack.json && node scripts/verify-package-contents.mjs /tmp/javi-forge-pack.json"
   },
   "files": [
-    "dist/",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/__integration__/**",
+    "!dist/e2e/**",
     "ci-local/",
     "modules/",
     "templates/",
     "workflows/",
     "lib/",
-    "!dist/**/*.test.*",
-    "!dist/**/__snapshots__",
-    "package.json",
     "README.md",
+    "LICENSE*",
     ".gitignore.template"
   ],
   "author": "JNZader",

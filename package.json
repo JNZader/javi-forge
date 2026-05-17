@@ -4,7 +4,7 @@
   "description": "Project scaffolding and AI-ready CI bootstrap",
   "type": "module",
   "bin": {
-    "javi-forge": "./dist/index.js"
+    "javi-forge": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -35,7 +35,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/JNZader/javi-forge"
+    "url": "git+https://github.com/JNZader/javi-forge.git"
   },
   "engines": {
     "node": ">=18"

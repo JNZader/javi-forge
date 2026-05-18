@@ -26,7 +26,7 @@ vi.mock("../lib/common.js", () => ({
 }));
 
 function renderWithCI(ui: React.ReactElement, isCI = false) {
-	return render(React.createElement(CIProvider, { isCI }, ui));
+	return render(<CIProvider isCI={isCI}>{ui}</CIProvider>);
 }
 
 describe("StackSelector", () => {

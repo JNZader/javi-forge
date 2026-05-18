@@ -268,12 +268,14 @@ describe("importAgentSkillsPackage", () => {
 	});
 
 	it("copies directory and creates plugin.json + .installed.json", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			// skills.json exists, dest dir does not
-			if (typeof p === "string" && p.includes("skills.json"))
-				return true as never;
-			return false as never;
-		});
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				// skills.json exists, dest dir does not
+				if (typeof p === "string" && p.includes("skills.json"))
+					return true as never;
+				return false as never;
+			},
+		);
 		mockFs.readJson.mockResolvedValue({
 			name: "imported-skill",
 			version: "1.0.0",
@@ -445,11 +447,13 @@ describe("generateProjectSkillsJson", () => {
 	});
 
 	it("returns error when no installed plugins found", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.includes(".installed.json"))
-				return false as never;
-			return true as never;
-		});
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.includes(".installed.json"))
+					return false as never;
+				return true as never;
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["empty-dir"] as never);
 
 		const result = await generateProjectSkillsJson("/fake/project");
@@ -458,13 +462,15 @@ describe("generateProjectSkillsJson", () => {
 	});
 
 	it("generates skills.json from installed plugins", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["alpha", "beta"] as never);
-		mockFs.readJson.mockImplementation(async (p: string) => {
+		mockFs.readJson.mockImplementation(async (p, _opts) => {
 			if (typeof p === "string" && p.includes("alpha")) {
 				return {
 					name: "alpha",
@@ -516,11 +522,13 @@ describe("generateProjectSkillsJson", () => {
 	});
 
 	it("does not write file in dry-run mode", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["alpha"] as never);
 		mockFs.readJson.mockResolvedValue({
 			name: "alpha",
@@ -542,11 +550,13 @@ describe("generateProjectSkillsJson", () => {
 	});
 
 	it("uses custom registry name", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["alpha"] as never);
 		mockFs.readJson.mockResolvedValue({
 			name: "alpha",
@@ -581,11 +591,13 @@ describe("generateProjectSkillsJson", () => {
 	});
 
 	it("skips corrupt .installed.json entries", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["corrupt"] as never);
 		mockFs.readJson.mockRejectedValue(new Error("parse error") as never);
 
@@ -607,11 +619,13 @@ describe("generateGlobalSkillsJson", () => {
 	});
 
 	it("returns error when no plugins found", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
-				return false as never;
-			return true as never;
-		});
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return false as never;
+				return true as never;
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["empty"] as never);
 
 		const result = await generateGlobalSkillsJson();
@@ -620,11 +634,13 @@ describe("generateGlobalSkillsJson", () => {
 	});
 
 	it("generates global skills.json", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["my-plugin"] as never);
 		mockFs.readJson.mockResolvedValue({
 			name: "my-plugin",
@@ -646,11 +662,13 @@ describe("generateGlobalSkillsJson", () => {
 	});
 
 	it("does not write file in dry-run mode", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["my-plugin"] as never);
 		mockFs.readJson.mockResolvedValue({
 			name: "my-plugin",

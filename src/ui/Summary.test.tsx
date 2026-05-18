@@ -22,7 +22,7 @@ vi.mock("ink", async () => {
 });
 
 function renderWithCI(ui: React.ReactElement, isCI = false) {
-	return render(React.createElement(CIProvider, { isCI }, ui));
+	return render(<CIProvider isCI={isCI}>{ui}</CIProvider>);
 }
 
 function makeSteps(overrides: Partial<InitStep>[] = []): InitStep[] {

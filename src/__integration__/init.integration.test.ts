@@ -12,34 +12,36 @@ import {
 	readGenerated,
 } from "./helpers.js";
 
-// Mock ONLY external commands (git, npx) — NOT filesystem
+// Mock ONLY external commands (git, npx) — NOT filesystem.
+//
+// The mocked execFile carries a [util.promisify.custom] property so that
+// downstream callers using `promisify(execFile)` get our async shim directly
+// from Node's promisify itself. The old approach mocked util.promisify and
+// dispatched by `fn.name === "execFile" || "mockConstructor"`, which broke
+// across Vitest spy-naming changes (round-9 finding). Anchoring on the
+// official promisify.custom symbol is the long-term stable contract.
 vi.mock("child_process", async () => {
 	const actual =
 		await vi.importActual<typeof import("child_process")>("child_process");
-	return {
-		...actual,
-		execFile: vi.fn(
-			(_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
-				// Simulate git init / git config success
-				if (cb) cb(null, { stdout: "", stderr: "" });
-				return { stdout: "", stderr: "" };
-			},
-		),
-	};
-});
+	// Import promisify INSIDE the factory — vi.mock is hoisted above
+	// top-level imports, so we cannot reference a static `_promisify`.
+	const util = await vi.importActual<typeof import("node:util")>("node:util");
+	const promisifyCustom = util.promisify.custom as unknown as symbol;
 
-// Make promisify(execFile) work with our mock
-vi.mock("util", async () => {
-	const actual = await vi.importActual<typeof import("util")>("util");
-	return {
-		...actual,
-		promisify: (fn: Function) => {
-			if (fn.name === "execFile" || fn.name === "mockConstructor") {
-				return async (..._args: unknown[]) => ({ stdout: "", stderr: "" });
-			}
-			return actual.promisify(fn as (...args: unknown[]) => unknown);
+	const mockedExecFile = vi.fn(
+		(_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
+			// Simulate git init / git config success
+			if (cb) cb(null, { stdout: "", stderr: "" });
+			return { stdout: "", stderr: "" };
 		},
-	};
+	);
+
+	// Attach the promisify-custom symbol so util.promisify(execFile) resolves
+	// to this exact async function without touching the util module mock.
+	(mockedExecFile as unknown as Record<symbol, unknown>)[promisifyCustom] =
+		async (..._args: unknown[]) => ({ stdout: "", stderr: "" });
+
+	return { ...actual, execFile: mockedExecFile };
 });
 
 let tmpDir: string;

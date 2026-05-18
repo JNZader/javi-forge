@@ -33,8 +33,11 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
 		contextDir: true,
 		claudeMd: true,
 		securityHooks: false,
+		hookProfile: "standard",
+		codeGraph: false,
 		dockerDeploy: false,
 		dockerServiceName: "app",
+		localAi: false,
 		dryRun: false,
 		...overrides,
 	};

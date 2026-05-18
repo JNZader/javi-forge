@@ -244,11 +244,13 @@ describe("validatePlugin", () => {
 
 	it("returns errors for declared skill not found on disk", async () => {
 		// pathExists: true for plugin.json, true for skills/, false for skills/my-skill
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith("my-skill"))
-				return false as never;
-			return true as never;
-		});
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith("my-skill"))
+					return false as never;
+				return true as never;
+			},
+		);
 		mockFs.readJson.mockResolvedValue(validManifest as never);
 
 		const result = await validatePlugin("/fake/dir");
@@ -257,10 +259,13 @@ describe("validatePlugin", () => {
 	});
 
 	it("returns errors for declared asset dir missing entirely", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith("/skills")) return false as never;
-			return true as never;
-		});
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith("/skills"))
+					return false as never;
+				return true as never;
+			},
+		);
 		mockFs.readJson.mockResolvedValue(validManifest as never);
 
 		const result = await validatePlugin("/fake/dir");
@@ -378,11 +383,13 @@ describe("listInstalledPlugins", () => {
 	});
 
 	it("lists installed plugins from .installed.json files", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.includes(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.includes(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["my-plugin", ".tmp"] as never);
 		mockFs.readJson.mockResolvedValue({
 			name: "my-plugin",
@@ -559,13 +566,15 @@ describe("detectProjectPlugins", () => {
 	});
 
 	it("detects plugins with valid .installed.json", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["beta", "alpha"] as never);
-		mockFs.readJson.mockImplementation(async (p: string) => {
+		mockFs.readJson.mockImplementation(async (p, _opts) => {
 			if (typeof p === "string" && p.includes("alpha"))
 				return { name: "alpha" } as never;
 			if (typeof p === "string" && p.includes("beta"))
@@ -595,11 +604,13 @@ describe("detectProjectPlugins", () => {
 	});
 
 	it("skips entries without .installed.json", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
-				return false as never;
-			return true as never;
-		});
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return false as never;
+				return true as never;
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["no-meta"] as never);
 
 		const result = await detectProjectPlugins("/fake/project");
@@ -612,15 +623,17 @@ describe("detectProjectPlugins", () => {
 describe("syncPlugins", () => {
 	it("reports added plugins when manifest has no plugins field", async () => {
 		// detectProjectPluginsFull returns full InstalledPlugin objects
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith("manifest.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith("manifest.json"))
+					return true as never;
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			if (typeof p === "string" && p.endsWith(".installed.json"))
-				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["alpha", "beta"] as never);
-		mockFs.readJson.mockImplementation(async (p: string) => {
+		mockFs.readJson.mockImplementation(async (p, _opts) => {
 			if (typeof p === "string" && p.endsWith("manifest.json")) {
 				return {
 					version: "0.1.0",
@@ -667,18 +680,20 @@ describe("syncPlugins", () => {
 	});
 
 	it("reports removed plugins", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith("manifest.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith("manifest.json"))
+					return true as never;
+				if (
+					typeof p === "string" &&
+					p.includes("plugins") &&
+					!p.endsWith("manifest.json")
+				)
+					return false as never;
 				return true as never;
-			if (
-				typeof p === "string" &&
-				p.includes("plugins") &&
-				!p.endsWith("manifest.json")
-			)
-				return false as never;
-			return true as never;
-		});
-		mockFs.readJson.mockImplementation(async (p: string) => {
+			},
+		);
+		mockFs.readJson.mockImplementation(async (p, _opts) => {
 			if (typeof p === "string" && p.endsWith("manifest.json")) {
 				return {
 					version: "0.1.0",
@@ -704,13 +719,15 @@ describe("syncPlugins", () => {
 	});
 
 	it("reports unchanged when nothing changed", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["alpha"] as never);
-		mockFs.readJson.mockImplementation(async (p: string) => {
+		mockFs.readJson.mockImplementation(async (p, _opts) => {
 			if (typeof p === "string" && p.endsWith("manifest.json")) {
 				return {
 					version: "0.1.0",
@@ -742,13 +759,15 @@ describe("syncPlugins", () => {
 	});
 
 	it("does not write manifest in dry-run mode", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["alpha"] as never);
-		mockFs.readJson.mockImplementation(async (p: string) => {
+		mockFs.readJson.mockImplementation(async (p, _opts) => {
 			if (typeof p === "string" && p.endsWith("manifest.json")) {
 				return {
 					version: "0.1.0",
@@ -777,15 +796,17 @@ describe("syncPlugins", () => {
 	});
 
 	it("creates manifest when it does not exist", async () => {
-		mockFs.pathExists.mockImplementation(async (p: string) => {
-			if (typeof p === "string" && p.endsWith("manifest.json"))
-				return false as never;
-			if (typeof p === "string" && p.endsWith(".installed.json"))
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p === "string" && p.endsWith("manifest.json"))
+					return false as never;
+				if (typeof p === "string" && p.endsWith(".installed.json"))
+					return true as never;
 				return true as never;
-			return true as never;
-		});
+			},
+		);
 		mockFs.readdir.mockResolvedValue(["alpha"] as never);
-		mockFs.readJson.mockImplementation(async (p: string) => {
+		mockFs.readJson.mockImplementation(async (p, _opts) => {
 			if (typeof p === "string" && p.includes("alpha"))
 				return {
 					name: "alpha",

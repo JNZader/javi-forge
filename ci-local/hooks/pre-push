@@ -4,15 +4,19 @@
 # =============================================================================
 # Requires: npm install -g javi-forge
 # To skip:  git push --no-verify
+# Target:   ~3 minutes when Docker is running. Elapsed time logged below.
 # =============================================================================
 
 set -e
 
+_start=$SECONDS
+
 if docker info &>/dev/null; then
     echo "PRE-PUSH: Running full CI simulation..."
     javi-forge ci || {
+        _elapsed=$((SECONDS - _start))
         echo ""
-        echo "CI FAILED — Push aborted. Fix the issues above before pushing."
+        echo "CI FAILED after ${_elapsed}s — Push aborted. Fix the issues above before pushing."
         echo "To skip: git push --no-verify"
         exit 1
     }
@@ -20,9 +24,16 @@ else
     echo "PRE-PUSH: ⚠ Docker not running — running quick checks only (lint + typecheck)"
     echo "  Start Docker for full CI (security scan, Docker tests)"
     javi-forge ci --quick --no-docker --no-security --no-ci-ghagga || {
+        _elapsed=$((SECONDS - _start))
         echo ""
-        echo "Quick checks FAILED — Push aborted. Fix the issues above before pushing."
+        echo "Quick checks FAILED after ${_elapsed}s — Push aborted. Fix the issues above before pushing."
         echo "To skip: git push --no-verify"
         exit 1
     }
+fi
+
+_elapsed=$((SECONDS - _start))
+echo "PRE-PUSH: ${_elapsed}s (target: 180s)"
+if [ "$_elapsed" -gt 300 ]; then
+    echo "  WARNING: pre-push took ${_elapsed}s, well over the 180s target."
 fi

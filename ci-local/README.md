@@ -15,6 +15,16 @@ Reproduce tu CI/CD localmente antes de push. Si pasa local → pasa en GitHub Ac
 
 ## Instalación (30 segundos)
 
+### Prerequisito obligatorio
+
+Los hooks invocan la CLI `javi-forge`. Instalala global ANTES de correr `install.sh`:
+
+```bash
+npm install -g javi-forge
+```
+
+Si estás desarrollando javi-forge mismo, usá `pnpm link --global` desde la raíz del workspace.
+
 ### Copiar a un proyecto nuevo
 
 ```bash
@@ -26,10 +36,12 @@ cp -r lib /path/to/new-project/
 cd /path/to/new-project
 ./.ci-local/install.sh      # Linux/Mac
 # o
-.\.ci-local\install.ps1     # Windows
+.\.ci-local\install.ps1     # Windows (ver sección "PowerShell" para estado actual)
 ```
 
 > **Importante:** CI-Local depende de `lib/common.sh` (funciones compartidas). Copiar siempre ambos directorios.
+
+`install.sh` falla con mensaje claro si `javi-forge` no está en el PATH.
 
 ### Dependencias opcionales
 

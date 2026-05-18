@@ -15,6 +15,24 @@ echo -e "${CYAN}=== CI-LOCAL Installation ===${NC}"
 
 cd "$PROJECT_DIR"
 
+# 0. Verify javi-forge CLI is available (required by hooks)
+# The git hooks (pre-commit, pre-push) invoke `javi-forge ci ...`.
+# If the CLI is missing, hooks fail silently with "command not found".
+# Catch this BEFORE configuring hooks so the user gets a clear error.
+if ! command -v javi-forge >/dev/null 2>&1; then
+    echo -e "${RED}ERROR: javi-forge CLI not found in PATH${NC}"
+    echo -e ""
+    echo -e "The git hooks (pre-commit, pre-push) require the javi-forge CLI."
+    echo -e "Install it globally:"
+    echo -e "  ${CYAN}npm install -g javi-forge${NC}"
+    echo -e ""
+    echo -e "Or, if you are developing javi-forge itself, link the workspace:"
+    echo -e "  ${CYAN}pnpm link --global${NC}"
+    echo -e ""
+    exit 1
+fi
+echo -e "${GREEN}javi-forge: $(javi-forge --version 2>/dev/null || echo 'available')${NC}"
+
 # 1. Configurar git hooks
 echo -e "${YELLOW}[1/2] Configuring git hooks...${NC}"
 git config core.hooksPath .ci-local/hooks

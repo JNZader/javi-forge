@@ -154,6 +154,17 @@ create_dockerfile() {
     local docker_dir="$SCRIPT_DIR/docker"
     mkdir -p "$docker_dir"
 
+    # Base image digests are pinned for deterministic CI. Refresh with
+    # `docker pull <img> && docker inspect <img>` and update both
+    # ci-local.sh and ci-local.ps1 in lockstep (the bytes must match for
+    # the dockerfile-hash cache to align across platforms).
+    #
+    # Java is left tag-only because JAVA_VERSION is a build-arg that lets
+    # the user pick a JDK version at runtime; pinning the digest would
+    # break any version other than 21. Default JAVA_VERSION=21 digest
+    # for reference (2026-05-18):
+    #   eclipse-temurin:21-jdk-noble
+    #     @sha256:1f5835564a8c5cee3e9e849a63e9b04ce5c7083070e4cbcaabbcdc36d9147450
     case "$STACK_TYPE" in
         java-gradle|java-maven)
             cat > "$docker_dir/$DOCKERFILE" << 'DOCKERFILE'
@@ -169,7 +180,7 @@ DOCKERFILE
             ;;
         node)
             cat > "$docker_dir/$DOCKERFILE" << 'DOCKERFILE'
-FROM node:22-slim
+FROM node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm
 RUN useradd -m -s /bin/bash runner
@@ -180,7 +191,7 @@ DOCKERFILE
             ;;
         python)
             cat > "$docker_dir/$DOCKERFILE" << 'DOCKERFILE'
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:401f6e1a67dad31a1bd78e9ad22d0ee0a3b52154e6bd30e90be696bb6a3d7461
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir pytest ruff pylint poetry
 RUN useradd -m -s /bin/bash runner
@@ -191,7 +202,7 @@ DOCKERFILE
             ;;
         go)
             cat > "$docker_dir/$DOCKERFILE" << 'DOCKERFILE'
-FROM golang:1.23-bookworm
+FROM golang:1.23-bookworm@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0 && \
     mv /root/go/bin/golangci-lint /usr/local/bin/
@@ -203,7 +214,7 @@ DOCKERFILE
             ;;
         rust)
             cat > "$docker_dir/$DOCKERFILE" << 'DOCKERFILE'
-FROM rust:1.83-slim
+FROM rust:1.83-slim@sha256:540c902e99c384163b688bbd8b5b8520e94e7731b27f7bd0eaa56ae1960627ab
 RUN apt-get update && apt-get install -y git pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 RUN rustup component add clippy rustfmt
 RUN useradd -m -s /bin/bash runner
@@ -214,7 +225,7 @@ DOCKERFILE
             ;;
         *)
             cat > "$docker_dir/$DOCKERFILE" << 'DOCKERFILE'
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b
 RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -s /bin/bash runner
 USER runner

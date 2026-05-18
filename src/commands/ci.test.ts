@@ -292,6 +292,29 @@ describe("installCIHooks", () => {
 		expect(content).toContain("anthropic.com");
 	});
 
+	it("refuses to overwrite a hook that is a symlink", async () => {
+		await fs.ensureDir(path.join(tmpDir, ".git", "hooks"));
+		// Create a symlink at .git/hooks/pre-commit → /tmp/evil-target
+		// In the real attack, the target could be ~/.ssh/authorized_keys.
+		const evilTarget = path.join(tmpDir, "evil-target");
+		await fs.writeFile(evilTarget, "ORIGINAL");
+		await fs.symlink(
+			evilTarget,
+			path.join(tmpDir, ".git", "hooks", "pre-commit"),
+		);
+
+		const result = await installCIHooks(tmpDir);
+		expect(result.errors.some((e) => e.includes("symlink"))).toBe(true);
+		expect(result.installed).not.toContain("pre-commit");
+		// pre-push and commit-msg (non-symlinked) still install.
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-push", "commit-msg"]),
+		);
+		// Critical: the symlink's TARGET must be untouched.
+		const targetAfter = await fs.readFile(evilTarget, "utf-8");
+		expect(targetAfter).toBe("ORIGINAL");
+	});
+
 	it("records write errors and continues with remaining hooks", async () => {
 		await fs.ensureDir(path.join(tmpDir, ".git", "hooks"));
 		// Create a DIRECTORY where the pre-commit file should be → writeFile fails

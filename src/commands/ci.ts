@@ -650,6 +650,26 @@ export async function installCIHooks(
 	for (const hook of hooks) {
 		const hookPath = path.join(hooksDir, hook.name);
 		try {
+			// Refuse to follow symlinks. .git/hooks/<name> as a symlink to a
+			// sensitive file (e.g., ~/.ssh/authorized_keys) would otherwise be
+			// clobbered by writeFile. lstat reports the link, not the target.
+			let isSymlink = false;
+			try {
+				const stat = await fs.lstat(hookPath);
+				isSymlink = stat.isSymbolicLink();
+			} catch (statErr: unknown) {
+				const code =
+					statErr && typeof statErr === "object" && "code" in statErr
+						? (statErr as { code: string }).code
+						: "";
+				if (code !== "ENOENT") {
+					throw statErr;
+				}
+				// ENOENT is expected if the hook file doesn't exist yet.
+			}
+			if (isSymlink) {
+				throw new Error(`refusing to write through a symlink at ${hookPath}`);
+			}
 			await fs.writeFile(hookPath, hook.content, { mode: 0o755 });
 			installed.push(hook.name);
 		} catch (e) {

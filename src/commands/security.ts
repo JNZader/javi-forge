@@ -394,6 +394,29 @@ export async function writeBaseline(
 ): Promise<void> {
 	const bp = baselinePath(projectDir);
 	await fs.ensureDir(path.dirname(bp));
+	// Refuse to follow symlinks: if .javi-forge/security-baseline.json has been
+	// replaced with a symlink (to /etc/passwd, /home/user/.ssh/authorized_keys,
+	// or any other sensitive file owned by the user) the default fs.writeJson
+	// would clobber the target. lstat reports the link, not what it points to.
+	let isSymlink = false;
+	try {
+		const stat = await fs.lstat(bp);
+		isSymlink = stat.isSymbolicLink();
+	} catch (e: unknown) {
+		const code =
+			e && typeof e === "object" && "code" in e
+				? (e as { code: string }).code
+				: "";
+		if (code !== "ENOENT") {
+			throw e;
+		}
+		// ENOENT is expected on first run; continue.
+	}
+	if (isSymlink) {
+		throw new Error(
+			`Refusing to write baseline through a symlink: ${bp}. Remove the symlink first.`,
+		);
+	}
 	await fs.writeJson(bp, baseline, { spaces: 2 });
 }
 

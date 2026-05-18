@@ -685,6 +685,33 @@ describe("baseline I/O", () => {
 		const result = await readBaseline(tmpDir);
 		expect(result).toBeNull();
 	});
+
+	it("writeBaseline refuses to follow a symlink at the baseline path", async () => {
+		// Attacker scenario: .javi-forge/security-baseline.json is a symlink
+		// pointing at a sensitive file the user can write. writeBaseline must
+		// detect the symlink via lstat and abort instead of clobbering it.
+		const baselineDir = path.join(tmpDir, ".javi-forge");
+		await fs.ensureDir(baselineDir);
+		const evilTarget = path.join(tmpDir, "evil-target.json");
+		await fs.writeFile(evilTarget, '{"original":"value"}');
+		await fs.symlink(
+			evilTarget,
+			path.join(baselineDir, "security-baseline.json"),
+		);
+
+		const baseline: SecurityBaseline = {
+			version: "1.0.0",
+			createdAt: "2025-01-01T00:00:00.000Z",
+			stack: "node",
+			buildTool: "npm",
+			findings: [],
+			findingKeys: [],
+		};
+
+		await expect(writeBaseline(tmpDir, baseline)).rejects.toThrow(/symlink/);
+		const targetAfter = await fs.readFile(evilTarget, "utf-8");
+		expect(targetAfter).toBe('{"original":"value"}');
+	});
 });
 
 // =============================================================================
@@ -888,4 +915,115 @@ describe("runSecurity orchestrator", () => {
 	// "node" when no language marker is recognised, so we cannot easily
 	// reach the unsupported-stack branch from outside. Covered indirectly
 	// by getAuditCommand returning null in its existing unit test.
+
+	it("propagates ENOENT (audit tool not installed) as a clear error", async () => {
+		// Real execFile sets err.code = 'ENOENT' when the binary is missing.
+		// runAuditTool's catch only recovers when err.stdout exists; ENOENT
+		// has no stdout → the error must surface to the user.
+		const enoent = new Error("spawn npm ENOENT") as Error & {
+			code: string;
+			stdout?: string;
+		};
+		enoent.code = "ENOENT";
+		stubAuditReturn = { stdout: "", err: enoent };
+
+		await expect(runSecurity("baseline", tmpDir, () => {})).rejects.toThrow(
+			/ENOENT/,
+		);
+	});
+
+	it("accepts a real-world npm audit JSON capture (golden fixture)", async () => {
+		// Pinned shape of npm v10+ `npm audit --json` output. If npm changes
+		// the schema in a future major (e.g., drops `via` arrays for `effects`)
+		// this test will fail loudly and the parser must be updated in tandem.
+		// Captured from npm v10.9 against a tree with handlebars 4.7.8.
+		const goldenNpmAuditJson = JSON.stringify({
+			auditReportVersion: 2,
+			vulnerabilities: {
+				handlebars: {
+					name: "handlebars",
+					severity: "critical",
+					isDirect: false,
+					via: [
+						{
+							source: 1099140,
+							name: "handlebars",
+							dependency: "handlebars",
+							title:
+								"Handlebars.js has JavaScript Injection via AST Type Confusion",
+							url: "https://github.com/advisories/GHSA-2w6w-674q-4c4q",
+							severity: "critical",
+							cwe: ["CWE-94"],
+							cvss: { score: 9.8, vectorString: null },
+							range: "<4.7.9",
+						},
+					],
+					effects: [],
+					range: "<4.7.9",
+					nodes: ["node_modules/handlebars"],
+					fixAvailable: {
+						name: "handlebars",
+						version: "4.7.9",
+						isSemVerMajor: false,
+					},
+				},
+				picomatch: {
+					name: "picomatch",
+					severity: "high",
+					isDirect: false,
+					via: [
+						{
+							source: 1097520,
+							name: "picomatch",
+							dependency: "picomatch",
+							title: "Picomatch has a ReDoS vulnerability",
+							url: "https://github.com/advisories/GHSA-xxx",
+							severity: "high",
+							cwe: ["CWE-1333"],
+							cvss: { score: 7.5, vectorString: null },
+							range: "<4.0.4",
+						},
+					],
+					effects: [],
+					range: "<4.0.4",
+					nodes: ["node_modules/picomatch"],
+					fixAvailable: true,
+				},
+			},
+			metadata: {
+				vulnerabilities: {
+					critical: 1,
+					high: 1,
+					moderate: 0,
+					low: 0,
+					info: 0,
+					total: 2,
+				},
+				dependencies: {
+					prod: 100,
+					dev: 200,
+					optional: 0,
+					peer: 0,
+					peerOptional: 0,
+					total: 300,
+				},
+			},
+		});
+
+		stubAuditReturn = { stdout: goldenNpmAuditJson };
+		const steps: Array<{ id: string; status: string }> = [];
+		await runSecurity("baseline", tmpDir, (s) =>
+			steps.push({ id: s.id, status: s.status }),
+		);
+		const written = await fs.readJson(
+			path.join(tmpDir, ".javi-forge", "security-baseline.json"),
+		);
+		const pkgs = written.findings.map((f: SecurityFinding) => f.package);
+		expect(pkgs).toContain("handlebars");
+		expect(pkgs).toContain("picomatch");
+		const critical = written.findings.find(
+			(f: SecurityFinding) => f.severity === "critical",
+		);
+		expect(critical?.package).toBe("handlebars");
+	});
 });

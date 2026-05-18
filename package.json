@@ -38,13 +38,13 @@
     "url": "git+https://github.com/JNZader/javi-forge.git"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "chalk": "^5.6.2",
     "fs-extra": "^11.3.5",
     "glob": "^13.0.6",
-    "ink": "^6.8.0",
+    "ink": "^7.0.3",
     "ink-spinner": "^5.0.0",
     "meow": "^14.1.0",
     "react": "^19.2.6",

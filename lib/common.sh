@@ -95,6 +95,36 @@ detect_stack() {
     BUILD_TOOL=""
     JAVA_VERSION="21"
 
+    # Allow user to override auto-detection. Useful for hybrid projects
+    # (Node + Go) where the first-match rule otherwise locks the choice.
+    # Recognised values: node, python, go, rust, java-gradle, java-maven.
+    if [ -n "${CI_LOCAL_STACK:-}" ]; then
+        case "$CI_LOCAL_STACK" in
+            node|python|go|rust|java-gradle|java-maven)
+                STACK_TYPE="$CI_LOCAL_STACK"
+                case "$STACK_TYPE" in
+                    node)
+                        if [ -f "$project_dir/pnpm-lock.yaml" ]; then BUILD_TOOL="pnpm"
+                        elif [ -f "$project_dir/yarn.lock" ]; then BUILD_TOOL="yarn"
+                        else BUILD_TOOL="npm"; fi ;;
+                    python)
+                        if [ -f "$project_dir/uv.lock" ]; then BUILD_TOOL="uv"
+                        elif [ -f "$project_dir/poetry.lock" ]; then BUILD_TOOL="poetry"
+                        elif [ -f "$project_dir/Pipfile" ]; then BUILD_TOOL="pipenv"
+                        else BUILD_TOOL="pip"; fi ;;
+                    go)          BUILD_TOOL="go" ;;
+                    rust)        BUILD_TOOL="cargo" ;;
+                    java-gradle) BUILD_TOOL="gradle" ;;
+                    java-maven)  BUILD_TOOL="maven" ;;
+                esac
+                return
+                ;;
+            *)
+                echo "WARNING: CI_LOCAL_STACK='$CI_LOCAL_STACK' is not recognised. Falling back to auto-detection." >&2
+                ;;
+        esac
+    fi
+
     # Java + Gradle
     if [[ -f "$project_dir/build.gradle" || -f "$project_dir/build.gradle.kts" ]]; then
         STACK_TYPE="java-gradle"

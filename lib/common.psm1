@@ -49,6 +49,34 @@ function Get-Stack {
         JavaVersion = '21'
     }
 
+    # Allow user override via $env:CI_LOCAL_STACK. Mirrors the bash side.
+    $override = $env:CI_LOCAL_STACK
+    if ($override) {
+        $valid = @('node', 'python', 'go', 'rust', 'java-gradle', 'java-maven')
+        if ($valid -contains $override) {
+            $result.StackType = $override
+            switch ($override) {
+                'node' {
+                    if      (Test-Path -LiteralPath (Join-Path $ProjectDir 'pnpm-lock.yaml') -PathType Leaf) { $result.BuildTool = 'pnpm' }
+                    elseif  (Test-Path -LiteralPath (Join-Path $ProjectDir 'yarn.lock')      -PathType Leaf) { $result.BuildTool = 'yarn' }
+                    else    { $result.BuildTool = 'npm' }
+                }
+                'python' {
+                    if     (Test-Path -LiteralPath (Join-Path $ProjectDir 'uv.lock')     -PathType Leaf) { $result.BuildTool = 'uv' }
+                    elseif (Test-Path -LiteralPath (Join-Path $ProjectDir 'poetry.lock') -PathType Leaf) { $result.BuildTool = 'poetry' }
+                    elseif (Test-Path -LiteralPath (Join-Path $ProjectDir 'Pipfile')     -PathType Leaf) { $result.BuildTool = 'pipenv' }
+                    else   { $result.BuildTool = 'pip' }
+                }
+                'go'          { $result.BuildTool = 'go' }
+                'rust'        { $result.BuildTool = 'cargo' }
+                'java-gradle' { $result.BuildTool = 'gradle' }
+                'java-maven'  { $result.BuildTool = 'maven' }
+            }
+            return $result
+        }
+        Write-Warning "CI_LOCAL_STACK='$override' is not recognised. Falling back to auto-detection."
+    }
+
     # Java + Gradle
     $gradleKts = Join-Path $ProjectDir 'build.gradle.kts'
     $gradle    = Join-Path $ProjectDir 'build.gradle'

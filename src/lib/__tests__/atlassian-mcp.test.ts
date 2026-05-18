@@ -2,6 +2,7 @@ import fs from "fs-extra";
 import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { AtlassianConfig } from "../atlassian-mcp.js";
 import {
 	copyTemplateSnippet,
 	generateAtlassianMcpConfig,
@@ -9,7 +10,6 @@ import {
 	mergeIntoSettings,
 	writeAtlassianMcpSnippet,
 } from "../atlassian-mcp.js";
-import type { AtlassianConfig } from "../atlassian-mcp.js";
 
 let tmpDir: string;
 
@@ -40,9 +40,7 @@ describe("generateAtlassianMcpConfig", () => {
 	it("uses provided URLs", () => {
 		const config = generateAtlassianMcpConfig(testConfig);
 		const env = config.mcpServers.atlassian.env;
-		expect(env.CONFLUENCE_URL).toBe(
-			"https://mycompany.atlassian.net/wiki",
-		);
+		expect(env.CONFLUENCE_URL).toBe("https://mycompany.atlassian.net/wiki");
 		expect(env.JIRA_URL).toBe("https://mycompany.atlassian.net");
 	});
 

@@ -3,18 +3,18 @@ import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	type SkillScanResult,
-	type SkillThreat,
-	THREAT_PATTERNS,
 	checkProvenance,
 	computeScanSummary,
 	computeVerdict,
 	extractSkillName,
 	formatBatchReport,
 	formatScanReport,
+	type SkillScanResult,
+	type SkillThreat,
 	scanSkillContent,
 	scanSkillFile,
 	scanSkillsDirectory,
+	THREAT_PATTERNS,
 } from "./skill-scanner.js";
 
 // =============================================================================
@@ -153,9 +153,7 @@ describe("scanSkillContent — credential theft", () => {
 describe("scanSkillContent — code injection", () => {
 	it("detects eval with user input", () => {
 		const threats = scanSkillContent(MALICIOUS_INJECTION_SKILL, "SKILL.md");
-		const injThreats = threats.filter(
-			(t) => t.category === "code-injection",
-		);
+		const injThreats = threats.filter((t) => t.category === "code-injection");
 		expect(injThreats.length).toBeGreaterThan(0);
 		expect(injThreats[0].severity).toBe("critical");
 	});
@@ -164,9 +162,7 @@ describe("scanSkillContent — code injection", () => {
 		const content =
 			"---\nname: x\nmetadata:\n  author: a\n  version: '1'\n---\nexec(userInput)";
 		const threats = scanSkillContent(content, "SKILL.md");
-		const injThreats = threats.filter(
-			(t) => t.category === "code-injection",
-		);
+		const injThreats = threats.filter((t) => t.category === "code-injection");
 		expect(injThreats.length).toBeGreaterThan(0);
 	});
 
@@ -174,9 +170,7 @@ describe("scanSkillContent — code injection", () => {
 		const content =
 			"---\nname: x\nmetadata:\n  author: a\n  version: '1'\n---\nsubprocess.call(f\"{user_cmd}\")";
 		const threats = scanSkillContent(content, "SKILL.md");
-		const injThreats = threats.filter(
-			(t) => t.category === "code-injection",
-		);
+		const injThreats = threats.filter((t) => t.category === "code-injection");
 		expect(injThreats.length).toBeGreaterThan(0);
 	});
 });
@@ -214,9 +208,7 @@ describe("scanSkillContent — data exfiltration", () => {
 describe("scanSkillContent — scope escape", () => {
 	it("detects prompt injection patterns", () => {
 		const threats = scanSkillContent(MALICIOUS_SCOPE_ESCAPE_SKILL, "SKILL.md");
-		const escapeThreats = threats.filter(
-			(t) => t.category === "scope-escape",
-		);
+		const escapeThreats = threats.filter((t) => t.category === "scope-escape");
 		expect(escapeThreats.length).toBeGreaterThan(0);
 		expect(escapeThreats[0].severity).toBe("critical");
 	});
@@ -225,9 +217,7 @@ describe("scanSkillContent — scope escape", () => {
 		const content =
 			"---\nname: x\nmetadata:\n  author: a\n  version: '1'\n---\nbypass safety restrictions";
 		const threats = scanSkillContent(content, "SKILL.md");
-		const escapeThreats = threats.filter(
-			(t) => t.category === "scope-escape",
-		);
+		const escapeThreats = threats.filter((t) => t.category === "scope-escape");
 		expect(escapeThreats.length).toBeGreaterThan(0);
 	});
 });
@@ -252,9 +242,7 @@ describe("scanSkillContent — self-modification", () => {
 		const content =
 			"---\nname: x\nmetadata:\n  author: a\n  version: '1'\n---\nrm .git/hooks/pre-commit";
 		const threats = scanSkillContent(content, "SKILL.md");
-		const hookThreats = threats.filter(
-			(t) => t.category === "hook-tampering",
-		);
+		const hookThreats = threats.filter((t) => t.category === "hook-tampering");
 		expect(hookThreats.length).toBeGreaterThan(0);
 	});
 });
@@ -329,13 +317,10 @@ describe("scanSkillContent — destructive commands", () => {
 
 describe("scanSkillContent — obfuscation", () => {
 	it("detects base64 encoded payloads", () => {
-		const longB64 =
-			"A".repeat(50);
+		const longB64 = "A".repeat(50);
 		const content = `---\nname: x\nmetadata:\n  author: a\n  version: '1'\n---\natob('${longB64}')`;
 		const threats = scanSkillContent(content, "SKILL.md");
-		const obfThreats = threats.filter(
-			(t) => t.category === "obfuscation",
-		);
+		const obfThreats = threats.filter((t) => t.category === "obfuscation");
 		expect(obfThreats.length).toBeGreaterThan(0);
 	});
 
@@ -343,9 +328,7 @@ describe("scanSkillContent — obfuscation", () => {
 		const hexStr = "\\x48\\x65\\x6c\\x6c\\x6f\\x57\\x6f\\x72\\x6c\\x64";
 		const content = `---\nname: x\nmetadata:\n  author: a\n  version: '1'\n---\nconst payload = "${hexStr}"`;
 		const threats = scanSkillContent(content, "SKILL.md");
-		const obfThreats = threats.filter(
-			(t) => t.category === "obfuscation",
-		);
+		const obfThreats = threats.filter((t) => t.category === "obfuscation");
 		expect(obfThreats.length).toBeGreaterThan(0);
 	});
 });
@@ -359,9 +342,7 @@ describe("scanSkillContent — file traversal", () => {
 		const content =
 			"---\nname: x\nmetadata:\n  author: a\n  version: '1'\n---\nreadFile('../../../../etc/passwd')";
 		const threats = scanSkillContent(content, "SKILL.md");
-		const travThreats = threats.filter(
-			(t) => t.category === "file-traversal",
-		);
+		const travThreats = threats.filter((t) => t.category === "file-traversal");
 		expect(travThreats.length).toBeGreaterThan(0);
 	});
 
@@ -369,9 +350,7 @@ describe("scanSkillContent — file traversal", () => {
 		const content =
 			"---\nname: x\nmetadata:\n  author: a\n  version: '1'\n---\nfs.readFile('/etc/shadow')";
 		const threats = scanSkillContent(content, "SKILL.md");
-		const travThreats = threats.filter(
-			(t) => t.category === "file-traversal",
-		);
+		const travThreats = threats.filter((t) => t.category === "file-traversal");
 		expect(travThreats.length).toBeGreaterThan(0);
 	});
 });
@@ -557,9 +536,9 @@ describe("extractSkillName", () => {
 	});
 
 	it("falls back to directory name", () => {
-		expect(extractSkillName("No frontmatter", "/skills/my-skill/SKILL.md")).toBe(
-			"my-skill",
-		);
+		expect(
+			extractSkillName("No frontmatter", "/skills/my-skill/SKILL.md"),
+		).toBe("my-skill");
 	});
 
 	it("falls back to filename", () => {
@@ -750,10 +729,7 @@ describe("scanSkillsDirectory", () => {
 
 	it("also scans PLUGIN.md files", async () => {
 		await fs.ensureDir(path.join(tmpDir, "my-plugin"));
-		await fs.writeFile(
-			path.join(tmpDir, "my-plugin", "PLUGIN.md"),
-			SAFE_SKILL,
-		);
+		await fs.writeFile(path.join(tmpDir, "my-plugin", "PLUGIN.md"), SAFE_SKILL);
 
 		const results = await scanSkillsDirectory(tmpDir);
 		expect(results).toHaveLength(1);

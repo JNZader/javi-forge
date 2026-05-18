@@ -109,16 +109,14 @@ export const THREAT_PATTERNS: ThreatPattern[] = [
 		severity: "critical",
 		pattern:
 			/\b(?:exec|execSync|spawn|spawnSync)\s*\(\s*(?:user|input|req|params|args|data)/i,
-		message:
-			"Process execution with user input — enables command injection",
+		message: "Process execution with user input — enables command injection",
 	},
 	{
 		category: "code-injection",
 		severity: "critical",
 		pattern:
 			/\b(?:subprocess\.(?:call|run|Popen)|os\.system|os\.popen)\s*\(\s*(?:f['\"]|user|input|req)/i,
-		message:
-			"Python subprocess with user input — enables command injection",
+		message: "Python subprocess with user input — enables command injection",
 	},
 
 	// ── Critical: Data Exfiltration ──
@@ -127,8 +125,7 @@ export const THREAT_PATTERNS: ThreatPattern[] = [
 		severity: "critical",
 		pattern:
 			/(?:curl|wget|fetch|axios|got|request)\s+.*(?:--data|--upload|-d\s|-F\s|\.post\(|\.put\()\s*.*(?:\/etc\/|~\/\.|\.env|secret|credential|token|key)/i,
-		message:
-			"Sending sensitive data to external endpoint — data exfiltration",
+		message: "Sending sensitive data to external endpoint — data exfiltration",
 	},
 	{
 		category: "data-exfiltration",
@@ -141,10 +138,8 @@ export const THREAT_PATTERNS: ThreatPattern[] = [
 	{
 		category: "data-exfiltration",
 		severity: "high",
-		pattern:
-			/fetch\s*\(\s*['"`]https?:\/\/(?!localhost|127\.0\.0\.1)/i,
-		message:
-			"fetch() to external URL — verify the destination is trusted",
+		pattern: /fetch\s*\(\s*['"`]https?:\/\/(?!localhost|127\.0\.0\.1)/i,
+		message: "fetch() to external URL — verify the destination is trusted",
 	},
 
 	// ── Critical: Scope Escape ──
@@ -153,16 +148,13 @@ export const THREAT_PATTERNS: ThreatPattern[] = [
 		severity: "critical",
 		pattern:
 			/(?:ignore\s+(?:all\s+)?previous|disregard\s+(?:all\s+)?(?:prior|above)|override\s+(?:safety|security|rules)|bypass\s+(?:safety|security|restrictions))/i,
-		message:
-			"Prompt injection attempt — tries to override safety instructions",
+		message: "Prompt injection attempt — tries to override safety instructions",
 	},
 	{
 		category: "scope-escape",
 		severity: "critical",
-		pattern:
-			/(?:you\s+are\s+now|from\s+now\s+on|new\s+instructions?:?\s+)/i,
-		message:
-			"Attempts to redefine agent identity — prompt injection risk",
+		pattern: /(?:you\s+are\s+now|from\s+now\s+on|new\s+instructions?:?\s+)/i,
+		message: "Attempts to redefine agent identity — prompt injection risk",
 	},
 
 	// ── Critical: Self-Modification ──
@@ -194,8 +186,7 @@ export const THREAT_PATTERNS: ThreatPattern[] = [
 		category: "privilege-escalation",
 		severity: "high",
 		pattern: /chmod\s+(?:777|666|a\+[rwx])/i,
-		message:
-			"Sets overly permissive file permissions — security risk",
+		message: "Sets overly permissive file permissions — security risk",
 	},
 	{
 		category: "privilege-escalation",
@@ -238,8 +229,7 @@ export const THREAT_PATTERNS: ThreatPattern[] = [
 		severity: "high",
 		pattern:
 			/(?:readFile|writeFile|open|fs\.)\s*\(\s*['"`]\/(?:etc|usr|var|tmp|root|home)\//i,
-		message:
-			"Absolute path to system directory — scope escape risk",
+		message: "Absolute path to system directory — scope escape risk",
 	},
 
 	// ── Moderate: Obfuscation ──
@@ -247,15 +237,13 @@ export const THREAT_PATTERNS: ThreatPattern[] = [
 		category: "obfuscation",
 		severity: "moderate",
 		pattern: /(?:atob|btoa|Buffer\.from)\s*\(\s*['"`][A-Za-z0-9+/]{40,}/,
-		message:
-			"Base64 encoded content — may hide malicious payloads",
+		message: "Base64 encoded content — may hide malicious payloads",
 	},
 	{
 		category: "obfuscation",
 		severity: "moderate",
 		pattern: /\\x[0-9a-fA-F]{2}(?:\\x[0-9a-fA-F]{2}){4,}/,
-		message:
-			"Hex-encoded string sequence — may hide malicious payloads",
+		message: "Hex-encoded string sequence — may hide malicious payloads",
 	},
 
 	// ── Moderate: Excessive Permissions ──
@@ -264,8 +252,7 @@ export const THREAT_PATTERNS: ThreatPattern[] = [
 		severity: "moderate",
 		pattern:
 			/allowed-tools:\s*.*(?:Bash|Edit|Write|Read|Glob|Grep|WebFetch|WebSearch).*(?:Bash|Edit|Write|Read|Glob|Grep|WebFetch|WebSearch).*(?:Bash|Edit|Write|Read|Glob|Grep|WebFetch|WebSearch).*(?:Bash|Edit|Write|Read|Glob|Grep|WebFetch|WebSearch)/i,
-		message:
-			"Requests many tools — verify skill actually needs all of them",
+		message: "Requests many tools — verify skill actually needs all of them",
 	},
 ];
 
@@ -395,10 +382,7 @@ export function computeScanSummary(threats: SkillThreat[]): SkillScanSummary {
 // Skill name extraction
 // =============================================================================
 
-export function extractSkillName(
-	content: string,
-	filePath: string,
-): string {
+export function extractSkillName(content: string, filePath: string): string {
 	// Try frontmatter name
 	const fmMatch = content.match(/^---\n[\s\S]*?\bname:\s*(.+)/m);
 	if (fmMatch?.[1]) return fmMatch[1].trim();

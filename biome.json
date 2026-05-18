@@ -6,7 +6,7 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"includes": ["**", "!!**/dist"]
+		"includes": ["**", "!!**/dist", "!!**/coverage", "!!**/reports", "!!**/node_modules"]
 	},
 	"formatter": {
 		"enabled": true,
@@ -16,12 +16,20 @@
 		"enabled": true,
 		"rules": {
 			"recommended": true,
+			"style": {
+				"useNodejsImportProtocol": "warn",
+				"noNonNullAssertion": "warn"
+			},
 			"suspicious": {
 				"noArrayIndexKey": "off",
-				"noImplicitAnyLet": "error"
+				"noImplicitAnyLet": "error",
+				"noTemplateCurlyInString": "warn"
 			},
 			"correctness": {
-				"useExhaustiveDependencies": "off"
+				"useExhaustiveDependencies": "off",
+				"noUnusedImports": "warn",
+				"noUnusedVariables": "warn",
+				"noUnusedFunctionParameters": "warn"
 			}
 		}
 	},
@@ -37,5 +45,24 @@
 				"organizeImports": "on"
 			}
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**", "**/__integration__/**", "**/e2e/**"],
+			"linter": {
+				"rules": {
+					"complexity": {
+						"noBannedTypes": "off"
+					},
+					"style": {
+						"noNonNullAssertion": "off",
+						"useNodejsImportProtocol": "warn"
+					},
+					"suspicious": {
+						"noExplicitAny": "off"
+					}
+				}
+			}
+		}
+	]
 }

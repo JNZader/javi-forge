@@ -178,8 +178,7 @@ export const BUILTIN_RULES: SemgrepRule[] = [
 	{
 		id: "tob-hardcoded-secret",
 		severity: "high",
-		message:
-			"Hardcoded secret or API key detected — use environment variables",
+		message: "Hardcoded secret or API key detected — use environment variables",
 		category: "cryptography",
 		pattern:
 			"(?:password|secret|api_key|apikey|auth_token|private_key)\\s*=\\s*['\"][^'\"]{8,}['\"]",
@@ -203,8 +202,7 @@ export const BUILTIN_RULES: SemgrepRule[] = [
 	{
 		id: "tob-unsafe-json-parse",
 		severity: "moderate",
-		message:
-			"JSON.parse without try/catch can crash on malformed input",
+		message: "JSON.parse without try/catch can crash on malformed input",
 		category: "deserialization",
 		pattern:
 			"(?<!try\\s*\\{[^}]*)JSON\\.parse\\s*\\(\\s*(?:req\\.|body\\.|input)",
@@ -243,7 +241,8 @@ export const BUILTIN_RULES: SemgrepRule[] = [
 		severity: "moderate",
 		message: "Stack trace sent to client — hide error details in production",
 		category: "information-disclosure",
-		pattern: "(?:res\\.(?:send|json)\\s*\\(.*(?:err|error)\\.(?:stack|message))",
+		pattern:
+			"(?:res\\.(?:send|json)\\s*\\(.*(?:err|error)\\.(?:stack|message))",
 		languages: ["javascript", "typescript"],
 		cwe: "CWE-209",
 		owasp: "A04:2021",
@@ -614,10 +613,12 @@ export function formatReportText(report: SecurityAnalysisReport): string {
 	lines.push(`Engine: ${report.engine}`);
 	lines.push(`Findings: ${summary.total}`);
 	lines.push(
-		`Severity breakdown: ${Object.entries(summary.bySeverity)
-			.filter(([, count]) => count > 0)
-			.map(([sev, count]) => `${count} ${sev}`)
-			.join(", ") || "none"}`,
+		`Severity breakdown: ${
+			Object.entries(summary.bySeverity)
+				.filter(([, count]) => count > 0)
+				.map(([sev, count]) => `${count} ${sev}`)
+				.join(", ") || "none"
+		}`,
 	);
 	lines.push(`Pass threshold: ${summary.failThreshold}`);
 	lines.push(`Result: ${summary.passed ? "PASS" : "FAIL"}`);
@@ -626,11 +627,11 @@ export function formatReportText(report: SecurityAnalysisReport): string {
 	if (findings.length > 0) {
 		lines.push("--- Findings ---");
 		for (const f of findings) {
-			const loc = f.column ? `${f.file}:${f.line}:${f.column}` : `${f.file}:${f.line}`;
+			const loc = f.column
+				? `${f.file}:${f.line}:${f.column}`
+				: `${f.file}:${f.line}`;
 			const cwe = f.cwe ? ` [${f.cwe}]` : "";
-			lines.push(
-				`[${f.severity.toUpperCase()}] ${f.ruleId}${cwe} at ${loc}`,
-			);
+			lines.push(`[${f.severity.toUpperCase()}] ${f.ruleId}${cwe} at ${loc}`);
 			lines.push(`  ${f.message}`);
 		}
 	}

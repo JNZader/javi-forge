@@ -4,9 +4,6 @@ import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	BUILTIN_RULES,
-	type SecurityAnalysisFinding,
-	type SecurityAnalysisOptions,
-	type SemgrepRule,
 	buildReport,
 	buildSummary,
 	collectFiles,
@@ -17,6 +14,9 @@ import {
 	loadCustomRules,
 	matchRule,
 	runSecurityAnalysis,
+	type SecurityAnalysisFinding,
+	type SecurityAnalysisOptions,
+	type SemgrepRule,
 	severityAtOrAbove,
 } from "./security-analysis.js";
 
@@ -76,7 +76,7 @@ describe("matchRule", () => {
 	});
 
 	it("finds eval() usage in JavaScript files", () => {
-		const content = 'eval(userInput)';
+		const content = "eval(userInput)";
 		const findings = matchRule(evalRule, content, "test.js");
 		expect(findings).toHaveLength(1);
 	});
@@ -196,11 +196,7 @@ describe("matchRule — built-in rules", () => {
 
 	it("detects command injection via exec with template literals", () => {
 		const rule = findRule("tob-cmd-injection");
-		const findings = matchRule(
-			rule,
-			"exec(`ls ${userInput}`)",
-			"server.ts",
-		);
+		const findings = matchRule(rule, "exec(`ls ${userInput}`)", "server.ts");
 		expect(findings).toHaveLength(1);
 	});
 });
@@ -584,7 +580,7 @@ describe("runSecurityAnalysis", () => {
 	it("detects eval injection in a TypeScript file", async () => {
 		await fs.writeFile(
 			path.join(tmpDir, "server.ts"),
-			'const result = eval(userInput);\n',
+			"const result = eval(userInput);\n",
 		);
 
 		const report = await runSecurityAnalysis(tmpDir);
@@ -610,7 +606,7 @@ describe("runSecurityAnalysis", () => {
 	it("passes with clean code", async () => {
 		await fs.writeFile(
 			path.join(tmpDir, "app.ts"),
-			'const x = 1;\nconst y = x + 2;\nexport { y };\n',
+			"const x = 1;\nconst y = x + 2;\nexport { y };\n",
 		);
 
 		const report = await runSecurityAnalysis(tmpDir);
@@ -645,10 +641,7 @@ describe("runSecurityAnalysis", () => {
 
 	it("uses relative file paths in findings", async () => {
 		await fs.ensureDir(path.join(tmpDir, "src"));
-		await fs.writeFile(
-			path.join(tmpDir, "src", "bad.ts"),
-			'eval("code");\n',
-		);
+		await fs.writeFile(path.join(tmpDir, "src", "bad.ts"), 'eval("code");\n');
 
 		const report = await runSecurityAnalysis(tmpDir);
 		expect(report.findings[0].file).toBe(path.join("src", "bad.ts"));
@@ -666,10 +659,7 @@ describe("runSecurityAnalysis", () => {
 			languages: ["typescript"],
 		});
 
-		await fs.writeFile(
-			path.join(tmpDir, "app.ts"),
-			'console.log("hello");\n',
-		);
+		await fs.writeFile(path.join(tmpDir, "app.ts"), 'console.log("hello");\n');
 
 		const report = await runSecurityAnalysis(tmpDir, { rulesDir });
 		const customFindings = report.findings.filter(

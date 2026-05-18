@@ -2,7 +2,10 @@
   "$schema": "https://github.com/JNZader/javi-forge/raw/main/schemas/manifest.schema.json",
   "version": "1.0.0",
   "project": "javi-forge",
-  "updatedAt": "2026-05-17",
+  "updatedAt": "2026-05-18",
+  "projectName": "javi-forge",
+  "createdAt": "2026-04-01T16:32:55.375Z",
+  "modules": ["ci-local", "security-baseline", "ai-attribution-blocker", "supply-chain", "self-dogfooding"],
   "stack": {
     "language": "node",
     "buildTool": "pnpm",
@@ -10,7 +13,7 @@
       "node": ">=22"
     }
   },
-  "modules": {
+  "modulesConfig": {
     "ci-local": {
       "enabled": true,
       "hooksPath": "ci-local/hooks",

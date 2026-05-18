@@ -90,9 +90,30 @@ describe("createDispatch", () => {
 describe("aggregateResults", () => {
 	const preset = TEAM_PRESETS.review;
 	const passResults: AgentResult[] = [
-		{ roleId: "quality", roleName: "Quality", passed: true, findings: [], severity: "info", durationMs: 1000 },
-		{ roleId: "security", roleName: "Security", passed: true, findings: [], severity: "info", durationMs: 2000 },
-		{ roleId: "testing", roleName: "Testing", passed: true, findings: [], severity: "info", durationMs: 1500 },
+		{
+			roleId: "quality",
+			roleName: "Quality",
+			passed: true,
+			findings: [],
+			severity: "info",
+			durationMs: 1000,
+		},
+		{
+			roleId: "security",
+			roleName: "Security",
+			passed: true,
+			findings: [],
+			severity: "info",
+			durationMs: 2000,
+		},
+		{
+			roleId: "testing",
+			roleName: "Testing",
+			passed: true,
+			findings: [],
+			severity: "info",
+			durationMs: 1500,
+		},
 	];
 
 	it("passes when all agents pass (all-must-pass)", () => {
@@ -104,7 +125,14 @@ describe("aggregateResults", () => {
 	it("fails when any agent fails (all-must-pass)", () => {
 		const failResults = [
 			...passResults.slice(0, 2),
-			{ roleId: "testing", roleName: "Testing", passed: false, findings: ["Missing tests"], severity: "high" as const, durationMs: 1500 },
+			{
+				roleId: "testing",
+				roleName: "Testing",
+				passed: false,
+				findings: ["Missing tests"],
+				severity: "high" as const,
+				durationMs: 1500,
+			},
 		];
 		const result = aggregateResults(preset, failResults);
 		expect(result.passed).toBe(false);
@@ -114,9 +142,30 @@ describe("aggregateResults", () => {
 	it("passes with majority (majority aggregation)", () => {
 		const majorityPreset = { ...preset, aggregation: "majority" as const };
 		const mixedResults: AgentResult[] = [
-			{ roleId: "a", roleName: "A", passed: true, findings: [], severity: "info", durationMs: 100 },
-			{ roleId: "b", roleName: "B", passed: true, findings: [], severity: "info", durationMs: 100 },
-			{ roleId: "c", roleName: "C", passed: false, findings: ["issue"], severity: "medium", durationMs: 100 },
+			{
+				roleId: "a",
+				roleName: "A",
+				passed: true,
+				findings: [],
+				severity: "info",
+				durationMs: 100,
+			},
+			{
+				roleId: "b",
+				roleName: "B",
+				passed: true,
+				findings: [],
+				severity: "info",
+				durationMs: 100,
+			},
+			{
+				roleId: "c",
+				roleName: "C",
+				passed: false,
+				findings: ["issue"],
+				severity: "medium",
+				durationMs: 100,
+			},
 		];
 		const result = aggregateResults(majorityPreset, mixedResults);
 		expect(result.passed).toBe(true);
@@ -125,8 +174,22 @@ describe("aggregateResults", () => {
 	it("passes with any-pass", () => {
 		const anyPreset = { ...preset, aggregation: "any-pass" as const };
 		const mixedResults: AgentResult[] = [
-			{ roleId: "a", roleName: "A", passed: false, findings: ["nope"], severity: "high", durationMs: 100 },
-			{ roleId: "b", roleName: "B", passed: true, findings: [], severity: "info", durationMs: 100 },
+			{
+				roleId: "a",
+				roleName: "A",
+				passed: false,
+				findings: ["nope"],
+				severity: "high",
+				durationMs: 100,
+			},
+			{
+				roleId: "b",
+				roleName: "B",
+				passed: true,
+				findings: [],
+				severity: "info",
+				durationMs: 100,
+			},
 		];
 		const result = aggregateResults(anyPreset, mixedResults);
 		expect(result.passed).toBe(true);
@@ -134,7 +197,14 @@ describe("aggregateResults", () => {
 
 	it("includes critical findings count in summary", () => {
 		const failResults: AgentResult[] = [
-			{ roleId: "sec", roleName: "Security", passed: false, findings: ["SQL injection", "XSS"], severity: "critical", durationMs: 1000 },
+			{
+				roleId: "sec",
+				roleName: "Security",
+				passed: false,
+				findings: ["SQL injection", "XSS"],
+				severity: "critical",
+				durationMs: 1000,
+			},
 		];
 		const result = aggregateResults(preset, failResults);
 		expect(result.summary).toContain("2 critical findings");
@@ -149,7 +219,14 @@ describe("aggregateResults", () => {
 describe("formatTeamResult", () => {
 	it("formats passing result", () => {
 		const result = aggregateResults(TEAM_PRESETS.review, [
-			{ roleId: "q", roleName: "Quality", passed: true, findings: [], severity: "info", durationMs: 1000 },
+			{
+				roleId: "q",
+				roleName: "Quality",
+				passed: true,
+				findings: [],
+				severity: "info",
+				durationMs: 1000,
+			},
 		]);
 		const output = formatTeamResult(result);
 		expect(output).toContain("✅");
@@ -159,7 +236,14 @@ describe("formatTeamResult", () => {
 
 	it("formats failing result with findings", () => {
 		const result = aggregateResults(TEAM_PRESETS.review, [
-			{ roleId: "s", roleName: "Security", passed: false, findings: ["XSS found", "Open redirect"], severity: "critical", durationMs: 2000 },
+			{
+				roleId: "s",
+				roleName: "Security",
+				passed: false,
+				findings: ["XSS found", "Open redirect"],
+				severity: "critical",
+				durationMs: 2000,
+			},
 		]);
 		const output = formatTeamResult(result);
 		expect(output).toContain("❌");

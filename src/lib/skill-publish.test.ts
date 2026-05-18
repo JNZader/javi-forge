@@ -164,4 +164,38 @@ describe("publishSkill", () => {
 		expect(result.manifest?.description.length).toBeLessThanOrEqual(200);
 		expect(result.manifest?.description).toContain("...");
 	});
+
+	it("refuses to publish when SKILL.md is a symlink (closes round-7 CRITICAL)", async () => {
+		// An attacker could place a SKILL.md symlink pointing at /etc/passwd
+		// or another sensitive file. Without the lstat-reject in
+		// skill-publish.ts, readFile + fs.copy would expose the target's
+		// contents in the published manifest bundle.
+		const skillDir = path.join(tmpDir, "evil-skill");
+		await fs.ensureDir(skillDir);
+		const realTarget = path.join(tmpDir, "secret.txt");
+		await fs.writeFile(realTarget, "secret data\n");
+		await fs.symlink(realTarget, path.join(skillDir, "SKILL.md"));
+
+		const result = await publishSkill({ skillDir });
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("symlink");
+		// The target file's contents must NOT have been copied anywhere.
+		expect(
+			await fs.pathExists(
+				path.join(skillDir, "skills", "evil-skill", "SKILL.md"),
+			),
+		).toBe(false);
+	});
+
+	it("dryRun does not create the skills/ subdir either", async () => {
+		// Previous dryRun test only asserted plugin.json absence. The real
+		// publishSkill also creates skills/<name>/SKILL.md when !dryRun.
+		// Verify the dryRun path skips that side effect too.
+		const skillDir = await writeSkill("dry-skill-2", {
+			name: "dry-skill-2",
+			description: "A dry run skill that should leave no trace",
+		});
+		await publishSkill({ skillDir, dryRun: true });
+		expect(await fs.pathExists(path.join(skillDir, "skills"))).toBe(false);
+	});
 });

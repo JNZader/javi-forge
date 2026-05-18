@@ -90,6 +90,27 @@ describe("runWorkflowShow", () => {
 		expect(result).toBeNull();
 	});
 
+	it("rejects path-traversal in template name (closes round-7 HIGH)", async () => {
+		// loadBuiltinTemplate restricts names to kebab-case. Without that
+		// check, "../../../etc/passwd" would resolve outside the bundled
+		// WORKFLOW_TEMPLATES_DIR. Verify the rejection by name regex AND
+		// the resolved-path guard.
+		for (const evil of [
+			"../../etc/passwd",
+			"./../../etc",
+			"name with spaces",
+			"name.dot",
+			"ABSOLUTE",
+			"-leading-dash",
+			"trailing-dash-",
+		]) {
+			const result = await runWorkflowShow(tmpDir, onStep, {
+				template: evil,
+			});
+			expect(result).toBeNull();
+		}
+	});
+
 	it("returns null when no workflows found (no built-ins, no discovered)", async () => {
 		// No target, no template, no .javi-forge/workflows/ → null.
 		const result = await runWorkflowShow(tmpDir, onStep, {});

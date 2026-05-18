@@ -58,6 +58,24 @@ export async function publishSkill(
 		return { success: false, error: `SKILL.md not found in ${skillDir}` };
 	}
 
+	// Refuse to follow a symlink. If SKILL.md is a symlink to a file outside
+	// the skill directory (e.g., /etc/passwd), readFile + the later fs.copy
+	// would expose the target's contents in the published manifest bundle.
+	// Mirrors the symlink-reject pattern in security.ts writeBaseline /
+	// ci.ts installCIHooks.
+	try {
+		const stat = await fs.lstat(skillMdPath);
+		if (stat.isSymbolicLink()) {
+			return {
+				success: false,
+				error: `SKILL.md is a symlink; refusing to publish. Use a regular file.`,
+			};
+		}
+	} catch {
+		// pathExists already returned true above; lstat failures here are
+		// unexpected. Fall through to readFile which will surface the error.
+	}
+
 	// Read and parse SKILL.md
 	let raw: string;
 	try {

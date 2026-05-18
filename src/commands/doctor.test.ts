@@ -247,10 +247,12 @@ describe("runDoctor", () => {
 	// count returned for the bundled dir; a unit test for countDir itself
 	// belongs in lib/common.test.ts if we want explicit coverage.
 
-	it("shows context refresh ok when .context/ has the expected files", async () => {
-		// refreshContextDir reads the existing .context/ and reports an
-		// updated status if it can refresh from the manifest. Scaffold the
-		// .context/ + manifest so the path is reachable.
+	it("shows context refresh ok when .context/ + manifest are present", async () => {
+		// Round-7 review flagged that the original loose assertion
+		// (`["ok", "skip"]`) made this test pass even if refresh silently
+		// failed. Tighten back to a strict "ok" — when both .context/ and
+		// the manifest exist, the doctor MUST report success or there's a
+		// real regression.
 		await fs.ensureDir(path.join(tmpDir, ".context"));
 		await fs.writeFile(
 			path.join(tmpDir, ".context", "INDEX.md"),
@@ -268,14 +270,18 @@ describe("runDoctor", () => {
 			updatedAt: "2025-01-15T10:00:00Z",
 			modules: [],
 		});
+		// detectStack needs a stack marker — without it refreshContextDir
+		// cannot pick a template and falls through to skip.
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			name: "test-project",
+		});
 
 		const result = await runDoctor(tmpDir);
 		const ctxSection = result.sections.find(
 			(s) => s.title === "Context Directory",
 		)!;
 		expect(ctxSection).toBeDefined();
-		// Real refresh either updates or leaves files alone; both report ok.
-		expect(["ok", "skip"]).toContain(ctxSection.checks[0].status);
+		expect(ctxSection.checks[0].status).toBe("ok");
 	});
 
 	it("shows context refresh skip when no .context/ exists", async () => {

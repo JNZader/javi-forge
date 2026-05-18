@@ -74,12 +74,29 @@ export async function listBuiltinTemplates(): Promise<
 
 /**
  * Load a built-in template by name. Returns the file content or null if not found.
+ *
+ * The name argument is restricted to a strict kebab-case alphabet — anything
+ * with path separators, dots, or characters outside [a-z0-9-] is rejected
+ * outright. Without this check, an attacker (or a user with a typo) could
+ * pass --template "../../../etc/passwd" and walk out of WORKFLOW_TEMPLATES_DIR.
+ * The file would still need to end in .dot or .mermaid, but file-existence
+ * probes and arbitrary DOT-parse on attacker-controlled paths is enough to
+ * reject up front.
  */
 export async function loadBuiltinTemplate(
 	name: string,
 ): Promise<{ content: string; format: WorkflowFormat } | null> {
+	if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(name)) {
+		return null;
+	}
 	for (const [ext, format] of Object.entries(WORKFLOW_EXTENSIONS)) {
 		const templatePath = path.join(WORKFLOW_TEMPLATES_DIR, `${name}${ext}`);
+		// Defense in depth: even with the name regex above, ensure the
+		// resolved real path stays inside WORKFLOW_TEMPLATES_DIR.
+		const resolved = path.resolve(templatePath);
+		if (!resolved.startsWith(`${WORKFLOW_TEMPLATES_DIR}${path.sep}`)) {
+			continue;
+		}
 		if (await fs.pathExists(templatePath)) {
 			const content = await fs.readFile(templatePath, "utf-8");
 			return { content, format };

@@ -479,74 +479,107 @@ describe("initProject() — integration", () => {
 		return (JSON.parse(raw).modules ?? []) as string[];
 	}
 
+	// All optional-flag module names. Each per-flag test asserts:
+	//   - the flag's own module IS in the manifest
+	//   - the other optional modules are NOT in the manifest
+	// This catches cross-flag contamination (round-9 finding): if enabling
+	// `aiSync` accidentally also turned on `localAi`, a pure toContain check
+	// would pass while the real coupling bug would slip through.
+	const OPTIONAL_FLAG_MODULES = [
+		"context",
+		"claude-md",
+		"docker-deploy",
+		"security-hooks",
+		"code-graph",
+		"local-ai",
+		"ai-config",
+	] as const;
+	type OptionalFlagModule = (typeof OPTIONAL_FLAG_MODULES)[number];
+
+	function expectExactlyTheseOptionalModules(
+		actual: string[],
+		expected: OptionalFlagModule[],
+	) {
+		const expectedSet = new Set<string>(expected);
+		for (const mod of OPTIONAL_FLAG_MODULES) {
+			if (expectedSet.has(mod)) {
+				expect(actual).toContain(mod);
+			} else {
+				expect(actual).not.toContain(mod);
+			}
+		}
+	}
+
+	// Base options leave contextDir and claudeMd true and the rest false.
+	// Each test enables ONE extra optional flag and asserts the manifest
+	// matches the base set + that one addition.
+	const BASE_OPTIONAL_MODULES: OptionalFlagModule[] = ["context", "claude-md"];
+
 	it("manifest includes 'context' when contextDir is true", async () => {
-		const opts = makeOptions({
-			projectName: "context-on",
-			contextDir: true,
-		});
+		const opts = makeOptions({ projectName: "context-on", contextDir: true });
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
-		expect(await readManifestModules(opts.projectDir)).toContain("context");
+		expectExactlyTheseOptionalModules(
+			await readManifestModules(opts.projectDir),
+			BASE_OPTIONAL_MODULES,
+		);
 	});
 
 	it("manifest includes 'claude-md' when claudeMd is true", async () => {
-		const opts = makeOptions({
-			projectName: "claude-on",
-			claudeMd: true,
-		});
+		const opts = makeOptions({ projectName: "claude-on", claudeMd: true });
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
-		expect(await readManifestModules(opts.projectDir)).toContain("claude-md");
+		expectExactlyTheseOptionalModules(
+			await readManifestModules(opts.projectDir),
+			BASE_OPTIONAL_MODULES,
+		);
 	});
 
 	it("manifest includes 'docker-deploy' when dockerDeploy is true", async () => {
-		const opts = makeOptions({
-			projectName: "docker-on",
-			dockerDeploy: true,
-		});
+		const opts = makeOptions({ projectName: "docker-on", dockerDeploy: true });
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
-		expect(await readManifestModules(opts.projectDir)).toContain(
-			"docker-deploy",
+		expectExactlyTheseOptionalModules(
+			await readManifestModules(opts.projectDir),
+			[...BASE_OPTIONAL_MODULES, "docker-deploy"],
 		);
 	});
 
 	it("manifest includes 'security-hooks' when securityHooks is true", async () => {
-		const opts = makeOptions({
-			projectName: "sec-on",
-			securityHooks: true,
-		});
+		const opts = makeOptions({ projectName: "sec-on", securityHooks: true });
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
-		const modules = await readManifestModules(opts.projectDir);
-		expect(modules).toContain("security-hooks");
+		expectExactlyTheseOptionalModules(
+			await readManifestModules(opts.projectDir),
+			[...BASE_OPTIONAL_MODULES, "security-hooks"],
+		);
 	});
 
 	it("manifest includes 'code-graph' when codeGraph is true", async () => {
-		const opts = makeOptions({
-			projectName: "graph-on",
-			codeGraph: true,
-		});
+		const opts = makeOptions({ projectName: "graph-on", codeGraph: true });
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
-		expect(await readManifestModules(opts.projectDir)).toContain("code-graph");
+		expectExactlyTheseOptionalModules(
+			await readManifestModules(opts.projectDir),
+			[...BASE_OPTIONAL_MODULES, "code-graph"],
+		);
 	});
 
 	it("manifest includes 'local-ai' when localAi is true", async () => {
-		const opts = makeOptions({
-			projectName: "ai-on",
-			localAi: true,
-		});
+		const opts = makeOptions({ projectName: "ai-on", localAi: true });
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
-		expect(await readManifestModules(opts.projectDir)).toContain("local-ai");
+		expectExactlyTheseOptionalModules(
+			await readManifestModules(opts.projectDir),
+			[...BASE_OPTIONAL_MODULES, "local-ai"],
+		);
 	});
 
 	it("manifest includes 'ai-config' when aiSync is true (closes round-8 HIGH gap)", async () => {
 		// The dropped "writes manifest with correct structure" unit test was
 		// the ONLY assertion that aiSync=true → "ai-config" in modules. The
-		// other 6 new integration tests inherit aiSync:false from the base
-		// makeOptions, so without this case the ai-config code path
+		// other 6 per-flag integration tests inherit aiSync:false from the
+		// base makeOptions, so without this case the ai-config code path
 		// (init.ts:1076 `aiSync ? ["ai-config"] : []`) is untested.
 		//
 		// The aiSync step shells out to javi-ai which is external; we cannot
@@ -554,12 +587,12 @@ describe("initProject() — integration", () => {
 		// this file no-ops external calls, so the step "succeeds" enough for
 		// the manifest write to land. We assert ONLY on the manifest
 		// contents — the actual javi-ai sync is out of scope here.
-		const opts = makeOptions({
-			projectName: "ai-config-on",
-			aiSync: true,
-		});
+		const opts = makeOptions({ projectName: "ai-config-on", aiSync: true });
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
-		expect(await readManifestModules(opts.projectDir)).toContain("ai-config");
+		expectExactlyTheseOptionalModules(
+			await readManifestModules(opts.projectDir),
+			[...BASE_OPTIONAL_MODULES, "ai-config"],
+		);
 	});
 });

@@ -34,11 +34,18 @@ fi
 
 # Log resolved path. The hooks will trust whatever PATH gives them at commit
 # time — surface the binary location so the user catches a hijack early.
+# readlink -f resolves any symlink chain so a symlink trick (~/.local/bin
+# pointing to /tmp/evil) doesn't escape the writable-path warning below.
 JAVI_FORGE_PATH=$(command -v javi-forge)
+JAVI_FORGE_REAL=$(readlink -f "$JAVI_FORGE_PATH" 2>/dev/null || printf "%s" "$JAVI_FORGE_PATH")
 JAVI_FORGE_VERSION_OUTPUT=$(javi-forge --version 2>&1) && JAVI_FORGE_VERSION_OK=1 || JAVI_FORGE_VERSION_OK=0
 
 if [ "$JAVI_FORGE_VERSION_OK" -eq 1 ]; then
-    echo -e "${GREEN}javi-forge: ${JAVI_FORGE_VERSION_OUTPUT} (${JAVI_FORGE_PATH})${NC}"
+    if [ "$JAVI_FORGE_PATH" = "$JAVI_FORGE_REAL" ]; then
+        echo -e "${GREEN}javi-forge: ${JAVI_FORGE_VERSION_OUTPUT} (${JAVI_FORGE_PATH})${NC}"
+    else
+        echo -e "${GREEN}javi-forge: ${JAVI_FORGE_VERSION_OUTPUT} (${JAVI_FORGE_PATH} -> ${JAVI_FORGE_REAL})${NC}"
+    fi
 else
     echo -e "${RED}ERROR: javi-forge found at ${JAVI_FORGE_PATH} but '--version' failed${NC}"
     echo -e "${YELLOW}Output: ${JAVI_FORGE_VERSION_OUTPUT}${NC}"
@@ -46,22 +53,38 @@ else
     exit 1
 fi
 
-# Warn if the resolved path is in a world-writable / tmp location — that is
-# a supply-chain red flag (someone could swap the binary).
-case "$JAVI_FORGE_PATH" in
+# Warn if the RESOLVED (post-symlink) path is in a writable-by-many or temp
+# location. Audit (2026-05-17) flagged additional locations beyond /tmp:
+# user-controlled caches and globals can be hijacked by a malicious package.
+case "$JAVI_FORGE_REAL" in
     /tmp/*|/var/tmp/*|/dev/shm/*)
-        echo -e "${YELLOW}WARNING: javi-forge is in a temp directory (${JAVI_FORGE_PATH}).${NC}"
+        echo -e "${YELLOW}WARNING: javi-forge resolves to a temp directory (${JAVI_FORGE_REAL}).${NC}"
         echo -e "${YELLOW}This is unusual and may indicate a compromised install.${NC}"
+        ;;
+    "$HOME"/.cache/*|"$HOME"/.npm/_npx/*|"$HOME"/.pnpm-store/*)
+        echo -e "${YELLOW}WARNING: javi-forge resolves to a cache directory (${JAVI_FORGE_REAL}).${NC}"
+        echo -e "${YELLOW}Caches can be overwritten by package installs — prefer a stable global location.${NC}"
         ;;
 esac
 
 # 1. Configurar git hooks
 echo -e "${YELLOW}[1/2] Configuring git hooks...${NC}"
-git config core.hooksPath .ci-local/hooks
-# Explicit 0755: owner rwx, group/others rx. Avoids group-writable hooks
-# that any member of the user's group could rewrite between commits.
-chmod 0755 "$SCRIPT_DIR/hooks/"* 2>/dev/null || true
-chmod 0755 "$SCRIPT_DIR/"*.sh 2>/dev/null || true
+# Compute hooksPath relative to the project root so this works whether the
+# directory is "ci-local" (development checkout) or ".ci-local" (user's
+# project, after copying via the install instructions).
+HOOKS_DIR="$SCRIPT_DIR/hooks"
+HOOKS_REL=$(realpath --relative-to="$PROJECT_DIR" "$HOOKS_DIR" 2>/dev/null || printf "%s" "$HOOKS_DIR")
+git config core.hooksPath "$HOOKS_REL"
+echo -e "${GREEN}hooksPath = $HOOKS_REL${NC}"
+# Explicit 0755 (and only when files exist) — owner rwx, group/others rx.
+# Avoids group-writable hooks AND avoids passing a literal "*" to chmod
+# when the glob expands to nothing.
+shopt -s nullglob
+hook_files=("$HOOKS_DIR"/* "$SCRIPT_DIR"/*.sh)
+if [ ${#hook_files[@]} -gt 0 ]; then
+    chmod 0755 "${hook_files[@]}"
+fi
+shopt -u nullglob
 echo -e "${GREEN}Done${NC}"
 
 # 2. Verificar dependencias

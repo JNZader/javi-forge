@@ -8,8 +8,41 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# ─── Required tools (fail-closed) ──────────────────────────────────
+# realpath is load-bearing for the symlink-traversal checks below. If it's
+# missing, the fallback used to silently return unresolved paths, which let
+# a hostile symlink slip past. Audit round 4 (2026-05-17) PoC verified.
+if ! command -v realpath >/dev/null 2>&1; then
+    printf 'ERROR: realpath is required for ci-local install (symlink checks).\n' >&2
+    printf '  Linux/WSL: install coreutils\n' >&2
+    printf '  macOS:     brew install coreutils, then add gnubin to PATH\n' >&2
+    exit 1
+fi
+
+# ─── SECURITY: validate lib/common.sh BEFORE sourcing it ───────────
+# Sourcing a hostile symlink runs attacker code at user privilege BEFORE
+# any traversal check could fire. Round 4 PoC verified this on bash and
+# PowerShell. Resolve the lib path and abort if it escapes the project.
+LIB_FILE="$SCRIPT_DIR/../lib/common.sh"
+LIB_REAL=$(realpath "$LIB_FILE" 2>/dev/null || true)
+PROJECT_REAL=$(realpath "$PROJECT_DIR" 2>/dev/null || true)
+if [ -z "$LIB_REAL" ] || [ -z "$PROJECT_REAL" ]; then
+    printf 'ERROR: failed to resolve lib/common.sh or project root.\n' >&2
+    exit 1
+fi
+case "$LIB_REAL" in
+    "$PROJECT_REAL"|"$PROJECT_REAL"/*) ;;
+    *)
+        printf 'ERROR: lib/common.sh resolves outside the project root:\n' >&2
+        printf '  LIB resolved:     %s\n' "$LIB_REAL" >&2
+        printf '  PROJECT resolved: %s\n' "$PROJECT_REAL" >&2
+        printf 'Refusing to source. Investigate symlinks under lib/.\n' >&2
+        exit 1
+        ;;
+esac
+
 # Source shared library for colors
-source "$SCRIPT_DIR/../lib/common.sh"
+source "$LIB_FILE"
 
 echo -e "${CYAN}=== CI-LOCAL Installation ===${NC}"
 
@@ -73,25 +106,24 @@ echo -e "${YELLOW}[1/2] Configuring git hooks...${NC}"
 # directory is "ci-local" (development checkout) or ".ci-local" (user's
 # project, after copying via the install instructions).
 HOOKS_DIR="$SCRIPT_DIR/hooks"
-HOOKS_REL=$(realpath --relative-to="$PROJECT_DIR" "$HOOKS_DIR" 2>/dev/null || printf "%s" "$HOOKS_DIR")
 
 # SECURITY: reject hooksPath that escapes the project root. If $SCRIPT_DIR or
 # $SCRIPT_DIR/hooks is a symlink pointing outside the project, realpath
 # resolves through it and emits "../../tmp/evil/hooks". Setting that as
 # core.hooksPath means every future commit executes whatever lives there.
-# Audit (round 3, 2026-05-17) caught this; same fix applied to install.ps1.
-HOOKS_ABS=$(realpath "$HOOKS_DIR" 2>/dev/null || printf "%s" "$HOOKS_DIR")
-PROJECT_ABS=$(realpath "$PROJECT_DIR" 2>/dev/null || printf "%s" "$PROJECT_DIR")
+# realpath is guaranteed above so no fallback is needed.
+HOOKS_ABS=$(realpath "$HOOKS_DIR")
 case "$HOOKS_ABS" in
-    "$PROJECT_ABS"|"$PROJECT_ABS"/*) ;;
+    "$PROJECT_REAL"|"$PROJECT_REAL"/*) ;;
     *)
         echo -e "${RED}ERROR: hooks directory resolves outside the project root${NC}"
         echo -e "${YELLOW}  HOOKS_DIR resolved to: $HOOKS_ABS${NC}"
-        echo -e "${YELLOW}  PROJECT_DIR:           $PROJECT_ABS${NC}"
+        echo -e "${YELLOW}  PROJECT_DIR:           $PROJECT_REAL${NC}"
         echo -e "${YELLOW}Refusing to set core.hooksPath. Investigate symlinks under ci-local/.${NC}"
         exit 1
         ;;
 esac
+HOOKS_REL=$(realpath --relative-to="$PROJECT_DIR" "$HOOKS_DIR")
 
 git config core.hooksPath "$HOOKS_REL"
 echo -e "${GREEN}hooksPath = $HOOKS_REL${NC}"

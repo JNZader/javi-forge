@@ -69,10 +69,10 @@
     ],
     "knownLimitations": [
       "commit-msg blocker: cross-script homoglyphs, tag chars, variation selectors not detected — see modules.ai-attribution-blocker.outOfScope",
-      "ci-local/install.{sh,ps1}: TOCTOU between command -v check at install time and PATH resolution at commit time — accepted; mitigated via path warnings + readlink/Get-Item .LinkType",
-      "ci-local PowerShell port: syntax-validated against pwsh 7.6 on Linux; end-to-end tested in detect mode. Quick/shell/full modes not yet smoke-tested on a real Windows host — needs validation in a real environment before tagging a release",
-      "ci-local PowerShell port: Import-Module loads lib/common.psm1 without signature verification — acceptable since the script is invoked from the same repo the user trusts; document that users running install.ps1 from a fresh clone of an untrusted source are out of scope",
-      "lib/common.psm1: detect_framework() function from common.sh is not ported (the bash version has no callers and is effectively dead code)"
+      "ci-local/install.{sh,ps1}: install-time check only — between install and the next commit the PATH could be remapped or the binary replaced. Mitigated by symlink-path warnings, readlink/ResolveLinkTarget chain resolution, refusal to wire when the resolved binary is under user-writable caches, and (on Windows) icacls hardening of the hooks directory. Remaining risk is the responsibility of the user's file-permission setup.",
+      "ci-local PowerShell port: requires pwsh 7.2+ (FileSystemInfo.ResolveLinkTarget). Validated on Linux pwsh 7.6 (detect mode + symlink-traversal PoC). Quick/shell/full modes not yet smoke-tested on a real Windows host — needs validation before tagging a release.",
+      "ci-local PowerShell port: lib/common.psm1 is verified to resolve INSIDE the project root before Import-Module loads it; module signing is NOT verified. Users running install.ps1 from a fresh clone of an untrusted source are out of scope.",
+      "lib/common.psm1: detect_framework() function from common.sh is not ported (the bash version has no callers and is effectively dead code)."
     ]
   }
 }

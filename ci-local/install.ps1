@@ -10,15 +10,16 @@
 # change. Test on real Windows + WSL + macOS pwsh before tagging a release.
 # =============================================================================
 
-#Requires -Version 7.0
+#Requires -Version 7.2
 [CmdletBinding()]
 param()
 
 # Defense-in-depth: #Requires is parsed by some hosts AFTER the script body.
-# Surface a clear error before any logic runs if we're on Windows PowerShell 5.1
-# (which has different strict-mode semantics and lacks GetRelativePath).
-if ($PSVersionTable.PSEdition -ne 'Core') {
-    Write-Host 'ERROR: ci-local install.ps1 requires PowerShell 7+ (pwsh).' -ForegroundColor Red
+# 7.2 is the minimum because FileSystemInfo.ResolveLinkTarget($true) is .NET 6+,
+# which shipped with pwsh 7.2. Earlier pwsh 7.x runs on .NET 5 and the method
+# is absent — the symlink check would silently fall back to no-op.
+if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion -lt [Version]'7.2') {
+    Write-Host 'ERROR: ci-local install.ps1 requires PowerShell 7.2+ (pwsh).' -ForegroundColor Red
     Write-Host "Detected: $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
     Write-Host 'Install: https://github.com/PowerShell/PowerShell/releases' -ForegroundColor Cyan
     exit 1
@@ -30,6 +31,21 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir  = Split-Path -Parent $PSCommandPath
 $ProjectDir = Split-Path -Parent $ScriptDir
 
+# ─── Symlink-safe path resolver ────────────────────────────────────
+# Defined inline (NOT in lib/common.psm1) because we need it BEFORE the
+# module is loaded — Import-Module on a hostile symlink would already
+# execute the attacker's code. Audit round 4 PoC verified.
+# Fails closed: any exception aborts the script.
+function Resolve-RealPath([string]$P) {
+    if ([string]::IsNullOrEmpty($P)) {
+        throw "Resolve-RealPath: empty path"
+    }
+    $item = Get-Item -LiteralPath $P -Force -ErrorAction Stop
+    $target = $item.ResolveLinkTarget($true)
+    if ($target) { return $target.FullName }
+    return $item.FullName
+}
+
 # Find the shared library (mirrors install.sh's source order).
 $libPath = Join-Path $ScriptDir '..' 'lib' 'common.psm1'
 if (-not (Test-Path -LiteralPath $libPath -PathType Leaf)) {
@@ -37,6 +53,27 @@ if (-not (Test-Path -LiteralPath $libPath -PathType Leaf)) {
     Write-Host "Copy lib/ alongside ci-local/ (see README)." -ForegroundColor Yellow
     exit 1
 }
+
+# SECURITY: validate the module BEFORE importing. A hostile symlink runs
+# attacker code at user privilege as soon as Import-Module evaluates it.
+# Round 4 (2026-05-17) PoC verified the same hijack on install.sh side.
+try {
+    $libReal     = Resolve-RealPath $libPath
+    $projectReal = Resolve-RealPath $ProjectDir
+} catch {
+    Write-Host "ERROR: could not resolve lib/common.psm1 or project root: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+$sep = [System.IO.Path]::DirectorySeparatorChar
+if (-not ($libReal.Equals($projectReal, [StringComparison]::OrdinalIgnoreCase) -or
+          $libReal.StartsWith($projectReal + $sep, [StringComparison]::OrdinalIgnoreCase))) {
+    Write-Host 'ERROR: lib/common.psm1 resolves outside the project root' -ForegroundColor Red
+    Write-Host "  LIB resolved:     $libReal" -ForegroundColor Yellow
+    Write-Host "  PROJECT resolved: $projectReal" -ForegroundColor Yellow
+    Write-Host 'Refusing to import. Investigate symlinks under lib/.' -ForegroundColor Yellow
+    exit 1
+}
+
 Import-Module $libPath -Force
 
 Write-Host '=== CI-LOCAL Installation ===' -ForegroundColor Cyan
@@ -104,10 +141,14 @@ try {
         exit 1
     }
 
-    # Reject UNC paths outright — a javi-forge symlinked to \\attacker\share
-    # passes the writable-cache check below because none of the prefixes
-    # match. UNC targets are unusual for a CLI install and worth surfacing.
-    if ($jfReal -like '\\\\*') {
+    # Reject UNC / remote paths outright — a javi-forge symlinked to
+    # \\attacker\share passes the writable-cache check because none of the
+    # prefixes match. Two forms to handle:
+    #   \\server\share\path         → UNC (reject)
+    #   \\?\UNC\server\share\path   → extended-length UNC (reject)
+    #   \\?\C:\very\long\path       → extended-length LOCAL (allow)
+    if ($jfReal -like '\\\\?\\UNC\\*' -or
+        ($jfReal -like '\\\\*' -and -not ($jfReal -like '\\\\?\\*'))) {
         Write-Host "ERROR: javi-forge resolves to a UNC / network path ($jfReal)." -ForegroundColor Red
         Write-Host 'Refusing to wire hooks against a remote binary.' -ForegroundColor Yellow
         exit 1
@@ -156,25 +197,18 @@ try {
     # GetRelativePath returns "../../../somewhere/evil" and every future
     # commit executes whatever lives there. Audit round 3 caught this.
     #
-    # GetFullPath does NOT follow symlinks — it only normalises ".." etc.
-    # FileSystemInfo.ResolveLinkTarget($true) (introduced in .NET 6) walks
-    # the full chain. Available in pwsh 7.2+; #Requires above pins 7.0
-    # but ResolveLinkTarget is still present on 7.0/7.1 builds shipped by
-    # MS, so this is safe.
-    function Resolve-RealPath([string]$P) {
-        if ([string]::IsNullOrEmpty($P)) { return $P }
-        try {
-            $item = Get-Item -LiteralPath $P -Force -ErrorAction Stop
-            $target = $item.ResolveLinkTarget($true)
-            if ($target) { return $target.FullName }
-            return $item.FullName
-        } catch {
-            return [System.IO.Path]::GetFullPath($P)
-        }
+    # Resolve-RealPath is defined at top level (BEFORE Import-Module) so we
+    # can reuse it here for the hooks-dir check. It fails closed — any
+    # exception aborts instead of falling back to GetFullPath which does
+    # not follow symlinks (the original fallback opened a hole flagged by
+    # audit round 4).
+    try {
+        $hooksAbs   = Resolve-RealPath $hooksDir
+        $projectAbs = Resolve-RealPath $ProjectDir
+    } catch {
+        Write-Host "ERROR: could not resolve hooks dir or project root: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
     }
-    $hooksAbs   = Resolve-RealPath $hooksDir
-    $projectAbs = Resolve-RealPath $ProjectDir
-    $sep = [System.IO.Path]::DirectorySeparatorChar
     if (-not ($hooksAbs.Equals($projectAbs, [StringComparison]::OrdinalIgnoreCase) -or
               $hooksAbs.StartsWith($projectAbs + $sep, [StringComparison]::OrdinalIgnoreCase))) {
         Write-Host 'ERROR: hooks directory resolves outside the project root' -ForegroundColor Red
@@ -212,14 +246,28 @@ try {
     if ($IsWindows -and (Test-CommandExists -Name 'icacls')) {
         # Restrict hooks dir to current user (F = full, OI/CI = inherit to
         # files/subfolders). /inheritance:r drops any permissive parent ACL.
-        # Best-effort: failures are non-fatal but visible.
+        #
+        # Use the current user's SID rather than $env:USERNAME — usernames
+        # with spaces ("John Doe") or domain prefixes ("CONTOSO\jdoe")
+        # break the SDDL principal syntax; SIDs are unambiguous. Falls
+        # back to USERNAME only if the SID lookup fails.
+        $principal = $null
         try {
-            & icacls $hooksDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" *> $null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "WARNING: icacls on $hooksDir returned $LASTEXITCODE" -ForegroundColor Yellow
-            }
+            $principal = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
         } catch {
-            Write-Host "WARNING: icacls failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            $principal = $env:USERNAME
+        }
+        if (-not $principal -or $principal -notmatch '^[\w\-\\:]+$') {
+            Write-Host 'WARNING: could not derive a safe principal for icacls; skipping ACL hardening.' -ForegroundColor Yellow
+        } else {
+            try {
+                & icacls $hooksDir /inheritance:r /grant:r "${principal}:(OI)(CI)F" *> $null
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "WARNING: icacls on $hooksDir returned $LASTEXITCODE" -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host "WARNING: icacls failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
         }
     }
     Write-Host 'Done' -ForegroundColor Green

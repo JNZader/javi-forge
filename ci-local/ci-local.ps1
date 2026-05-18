@@ -13,7 +13,7 @@
 # change.
 # =============================================================================
 
-#Requires -Version 7.0
+#Requires -Version 7.2
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
@@ -21,11 +21,26 @@ param(
     [string]$Mode = 'full'
 )
 
+# See install.ps1 for the rationale behind 7.2 minimum (ResolveLinkTarget).
+if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion -lt [Version]'7.2') {
+    Write-Host 'ERROR: ci-local.ps1 requires PowerShell 7.2+ (pwsh).' -ForegroundColor Red
+    exit 1
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ScriptDir  = Split-Path -Parent $PSCommandPath
 $ProjectDir = Split-Path -Parent $ScriptDir
+
+# ─── Symlink-safe path resolver (inline, runs BEFORE Import-Module) ───
+function Resolve-RealPath([string]$P) {
+    if ([string]::IsNullOrEmpty($P)) { throw "Resolve-RealPath: empty path" }
+    $item = Get-Item -LiteralPath $P -Force -ErrorAction Stop
+    $target = $item.ResolveLinkTarget($true)
+    if ($target) { return $target.FullName }
+    return $item.FullName
+}
 
 # ─── Load shared lib ──────────────────────────────────────────────────
 $libCandidates = @(
@@ -37,6 +52,24 @@ if (-not $libPath) {
     Write-Host 'ERROR: lib/common.psm1 not found' -ForegroundColor Red
     exit 1
 }
+
+# SECURITY: validate the module BEFORE importing. Mirror of install.ps1.
+try {
+    $libReal     = Resolve-RealPath $libPath
+    $projectReal = Resolve-RealPath $ProjectDir
+} catch {
+    Write-Host "ERROR: could not resolve lib/common.psm1 or project root: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+$sep = [System.IO.Path]::DirectorySeparatorChar
+if (-not ($libReal.Equals($projectReal, [StringComparison]::OrdinalIgnoreCase) -or
+          $libReal.StartsWith($projectReal + $sep, [StringComparison]::OrdinalIgnoreCase))) {
+    Write-Host 'ERROR: lib/common.psm1 resolves outside the project root' -ForegroundColor Red
+    Write-Host "  LIB resolved:     $libReal" -ForegroundColor Yellow
+    Write-Host "  PROJECT resolved: $projectReal" -ForegroundColor Yellow
+    exit 1
+}
+
 Import-Module $libPath -Force
 
 # ─── Stack detection + per-stack CI commands ──────────────────────────
@@ -230,11 +263,18 @@ function Confirm-DockerImage {
 function ConvertTo-DockerHostPath {
     param([Parameter(Mandatory)][string]$Path)
     if (-not $IsWindows) { return $Path }
-    # Drive letter + colon → /letter
+    # Drive letter + colon. Two forms exist:
+    #   C:\Users\foo  → absolute, valid for docker bind
+    #   C:Users\foo   → drive-relative, NOT a real absolute path
+    # Refuse the drive-relative form — it produces /cUsers/foo which is a
+    # broken bind mount and worth surfacing immediately.
     if ($Path -match '^([A-Za-z]):(.*)$') {
         $drive = $Matches[1].ToLowerInvariant()
-        $rest  = $Matches[2] -replace '\\', '/'
-        return "/$drive$rest"
+        $rest  = $Matches[2]
+        if (-not ($rest.StartsWith('/') -or $rest.StartsWith('\'))) {
+            throw "ConvertTo-DockerHostPath: drive-relative path not supported ($Path). Use an absolute path."
+        }
+        return "/$drive" + ($rest -replace '\\', '/')
     }
     return ($Path -replace '\\', '/')
 }

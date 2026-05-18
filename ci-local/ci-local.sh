@@ -16,16 +16,41 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Source shared library for colors and detect_stack
+# Require realpath: load-bearing for the lib symlink check below.
+if ! command -v realpath >/dev/null 2>&1; then
+    printf 'ERROR: realpath is required (install coreutils).\n' >&2
+    exit 1
+fi
+
+# Source shared library for colors and detect_stack.
 # Look inside ci-local/lib first (self-contained), fallback to project-level lib/
+LIB_CANDIDATE=""
 if [ -f "$SCRIPT_DIR/lib/common.sh" ]; then
-    source "$SCRIPT_DIR/lib/common.sh"
+    LIB_CANDIDATE="$SCRIPT_DIR/lib/common.sh"
 elif [ -f "$SCRIPT_DIR/../lib/common.sh" ]; then
-    source "$SCRIPT_DIR/../lib/common.sh"
+    LIB_CANDIDATE="$SCRIPT_DIR/../lib/common.sh"
 else
     echo "ERROR: lib/common.sh not found"
     exit 1
 fi
+
+# SECURITY: validate lib/common.sh before sourcing. A hostile symlink runs
+# attacker code at user privilege as soon as `source` evaluates the file.
+# Audit round 4 (2026-05-17) PoC verified the same hijack on install.sh.
+_LIB_REAL=$(realpath "$LIB_CANDIDATE")
+_PROJECT_REAL=$(realpath "$PROJECT_DIR")
+case "$_LIB_REAL" in
+    "$_PROJECT_REAL"|"$_PROJECT_REAL"/*) ;;
+    *)
+        printf 'ERROR: lib/common.sh resolves outside the project root:\n' >&2
+        printf '  LIB resolved:     %s\n' "$_LIB_REAL" >&2
+        printf '  PROJECT resolved: %s\n' "$_PROJECT_REAL" >&2
+        exit 1
+        ;;
+esac
+unset _LIB_REAL _PROJECT_REAL
+
+source "$LIB_CANDIDATE"
 
 # =============================================================================
 # CI COMMAND SETUP (extends shared detect_stack with CI-specific commands)

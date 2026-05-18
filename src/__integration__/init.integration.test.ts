@@ -52,15 +52,21 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
 		stack: "node",
 		ciProvider: "github",
 		memory: "engram",
-		aiSync: false, // skip javi-ai (external)
+		aiSync: false, // skip javi-ai (external) — flip on per-test as needed
 		sdd: true,
 		ghagga: true,
 		mock: false,
 		contextDir: true,
 		claudeMd: true,
 		securityHooks: false,
+		// Required by InitOptions; rounding out the defaults so future
+		// renames break typecheck instead of slipping through `as Partial`
+		// casts in individual tests (round-8 review finding).
+		hookProfile: "standard",
+		codeGraph: false,
 		dockerDeploy: false,
 		dockerServiceName: "app",
+		localAi: false,
 		dryRun: false,
 		...overrides,
 		// Always override projectDir based on projectName
@@ -519,8 +525,7 @@ describe("initProject() — integration", () => {
 	it("manifest includes 'code-graph' when codeGraph is true", async () => {
 		const opts = makeOptions({
 			projectName: "graph-on",
-			// codeGraph is not in the base makeOptions; pass via overrides.
-			...({ codeGraph: true } as Partial<InitOptions>),
+			codeGraph: true,
 		});
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
@@ -530,10 +535,31 @@ describe("initProject() — integration", () => {
 	it("manifest includes 'local-ai' when localAi is true", async () => {
 		const opts = makeOptions({
 			projectName: "ai-on",
-			...({ localAi: true } as Partial<InitOptions>),
+			localAi: true,
 		});
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
 		expect(await readManifestModules(opts.projectDir)).toContain("local-ai");
+	});
+
+	it("manifest includes 'ai-config' when aiSync is true (closes round-8 HIGH gap)", async () => {
+		// The dropped "writes manifest with correct structure" unit test was
+		// the ONLY assertion that aiSync=true → "ai-config" in modules. The
+		// other 6 new integration tests inherit aiSync:false from the base
+		// makeOptions, so without this case the ai-config code path
+		// (init.ts:1076 `aiSync ? ["ai-config"] : []`) is untested.
+		//
+		// The aiSync step shells out to javi-ai which is external; we cannot
+		// install it inside the test runner. The execFile mock at the top of
+		// this file no-ops external calls, so the step "succeeds" enough for
+		// the manifest write to land. We assert ONLY on the manifest
+		// contents — the actual javi-ai sync is out of scope here.
+		const opts = makeOptions({
+			projectName: "ai-config-on",
+			aiSync: true,
+		});
+		const { onStep } = collectSteps();
+		await initProject(opts, onStep);
+		expect(await readManifestModules(opts.projectDir)).toContain("ai-config");
 	});
 });

@@ -34,14 +34,25 @@ cp -r lib /path/to/new-project/
 
 # En el nuevo proyecto
 cd /path/to/new-project
-./.ci-local/install.sh      # Linux/Mac
+./.ci-local/install.sh      # Linux/Mac/WSL
 # o
-.\.ci-local\install.ps1     # Windows (ver sección "PowerShell" para estado actual)
+.\.ci-local\install.ps1     # Windows (PowerShell 7+)
 ```
 
-> **Importante:** CI-Local depende de `lib/common.sh` (funciones compartidas). Copiar siempre ambos directorios.
+> **Importante:** CI-Local depende de `lib/common.sh` (Linux/Mac) y/o `lib/common.psm1` (Windows). Copiá ambos junto con el directorio `ci-local/`.
 
-`install.sh` falla con mensaje claro si `javi-forge` no está en el PATH.
+El installer (ambas variantes) falla con mensaje claro si `javi-forge` no está en el PATH.
+
+### Soporte cross-platform
+
+| Plataforma | Installer | Runner | Hooks | Requisitos |
+|---|---|---|---|---|
+| Linux | `install.sh` | `ci-local.sh` | bash | bash, perl, docker (opcional) |
+| macOS | `install.sh` | `ci-local.sh` | bash | bash, perl, docker (opcional) |
+| WSL | `install.sh` | `ci-local.sh` | bash | bash, perl, docker (opcional) |
+| Windows nativo | `install.ps1` | `ci-local.ps1` | bash | PowerShell 7+, Git for Windows (MSYS2 bash), docker (opcional) |
+
+Los git hooks (`pre-commit`, `commit-msg`, `pre-push`) son bash en todas las plataformas. En Windows nativo corren via el MSYS2 bash que viene con Git for Windows — no se necesita una versión PowerShell de los hooks.
 
 ### Dependencias opcionales
 

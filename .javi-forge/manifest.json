@@ -69,8 +69,8 @@
     ],
     "knownLimitations": [
       "commit-msg blocker: cross-script homoglyphs, tag chars, variation selectors not detected — see modules.ai-attribution-blocker.outOfScope",
-      "ci-local: PowerShell (install.ps1) advertised in README but not implemented yet (tracked as C5)",
-      "ci-local/install.sh: TOCTOU between command -v check at install time and PATH resolution at commit time — accepted; mitigated via path warnings + readlink"
+      "ci-local/install.sh: TOCTOU between command -v check at install time and PATH resolution at commit time — accepted; mitigated via path warnings + readlink",
+      "ci-local PowerShell port (install.ps1, ci-local.ps1, lib/common.psm1): syntax-validated against pwsh 7.6 on Linux; end-to-end tested in detect mode. Not yet smoke-tested on a real Windows host — needs validation in a real environment before tagging a release"
     ]
   }
 }

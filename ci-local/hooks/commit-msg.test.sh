@@ -228,6 +228,30 @@ expect_block "generated via GPT" "feat: generated via GPT"
 # Full-width characters (NFKC normalization)
 expect_block "Ｍａｄｅ ｂｙ Claude (fullwidth)" "feat: Ｍａｄｅ ｂｙ Claude"
 
+# ─── Bypasses adicionales identificados en audit-2 (2026-05-17 review B) ──
+
+# Combining diacritics (U+0300-U+036F) — Ćlaude = C + U+0301
+expect_block "Ćlaude (combining acute)" "$(printf 'feat: Made by Ćlaude')"
+expect_block "Cláude (combining grave)" "$(printf 'feat: Made by Clàude')"
+
+# Verbos expandidos — sólo aplican si hay (by|with|using|via) después del verbo.
+# "asked Claude to ..." NO bloquea por diseño: el riesgo de false positive en
+# nombres personales o conversaciones legítimas es alto. Si necesitás defensa
+# adversarial usá signed commits.
+expect_block "helped by Claude" "feat: helped by Claude"
+expect_block "wrote with GPT" "feat: wrote with GPT-4"
+expect_block "prompted via AI" "feat: prompted via AI"
+expect_block "fixed by Copilot" "feat: fixed by Copilot"
+expect_block "refactored with Cursor" "feat: refactored with Cursor"
+
+# Cases que DOCUMENTADAMENTE NO bloqueamos (bare provider sin verb-prepositional):
+# - "asked Claude to refactor"  (FP risk: pidió a una persona llamada Claude)
+# - "I used Claude to write"    (FP risk: usé al usuario Claude para escribir)
+# - "claude helped me debug"    (FP risk: Claude la persona ayudó a debuggear)
+# Estos son límites aceptados; ver header del hook.
+expect_pass "asked Claude (person, not attribution)" "feat: asked Claude to review the PR"
+expect_pass "user Claude in seed" "feat: configure user Claude in fixtures"
+
 # ─── Cases que DEBEN PASAR (false positive checks) ────────────────────
 
 expect_pass "Simple feat" "feat: add user profile endpoint"

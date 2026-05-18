@@ -1,18 +1,29 @@
 #!/bin/bash
 set -e
 # =============================================================================
-# COMMIT-MSG: Block AI attribution in commit messages
+# COMMIT-MSG: Block accidental AI-attribution in commit messages
 # =============================================================================
-# Bloquea mensajes con atribución a IA. Best-effort, NO security control.
+# Best-effort, NOT an adversarial-grade security control.
 #
-# Estrategia:
-#   1. Normalizar el mensaje (Unicode invisibles, markdown, puntuación, emoji)
-#   2. Match patrones contra la versión normalizada
+# Diseño:
+#   1. Normalizar el mensaje (Unicode invisibles, combining marks, markdown,
+#      puntuación, emoji, full-width latin via NFKC)
+#   2. Match patrones case-insensitive contra la versión normalizada
+#      Y contra el mensaje crudo (por si normalize sobre-strip-ea)
 #
-# Esto cierra bypasses comunes (ZWSP, **bold**, "by, Claude", "by.Claude",
-# emoji separadores) pero NO defiende contra homoglifos Unicode
-# (e.g., Cyrillic Сlaude) por costo/beneficio. Si el usuario quiere bypasses
-# creativos puede pasarlos — la herramienta no es cripto.
+# Alcance:
+#   ✅ Defiende contra: copy-paste accidental, whitespace tricks (doble
+#      espacio, NBSP, ZWSP), markdown formatting, full-width latin,
+#      combining diacritics, dashes/underscores en model names, separadores
+#      de puntuación / emoji.
+#   ❌ NO defiende contra: homoglifos cross-script (Cyrillic Сlaude, Greek
+#      Ϲlaude, Cherokee Ꮯlaude), tag characters, variation selectors,
+#      provider names standalone sin verbo o modelo, bypasses creativos
+#      de adversario motivado con tabla Unicode en mano.
+#
+# El test suite (commit-msg.test.sh) documenta qué bypasses están cubiertos
+# y cuáles aceptamos como limitación. Si necesitás defensa adversarial,
+# usá signed commits, no regex.
 # =============================================================================
 
 COMMIT_MSG_FILE="$1"
@@ -24,28 +35,35 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # ─── Normalización ──────────────────────────────────────────────────
-# Requiere perl. Si no está disponible, se usa el mensaje crudo (degraded).
+# Si perl falla (no instalado, módulo Unicode::Normalize ausente), el
+# normalize retorna el mensaje crudo. El loop de patrones igual matchea
+# contra RAW_MSG, así que perl roto degrada pero no abre todo.
 normalize_msg() {
     if ! command -v perl >/dev/null 2>&1; then
         printf "%s" "$1"
         return
     fi
+    # 2>/dev/null suprime warnings de perl. Si el script falla por completo,
+    # || printf "%s" "$1" deja pasar el raw — el match contra RAW_MSG abajo
+    # sigue cubriendo los patrones literales.
     printf "%s" "$1" | perl -CSAD -pe '
         # 1. Reemplazar Unicode formatting/invisibles por ESPACIO (no borrarlos).
         #    Borrarlos junta "by" + "Claude" → "byClaude" y la regex pierde el match.
         #    ZWSP/ZWNJ/ZWJ/LRM/RLM, NBSP, bidi controls, BOM, word-joiner.
         s/[\x{00A0}\x{200B}-\x{200F}\x{2028}-\x{202F}\x{2060}-\x{206F}\x{FEFF}]/ /g;
-        # 2. NFKC normaliza compatibility forms (full-width latin → ascii)
+        # 2. Strip combining diacritics. Esto folds "Ćlaude" (C + U+0301) a "Claude".
+        s/[\x{0300}-\x{036F}]//g;
+        # 3. NFKC normaliza compatibility forms (full-width latin → ascii)
         use Unicode::Normalize qw(NFKC);
         $_ = NFKC($_);
-        # 3. Markdown / puntuación / emoji → espacio
+        # 4. Markdown / puntuación / emoji → espacio
         #    Markdown:   * _ ` ~
         #    Puntuación: . , : ; ! ? ( ) [ ] { } < > / \ | " '\''
         #    Emoji:      Misc Symbols (2600-27BF), Pictographs (1F300-1FAFF)
         s/[*_`~.,:;!?()\[\]{}<>\\\/|"'\''\x{2600}-\x{27BF}\x{1F300}-\x{1FAFF}]/ /g;
-        # 4. Colapsar whitespace (incluye \n, \t, espacios múltiples)
+        # 5. Colapsar whitespace (incluye \n, \t, espacios múltiples)
         s/\s+/ /g;
-    '
+    ' 2>/dev/null || printf "%s" "$1"
 }
 
 NORMALIZED_MSG=$(normalize_msg "$RAW_MSG")
@@ -73,8 +91,10 @@ AI_PATTERNS=(
 
     # ── Verbos de atribución + by/with + proveedor ───────────────────
     # Ej: "made by Claude", "generated with GPT", "built with OpenAI"
-    "(made|generated|written|created|assisted|built|developed|authored|produced|coded|crafted)[[:space:]]+(by|with|using|via)[[:space:]]+${PROVIDER_PAT}"
-    "(made|generated|written|created|assisted|built|developed|authored|produced|coded|crafted)[[:space:]]+(by|with|using|via)[[:space:]]+\bai(assistant|bot|agent|helper)?\b"
+    # Verbos expandidos en audit-2 para cubrir "I used X", "X helped me",
+    # "wrote by AI", "prompted to write", "asked Claude to".
+    "(made|generated|written|created|assisted|built|developed|authored|produced|coded|crafted|helped|used|wrote|prompted|asked|fixed|refactored)[[:space:]]+(by|with|using|via)[[:space:]]+${PROVIDER_PAT}"
+    "(made|generated|written|created|assisted|built|developed|authored|produced|coded|crafted|helped|used|wrote|prompted|asked|fixed|refactored)[[:space:]]+(by|with|using|via)[[:space:]]+\bai(assistant|bot|agent|helper)?\b"
 
     # ── "with help from / thanks to / powered by X" ──────────────────
     "(with[[:space:]]+help[[:space:]]+from|thanks[[:space:]]+to|powered[[:space:]]+by|courtesy[[:space:]]+of)[[:space:]]+${PROVIDER_PAT}"

@@ -5,14 +5,14 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  handlebars: '>=4.7.9'
-  picomatch: '>=4.0.4'
-  brace-expansion: '>=5.0.5'
-  lodash: '>=4.18.0'
-  lodash-es: '>=4.18.0'
-  fast-uri: '>=3.1.2'
-  postcss: '>=8.5.10'
-  vite: '>=8.0.5'
+  handlebars: ^4.7.9
+  picomatch: ^4.0.4
+  brace-expansion: ^5.0.5
+  lodash: ^4.18.0
+  lodash-es: ^4.18.0
+  fast-uri: ^3.1.2
+  postcss: ^8.5.10
+  vite: ^8.0.5
 
 importers:
 
@@ -98,7 +98,7 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
       vite:
-        specifier: '>=8.0.5'
+        specifier: ^8.0.5
         version: 8.0.13(@types/node@25.8.0)(esbuild@0.28.0)(tsx@4.22.1)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.6
@@ -912,7 +912,7 @@ packages:
     resolution: {integrity: sha512-MCFc63czMjEInOlcY2cpQCvCN+KgbAn+60xu9cMgP4sKaLC5JNAKw7JH8QdAnoAC88hW1IiSNZ+GgVXlN1UcMQ==}
     peerDependencies:
       msw: ^2.4.9
-      vite: '>=8.0.5'
+      vite: ^8.0.5
     peerDependenciesMeta:
       msw:
         optional: true
@@ -1386,7 +1386,7 @@ packages:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
     engines: {node: '>=12.0.0'}
     peerDependencies:
-      picomatch: '>=4.0.4'
+      picomatch: ^4.0.4
     peerDependenciesMeta:
       picomatch:
         optional: true
@@ -2713,7 +2713,7 @@ packages:
       '@vitest/ui': 4.1.6
       happy-dom: '*'
       jsdom: '*'
-      vite: '>=8.0.5'
+      vite: ^8.0.5
     peerDependenciesMeta:
       '@edge-runtime/vm':
         optional: true

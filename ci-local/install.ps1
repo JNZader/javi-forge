@@ -212,6 +212,35 @@ try {
     # ─── Configure git hooks ──────────────────────────────────────────
     Write-Host '[1/2] Configuring git hooks...' -ForegroundColor Yellow
 
+    # Detect competing hook managers BEFORE we touch core.hooksPath.
+    if (Test-Path -LiteralPath '.husky' -PathType Container) {
+        Write-Host 'WARNING: husky detected (.husky/). ci-local will override its hooks via core.hooksPath.' -ForegroundColor Yellow
+        Write-Host "If you want to keep husky: 'pnpm remove husky' first, OR back out of this install." -ForegroundColor Yellow
+    }
+    if ((Test-Path -LiteralPath 'lefthook.yml' -PathType Leaf) -or
+        (Test-Path -LiteralPath 'lefthook.yaml' -PathType Leaf)) {
+        Write-Host 'WARNING: lefthook detected. ci-local will override its hooks via core.hooksPath.' -ForegroundColor Yellow
+    }
+
+    # Backup existing .git/hooks/ files BEFORE we redirect hooksPath.
+    $existingHooks = (& git config --get core.hooksPath 2>$null) -join ''
+    if ($existingHooks -and $existingHooks -ne 'ci-local/hooks' -and $existingHooks -ne '.ci-local/hooks') {
+        Write-Host "WARNING: existing core.hooksPath was $existingHooks. It will be replaced." -ForegroundColor Yellow
+    }
+    foreach ($hook in 'pre-commit', 'commit-msg', 'pre-push') {
+        $hookPath = ".git/hooks/$hook"
+        $bakPath  = "$hookPath.bak"
+        if ((Test-Path -LiteralPath $hookPath -PathType Leaf) -and
+            (-not (Test-Path -LiteralPath $bakPath -PathType Leaf))) {
+            $size = (Get-Item -LiteralPath $hookPath).Length
+            if ($size -gt 0) {
+                Copy-Item -LiteralPath $hookPath -Destination $bakPath -Force
+                Write-Host "  Backed up existing $hookPath -> $bakPath" -ForegroundColor Yellow
+            }
+        }
+    }
+
+
     # Compute hooksPath RELATIVE to the project root so the same install.ps1
     # works whether the dir is "ci-local" (dev checkout) or ".ci-local"
     # (user's project after copying via install instructions).

@@ -106,6 +106,32 @@ esac
 
 # 1. Configurar git hooks
 echo -e "${YELLOW}[1/2] Configuring git hooks...${NC}"
+
+# Detect competing hook managers BEFORE we touch core.hooksPath. Setting
+# our path would silently override theirs and break expected behaviour.
+if [ -d ".husky" ]; then
+    echo -e "${YELLOW}WARNING: husky detected (.husky/). ci-local will override its hooks via core.hooksPath.${NC}"
+    echo -e "${YELLOW}If you want to keep husky: 'pnpm remove husky' first, OR back out of this install.${NC}"
+fi
+if [ -f "lefthook.yml" ] || [ -f "lefthook.yaml" ]; then
+    echo -e "${YELLOW}WARNING: lefthook detected. ci-local will override its hooks via core.hooksPath.${NC}"
+fi
+
+# Backup any existing .git/hooks/ files BEFORE we redirect hooksPath. The
+# user can restore them via './uninstall.sh --restore-backups'. We move
+# instead of copy so a future install does not double-back-up.
+EXISTING_HOOKSPATH=$(git config --get core.hooksPath 2>/dev/null || echo "")
+if [ -n "$EXISTING_HOOKSPATH" ] && [ "$EXISTING_HOOKSPATH" != "ci-local/hooks" ] && [ "$EXISTING_HOOKSPATH" != ".ci-local/hooks" ]; then
+    echo -e "${YELLOW}WARNING: existing core.hooksPath was ${EXISTING_HOOKSPATH}.${NC}"
+    echo -e "${YELLOW}It will be replaced. The previous value can be restored manually.${NC}"
+fi
+for hook in pre-commit commit-msg pre-push; do
+    if [ -f ".git/hooks/$hook" ] && [ -s ".git/hooks/$hook" ] && [ ! -f ".git/hooks/$hook.bak" ]; then
+        cp ".git/hooks/$hook" ".git/hooks/$hook.bak"
+        echo -e "${YELLOW}  Backed up existing .git/hooks/$hook → .git/hooks/$hook.bak${NC}"
+    fi
+done
+
 # Compute hooksPath relative to the project root so this works whether the
 # directory is "ci-local" (development checkout) or ".ci-local" (user's
 # project, after copying via the install instructions).

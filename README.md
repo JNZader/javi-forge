@@ -88,8 +88,12 @@ flowchart LR
 | `ci` | Run CI simulation (lint + compile + test + security + ghagga) |
 | `ci init` | Install git hooks in `.git/hooks/` (recommended for existing repos) |
 | `tdd init` | Install TDD-enforcing pre-commit hook (auto-detects stack) |
+| `tdd pipeline` | Install full TDD pipeline (red → green → refactor enforcement) |
 | `analyze` | Run repoforge skills analysis on current project |
 | `doctor` | Show comprehensive health report |
+| `workflow show` | Print the active workflow definition |
+| `workflow validate` | Lint the workflow YAML against the schema |
+| `workflow list` | List bundled workflow templates |
 | `plugin add` | Install a plugin from GitHub (`org/repo`) |
 | `plugin remove` | Remove an installed plugin |
 | `plugin list` | List installed plugins |
@@ -98,8 +102,11 @@ flowchart LR
 | `plugin sync` | Auto-detect and wire installed plugins into manifest |
 | `plugin export` | Export plugin to Agent Skills spec (`skills.json`) |
 | `plugin export --codex` | Export plugin to Codex-compatible TOML subagent files |
+| `plugin export-skills` | Aggregate all installed plugin skills into a single bundle |
 | `plugin import` | Import an Agent Skills spec package as a javi-forge plugin |
 | `skills doctor` | Show skills health report (conflict + duplicate detection) |
+| `skills auto` | Scan project lockfiles and auto-install matching skills from the registry |
+| `skill publish` | Publish a local skill to the registry (validates manifest, signs the artifact) |
 | `skills budget` | Show token cost of loaded skills |
 | `skills score` | Score a skill on quality dimensions (0-100) |
 | `skills benchmark` | Benchmark a skill with structural quality checks |

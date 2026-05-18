@@ -1,0 +1,66 @@
+{
+  "$schema": "https://github.com/JNZader/javi-forge/raw/main/schemas/manifest.schema.json",
+  "version": "1.0.0",
+  "project": "javi-forge",
+  "updatedAt": "2026-05-17",
+  "stack": {
+    "language": "node",
+    "buildTool": "pnpm",
+    "engines": {
+      "node": ">=22"
+    }
+  },
+  "modules": {
+    "ci-local": {
+      "enabled": true,
+      "hooksPath": ".ci-local/hooks",
+      "hooks": ["pre-commit", "commit-msg", "pre-push"],
+      "description": "Local Docker-based CI replacement for GitHub Actions"
+    },
+    "security-baseline": {
+      "enabled": true,
+      "file": ".javi-forge/security-baseline.json",
+      "description": "Regression gate: blocks PRs that introduce NEW vulns vs baseline"
+    },
+    "ai-attribution-blocker": {
+      "enabled": true,
+      "file": "ci-local/hooks/commit-msg",
+      "testSuite": "ci-local/hooks/commit-msg.test.sh",
+      "description": "Hardened commit-msg hook with Unicode normalization (perl)"
+    },
+    "supply-chain": {
+      "enabled": true,
+      "tool": "pnpm.overrides",
+      "auditLevel": "high",
+      "description": "Caret-bounded overrides for known-vulnerable transitive deps"
+    },
+    "self-dogfooding": {
+      "enabled": true,
+      "workflow": ".github/workflows/ci.yml",
+      "steps": [
+        "pnpm test:hooks",
+        "pnpm audit --audit-level=high",
+        "javi-forge ci --quick --no-docker --no-ci-ghagga"
+      ],
+      "description": "javi-forge runs its own tools against itself in CI"
+    }
+  },
+  "audit": {
+    "lastReview": "2026-05-17",
+    "method": "multi-voice (Haiku + Sonnet + Opus-alt)",
+    "findingsAddressed": [
+      "1 CRITICAL CVE (handlebars RCE)",
+      "12 HIGH transitive CVEs",
+      "11 AI-blocker bypasses",
+      "open-ended pnpm.overrides ranges",
+      "missing javi-forge CLI prereq check in install.sh",
+      "missing self-dogfooding in own CI",
+      "group-writable hook permissions (0775 -> 0755)",
+      "tmp-file leak in test suite (added trap EXIT)"
+    ],
+    "knownLimitations": [
+      "AI blocker: Cyrillic/Greek homoglyphs (Сlaude) not detected — would need transliteration",
+      "ci-local: PowerShell (install.ps1) advertised in README but not implemented yet"
+    ]
+  }
+}

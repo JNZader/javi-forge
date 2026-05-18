@@ -19,3 +19,26 @@ jobs:
       - run: pnpm build
       - run: pnpm test
       - run: pnpm package:check
+
+      # ─── Dogfooding: javi-forge must use its own tools on itself ──────
+      # Without this we'd be a security tool that doesn't eat its own
+      # cooking. Audit 2026-05-17 flagged this as a credibility issue.
+
+      # Hook regression suite — proves the AI-attribution blocker is alive
+      # and matches what's declared in commit-msg.test.sh.
+      - name: Run commit-msg hook regression suite
+        run: pnpm test:hooks
+
+      # Dependency audit — fail the build on any HIGH/CRITICAL CVE. Lower
+      # severities are allowed through but visible in the run log.
+      - name: pnpm audit (high+)
+        run: pnpm audit --audit-level=high
+
+      # Self-CI — exercises javi-forge's own ci pipeline against itself
+      # (stack detection, build, tests, security scan). --no-docker keeps
+      # the runtime under the runner's quota; --no-ci-ghagga avoids a
+      # cyclic dependency on the ghagga binary in this repo.
+      - name: Self-CI (javi-forge ci --quick)
+        run: |
+          npm install -g . --silent
+          javi-forge ci --quick --no-docker --no-ci-ghagga

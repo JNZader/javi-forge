@@ -48,9 +48,12 @@ case "$_LIB_REAL" in
         exit 1
         ;;
 esac
-unset _LIB_REAL _PROJECT_REAL
 
-source "$LIB_CANDIDATE"
+# Source the RESOLVED path to close the TOCTOU window between validation
+# and source (round 5 finding). Preserve the variables under temp names
+# in case any downstream caller relies on them.
+source "$_LIB_REAL"
+unset _LIB_REAL _PROJECT_REAL
 
 # =============================================================================
 # CI COMMAND SETUP (extends shared detect_stack with CI-specific commands)

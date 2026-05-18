@@ -24,12 +24,14 @@ fi
 # any traversal check could fire. Round 4 PoC verified this on bash and
 # PowerShell. Resolve the lib path and abort if it escapes the project.
 LIB_FILE="$SCRIPT_DIR/../lib/common.sh"
-LIB_REAL=$(realpath "$LIB_FILE" 2>/dev/null || true)
-PROJECT_REAL=$(realpath "$PROJECT_DIR" 2>/dev/null || true)
-if [ -z "$LIB_REAL" ] || [ -z "$PROJECT_REAL" ]; then
-    printf 'ERROR: failed to resolve lib/common.sh or project root.\n' >&2
+if [ ! -f "$LIB_FILE" ]; then
+    printf 'ERROR: lib/common.sh not found at %s\n' "$LIB_FILE" >&2
     exit 1
 fi
+# realpath was hard-required above — failures here are unexpected, so let
+# set -e propagate them instead of swallowing with `|| true`.
+LIB_REAL=$(realpath "$LIB_FILE")
+PROJECT_REAL=$(realpath "$PROJECT_DIR")
 case "$LIB_REAL" in
     "$PROJECT_REAL"|"$PROJECT_REAL"/*) ;;
     *)
@@ -41,8 +43,10 @@ case "$LIB_REAL" in
         ;;
 esac
 
-# Source shared library for colors
-source "$LIB_FILE"
+# Source the RESOLVED path, not the original. Round 5 flagged a TOCTOU:
+# between the realpath check and the source, an attacker could swap the
+# symlink target. Sourcing $LIB_REAL eliminates that window.
+source "$LIB_REAL"
 
 echo -e "${CYAN}=== CI-LOCAL Installation ===${NC}"
 

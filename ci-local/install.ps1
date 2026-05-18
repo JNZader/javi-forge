@@ -36,15 +36,40 @@ $ProjectDir = Split-Path -Parent $ScriptDir
 # module is loaded — Import-Module on a hostile symlink would already
 # execute the attacker's code. Audit round 4 PoC verified.
 # Fails closed: any exception aborts the script.
+#
+# DEFENSE — alias / function shadowing (round 5):
+# PowerShell command resolution is Alias > Function > Cmdlet. A
+# pre-existing GLOBAL alias of the same name would beat our local
+# function. Remove any prior binding before defining, and verify the
+# resolved Get-Command points to OUR script file.
+Remove-Item Alias:Resolve-RealPath    -Force -ErrorAction SilentlyContinue
+Remove-Item Function:Resolve-RealPath -Force -ErrorAction SilentlyContinue
 function Resolve-RealPath([string]$P) {
     if ([string]::IsNullOrEmpty($P)) {
         throw "Resolve-RealPath: empty path"
     }
     $item = Get-Item -LiteralPath $P -Force -ErrorAction Stop
     $target = $item.ResolveLinkTarget($true)
-    if ($target) { return $target.FullName }
+    if ($target) {
+        # ResolveLinkTarget($true) is platform-inconsistent for dangling
+        # links: Linux throws on the call above, but Windows returns a
+        # FileSystemInfo whose .Exists is false. Treat both the same.
+        if (-not $target.Exists) {
+            throw "Resolve-RealPath: dangling symlink target $($target.FullName)"
+        }
+        return $target.FullName
+    }
     return $item.FullName
 }
+$_rr = Get-Command Resolve-RealPath -ErrorAction SilentlyContinue
+if (-not $_rr -or $_rr.CommandType -ne 'Function' -or $_rr.ScriptBlock.File -ne $PSCommandPath) {
+    Write-Host 'ERROR: Resolve-RealPath is shadowed by an external command' -ForegroundColor Red
+    if ($_rr) {
+        Write-Host "  Resolved to: $($_rr.CommandType) at $($_rr.ScriptBlock.File)" -ForegroundColor Yellow
+    }
+    exit 1
+}
+Remove-Variable _rr
 
 # Find the shared library (mirrors install.sh's source order).
 $libPath = Join-Path $ScriptDir '..' 'lib' 'common.psm1'

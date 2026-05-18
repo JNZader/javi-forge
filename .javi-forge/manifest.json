@@ -72,7 +72,9 @@
       "ci-local/install.{sh,ps1}: install-time check only — between install and the next commit the PATH could be remapped or the binary replaced. Mitigated by symlink-path warnings, readlink/ResolveLinkTarget chain resolution, refusal to wire when the resolved binary is under user-writable caches, and (on Windows) icacls hardening of the hooks directory. Remaining risk is the responsibility of the user's file-permission setup.",
       "ci-local PowerShell port: requires pwsh 7.2+ (FileSystemInfo.ResolveLinkTarget). Validated on Linux pwsh 7.6 (detect mode + symlink-traversal PoC). Quick/shell/full modes not yet smoke-tested on a real Windows host — needs validation before tagging a release.",
       "ci-local PowerShell port: lib/common.psm1 is verified to resolve INSIDE the project root before Import-Module loads it; module signing is NOT verified. Users running install.ps1 from a fresh clone of an untrusted source are out of scope.",
-      "lib/common.psm1: detect_framework() function from common.sh is not ported (the bash version has no callers and is effectively dead code)."
+      "lib/common.psm1: detect_framework() function from common.sh is not ported (the bash version has no callers and is effectively dead code).",
+      "ci-local installers trust the host PATH: a malicious 'realpath' (bash) or shadowed Get-Item provider (PowerShell) earlier on PATH/PSModulePath defeats the symlink checks. Out of scope: an attacker with write access to the user's $PATH, $PROFILE, or $PSModulePath already has user-level RCE before the installer runs. Mitigation: defense-in-depth — install.ps1 strips any pre-existing Resolve-RealPath alias/function and verifies the binding resolves to its own script file before use.",
+      "ci-local installers trust the lib content at install time: a non-symlink direct overwrite of lib/common.{sh,psm1} bypasses the symlink check. Out of scope: an attacker with write access to lib/ has user-level RCE through any future invocation. Recommended mitigation: keep lib/ under version control, run 'git diff lib/' before commits, and on shared systems set restrictive file permissions on the lib directory."
     ]
   }
 }

@@ -34,13 +34,30 @@ $ScriptDir  = Split-Path -Parent $PSCommandPath
 $ProjectDir = Split-Path -Parent $ScriptDir
 
 # ─── Symlink-safe path resolver (inline, runs BEFORE Import-Module) ───
+# Same defense as install.ps1: remove any pre-existing alias/function with
+# this name (Alias > Function in PS lookup order would let a $PROFILE
+# alias shadow our resolver), then verify the binding is the local
+# function defined in THIS script file.
+Remove-Item Alias:Resolve-RealPath    -Force -ErrorAction SilentlyContinue
+Remove-Item Function:Resolve-RealPath -Force -ErrorAction SilentlyContinue
 function Resolve-RealPath([string]$P) {
     if ([string]::IsNullOrEmpty($P)) { throw "Resolve-RealPath: empty path" }
     $item = Get-Item -LiteralPath $P -Force -ErrorAction Stop
     $target = $item.ResolveLinkTarget($true)
-    if ($target) { return $target.FullName }
+    if ($target) {
+        if (-not $target.Exists) {
+            throw "Resolve-RealPath: dangling symlink target $($target.FullName)"
+        }
+        return $target.FullName
+    }
     return $item.FullName
 }
+$_rr = Get-Command Resolve-RealPath -ErrorAction SilentlyContinue
+if (-not $_rr -or $_rr.CommandType -ne 'Function' -or $_rr.ScriptBlock.File -ne $PSCommandPath) {
+    Write-Host 'ERROR: Resolve-RealPath is shadowed by an external command' -ForegroundColor Red
+    exit 1
+}
+Remove-Variable _rr
 
 # ─── Load shared lib ──────────────────────────────────────────────────
 $libCandidates = @(

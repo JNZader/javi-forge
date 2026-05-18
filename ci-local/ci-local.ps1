@@ -223,6 +223,22 @@ function Confirm-DockerImage {
     }
 }
 
+# Convert a host path to the form expected by docker run -v.
+# Linux/macOS:  /path/to/x         -> /path/to/x  (pass through)
+# Windows:      C:\Users\foo\proj  -> /c/Users/foo/proj  (Docker Desktop format)
+# WSL inside Windows is the bash side and never reaches this code.
+function ConvertTo-DockerHostPath {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not $IsWindows) { return $Path }
+    # Drive letter + colon → /letter
+    if ($Path -match '^([A-Za-z]):(.*)$') {
+        $drive = $Matches[1].ToLowerInvariant()
+        $rest  = $Matches[2] -replace '\\', '/'
+        return "/$drive$rest"
+    }
+    return ($Path -replace '\\', '/')
+}
+
 function Invoke-InCi {
     param(
         [Parameter(Mandatory)][hashtable]$Cfg,
@@ -239,14 +255,18 @@ function Invoke-InCi {
     }
 
     $dockerFlags = @('--rm')
-    # Allocate a TTY only when stdin is a real terminal — same as `[ -t 0 ]`.
-    if ([Environment]::UserInteractive -and $Host.UI.RawUI) { $dockerFlags += '-it' }
+    # Allocate a TTY only when stdin is a real terminal. The bash version
+    # uses `[ -t 0 ]`; the PowerShell equivalent is IsInputRedirected from
+    # System.Console — older UserInteractive + RawUI checks are unreliable
+    # in pwsh 7 (flagged by audit round 3).
+    if (-not [Console]::IsInputRedirected) { $dockerFlags += '-it' }
 
+    $hostMount = ConvertTo-DockerHostPath -Path $ProjectDir
     & docker run @dockerFlags `
         --stop-timeout 30 `
         --entrypoint '' `
         --user $RunUser `
-        -v "$($ProjectDir):/home/runner/work" `
+        -v "${hostMount}:/home/runner/work" `
         -e CI=true `
         $imageName timeout $timeout bash -c $Cmd
     if ($LASTEXITCODE -ne 0) { throw "step failed with exit $LASTEXITCODE" }
@@ -304,8 +324,9 @@ switch ($Mode) {
         Write-Host ''
         Write-Host 'Opening shell in CI environment...' -ForegroundColor Yellow
         $imageName = Get-ImageName -StackType $cfg.StackType
+        $hostMount = ConvertTo-DockerHostPath -Path $ProjectDir
         & docker run --rm -it `
-            -v "$($ProjectDir):/home/runner/work" `
+            -v "${hostMount}:/home/runner/work" `
             -e CI=true `
             $imageName 'cd /home/runner/work && bash'
     }

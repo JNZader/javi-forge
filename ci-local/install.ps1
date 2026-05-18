@@ -14,6 +14,16 @@
 [CmdletBinding()]
 param()
 
+# Defense-in-depth: #Requires is parsed by some hosts AFTER the script body.
+# Surface a clear error before any logic runs if we're on Windows PowerShell 5.1
+# (which has different strict-mode semantics and lacks GetRelativePath).
+if ($PSVersionTable.PSEdition -ne 'Core') {
+    Write-Host 'ERROR: ci-local install.ps1 requires PowerShell 7+ (pwsh).' -ForegroundColor Red
+    Write-Host "Detected: $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)" -ForegroundColor Yellow
+    Write-Host 'Install: https://github.com/PowerShell/PowerShell/releases' -ForegroundColor Cyan
+    exit 1
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -94,20 +104,38 @@ try {
         exit 1
     }
 
+    # Reject UNC paths outright — a javi-forge symlinked to \\attacker\share
+    # passes the writable-cache check below because none of the prefixes
+    # match. UNC targets are unusual for a CLI install and worth surfacing.
+    if ($jfReal -like '\\\\*') {
+        Write-Host "ERROR: javi-forge resolves to a UNC / network path ($jfReal)." -ForegroundColor Red
+        Write-Host 'Refusing to wire hooks against a remote binary.' -ForegroundColor Yellow
+        exit 1
+    }
+
     # Warn if the resolved path is in a writable / cache / temp location.
-    # On Windows the equivalent risky locations are %TEMP%, %LOCALAPPDATA%\npm-cache,
-    # %APPDATA%\npm, plus the POSIX ones for WSL/macOS users.
-    $tempPaths = @(
-        '/tmp/', '/var/tmp/', '/dev/shm/'
-        (Join-Path $HOME '.cache')
-        (Join-Path $HOME '.npm/_npx')
+    # Build the candidate list defensively: an empty env var would produce
+    # something like Join-Path '' 'npm-cache' = 'npm-cache', which then
+    # matches every path containing that substring (Opus-alt PoC).
+    function Test-IsAbsolutePath([string]$P) {
+        if ([string]::IsNullOrWhiteSpace($P)) { return $false }
+        try { return [System.IO.Path]::IsPathRooted($P) } catch { return $false }
+    }
+
+    $tempPaths = @('/tmp/', '/var/tmp/', '/dev/shm/')
+    foreach ($candidate in @(
+        (Join-Path $HOME '.cache'),
+        (Join-Path $HOME '.npm/_npx'),
         (Join-Path $HOME '.pnpm-store')
-    )
-    if ($env:TEMP)         { $tempPaths += $env:TEMP }
-    if ($env:LOCALAPPDATA) { $tempPaths += (Join-Path $env:LOCALAPPDATA 'npm-cache') }
-    if ($env:APPDATA)      { $tempPaths += (Join-Path $env:APPDATA 'npm') }
+    )) {
+        if (Test-IsAbsolutePath $candidate) { $tempPaths += $candidate }
+    }
+    if (Test-IsAbsolutePath $env:TEMP)         { $tempPaths += $env:TEMP }
+    if (Test-IsAbsolutePath $env:LOCALAPPDATA) { $tempPaths += (Join-Path $env:LOCALAPPDATA 'npm-cache') }
+    if (Test-IsAbsolutePath $env:APPDATA)      { $tempPaths += (Join-Path $env:APPDATA 'npm') }
 
     foreach ($p in $tempPaths) {
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
         if ($jfReal.StartsWith($p, [StringComparison]::OrdinalIgnoreCase)) {
             Write-Host "WARNING: javi-forge resolves to a writable/cache directory ($jfReal)." -ForegroundColor Yellow
             Write-Host 'Caches can be overwritten by package installs — prefer a stable global location.' -ForegroundColor Yellow
@@ -122,8 +150,42 @@ try {
     # works whether the dir is "ci-local" (dev checkout) or ".ci-local"
     # (user's project after copying via install instructions).
     $hooksDir = Join-Path $ScriptDir 'hooks'
+
+    # SECURITY: reject hooksPath that escapes the project root. If
+    # ci-local/hooks is a symlink/junction pointing outside the project,
+    # GetRelativePath returns "../../../somewhere/evil" and every future
+    # commit executes whatever lives there. Audit round 3 caught this.
+    #
+    # GetFullPath does NOT follow symlinks — it only normalises ".." etc.
+    # FileSystemInfo.ResolveLinkTarget($true) (introduced in .NET 6) walks
+    # the full chain. Available in pwsh 7.2+; #Requires above pins 7.0
+    # but ResolveLinkTarget is still present on 7.0/7.1 builds shipped by
+    # MS, so this is safe.
+    function Resolve-RealPath([string]$P) {
+        if ([string]::IsNullOrEmpty($P)) { return $P }
+        try {
+            $item = Get-Item -LiteralPath $P -Force -ErrorAction Stop
+            $target = $item.ResolveLinkTarget($true)
+            if ($target) { return $target.FullName }
+            return $item.FullName
+        } catch {
+            return [System.IO.Path]::GetFullPath($P)
+        }
+    }
+    $hooksAbs   = Resolve-RealPath $hooksDir
+    $projectAbs = Resolve-RealPath $ProjectDir
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    if (-not ($hooksAbs.Equals($projectAbs, [StringComparison]::OrdinalIgnoreCase) -or
+              $hooksAbs.StartsWith($projectAbs + $sep, [StringComparison]::OrdinalIgnoreCase))) {
+        Write-Host 'ERROR: hooks directory resolves outside the project root' -ForegroundColor Red
+        Write-Host "  HOOKS_DIR resolved to: $hooksAbs" -ForegroundColor Yellow
+        Write-Host "  PROJECT_DIR:           $projectAbs" -ForegroundColor Yellow
+        Write-Host 'Refusing to set core.hooksPath. Investigate symlinks/junctions under ci-local/.' -ForegroundColor Yellow
+        exit 1
+    }
+
     try {
-        $hooksRel = [System.IO.Path]::GetRelativePath($ProjectDir, $hooksDir)
+        $hooksRel = [System.IO.Path]::GetRelativePath($projectAbs, $hooksAbs)
     } catch {
         $hooksRel = $hooksDir
     }
@@ -137,14 +199,28 @@ try {
     }
     Write-Host "hooksPath = $hooksRel" -ForegroundColor Green
 
-    # Make hooks executable. chmod is a no-op on NTFS (Windows ignores POSIX
-    # bits) so just call it best-effort. Git for Windows ships with chmod
-    # via MSYS2, which is the env the hooks themselves run under.
+    # Make hooks executable. Different OS, different model:
+    #   - macOS / Linux / WSL: chmod 0755 — POSIX bits, what git expects.
+    #   - Windows native NTFS: chmod is a no-op; lock the ACL via icacls so
+    #     only the current user can rewrite the hooks between commits.
     if (Test-CommandExists -Name 'chmod') {
         Get-ChildItem -LiteralPath $hooksDir -File -ErrorAction SilentlyContinue |
             ForEach-Object { & chmod 0755 $_.FullName }
         Get-ChildItem -LiteralPath $ScriptDir -Filter '*.sh' -File -ErrorAction SilentlyContinue |
             ForEach-Object { & chmod 0755 $_.FullName }
+    }
+    if ($IsWindows -and (Test-CommandExists -Name 'icacls')) {
+        # Restrict hooks dir to current user (F = full, OI/CI = inherit to
+        # files/subfolders). /inheritance:r drops any permissive parent ACL.
+        # Best-effort: failures are non-fatal but visible.
+        try {
+            & icacls $hooksDir /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F" *> $null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "WARNING: icacls on $hooksDir returned $LASTEXITCODE" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "WARNING: icacls failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
     }
     Write-Host 'Done' -ForegroundColor Green
 

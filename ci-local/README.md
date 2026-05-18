@@ -178,7 +178,7 @@ Developer workflow:
 
 lib/                  # Dependencia requerida (copiar junto con .ci-local/)
 ├── common.sh         # Funciones compartidas (Bash)
-└── Common.psm1       # Funciones compartidas (PowerShell)
+└── common.psm1       # Funciones compartidas (PowerShell)
 ```
 
 ## Personalización

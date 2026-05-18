@@ -74,6 +74,25 @@ echo -e "${YELLOW}[1/2] Configuring git hooks...${NC}"
 # project, after copying via the install instructions).
 HOOKS_DIR="$SCRIPT_DIR/hooks"
 HOOKS_REL=$(realpath --relative-to="$PROJECT_DIR" "$HOOKS_DIR" 2>/dev/null || printf "%s" "$HOOKS_DIR")
+
+# SECURITY: reject hooksPath that escapes the project root. If $SCRIPT_DIR or
+# $SCRIPT_DIR/hooks is a symlink pointing outside the project, realpath
+# resolves through it and emits "../../tmp/evil/hooks". Setting that as
+# core.hooksPath means every future commit executes whatever lives there.
+# Audit (round 3, 2026-05-17) caught this; same fix applied to install.ps1.
+HOOKS_ABS=$(realpath "$HOOKS_DIR" 2>/dev/null || printf "%s" "$HOOKS_DIR")
+PROJECT_ABS=$(realpath "$PROJECT_DIR" 2>/dev/null || printf "%s" "$PROJECT_DIR")
+case "$HOOKS_ABS" in
+    "$PROJECT_ABS"|"$PROJECT_ABS"/*) ;;
+    *)
+        echo -e "${RED}ERROR: hooks directory resolves outside the project root${NC}"
+        echo -e "${YELLOW}  HOOKS_DIR resolved to: $HOOKS_ABS${NC}"
+        echo -e "${YELLOW}  PROJECT_DIR:           $PROJECT_ABS${NC}"
+        echo -e "${YELLOW}Refusing to set core.hooksPath. Investigate symlinks under ci-local/.${NC}"
+        exit 1
+        ;;
+esac
+
 git config core.hooksPath "$HOOKS_REL"
 echo -e "${GREEN}hooksPath = $HOOKS_REL${NC}"
 # Explicit 0755 (and only when files exist) — owner rwx, group/others rx.

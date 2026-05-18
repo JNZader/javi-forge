@@ -276,44 +276,11 @@ describe("initProject", () => {
 		expect(ciStep).toBeDefined();
 	});
 
-	it("writes manifest with correct structure", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.endsWith(".git")) return false as never;
-			return true as never;
-		});
-
-		await collectSteps(
-			makeOptions({
-				projectName: "test-manifest",
-				stack: "node",
-				ciProvider: "github",
-				memory: "engram",
-				ghagga: true,
-				sdd: true,
-				aiSync: true,
-			}),
-		);
-
-		expect(mockedFs.writeJson).toHaveBeenCalled();
-		const manifestCall = mockedFs.writeJson.mock.calls.find((args) =>
-			String(args[0]).includes("manifest.json"),
-		);
-		expect(manifestCall).toBeDefined();
-		const [manifestPath, manifestData] = manifestCall!;
-		expect(String(manifestPath)).toContain("manifest.json");
-		expect(manifestData).toMatchObject({
-			version: "0.1.0",
-			projectName: "test-manifest",
-			stack: "node",
-			ciProvider: "github",
-			memory: "engram",
-		});
-		expect((manifestData as ForgeManifest).modules).toContain("engram");
-		expect((manifestData as ForgeManifest).modules).toContain("ghagga");
-		expect((manifestData as ForgeManifest).modules).toContain("sdd");
-		expect((manifestData as ForgeManifest).modules).toContain("ai-config");
-	});
+	// "writes manifest with correct structure" was dropped in M6: the same
+	// assertion is made end-to-end against a real tmpdir manifest.json in
+	// src/__integration__/init.integration.test.ts ("manifest.json has
+	// correct structure and values"). Re-asserting it here via mock-call
+	// inspection was duplicate coverage with a weaker signal.
 
 	it("reports error with helpful message when javi-ai not found", async () => {
 		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
@@ -475,20 +442,9 @@ describe("initProject", () => {
 		expect(ctxStep!.detail).toContain("dry-run");
 	});
 
-	it("manifest includes context module when contextDir is true", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.endsWith(".git")) return false as never;
-			return true as never;
-		});
-
-		await collectSteps(makeOptions({ contextDir: true }));
-		expect(mockedFs.writeJson).toHaveBeenCalled();
-		const [, manifestData] = mockedFs.writeJson.mock.calls.find((args) =>
-			String(args[0]).includes("manifest.json"),
-		)!;
-		expect((manifestData as ForgeManifest).modules).toContain("context");
-	});
+	// "manifest includes context module" dropped — covered by the
+	// "manifest includes 'context' when contextDir is true" integration
+	// test that asserts on the real manifest.json on disk.
 
 	// ── CLAUDE.md step ────────────────────────────────────────────────────
 
@@ -554,20 +510,8 @@ describe("initProject", () => {
 		expect(claudeMdWrites).toHaveLength(0);
 	});
 
-	it("manifest includes claude-md module when claudeMd is true", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.endsWith(".git")) return false as never;
-			return true as never;
-		});
-
-		await collectSteps(makeOptions({ claudeMd: true }));
-		expect(mockedFs.writeJson).toHaveBeenCalled();
-		const [, manifestData] = mockedFs.writeJson.mock.calls.find((args) =>
-			String(args[0]).includes("manifest.json"),
-		)!;
-		expect((manifestData as ForgeManifest).modules).toContain("claude-md");
-	});
+	// "manifest includes claude-md module" dropped — covered by the
+	// "manifest includes 'claude-md' when claudeMd is true" integration test.
 
 	// ── Docker zero-downtime deploy step ────────────��───────────────────────
 
@@ -646,20 +590,8 @@ describe("initProject", () => {
 		expect(deployWrites).toHaveLength(0);
 	});
 
-	it("manifest includes docker-deploy module when dockerDeploy is true", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.endsWith(".git")) return false as never;
-			return true as never;
-		});
-
-		await collectSteps(makeOptions({ dockerDeploy: true }));
-		expect(mockedFs.writeJson).toHaveBeenCalled();
-		const [, manifestData] = mockedFs.writeJson.mock.calls.find((args) =>
-			String(args[0]).includes("manifest.json"),
-		)!;
-		expect((manifestData as ForgeManifest).modules).toContain("docker-deploy");
-	});
+	// "manifest includes docker-deploy module" dropped — covered by the
+	// "manifest includes 'docker-deploy' when dockerDeploy is true" integration test.
 
 	// ── Security hooks step ──────────────────────────────────────────────────
 
@@ -742,20 +674,8 @@ describe("initProject", () => {
 		expect(secStep!.detail).toContain("templates not found");
 	});
 
-	it("manifest includes security-hooks module when securityHooks is true", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.endsWith(".git")) return false as never;
-			return true as never;
-		});
-
-		await collectSteps(makeOptions({ securityHooks: true }));
-		expect(mockedFs.writeJson).toHaveBeenCalled();
-		const [, manifestData] = mockedFs.writeJson.mock.calls.find((args) =>
-			String(args[0]).includes("manifest.json"),
-		)!;
-		expect((manifestData as ForgeManifest).modules).toContain("security-hooks");
-	});
+	// "manifest includes security-hooks module" dropped — covered by the
+	// "manifest includes 'security-hooks' when securityHooks is true" integration test.
 
 	// ── Code graph step ───────────────────────────────────────────────────
 
@@ -829,20 +749,8 @@ describe("initProject", () => {
 		expect(repoforgeConfigCopies).toHaveLength(0);
 	});
 
-	it("manifest includes code-graph module when codeGraph is true", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.endsWith(".git")) return false as never;
-			return true as never;
-		});
-
-		await collectSteps(makeOptions({ codeGraph: true }));
-		expect(mockedFs.writeJson).toHaveBeenCalled();
-		const [, manifestData] = mockedFs.writeJson.mock.calls.find((args) =>
-			String(args[0]).includes("manifest.json"),
-		)!;
-		expect((manifestData as ForgeManifest).modules).toContain("code-graph");
-	});
+	// "manifest includes code-graph module" dropped — covered by the
+	// "manifest includes 'code-graph' when codeGraph is true" integration test.
 
 	// ── Local AI stack step ──────────────────────────────────────────────────
 
@@ -905,20 +813,8 @@ describe("initProject", () => {
 		expect(composeCopies).toHaveLength(0);
 	});
 
-	it("manifest includes local-ai module when localAi is true", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.endsWith(".git")) return false as never;
-			return true as never;
-		});
-
-		await collectSteps(makeOptions({ localAi: true }));
-		expect(mockedFs.writeJson).toHaveBeenCalled();
-		const [, manifestData] = mockedFs.writeJson.mock.calls.find((args) =>
-			String(args[0]).includes("manifest.json"),
-		)!;
-		expect((manifestData as ForgeManifest).modules).toContain("local-ai");
-	});
+	// "manifest includes local-ai module" dropped — covered by the
+	// "manifest includes 'local-ai' when localAi is true" integration test.
 
 	// ── Agent Skills manifest step ────────────────────────────────────────────
 

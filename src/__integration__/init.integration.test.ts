@@ -461,4 +461,79 @@ describe("initProject() — integration", () => {
 
 		expect(await fileExists(opts.projectDir)).toBe(false);
 	});
+
+	// ── Per-flag manifest modules (consolidated from init.test.ts) ──────────
+	// These were previously asserted via writeJson mock assertions in
+	// init.test.ts. M6 refactor: verify the same contract by reading the
+	// real manifest.json off disk after a real init run. The orchestrator's
+	// flag → module mapping is still exercised, but now end-to-end.
+
+	async function readManifestModules(projectDir: string): Promise<string[]> {
+		const raw = await readGenerated(projectDir, ".javi-forge", "manifest.json");
+		return (JSON.parse(raw).modules ?? []) as string[];
+	}
+
+	it("manifest includes 'context' when contextDir is true", async () => {
+		const opts = makeOptions({
+			projectName: "context-on",
+			contextDir: true,
+		});
+		const { onStep } = collectSteps();
+		await initProject(opts, onStep);
+		expect(await readManifestModules(opts.projectDir)).toContain("context");
+	});
+
+	it("manifest includes 'claude-md' when claudeMd is true", async () => {
+		const opts = makeOptions({
+			projectName: "claude-on",
+			claudeMd: true,
+		});
+		const { onStep } = collectSteps();
+		await initProject(opts, onStep);
+		expect(await readManifestModules(opts.projectDir)).toContain("claude-md");
+	});
+
+	it("manifest includes 'docker-deploy' when dockerDeploy is true", async () => {
+		const opts = makeOptions({
+			projectName: "docker-on",
+			dockerDeploy: true,
+		});
+		const { onStep } = collectSteps();
+		await initProject(opts, onStep);
+		expect(await readManifestModules(opts.projectDir)).toContain(
+			"docker-deploy",
+		);
+	});
+
+	it("manifest includes 'security-hooks' when securityHooks is true", async () => {
+		const opts = makeOptions({
+			projectName: "sec-on",
+			securityHooks: true,
+		});
+		const { onStep } = collectSteps();
+		await initProject(opts, onStep);
+		const modules = await readManifestModules(opts.projectDir);
+		expect(modules).toContain("security-hooks");
+	});
+
+	it("manifest includes 'code-graph' when codeGraph is true", async () => {
+		const opts = makeOptions({
+			projectName: "graph-on",
+			// codeGraph is not in the base makeOptions; pass via overrides.
+			...({ codeGraph: true } as Partial<InitOptions>),
+		});
+		const { onStep } = collectSteps();
+		await initProject(opts, onStep);
+		expect(await readManifestModules(opts.projectDir)).toContain("code-graph");
+	});
+
+	it("manifest includes 'local-ai' when localAi is true", async () => {
+		const opts = makeOptions({
+			projectName: "ai-on",
+			...({ localAi: true } as Partial<InitOptions>),
+		});
+		const { onStep } = collectSteps();
+		await initProject(opts, onStep);
+		expect(await readManifestModules(opts.projectDir)).toContain("local-ai");
+	});
 });

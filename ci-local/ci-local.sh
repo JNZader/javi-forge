@@ -72,9 +72,13 @@ setup_ci_commands() {
             else
                 COMPILE_CMD=""
             fi
-            # Only set test if test script exists
+            # Only set test if test script exists. If a "test:hooks" script
+            # is present, chain it so the commit-msg hook stays under coverage.
             if grep -q '"test"' "$PROJECT_DIR/package.json" 2>/dev/null; then
                 TEST_CMD="$BUILD_TOOL test"
+                if grep -q '"test:hooks"' "$PROJECT_DIR/package.json" 2>/dev/null; then
+                    TEST_CMD="$TEST_CMD && $BUILD_TOOL run test:hooks"
+                fi
             else
                 TEST_CMD=""
             fi

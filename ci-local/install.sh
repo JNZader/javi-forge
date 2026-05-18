@@ -31,13 +31,37 @@ if ! command -v javi-forge >/dev/null 2>&1; then
     echo -e ""
     exit 1
 fi
-echo -e "${GREEN}javi-forge: $(javi-forge --version 2>/dev/null || echo 'available')${NC}"
+
+# Log resolved path. The hooks will trust whatever PATH gives them at commit
+# time — surface the binary location so the user catches a hijack early.
+JAVI_FORGE_PATH=$(command -v javi-forge)
+JAVI_FORGE_VERSION_OUTPUT=$(javi-forge --version 2>&1) && JAVI_FORGE_VERSION_OK=1 || JAVI_FORGE_VERSION_OK=0
+
+if [ "$JAVI_FORGE_VERSION_OK" -eq 1 ]; then
+    echo -e "${GREEN}javi-forge: ${JAVI_FORGE_VERSION_OUTPUT} (${JAVI_FORGE_PATH})${NC}"
+else
+    echo -e "${RED}ERROR: javi-forge found at ${JAVI_FORGE_PATH} but '--version' failed${NC}"
+    echo -e "${YELLOW}Output: ${JAVI_FORGE_VERSION_OUTPUT}${NC}"
+    echo -e "Reinstall: ${CYAN}npm install -g javi-forge${NC}"
+    exit 1
+fi
+
+# Warn if the resolved path is in a world-writable / tmp location — that is
+# a supply-chain red flag (someone could swap the binary).
+case "$JAVI_FORGE_PATH" in
+    /tmp/*|/var/tmp/*|/dev/shm/*)
+        echo -e "${YELLOW}WARNING: javi-forge is in a temp directory (${JAVI_FORGE_PATH}).${NC}"
+        echo -e "${YELLOW}This is unusual and may indicate a compromised install.${NC}"
+        ;;
+esac
 
 # 1. Configurar git hooks
 echo -e "${YELLOW}[1/2] Configuring git hooks...${NC}"
 git config core.hooksPath .ci-local/hooks
-chmod +x "$SCRIPT_DIR/hooks/"* 2>/dev/null || true
-chmod +x "$SCRIPT_DIR/"*.sh 2>/dev/null || true
+# Explicit 0755: owner rwx, group/others rx. Avoids group-writable hooks
+# that any member of the user's group could rewrite between commits.
+chmod 0755 "$SCRIPT_DIR/hooks/"* 2>/dev/null || true
+chmod 0755 "$SCRIPT_DIR/"*.sh 2>/dev/null || true
 echo -e "${GREEN}Done${NC}"
 
 # 2. Verificar dependencias

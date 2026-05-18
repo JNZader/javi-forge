@@ -330,7 +330,7 @@ npx javi-forge doctor
 
 ## Requirements
 
-- **Node.js** >= 18
+- **Node.js** >= 22 (required by ink 7; previous versions ran on >= 18)
 
 ## Ecosystem
 

@@ -28,7 +28,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function Progress({
 	steps,
-	projectName,
+	projectName: _projectName,
 	contextLine,
 	onDone,
 }: Props) {

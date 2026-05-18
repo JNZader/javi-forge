@@ -1,6 +1,6 @@
+import os from "node:os";
+import path from "node:path";
 import fs from "fs-extra";
-import os from "os";
-import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	BUILTIN_RULES,
@@ -15,7 +15,6 @@ import {
 	matchRule,
 	runSecurityAnalysis,
 	type SecurityAnalysisFinding,
-	type SecurityAnalysisOptions,
 	type SemgrepRule,
 	severityAtOrAbove,
 } from "./security-analysis.js";

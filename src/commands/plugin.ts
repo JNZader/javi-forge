@@ -269,7 +269,7 @@ export async function runPluginExportCodex(
 			stepId,
 			`Export plugin as Codex TOML: ${name}`,
 			"done",
-			`exported ${result.files!.length} TOML file(s)`,
+			`exported ${result.files?.length} TOML file(s)`,
 		);
 	} else {
 		report(

@@ -4,8 +4,8 @@
  * source of truth for what was actually done.
  */
 
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
@@ -74,7 +74,7 @@ const TASK_ID_RE = /#(\d+)|task[- ](\d+[.\d]*)/i;
 
 export function parseCommitPhase(message: string): string | null {
 	const match = CONVENTIONAL_RE.exec(message);
-	return match ? match[1]! : null;
+	return match ? (match[1] ?? null) : null;
 }
 
 export function extractTaskId(message: string): string | null {
@@ -93,7 +93,8 @@ export function parseGitLog(raw: string): RecoveredTask[] {
 		const lines = block.split("\n").filter((l) => l.trim());
 		if (lines.length === 0) continue;
 
-		const headerLine = lines[0]!;
+		const headerLine = lines[0];
+		if (!headerLine) continue;
 		const parts = headerLine.split("|");
 		if (parts.length < 3) continue;
 

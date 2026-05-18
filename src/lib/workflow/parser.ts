@@ -62,24 +62,24 @@ export function parseDot(
 			/^"?(\w[\w\s-]*?)"?\s*->\s*"?(\w[\w\s-]*?)"?\s*(?:\[([^\]]*)\])?\s*$/,
 		);
 		if (edgeMatch) {
-			const fromId = edgeMatch[1]!.trim();
-			const toId = edgeMatch[2]!.trim();
+			const fromId = edgeMatch[1]?.trim();
+			const toId = edgeMatch[2]?.trim();
 			const attrs = edgeMatch[3] ? parseAttributes(edgeMatch[3]) : {};
 
 			ensureNode(nodesMap, fromId);
 			ensureNode(nodesMap, toId);
-			edges.push({ from: fromId, to: toId, label: attrs["label"] });
+			edges.push({ from: fromId, to: toId, label: attrs.label });
 			continue;
 		}
 
 		// Node: A [label="..." check="..."]
 		const nodeMatch = stmt.match(/^"?(\w[\w\s-]*?)"?\s*\[([^\]]+)\]\s*$/);
 		if (nodeMatch) {
-			const nodeId = nodeMatch[1]!.trim();
+			const nodeId = nodeMatch[1]?.trim();
 			const attrs = parseAttributes(nodeMatch[2]!);
 			const node = ensureNode(nodesMap, nodeId);
-			if (attrs["label"]) node.label = attrs["label"];
-			if (attrs["check"]) node.check = attrs["check"];
+			if (attrs.label) node.label = attrs.label;
+			if (attrs.check) node.check = attrs.check;
 			// Store remaining attrs as metadata
 			const { label: _l, check: _c, ...rest } = attrs;
 			if (Object.keys(rest).length > 0) node.metadata = rest;
@@ -91,8 +91,8 @@ export function parseDot(
 		if (chainMatch) {
 			const parts = stmt.split("->").map((p) => p.trim().replace(/^"|"$/g, ""));
 			for (let i = 0; i < parts.length - 1; i++) {
-				const fromId = parts[i]!.trim();
-				const toId = parts[i + 1]!.trim();
+				const fromId = parts[i]?.trim();
+				const toId = parts[i + 1]?.trim();
 				ensureNode(nodesMap, fromId);
 				ensureNode(nodesMap, toId);
 				edges.push({ from: fromId, to: toId });
@@ -132,7 +132,7 @@ export function parseMermaid(
 	}
 
 	// First line must be flowchart directive
-	const headerMatch = lines[0]!.match(
+	const headerMatch = lines[0]?.match(
 		/^(?:flowchart|graph)\s+(LR|TD|TB|RL|BT)/i,
 	);
 	if (!headerMatch) {
@@ -164,7 +164,7 @@ export function parseMermaid(
 		if (edgeLabelMatch) {
 			const fromId = edgeLabelMatch[1]!;
 			const fromLabel = edgeLabelMatch[2];
-			const edgeLabel = edgeLabelMatch[3]!.trim();
+			const edgeLabel = edgeLabelMatch[3]?.trim();
 			const toId = edgeLabelMatch[4]!;
 			const toLabel = edgeLabelMatch[5];
 
@@ -182,7 +182,7 @@ export function parseMermaid(
 		if (edgeMatch && line.includes("-->")) {
 			const segments = line.split(/\s*-->\s*/);
 			for (let s = 0; s < segments.length; s++) {
-				const seg = segments[s]!.trim();
+				const seg = segments[s]?.trim();
 				const segMatch = seg.match(/^(\w[\w-]*)(?:\[([^\]]+)\])?$/);
 				if (segMatch) {
 					const nodeId = segMatch[1]!;
@@ -193,8 +193,8 @@ export function parseMermaid(
 			}
 			// Create edges between consecutive segments
 			for (let s = 0; s < segments.length - 1; s++) {
-				const fromSeg = segments[s]!.trim().match(/^(\w[\w-]*)/);
-				const toSeg = segments[s + 1]!.trim().match(/^(\w[\w-]*)/);
+				const fromSeg = segments[s]?.trim().match(/^(\w[\w-]*)/);
+				const toSeg = segments[s + 1]?.trim().match(/^(\w[\w-]*)/);
 				if (fromSeg && toSeg) {
 					edges.push({ from: fromSeg[1]!, to: toSeg[1]! });
 				}

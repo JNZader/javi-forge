@@ -1,7 +1,4 @@
-import fs from "fs-extra";
-import os from "os";
-import path from "path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { Stack } from "../types/index.js";
 import {
 	getDockerfileContent,

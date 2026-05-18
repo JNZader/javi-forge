@@ -4,8 +4,8 @@
  * dependency confusion, and malicious package takeovers.
  */
 
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import type { Stack } from "../types/index.js";
 
 // ── Types ──

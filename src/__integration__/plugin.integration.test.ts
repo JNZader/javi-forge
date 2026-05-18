@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { validatePlugin } from "../lib/plugin.js";
 import { cleanupTempDir, createTempDir } from "./helpers.js";

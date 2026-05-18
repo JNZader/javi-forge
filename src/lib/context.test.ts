@@ -94,7 +94,7 @@ describe("generateContextDir", () => {
 		const options = makeOptions({ stack: "haskell" as Stack });
 		const { index, summary } = await generateContextDir(options);
 
-		const defaultCtx = STACK_CONTEXT_MAP["default"];
+		const defaultCtx = STACK_CONTEXT_MAP.default;
 
 		expect(index).toContain(defaultCtx.entryPoint);
 		expect(index).toContain(defaultCtx.conventions);
@@ -157,20 +157,20 @@ describe("generateContextDir", () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 describe("buildIndexMd", () => {
 	it("includes project name as heading", () => {
-		const ctx = STACK_CONTEXT_MAP["node"];
+		const ctx = STACK_CONTEXT_MAP.node;
 		const result = buildIndexMd("my-app", ctx, "github", "engram");
 		expect(result).toMatch(/^# my-app — Project Index/);
 	});
 
 	it("includes directory tree in code block", () => {
-		const ctx = STACK_CONTEXT_MAP["python"];
+		const ctx = STACK_CONTEXT_MAP.python;
 		const result = buildIndexMd("pyproj", ctx, "github", "engram");
 		expect(result).toContain("```");
 		expect(result).toContain("pyproject.toml");
 	});
 
 	it("includes entry point", () => {
-		const ctx = STACK_CONTEXT_MAP["go"];
+		const ctx = STACK_CONTEXT_MAP.go;
 		const result = buildIndexMd("goapp", ctx, "github", "none");
 		expect(result).toContain("`cmd/main.go`");
 	});

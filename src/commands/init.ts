@@ -1,7 +1,7 @@
-import { execFile } from "child_process";
+import { execFile } from "node:child_process";
+import path from "node:path";
+import { promisify } from "node:util";
 import fs from "fs-extra";
-import path from "path";
-import { promisify } from "util";
 import {
 	AGENT_SKILLS_MANIFEST_FILE,
 	CI_LOCAL_DIR,

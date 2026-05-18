@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCI } from "../commands/ci.js";
 import { cleanupTempDir, collectSteps, createTempDir } from "./helpers.js";

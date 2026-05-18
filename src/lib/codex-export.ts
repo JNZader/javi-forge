@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import { PLUGIN_MANIFEST_FILE, PLUGINS_DIR } from "../constants.js";
 import type {
 	CodexExportResult,
@@ -20,18 +20,14 @@ export function skillToCodexToml(raw: string): CodexTomlEntry | null {
 	const parsed = parseFrontmatter(raw);
 	if (!parsed) return null;
 
-	const name = parsed.data["name"];
+	const name = parsed.data.name;
 	if (typeof name !== "string" || !name) return null;
 
 	const description =
-		typeof parsed.data["description"] === "string"
-			? parsed.data["description"]
-			: "";
+		typeof parsed.data.description === "string" ? parsed.data.description : "";
 
 	const model =
-		typeof parsed.data["model"] === "string"
-			? parsed.data["model"]
-			: DEFAULT_MODEL;
+		typeof parsed.data.model === "string" ? parsed.data.model : DEFAULT_MODEL;
 
 	const instructions = description
 		? `${description}\n\n${parsed.content}`.trim()

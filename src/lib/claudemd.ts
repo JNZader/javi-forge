@@ -58,7 +58,7 @@ const PLUGIN_INSTRUCTIONS: Record<string, string> = {
 // =============================================================================
 
 function getStackClaudeMd(stack: string): StackClaudeMdEntry {
-	return STACK_CLAUDEMD_MAP[stack] ?? STACK_CLAUDEMD_MAP["default"];
+	return STACK_CLAUDEMD_MAP[stack] ?? STACK_CLAUDEMD_MAP.default;
 }
 
 export function buildClaudeMd(

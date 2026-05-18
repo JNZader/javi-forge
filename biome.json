@@ -63,6 +63,44 @@
 					}
 				}
 			}
+		},
+		{
+			"includes": ["**/*.tsx"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noUnusedImports": "off"
+					},
+					"style": {
+						"useImportType": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": ["src/lib/workflow/parser.ts", "src/lib/workflow/renderer.ts"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noNonNullAssertion": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"src/lib/atlassian-mcp.ts",
+				"src/lib/docker.ts",
+				"src/lib/__tests__/atlassian-mcp.test.ts",
+				"src/lib/security-analysis.test.ts"
+			],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noTemplateCurlyInString": "off"
+					}
+				}
+			}
 		}
 	]
 }

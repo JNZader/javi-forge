@@ -80,7 +80,7 @@ describe("generateClaudeMd", () => {
 	it("falls back to default for unknown stack", () => {
 		const result = generateClaudeMd(makeOptions({ stack: "haskell" as Stack }));
 
-		const defaultEntry = STACK_CLAUDEMD_MAP["default"];
+		const defaultEntry = STACK_CLAUDEMD_MAP.default;
 		expect(result).toContain(defaultEntry.conventions);
 		expect(result).toContain(defaultEntry.testFramework);
 		expect(result).toContain("**Language/Runtime**: haskell");
@@ -150,14 +150,14 @@ describe("generateClaudeMd", () => {
 
 describe("buildClaudeMd", () => {
 	it("produces correct heading", () => {
-		const entry = STACK_CLAUDEMD_MAP["node"];
+		const entry = STACK_CLAUDEMD_MAP.node;
 		const result = buildClaudeMd("my-app", "node", entry, false, []);
 
 		expect(result).toMatch(/^# my-app\n/);
 	});
 
 	it("includes stack section with correct values", () => {
-		const entry = STACK_CLAUDEMD_MAP["python"];
+		const entry = STACK_CLAUDEMD_MAP.python;
 		const result = buildClaudeMd("my-api", "python", entry, false, []);
 
 		expect(result).toContain("**Language/Runtime**: python");
@@ -185,7 +185,7 @@ describe("buildClaudeMd", () => {
 	});
 
 	it("conditionally includes project context section", () => {
-		const entry = STACK_CLAUDEMD_MAP["default"];
+		const entry = STACK_CLAUDEMD_MAP.default;
 
 		const withContext = buildClaudeMd("proj", "node", entry, true, []);
 		expect(withContext).toContain("## Project Context");
@@ -195,7 +195,7 @@ describe("buildClaudeMd", () => {
 	});
 
 	it("includes modules when provided", () => {
-		const entry = STACK_CLAUDEMD_MAP["default"];
+		const entry = STACK_CLAUDEMD_MAP.default;
 		const result = buildClaudeMd("proj", "node", entry, false, [
 			"ai-sync",
 			"sdd",
@@ -211,7 +211,7 @@ describe("buildClaudeMd", () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 describe("buildSmartClaudeMd", () => {
 	it("includes detected skills in Skills section", () => {
-		const entry = STACK_CLAUDEMD_MAP["node"];
+		const entry = STACK_CLAUDEMD_MAP.node;
 		const result = buildSmartClaudeMd(
 			"my-app",
 			"node",
@@ -252,7 +252,7 @@ describe("buildSmartClaudeMd", () => {
 	});
 
 	it("includes Architecture Patterns section for detected skills", () => {
-		const entry = STACK_CLAUDEMD_MAP["node"];
+		const entry = STACK_CLAUDEMD_MAP.node;
 		const result = buildSmartClaudeMd(
 			"proj",
 			"node",
@@ -268,14 +268,14 @@ describe("buildSmartClaudeMd", () => {
 	});
 
 	it("omits Architecture Patterns when no patterns match", () => {
-		const entry = STACK_CLAUDEMD_MAP["go"];
+		const entry = STACK_CLAUDEMD_MAP.go;
 		const result = buildSmartClaudeMd("proj", "go", entry, [], false, []);
 
 		expect(result).not.toContain("## Architecture Patterns");
 	});
 
 	it("includes Plugin instructions for matching skills", () => {
-		const entry = STACK_CLAUDEMD_MAP["node"];
+		const entry = STACK_CLAUDEMD_MAP.node;
 		const result = buildSmartClaudeMd(
 			"proj",
 			"node",
@@ -291,14 +291,14 @@ describe("buildSmartClaudeMd", () => {
 	});
 
 	it("omits Plugins section when no hints match", () => {
-		const entry = STACK_CLAUDEMD_MAP["go"];
+		const entry = STACK_CLAUDEMD_MAP.go;
 		const result = buildSmartClaudeMd("proj", "go", entry, [], false, []);
 
 		expect(result).not.toContain("## Plugins");
 	});
 
 	it("deduplicates plugin hints across skills", () => {
-		const entry = STACK_CLAUDEMD_MAP["node"];
+		const entry = STACK_CLAUDEMD_MAP.node;
 		// react-19 and nextjs-15 both map to the same merge-checks hint
 		const result = buildSmartClaudeMd(
 			"proj",
@@ -314,7 +314,7 @@ describe("buildSmartClaudeMd", () => {
 	});
 
 	it("includes Project Context when contextDir is true", () => {
-		const entry = STACK_CLAUDEMD_MAP["node"];
+		const entry = STACK_CLAUDEMD_MAP.node;
 		const result = buildSmartClaudeMd(
 			"proj",
 			"node",
@@ -329,7 +329,7 @@ describe("buildSmartClaudeMd", () => {
 	});
 
 	it("includes Modules section when modules are provided", () => {
-		const entry = STACK_CLAUDEMD_MAP["node"];
+		const entry = STACK_CLAUDEMD_MAP.node;
 		const result = buildSmartClaudeMd("proj", "node", entry, [], false, [
 			"sdd",
 			"engram",
@@ -340,7 +340,7 @@ describe("buildSmartClaudeMd", () => {
 	});
 
 	it("output is under 8000 chars for a fully-loaded project", () => {
-		const entry = STACK_CLAUDEMD_MAP["node"];
+		const entry = STACK_CLAUDEMD_MAP.node;
 		const allSkills = [
 			"react-19",
 			"nextjs-15",

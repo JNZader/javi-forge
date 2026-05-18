@@ -1,4 +1,3 @@
-import path from "path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mock fs-extra ────────────────────────────────────────────────────────────
@@ -180,7 +179,7 @@ describe("generateDependabotYml", () => {
 		mockedFs.pathExists.mockResolvedValue(true as never);
 
 		// Two node stacks — 'npm' fragment should only appear once
-		const result = await generateDependabotYml(["node", "node"], true);
+		const _result = await generateDependabotYml(["node", "node"], true);
 		expect(npmCallCount).toBe(1);
 	});
 

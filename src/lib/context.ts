@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import { STACK_CONTEXT_MAP } from "../constants.js";
 import type {
 	ForgeManifest,
@@ -12,7 +12,7 @@ import type {
 // =============================================================================
 
 function getStackContext(stack: string): StackContextEntry {
-	return STACK_CONTEXT_MAP[stack] ?? STACK_CONTEXT_MAP["default"];
+	return STACK_CONTEXT_MAP[stack] ?? STACK_CONTEXT_MAP.default;
 }
 
 export function buildIndexMd(

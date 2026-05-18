@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import type {
 	WorkflowGraph,
 	WorkflowValidationResult,
@@ -39,10 +39,10 @@ const BUILTIN_CHECKS: Record<
 			try {
 				const pkg = (await fs.readJson(pkgPath)) as Record<string, unknown>;
 				const deps = {
-					...(pkg["devDependencies"] as Record<string, string> | undefined),
-					...(pkg["dependencies"] as Record<string, string> | undefined),
+					...(pkg.devDependencies as Record<string, string> | undefined),
+					...(pkg.dependencies as Record<string, string> | undefined),
 				};
-				if (deps["eslint"] || deps["biome"] || deps["oxlint"]) {
+				if (deps.eslint || deps.biome || deps.oxlint) {
 					return { pass: true, detail: "Linter found in package.json" };
 				}
 			} catch {

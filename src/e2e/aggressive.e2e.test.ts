@@ -7,12 +7,12 @@
  *
  * Prerequisites: `pnpm build` must be run before these tests.
  */
-import { execFile } from "child_process";
-import crypto from "crypto";
+import { execFile } from "node:child_process";
+import crypto from "node:crypto";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 import fs from "fs-extra";
-import os from "os";
-import path from "path";
-import { promisify } from "util";
 import { afterEach, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -72,7 +72,7 @@ async function runInit(
 }
 
 /** Get the project directory inside a sandbox */
-function projectDir(sandbox: string, name: string): string {
+function _projectDir(sandbox: string, name: string): string {
 	return path.join(sandbox, name);
 }
 

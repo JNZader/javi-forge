@@ -1,6 +1,6 @@
-import { execFileSync } from "child_process";
+import { execFileSync } from "node:child_process";
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { installCIHooks } from "../commands/ci.js";
 import {

@@ -1,7 +1,7 @@
-import { execFile, spawn } from "child_process";
+import { execFile, spawn } from "node:child_process";
+import path from "node:path";
+import { promisify } from "node:util";
 import fs from "fs-extra";
-import path from "path";
-import { promisify } from "util";
 import { refreshContextDir } from "../lib/context.js";
 import {
 	ensureImage,

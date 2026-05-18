@@ -3,8 +3,8 @@
  * a curated regex bundle. Designed for pre-commit hooks and CI gates.
  */
 
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 
 // ── Types ──
 
@@ -268,7 +268,8 @@ export function scanContent(
 	const lines = content.split("\n");
 
 	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i]!;
+		const line = lines[i];
+		if (line === undefined) continue;
 		for (const pat of patterns) {
 			const match = pat.pattern.exec(line);
 			if (match) {

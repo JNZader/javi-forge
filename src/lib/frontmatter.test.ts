@@ -103,8 +103,8 @@ metadata:
 Body content`;
 		const result = parseFrontmatter(raw);
 		expect(result).not.toBeNull();
-		expect(result!.data["name"]).toBe("complex-skill");
-		expect(result!.data["metadata"]).toEqual({
+		expect(result!.data.name).toBe("complex-skill");
+		expect(result!.data.metadata).toEqual({
 			version: "1.2.3",
 			tags: ["typescript", "react"],
 			config: { nested: true, count: 42 },
@@ -119,7 +119,7 @@ name: trimmed
 Body`;
 		const result = parseFrontmatter(raw);
 		expect(result).not.toBeNull();
-		expect(result!.data["name"]).toBe("trimmed");
+		expect(result!.data.name).toBe("trimmed");
 	});
 
 	it("verifies slice indices — content excludes closing delimiter", () => {

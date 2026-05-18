@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import type { Stack } from "../types/index.js";
 
 // ── Stack-to-Skills Mapping ────────────────────────────────────────────────
@@ -134,8 +134,8 @@ export async function detectProjectStack(
 		try {
 			const pkg = (await fs.readJson(pkgPath)) as Record<string, unknown>;
 			const allDeps = {
-				...((pkg["dependencies"] as Record<string, string>) ?? {}),
-				...((pkg["devDependencies"] as Record<string, string>) ?? {}),
+				...((pkg.dependencies as Record<string, string>) ?? {}),
+				...((pkg.devDependencies as Record<string, string>) ?? {}),
 			};
 
 			for (const depName of Object.keys(allDeps)) {

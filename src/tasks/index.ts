@@ -1,12 +1,11 @@
+export { getDefaultScaffoldTasks } from "./scaffold-tasks.js";
 export {
-	generateTaskId,
-	createTask,
 	addSubtask,
 	buildTaskTree,
+	createTask,
 	findTask,
+	generateTaskId,
 	type TaskNode,
 	type TaskStatus,
-} from './task-id.js';
-
-export { TaskTracker } from './task-tracker.js';
-export { getDefaultScaffoldTasks } from './scaffold-tasks.js';
+} from "./task-id.js";
+export { TaskTracker } from "./task-tracker.js";

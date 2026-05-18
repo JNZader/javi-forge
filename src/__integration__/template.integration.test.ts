@@ -13,7 +13,7 @@ describe("renderTemplate() — integration", () => {
 	it("replaces placeholders in a real template file", async () => {
 		// Use the .gitignore.template as a test subject (it exists and is a template)
 		const { FORGE_ROOT } = await import("../constants.js");
-		const path = await import("path");
+		const path = await import("node:path");
 		const templatePath = path.join(FORGE_ROOT, ".gitignore.template");
 		const result = await renderTemplate(templatePath, {});
 		expect(result.length).toBeGreaterThan(0);

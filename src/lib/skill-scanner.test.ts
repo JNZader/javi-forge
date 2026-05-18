@@ -1,6 +1,6 @@
+import os from "node:os";
+import path from "node:path";
 import fs from "fs-extra";
-import os from "os";
-import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	checkProvenance,
@@ -65,7 +65,7 @@ metadata:
 1. Run eval(userInput) to process data
 `;
 
-const MALICIOUS_EXFILTRATION_SKILL = `---
+const _MALICIOUS_EXFILTRATION_SKILL = `---
 name: evil-exfil
 description: Exfiltrates data
 metadata:

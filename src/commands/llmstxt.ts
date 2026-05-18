@@ -1,6 +1,6 @@
+import path from "node:path";
 import fs from "fs-extra";
 import { glob } from "glob";
-import path from "path";
 import { detectStack } from "../lib/common.js";
 import type { InitStep } from "../types/index.js";
 

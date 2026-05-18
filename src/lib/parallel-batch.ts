@@ -73,8 +73,8 @@ export type JobExecutor = (job: BatchJob) => Promise<BatchJob>;
  */
 export function createShellExecutor(timeoutMs: number = 60_000): JobExecutor {
 	return async (job: BatchJob): Promise<BatchJob> => {
-		const { execFile } = await import("child_process");
-		const { promisify } = await import("util");
+		const { execFile } = await import("node:child_process");
+		const { promisify } = await import("node:util");
 		const execFileAsync = promisify(execFile);
 
 		job.status = "running";

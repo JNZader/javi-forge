@@ -1,4 +1,4 @@
-import type { ChildProcess } from "child_process";
+import type { ChildProcess } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ForgeManifest, InitOptions, InitStep } from "../types/index.js";
 
@@ -66,7 +66,7 @@ vi.mock("../lib/stack-detector.js", () => ({
 	}),
 }));
 
-import { execFile } from "child_process";
+import { execFile } from "node:child_process";
 import fs from "fs-extra";
 import { generateSmartClaudeMd } from "../lib/claudemd.js";
 import { generateContextDir } from "../lib/context.js";
@@ -196,7 +196,7 @@ describe("initProject", () => {
 			return true as never;
 		});
 
-		const steps = await collectSteps(makeOptions({ dryRun: true }));
+		const _steps = await collectSteps(makeOptions({ dryRun: true }));
 		// In dry-run, fs.writeFile and fs.writeJson should not be called
 		expect(mockedFs.writeFile).not.toHaveBeenCalled();
 		expect(mockedFs.writeJson).not.toHaveBeenCalled();

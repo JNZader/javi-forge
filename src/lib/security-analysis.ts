@@ -6,8 +6,8 @@
  * with severity levels (critical, high, medium, low).
  */
 
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import type { SecuritySeverity } from "../types/index.js";
 
 // =============================================================================

@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import {
 	AGENT_SKILLS_MANIFEST_FILE,
 	PLUGIN_MANIFEST_FILE,

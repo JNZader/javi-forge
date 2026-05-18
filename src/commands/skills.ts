@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import { parseFrontmatter } from "../lib/frontmatter.js";
 import type {
 	ConflictKind,
@@ -20,7 +20,7 @@ import type {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_SKILLS_DIR = path.join(
-	process.env["HOME"] ?? "~",
+	process.env.HOME ?? "~",
 	".claude",
 	"skills",
 );
@@ -97,7 +97,7 @@ export function extractDirective(rule: string): RuleDirective | null {
 		const match = norm.match(pattern);
 		if (match) {
 			const subject = norm
-				.slice(match.index! + match[0].length)
+				.slice((match.index ?? 0) + match[0].length)
 				.trim()
 				.replace(/^(the|a|an)\s+/i, "")
 				.replace(/[.;,!]+$/, "")
@@ -112,7 +112,7 @@ export function extractDirective(rule: string): RuleDirective | null {
 		const match = norm.match(pattern);
 		if (match) {
 			const subject = norm
-				.slice(match.index! + match[0].length)
+				.slice((match.index ?? 0) + match[0].length)
 				.trim()
 				.replace(/^(the|a|an)\s+/i, "")
 				.replace(/[.;,!]+$/, "")
@@ -286,13 +286,13 @@ export async function parseSkillFile(skillPath: string): Promise<{
 	const fm = parseFrontmatter(raw);
 
 	const name =
-		(fm?.data?.["name"] as string) ?? path.basename(path.dirname(skillPath));
+		(fm?.data?.name as string) ?? path.basename(path.dirname(skillPath));
 
 	// Extract critical rules — look for "Critical Rules" or numbered list after it
 	const rules = extractCriticalRules(fm?.content ?? raw);
 
 	// Extract trigger keywords from description
-	const description = (fm?.data?.["description"] as string) ?? "";
+	const description = (fm?.data?.description as string) ?? "";
 	const triggers = extractTriggers(description);
 
 	return { name, rules, rawContent: raw, triggers };

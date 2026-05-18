@@ -1,5 +1,4 @@
-import fs from "fs-extra";
-import path from "path";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import yaml from "yaml";
 import { initProject } from "../commands/init.js";
@@ -36,7 +35,7 @@ vi.mock("util", async () => {
 		...actual,
 		promisify: (fn: Function) => {
 			if (fn.name === "execFile" || fn.name === "mockConstructor") {
-				return async (...args: unknown[]) => ({ stdout: "", stderr: "" });
+				return async (..._args: unknown[]) => ({ stdout: "", stderr: "" });
 			}
 			return actual.promisify(fn as (...args: unknown[]) => unknown);
 		},

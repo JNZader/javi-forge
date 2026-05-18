@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import type {
 	AutoWireEntry,
 	AutoWireResult,
@@ -190,7 +190,7 @@ async function wireClaudeMd(
 
 	// Build new section
 	const section = buildAutoWireSection(pluginsWithCapabilities);
-	const newContent = cleaned.trimEnd() + "\n\n" + section + "\n";
+	const newContent = `${cleaned.trimEnd()}\n\n${section}\n`;
 
 	if (!dryRun) {
 		await fs.ensureDir(path.dirname(claudeMdPath));
@@ -248,7 +248,7 @@ async function wireSettingsJson(
 	}
 
 	// Ensure hooks object
-	const hooks = (settings["hooks"] ?? {}) as Record<string, unknown>;
+	const hooks = (settings.hooks ?? {}) as Record<string, unknown>;
 	const pluginHooks = (hooks["plugin-hooks"] ?? []) as string[];
 	const existingSet = new Set(pluginHooks);
 
@@ -263,7 +263,7 @@ async function wireSettingsJson(
 	}
 
 	// Detect hooks that belong to removed plugins
-	const activePluginNames = new Set(desiredHooks.map((h) => h.plugin));
+	const _activePluginNames = new Set(desiredHooks.map((h) => h.plugin));
 	const cleanedHooks = pluginHooks.filter((h) => {
 		// Keep hooks that we just wired or that belong to active plugins
 		const belongsToActive = desiredHooks.some((d) => d.value === h);
@@ -280,7 +280,7 @@ async function wireSettingsJson(
 	});
 
 	hooks["plugin-hooks"] = cleanedHooks;
-	settings["hooks"] = hooks;
+	settings.hooks = hooks;
 
 	if (!dryRun && (wired.length > 0 || unwired.length > 0)) {
 		await fs.ensureDir(path.dirname(settingsPath));
@@ -307,7 +307,7 @@ export function removeAutoWireSection(content: string): string {
 	const after = content.slice(endIdx + WIRE_END.length).trimStart();
 
 	if (after) {
-		return before + "\n\n" + after;
+		return `${before}\n\n${after}`;
 	}
-	return before + "\n";
+	return `${before}\n`;
 }

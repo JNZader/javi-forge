@@ -1,9 +1,9 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import { render } from "ink";
 import meow from "meow";
-import { createRequire } from "module";
-import path from "path";
 import React from "react";
 import updateNotifier from "update-notifier";
 import type { CIMode } from "./commands/ci.js";
@@ -164,7 +164,7 @@ const VALID_CI = ["github", "gitlab", "woodpecker"];
 const VALID_MEMORY = ["engram", "obsidian-brain", "memory-simple", "none"];
 
 const isCI =
-	cli.flags.batch || process.env["CI"] === "1" || process.env["CI"] === "true";
+	cli.flags.batch || process.env.CI === "1" || process.env.CI === "true";
 
 // When stdin doesn't support raw mode (pipes, subprocesses, CI), provide a fake
 // stdin stream so Ink doesn't crash trying to enable raw mode on a non-TTY pipe.
@@ -329,18 +329,18 @@ switch (subcommand) {
 					target: workflowTarget,
 					template: workflowTemplate,
 				});
-				if (output) console.log("\n" + output);
+				if (output) console.log(`\n${output}`);
 				else process.exit(1);
 			} else if (workflowAction === "validate") {
 				const output = await runWorkflowValidate(process.cwd(), onStep, {
 					target: workflowTarget,
 					template: workflowTemplate,
 				});
-				if (output) console.log("\n" + output);
+				if (output) console.log(`\n${output}`);
 				else process.exit(1);
 			} else {
 				const output = await runWorkflowList(process.cwd(), onStep);
-				console.log("\n" + output);
+				console.log(`\n${output}`);
 			}
 		} catch (e) {
 			console.error(`\u2717 ${e instanceof Error ? e.message : String(e)}`);
@@ -462,7 +462,7 @@ switch (subcommand) {
 
 			const skillsDir =
 				cli.flags.skillsDir ||
-				path.join(process.env["HOME"] ?? "~", ".claude", "skills");
+				path.join(process.env.HOME ?? "~", ".claude", "skills");
 			const skillPath = path.join(skillsDir, targetSkill, "SKILL.md");
 
 			if (skillsAction === "score") {
@@ -599,7 +599,7 @@ switch (subcommand) {
 
 		const { runSecurity } = await import("./commands/security.js");
 		const mode = securityAction as SecurityMode;
-		const rawMinSev = (cli.flags as Record<string, unknown>)["minSeverity"] as
+		const rawMinSev = (cli.flags as Record<string, unknown>).minSeverity as
 			| string
 			| undefined;
 		const validSeverities: string[] = [
@@ -613,11 +613,11 @@ switch (subcommand) {
 			minSeverity: (rawMinSev && validSeverities.includes(rawMinSev)
 				? rawMinSev
 				: "low") as "critical" | "high" | "moderate" | "low" | "info",
-			staleDays: (cli.flags as Record<string, unknown>)["staleDays"] as
+			staleDays: (cli.flags as Record<string, unknown>).staleDays as
 				| number
 				| undefined,
 		};
-		const jsonOutput = !!(cli.flags as Record<string, unknown>)["json"];
+		const jsonOutput = !!(cli.flags as Record<string, unknown>).json;
 
 		try {
 			const result = await runSecurity(
@@ -651,8 +651,6 @@ switch (subcommand) {
 		}
 		break;
 	}
-
-	case "init":
 	default: {
 		const presetStack = VALID_STACKS.includes(cli.flags.stack)
 			? (cli.flags.stack as Stack)

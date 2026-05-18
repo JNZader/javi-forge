@@ -1,8 +1,8 @@
-import { execFile, spawn } from "child_process";
-import crypto from "crypto";
+import { execFile, spawn } from "node:child_process";
+import crypto from "node:crypto";
+import path from "node:path";
+import { promisify } from "node:util";
 import fs from "fs-extra";
-import path from "path";
-import { promisify } from "util";
 import type { Stack } from "../types/index.js";
 
 const execFileAsync = promisify(execFile);

@@ -1,4 +1,4 @@
-import type { ChildProcess } from "child_process";
+import type { ChildProcess } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mock fs-extra ────────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ vi.mock("../lib/context.js", () => ({
 	refreshContextDir: vi.fn().mockResolvedValue(null),
 }));
 
-import { execFile } from "child_process";
+import { execFile } from "node:child_process";
 import fs from "fs-extra";
 import { detectStack } from "../lib/common.js";
 import { refreshContextDir } from "../lib/context.js";

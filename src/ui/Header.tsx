@@ -19,10 +19,10 @@ function pad(content: string): string {
 }
 
 export default function Header({ subtitle, dryRun }: Props) {
-	const top = "\u256d" + "\u2500".repeat(BOX_WIDTH) + "\u256e";
-	const bottom = "\u2570" + "\u2500".repeat(BOX_WIDTH) + "\u256f";
-	const titleLine = pad("  " + TITLE + "  ");
-	const subLine = subtitle ? pad("  " + subtitle + "  ") : null;
+	const top = `\u256d${"\u2500".repeat(BOX_WIDTH)}\u256e`;
+	const bottom = `\u2570${"\u2500".repeat(BOX_WIDTH)}\u256f`;
+	const titleLine = pad(`  ${TITLE}  `);
+	const subLine = subtitle ? pad(`  ${subtitle}  `) : null;
 
 	return (
 		<Box flexDirection="column" marginBottom={1}>

@@ -1,6 +1,6 @@
+import os from "node:os";
+import path from "node:path";
 import fs from "fs-extra";
-import os from "os";
-import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	maskSecret,
@@ -60,7 +60,7 @@ describe("pattern detection", () => {
 
 	it("detects Stripe secret key", () => {
 		// Build the token dynamically to avoid GitHub push protection
-		const prefix = ["sk", "live"].join("_") + "_";
+		const prefix = `${["sk", "live"].join("_")}_`;
 		const token = `${prefix}${"A".repeat(26)}`;
 		const findings = scanContent(`const key = "${token}"`, "payment.ts");
 		expect(findings.some((f) => f.patternId === "stripe-secret")).toBe(true);

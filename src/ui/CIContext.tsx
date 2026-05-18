@@ -1,5 +1,4 @@
-import React from "react";
-import { createContext, useContext } from "react";
+import React, { createContext, useContext } from "react";
 
 interface CIContextValue {
 	/** True when running in non-interactive mode (CI=1 or --no-tui) */

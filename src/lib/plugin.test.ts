@@ -35,7 +35,6 @@ vi.mock("./auto-wire.js", () => ({
 import fs from "fs-extra";
 import {
 	detectProjectPlugins,
-	detectProjectPluginsFull,
 	installPlugin,
 	listInstalledPlugins,
 	normalizeGitUrl,

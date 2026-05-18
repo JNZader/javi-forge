@@ -43,7 +43,7 @@ import {
 
 const mockedFs = vi.mocked(fs);
 const mockedParseDot = vi.mocked(parseDot);
-const mockedParseMermaid = vi.mocked(parseMermaid);
+const _mockedParseMermaid = vi.mocked(parseMermaid);
 const mockedRenderAscii = vi.mocked(renderAscii);
 const mockedValidateWorkflow = vi.mocked(validateWorkflow);
 const mockedDiscoverWorkflows = vi.mocked(discoverWorkflows);

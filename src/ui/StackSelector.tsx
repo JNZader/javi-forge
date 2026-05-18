@@ -47,7 +47,7 @@ export default function StackSelector({ projectDir, onConfirm }: Props) {
 	}, [isCI, detecting]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	useInput(
-		(input, key) => {
+		(_input, key) => {
 			if (detecting) return;
 			if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
 			if (key.downArrow)

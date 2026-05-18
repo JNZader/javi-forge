@@ -1,5 +1,5 @@
+import path from "node:path";
 import { Box, Text, useInput } from "ink";
-import path from "path";
 import React, { useEffect, useState } from "react";
 import { useCIMode } from "./CIContext.js";
 import { theme } from "./theme.js";

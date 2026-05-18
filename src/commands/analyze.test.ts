@@ -1,4 +1,4 @@
-import type { ChildProcess } from "child_process";
+import type { ChildProcess } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { InitStep } from "../types/index.js";
 
@@ -12,7 +12,7 @@ vi.mock("child_process", () => ({
 	),
 }));
 
-import { execFile } from "child_process";
+import { execFile } from "node:child_process";
 import { runAnalyze } from "./analyze.js";
 
 const mockedExecFile = vi.mocked(execFile);

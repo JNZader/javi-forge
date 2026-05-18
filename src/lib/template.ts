@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import {
 	DEPENDABOT_FRAGMENTS_DIR,
 	DEPLOY_DESTINATION_MAP,
@@ -53,7 +53,7 @@ export async function generateDependabotYml(
 		);
 		if (await fs.pathExists(fragmentPath)) {
 			const fragment = await fs.readFile(fragmentPath, "utf-8");
-			content += "\n" + fragment;
+			content += `\n${fragment}`;
 		}
 	}
 

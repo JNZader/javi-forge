@@ -105,7 +105,8 @@ async function resolveGraph(
 		);
 		return null;
 	}
-	const first = discovered[0]!;
+	const first = discovered[0];
+	if (!first) return null;
 	const content = await fs.readFile(first.path, "utf-8");
 	const parser = first.format === "dot" ? parseDot : parseMermaid;
 	const graph = parser(content, first.name);

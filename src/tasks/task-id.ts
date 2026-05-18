@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
+import { createHash } from "node:crypto";
 
-export type TaskStatus = 'todo' | 'in-progress' | 'done';
+export type TaskStatus = "todo" | "in-progress" | "done";
 
 export type TaskNode = {
 	id: string;
@@ -20,8 +20,12 @@ export function generateTaskId(content: {
 	description?: string;
 	parentId?: string;
 }): string {
-	const input = [content.title, content.description ?? '', content.parentId ?? ''].join('|');
-	return createHash('sha256').update(input).digest('hex').slice(0, 7);
+	const input = [
+		content.title,
+		content.description ?? "",
+		content.parentId ?? "",
+	].join("|");
+	return createHash("sha256").update(input).digest("hex").slice(0, 7);
 }
 
 export function createTask(params: {
@@ -34,7 +38,7 @@ export function createTask(params: {
 		id: generateTaskId(params),
 		title: params.title,
 		description: params.description,
-		status: 'todo',
+		status: "todo",
 		parentId: params.parentId,
 		children: [],
 		dependencies: [],
@@ -65,7 +69,7 @@ export function buildTaskTree(flat: TaskNode[]): TaskNode[] {
 	const roots: TaskNode[] = [];
 	for (const node of map.values()) {
 		if (node.parentId && map.has(node.parentId)) {
-			map.get(node.parentId)!.children.push(node);
+			map.get(node.parentId)?.children.push(node);
 		} else {
 			roots.push(node);
 		}

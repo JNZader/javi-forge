@@ -6,8 +6,8 @@
  * (javi-ai) but implemented as a programmatic module with structured output.
  */
 
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import type { SecuritySeverity } from "../types/index.js";
 
 // =============================================================================
@@ -115,7 +115,7 @@ export const THREAT_PATTERNS: ThreatPattern[] = [
 		category: "code-injection",
 		severity: "critical",
 		pattern:
-			/\b(?:subprocess\.(?:call|run|Popen)|os\.system|os\.popen)\s*\(\s*(?:f['\"]|user|input|req)/i,
+			/\b(?:subprocess\.(?:call|run|Popen)|os\.system|os\.popen)\s*\(\s*(?:f['"]|user|input|req)/i,
 		message: "Python subprocess with user input — enables command injection",
 	},
 
@@ -287,7 +287,7 @@ export function checkProvenance(content: string): ProvenanceInfo {
 
 export function scanSkillContent(
 	content: string,
-	filePath: string,
+	_filePath: string,
 ): SkillThreat[] {
 	const threats: SkillThreat[] = [];
 	const lines = content.split("\n");

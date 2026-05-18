@@ -45,7 +45,7 @@ export function validateFrontmatter(
 	const errors: ValidationError[] = [];
 
 	// name: required, kebab-case, 2-60 chars
-	const name = frontmatter["name"];
+	const name = frontmatter.name;
 	if (typeof name !== "string" || !name) {
 		errors.push({
 			field: "name",
@@ -64,7 +64,7 @@ export function validateFrontmatter(
 	}
 
 	// description: required, non-empty, min 10 chars
-	const desc = frontmatter["description"];
+	const desc = frontmatter.description;
 	if (typeof desc !== "string" || !desc) {
 		errors.push({
 			field: "description",

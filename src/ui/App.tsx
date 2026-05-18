@@ -1,5 +1,5 @@
+import path from "node:path";
 import { Box } from "ink";
-import path from "path";
 import React, { useState } from "react";
 import { initProject } from "../commands/init.js";
 import type {

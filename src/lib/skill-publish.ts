@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import { PLUGIN_MANIFEST_FILE } from "../constants.js";
 import type { PluginManifest } from "../types/index.js";
 import { parseFrontmatter } from "./frontmatter.js";
@@ -70,10 +70,9 @@ export async function publishSkill(
 	const frontmatter = parsed?.data ?? {};
 
 	// Extract metadata
-	const name = (frontmatter["name"] as string) ?? path.basename(skillDir);
-	const version = (frontmatter["version"] as string) ?? "1.0.0";
-	const description =
-		(frontmatter["description"] as string) ?? `${name} AI skill`;
+	const name = (frontmatter.name as string) ?? path.basename(skillDir);
+	const version = (frontmatter.version as string) ?? "1.0.0";
+	const description = (frontmatter.description as string) ?? `${name} AI skill`;
 
 	// Validate name format (kebab-case)
 	if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)) {
@@ -97,7 +96,7 @@ export async function publishSkill(
 		version,
 		description:
 			description.length > 200
-				? description.slice(0, 197) + "..."
+				? `${description.slice(0, 197)}...`
 				: description,
 		skills: [name],
 		tags: tags.length > 0 ? tags : extractTagsFromDescription(description),

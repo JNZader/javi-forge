@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import type { StackDetectionResult } from "./stack-detector.js";
 import { detectProjectStack } from "./stack-detector.js";
 
@@ -30,7 +30,7 @@ export interface AutoInstallOptions {
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const DEFAULT_SKILLS_DIR = path.join(
-	process.env["HOME"] ?? "~",
+	process.env.HOME ?? "~",
 	".claude",
 	"skills",
 );

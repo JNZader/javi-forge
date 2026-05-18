@@ -1,5 +1,5 @@
+import path from "node:path";
 import fs from "fs-extra";
-import path from "path";
 import type { Stack, StackDetection } from "../types/index.js";
 
 /**
@@ -26,7 +26,7 @@ export async function detectStack(
 
 	// Node.js
 	if (await exists("package.json")) {
-		const pkg = await fs
+		const _pkg = await fs
 			.readJson(path.join(projectDir, "package.json"))
 			.catch(() => ({}));
 		const buildTool = (await exists("pnpm-lock.yaml"))

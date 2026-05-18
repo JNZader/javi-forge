@@ -30,24 +30,24 @@ beforeEach(() => {
 
 describe("SIGNAL_SKILL_MAP", () => {
 	it("maps react to react-19 skill", () => {
-		expect(SIGNAL_SKILL_MAP["react"]).toContain("react-19");
+		expect(SIGNAL_SKILL_MAP.react).toContain("react-19");
 	});
 
 	it("maps next to nextjs-15 and react-19", () => {
-		expect(SIGNAL_SKILL_MAP["next"]).toContain("nextjs-15");
-		expect(SIGNAL_SKILL_MAP["next"]).toContain("react-19");
+		expect(SIGNAL_SKILL_MAP.next).toContain("nextjs-15");
+		expect(SIGNAL_SKILL_MAP.next).toContain("react-19");
 	});
 
 	it("maps tailwindcss to tailwind-4", () => {
-		expect(SIGNAL_SKILL_MAP["tailwindcss"]).toContain("tailwind-4");
+		expect(SIGNAL_SKILL_MAP.tailwindcss).toContain("tailwind-4");
 	});
 
 	it("maps zustand to zustand-5", () => {
-		expect(SIGNAL_SKILL_MAP["zustand"]).toContain("zustand-5");
+		expect(SIGNAL_SKILL_MAP.zustand).toContain("zustand-5");
 	});
 
 	it("maps zod to zod-4", () => {
-		expect(SIGNAL_SKILL_MAP["zod"]).toContain("zod-4");
+		expect(SIGNAL_SKILL_MAP.zod).toContain("zod-4");
 	});
 });
 

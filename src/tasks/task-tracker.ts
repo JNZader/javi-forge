@@ -1,4 +1,4 @@
-import { createTask, type TaskNode, type TaskStatus } from './task-id.js';
+import { createTask, type TaskNode, type TaskStatus } from "./task-id.js";
 
 export class TaskTracker {
 	private tasks: TaskNode[] = [];
@@ -44,18 +44,18 @@ export class TaskTracker {
 			if (t.dependencies.length === 0) return false;
 			return t.dependencies.some((depId) => {
 				const dep = this.findFlat(depId);
-				return !dep || dep.status !== 'done';
+				return !dep || dep.status !== "done";
 			});
 		});
 	}
 
 	getReadyTasks(): TaskNode[] {
 		return this.tasks.filter((t) => {
-			if (t.status !== 'todo') return false;
+			if (t.status !== "todo") return false;
 			if (t.dependencies.length === 0) return true;
 			return t.dependencies.every((depId) => {
 				const dep = this.findFlat(depId);
-				return dep?.status === 'done';
+				return dep?.status === "done";
 			});
 		});
 	}
@@ -63,11 +63,11 @@ export class TaskTracker {
 	toMarkdown(): string {
 		return this.tasks
 			.map((t) => {
-				const check = t.status === 'done' ? 'x' : ' ';
-				const assignee = t.assignee ? ` @${t.assignee}` : '';
+				const check = t.status === "done" ? "x" : " ";
+				const assignee = t.assignee ? ` @${t.assignee}` : "";
 				return `- [${check}] ${t.title}${assignee}`;
 			})
-			.join('\n');
+			.join("\n");
 	}
 
 	toJSON(): string {

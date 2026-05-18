@@ -1,8 +1,39 @@
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SecurityBaseline, SecurityFinding } from "../types/index.js";
+
+// Stub for execFile — controlled per test below. vi.mock must come BEFORE
+// the import of security.js so the mock is in place when the module loads.
+let stubAuditReturn: { stdout: string; err?: Error & { stdout?: string } } = {
+	stdout: '{"vulnerabilities":{}}',
+};
+
+vi.mock("node:child_process", async (importOriginal) => {
+	const actual =
+		(await importOriginal()) as typeof import("node:child_process");
+	return {
+		...actual,
+		execFile: ((
+			_cmd: string,
+			_args: string[],
+			_opts: unknown,
+			cb: (err: Error | null, out: { stdout: string; stderr: string }) => void,
+		) => {
+			if (stubAuditReturn.err) {
+				const e = stubAuditReturn.err;
+				if (stubAuditReturn.stdout) {
+					(e as Error & { stdout: string }).stdout = stubAuditReturn.stdout;
+				}
+				cb(e, { stdout: "", stderr: "" });
+			} else {
+				cb(null, { stdout: stubAuditReturn.stdout, stderr: "" });
+			}
+		}) as unknown as typeof import("node:child_process").execFile,
+	};
+});
+
 import {
 	baselineAgeDays,
 	checkStaleness,
@@ -18,6 +49,7 @@ import {
 	parseNpmAudit,
 	parsePipAudit,
 	readBaseline,
+	runSecurity,
 	severityAtOrAbove,
 	writeBaseline,
 } from "./security.js";
@@ -653,4 +685,207 @@ describe("baseline I/O", () => {
 		const result = await readBaseline(tmpDir);
 		expect(result).toBeNull();
 	});
+});
+
+// =============================================================================
+// runSecurity — orchestrator, with mocked audit tool (mock at top of file)
+// =============================================================================
+
+describe("runSecurity orchestrator", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "javi-forge-runsec-test-"),
+		);
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			scripts: { test: "true" },
+		});
+		stubAuditReturn = { stdout: '{"vulnerabilities":{}}' };
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	it("baseline mode creates security-baseline.json with current findings", async () => {
+		stubAuditReturn = {
+			stdout: JSON.stringify({
+				vulnerabilities: {
+					lodash: {
+						severity: "high",
+						via: [{ source: 1, title: "Prototype Pollution", url: "x" }],
+					},
+				},
+			}),
+		};
+		const steps: Array<{ id: string; status: string }> = [];
+		const result = await runSecurity("baseline", tmpDir, (s) =>
+			steps.push({ id: s.id, status: s.status }),
+		);
+		expect(result).toBeNull(); // baseline returns null
+		expect(steps.some((s) => s.id === "save" && s.status === "done")).toBe(
+			true,
+		);
+		const baselinePath = path.join(
+			tmpDir,
+			".javi-forge",
+			"security-baseline.json",
+		);
+		expect(await fs.pathExists(baselinePath)).toBe(true);
+		const written = await fs.readJson(baselinePath);
+		expect(written.findings.length).toBe(1);
+		expect(written.findings[0].package).toBe("lodash");
+	});
+
+	it("update mode preserves createdAt + allowlist of existing baseline", async () => {
+		// Seed an existing baseline with allowlist
+		const existing = {
+			version: "1.0.0",
+			createdAt: "2020-01-01T00:00:00.000Z",
+			stack: "node" as const,
+			buildTool: "npm",
+			findings: [],
+			findingKeys: [],
+			allowlist: ["KEPT:pkg"],
+		};
+		await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
+		await fs.writeJson(
+			path.join(tmpDir, ".javi-forge", "security-baseline.json"),
+			existing,
+		);
+
+		const result = await runSecurity("update", tmpDir, () => {});
+		expect(result).toBeNull();
+		const updated = await fs.readJson(
+			path.join(tmpDir, ".javi-forge", "security-baseline.json"),
+		);
+		expect(updated.createdAt).toBe("2020-01-01T00:00:00.000Z");
+		expect(updated.allowlist).toEqual(["KEPT:pkg"]);
+		expect(updated.updatedAt).toBeDefined();
+	});
+
+	it("check mode throws when no baseline exists", async () => {
+		await expect(runSecurity("check", tmpDir, () => {})).rejects.toThrow(
+			/No security baseline found/,
+		);
+	});
+
+	it("check mode returns no regressions when audit matches baseline", async () => {
+		await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
+		await fs.writeJson(
+			path.join(tmpDir, ".javi-forge", "security-baseline.json"),
+			{
+				version: "1.0.0",
+				createdAt: new Date().toISOString(),
+				stack: "node",
+				buildTool: "npm",
+				findings: [],
+				findingKeys: [],
+			},
+		);
+		const steps: Array<{ id: string; status: string; detail?: string }> = [];
+		const result = await runSecurity("check", tmpDir, (s) =>
+			steps.push({ id: s.id, status: s.status, detail: s.detail }),
+		);
+		expect(result).not.toBeNull();
+		expect(result?.filteredRegressions.length).toBe(0);
+		expect(steps.some((s) => s.id === "check" && s.status === "done")).toBe(
+			true,
+		);
+	});
+
+	it("check mode reports new regression vs baseline", async () => {
+		await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
+		await fs.writeJson(
+			path.join(tmpDir, ".javi-forge", "security-baseline.json"),
+			{
+				version: "1.0.0",
+				createdAt: new Date().toISOString(),
+				stack: "node",
+				buildTool: "npm",
+				findings: [],
+				findingKeys: [],
+			},
+		);
+		stubAuditReturn = {
+			stdout: JSON.stringify({
+				vulnerabilities: {
+					newpkg: {
+						severity: "critical",
+						via: [{ source: 99, title: "New RCE", url: "x" }],
+					},
+				},
+			}),
+		};
+		const steps: Array<{ id: string; status: string }> = [];
+		const result = await runSecurity("check", tmpDir, (s) =>
+			steps.push({ id: s.id, status: s.status }),
+		);
+		expect(result?.filteredRegressions.length).toBe(1);
+		expect(steps.some((s) => s.id === "check" && s.status === "error")).toBe(
+			true,
+		);
+	});
+
+	it("allowlist mode throws when no baseline exists", async () => {
+		await expect(runSecurity("allowlist", tmpDir, () => {})).rejects.toThrow(
+			/No security baseline found/,
+		);
+	});
+
+	it("allowlist mode adds current findings to allowlist", async () => {
+		await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
+		await fs.writeJson(
+			path.join(tmpDir, ".javi-forge", "security-baseline.json"),
+			{
+				version: "1.0.0",
+				createdAt: new Date().toISOString(),
+				stack: "node",
+				buildTool: "npm",
+				findings: [],
+				findingKeys: [],
+				allowlist: [],
+			},
+		);
+		stubAuditReturn = {
+			stdout: JSON.stringify({
+				vulnerabilities: {
+					somepkg: {
+						severity: "low",
+						via: [{ source: 5, title: "Minor", url: "x" }],
+					},
+				},
+			}),
+		};
+		await runSecurity("allowlist", tmpDir, () => {});
+		const updated = await fs.readJson(
+			path.join(tmpDir, ".javi-forge", "security-baseline.json"),
+		);
+		expect(updated.allowlist.length).toBeGreaterThan(0);
+		expect(updated.allowlist[0]).toContain("somepkg");
+	});
+
+	it("rethrows when audit tool returns non-JSON and no usable stdout", async () => {
+		const fakeErr = new Error("npm not found") as Error & { code?: string };
+		stubAuditReturn = { stdout: "", err: fakeErr };
+		await expect(runSecurity("baseline", tmpDir, () => {})).rejects.toThrow(
+			/npm not found/,
+		);
+	});
+
+	it("recovers when npm audit exits non-zero but returns stdout (vulns found case)", async () => {
+		const fakeErr = new Error("audit exit 1") as Error & { stdout?: string };
+		stubAuditReturn = {
+			stdout: '{"vulnerabilities":{}}',
+			err: fakeErr,
+		};
+		const result = await runSecurity("baseline", tmpDir, () => {});
+		expect(result).toBeNull();
+	});
+
+	// "throws on unsupported stack" was removed: detectCIStack falls back to
+	// "node" when no language marker is recognised, so we cannot easily
+	// reach the unsupported-stack branch from outside. Covered indirectly
+	// by getAuditCommand returning null in its existing unit test.
 });

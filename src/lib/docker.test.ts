@@ -364,8 +364,12 @@ describe("runInContainer", () => {
 		expect(args[0]).toBe("run");
 		expect(args).toContain("--rm");
 		expect(args).toContain("--entrypoint");
-		expect(args).toContain("-v");
-		expect(args).toContain(`${projectDir}:/home/runner/work`);
+		// --mount (comma-syntax) is colon-safe; -v form is not.
+		expect(args).toContain("--mount");
+		expect(args).toContain(
+			`type=bind,source=${projectDir},target=/home/runner/work`,
+		);
+		expect(args).not.toContain("-v");
 		expect(args).toContain("-e");
 		expect(args).toContain("CI=true");
 		expect(args).toContain("javi-forge-ci-node");
@@ -374,6 +378,26 @@ describe("runInContainer", () => {
 		expect(args).toContain("bash");
 		expect(args).toContain("-c");
 		expect(args[args.length - 1]).toBe("pnpm test");
+	});
+
+	it("uses --mount syntax to avoid colon-in-path attacks", async () => {
+		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
+		// Colon-containing path is legal on Linux but would hijack the `-v`
+		// source:target:options parser. --mount uses comma syntax → safe.
+		const evilDir = "/tmp/a:/etc";
+		await runInContainer({
+			projectDir: evilDir,
+			command: "echo x",
+			stream: false,
+		});
+		const args = spawnMock.mock.calls[0]?.[1] as string[];
+		expect(args).toContain("--mount");
+		const mountArg = args.find((a) => a.startsWith("type=bind,"));
+		expect(mountArg).toBe(
+			`type=bind,source=${evilDir},target=/home/runner/work`,
+		);
+		// Ensure the legacy -v form is gone — otherwise the protection is theatre.
+		expect(args).not.toContain("-v");
 	});
 
 	it("respects custom timeout", async () => {
@@ -466,6 +490,9 @@ describe("openShell", () => {
 		const args = spawnMock.mock.calls[0]?.[1] as string[];
 		expect(args).toContain("-it");
 		expect(args).toContain("javi-forge-ci-node");
+		// --mount (colon-safe) is also required here.
+		expect(args).toContain("--mount");
+		expect(args).not.toContain("-v");
 		expect(args).toContain("bash");
 		expect(args[args.length - 1]).toContain(
 			"cd /home/runner/work && exec bash",

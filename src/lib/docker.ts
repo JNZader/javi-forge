@@ -231,6 +231,10 @@ export async function runInContainer(
 	const imageName = getImageName(stack);
 
 	const isInteractive = process.stdin.isTTY && stream;
+	// Use --mount instead of -v: the -v form parses the value as a single
+	// "src:dst[:opt]" colon-separated string, which breaks (and could be
+	// hijacked) when projectDir itself contains a colon. --mount takes
+	// comma-separated key=value pairs and is colon-safe.
 	const dockerArgs = [
 		"run",
 		"--rm",
@@ -240,8 +244,8 @@ export async function runInContainer(
 		"--entrypoint",
 		"",
 		...(user ? ["--user", user] : []),
-		"-v",
-		`${projectDir}:/home/runner/work`,
+		"--mount",
+		`type=bind,source=${projectDir},target=/home/runner/work`,
 		"-e",
 		"CI=true",
 		imageName,
@@ -292,8 +296,9 @@ export async function openShell(projectDir: string): Promise<void> {
 				"-it",
 				"--entrypoint",
 				"",
-				"-v",
-				`${projectDir}:/home/runner/work`,
+				// --mount is colon-safe; see runInContainer for the rationale.
+				"--mount",
+				`type=bind,source=${projectDir},target=/home/runner/work`,
 				"-e",
 				"CI=true",
 				imageName,

@@ -28,14 +28,6 @@ import { detectDirectiveClash } from "./skills/directives.js";
 
 // ── Re-exports (facade) ──────────────────────────────────────────────────────
 
-export {
-	CHARS_PER_TOKEN,
-	CONTRADICTION_PAIRS,
-	DEFAULT_BUDGET,
-	DEFAULT_REGISTRY_THRESHOLD,
-	DEFAULT_SKILLS_DIR,
-	DEFAULT_THRESHOLD,
-} from "./skills/constants.js";
 export type { RuleDirective } from "./skills/directives.js";
 export {
 	detectDirectiveClash,

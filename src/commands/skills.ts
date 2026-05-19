@@ -1,450 +1,47 @@
 import path from "node:path";
-import fs from "fs-extra";
-import { parseFrontmatter } from "../lib/frontmatter.js";
 import type {
-	ConflictKind,
 	SkillBenchmarkCheck,
 	SkillBenchmarkResult,
-	SkillBudgetEntry,
-	SkillBudgetResult,
-	SkillBudgetSuggestion,
-	SkillConflict,
-	SkillCriticalRule,
 	SkillDoctorResult,
-	SkillDuplicate,
 	SkillGrade,
 	SkillRegistryGateResult,
 	SkillScore,
 } from "../types/index.js";
 import {
-	CHARS_PER_TOKEN,
-	CONTRADICTION_PAIRS,
+	calculateBudget,
+	findConflicts,
+	findDuplicates,
+} from "./skills/analysis.js";
+import {
 	DEFAULT_BUDGET,
 	DEFAULT_REGISTRY_THRESHOLD,
 	DEFAULT_SKILLS_DIR,
 	DEFAULT_THRESHOLD,
 } from "./skills/constants.js";
-import { detectDirectiveClash } from "./skills/directives.js";
+import { estimateTokens, parseSkillFile } from "./skills/parsing.js";
 
 // ── Re-exports (facade) ──────────────────────────────────────────────────────
 
+export {
+	calculateBudget,
+	detectRuleConflict,
+	findConflicts,
+	findDuplicates,
+	generateBudgetOptimizations,
+} from "./skills/analysis.js";
 export type { RuleDirective } from "./skills/directives.js";
 export {
 	detectDirectiveClash,
 	extractDirective,
 	subjectsSimilar,
 } from "./skills/directives.js";
-
-// ── Budget Optimization ─────────────────────────────────────────────────────
-
-/**
- * Generate minimal disable sets to bring total tokens under budget.
- * Uses a greedy approach: disable largest skills first until under budget.
- * Returns up to 3 alternative optimization suggestions.
- */
-export function generateBudgetOptimizations(
-	entries: SkillBudgetEntry[],
-	totalTokens: number,
-	budget: number,
-): SkillBudgetSuggestion[] {
-	if (totalTokens <= budget) return [];
-
-	const excess = totalTokens - budget;
-	const suggestions: SkillBudgetSuggestion[] = [];
-
-	// Strategy 1: Greedy — disable largest skills first
-	const greedy = greedyDisableSet(entries, excess);
-	suggestions.push(makeSuggestion(greedy, entries, totalTokens, budget));
-
-	// Strategy 2: Minimal count — find smallest number of skills to disable
-	// (try single-skill solutions first, then pairs)
-	const singles = entries.filter((e) => e.tokens >= excess);
-	if (singles.length > 0) {
-		// Pick the smallest single that still meets budget
-		const sorted = [...singles].sort((a, b) => a.tokens - b.tokens);
-		const minimal = sorted[0];
-		if (minimal.skillName !== greedy[0]?.skillName) {
-			suggestions.push(makeSuggestion([minimal], entries, totalTokens, budget));
-		}
-	}
-
-	// Strategy 3: If we have many small skills, show a "trim many" approach
-	// Disable the bottom 50% by token count (many small skills)
-	if (entries.length >= 4) {
-		const sortedAsc = [...entries].sort((a, b) => a.tokens - b.tokens);
-		const halfCount = Math.ceil(sortedAsc.length / 2);
-		const bottomHalf = sortedAsc.slice(0, halfCount);
-		const saved = bottomHalf.reduce((s, e) => s + e.tokens, 0);
-		if (saved >= excess) {
-			const trimSet = greedyDisableSet(
-				[...bottomHalf].sort((a, b) => b.tokens - a.tokens),
-				excess,
-			);
-			const names = new Set(trimSet.map((e) => e.skillName));
-			const alreadySuggested = suggestions.some(
-				(s) =>
-					s.disableSkills.length === names.size &&
-					s.disableSkills.every((n) => names.has(n)),
-			);
-			if (!alreadySuggested) {
-				suggestions.push(makeSuggestion(trimSet, entries, totalTokens, budget));
-			}
-		}
-	}
-
-	return suggestions;
-}
-
-/** Greedy: pick largest entries until saved >= excess */
-function greedyDisableSet(
-	entries: SkillBudgetEntry[],
-	excess: number,
-): SkillBudgetEntry[] {
-	const sorted = [...entries].sort((a, b) => b.tokens - a.tokens);
-	const result: SkillBudgetEntry[] = [];
-	let saved = 0;
-
-	for (const entry of sorted) {
-		if (saved >= excess) break;
-		result.push(entry);
-		saved += entry.tokens;
-	}
-
-	return result;
-}
-
-function makeSuggestion(
-	disableSet: SkillBudgetEntry[],
-	_allEntries: SkillBudgetEntry[],
-	totalTokens: number,
-	budget: number,
-): SkillBudgetSuggestion {
-	const tokensSaved = disableSet.reduce((s, e) => s + e.tokens, 0);
-	const remaining = totalTokens - tokensSaved;
-	return {
-		disableSkills: disableSet.map((e) => e.skillName),
-		tokensSaved,
-		remainingTokens: remaining,
-		meetsbudget: remaining <= budget,
-	};
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Estimate token count from a string */
-export function estimateTokens(text: string): number {
-	return Math.ceil(text.length / CHARS_PER_TOKEN);
-}
-
-/** Read a SKILL.md and extract its name + critical rules section */
-export async function parseSkillFile(skillPath: string): Promise<{
-	name: string;
-	rules: string[];
-	rawContent: string;
-	triggers: string[];
-} | null> {
-	if (!(await fs.pathExists(skillPath))) return null;
-
-	const raw = await fs.readFile(skillPath, "utf-8");
-	const fm = parseFrontmatter(raw);
-
-	const name =
-		(fm?.data?.name as string) ?? path.basename(path.dirname(skillPath));
-
-	// Extract critical rules — look for "Critical Rules" or numbered list after it
-	const rules = extractCriticalRules(fm?.content ?? raw);
-
-	// Extract trigger keywords from description
-	const description = (fm?.data?.description as string) ?? "";
-	const triggers = extractTriggers(description);
-
-	return { name, rules, rawContent: raw, triggers };
-}
-
-/** Extract critical rules from markdown content */
-export function extractCriticalRules(content: string): string[] {
-	const rules: string[] = [];
-
-	// Strategy 1: Find "Critical Rules" or "## Critical Rules" section
-	const block1 = extractSection(content, /Critical Rules?/i);
-	if (block1) {
-		extractListItems(block1, rules);
-	}
-
-	// Strategy 2: If no critical rules section, look for rules/conventions in any section
-	if (rules.length === 0) {
-		const block2 = extractSection(content, /Rules?/i);
-		if (block2) {
-			extractListItems(block2, rules);
-		}
-	}
-
-	return rules;
-}
-
-/** Extract a markdown section body by heading pattern */
-function extractSection(
-	content: string,
-	headingPattern: RegExp,
-): string | null {
-	const lines = content.split("\n");
-	let capturing = false;
-	const blockLines: string[] = [];
-
-	for (const line of lines) {
-		if (capturing) {
-			// Stop at next heading
-			if (/^#+\s/.test(line) || /^---/.test(line)) break;
-			blockLines.push(line);
-		} else if (/^#+\s/.test(line) && headingPattern.test(line)) {
-			capturing = true;
-		}
-	}
-
-	return blockLines.length > 0 ? blockLines.join("\n") : null;
-}
-
-/** Extract numbered or bulleted list items from a markdown block */
-function extractListItems(block: string, out: string[]): void {
-	const lines = block.split("\n");
-	for (const line of lines) {
-		const match = line.match(/^\s*(?:\d+[.)]\s+|-\s+|\*\s+)(.+)/);
-		if (match) {
-			const cleaned = match[1].trim();
-			if (cleaned.length > 5) out.push(cleaned);
-		}
-	}
-}
-
-/** Extract trigger keywords from a skill description */
-export function extractTriggers(description: string): string[] {
-	const triggerMatch = description.match(/Trigger:\s*(.+)/i);
-	if (!triggerMatch) return [];
-
-	const triggerText = triggerMatch[1];
-	// Split on commas, "or", "and", common delimiters
-	const keywords = triggerText
-		.split(/[,;]|\bor\b/i)
-		.map((k) =>
-			k
-				.trim()
-				.toLowerCase()
-				.replace(/^when\s+/i, ""),
-		)
-		.filter((k) => k.length > 2);
-
-	return keywords;
-}
-
-// ── Core: Scan installed skills ─────────────────────────────────────────────
-
-/** Discover all SKILL.md files in a skills directory */
-export async function discoverSkills(skillsDir: string): Promise<string[]> {
-	if (!(await fs.pathExists(skillsDir))) return [];
-
-	const entries = await fs.readdir(skillsDir);
-	const skillFiles: string[] = [];
-
-	for (const entry of entries) {
-		if (entry.startsWith(".") || entry.startsWith("_")) continue;
-		const skillPath = path.join(skillsDir, entry, "SKILL.md");
-		if (await fs.pathExists(skillPath)) {
-			skillFiles.push(skillPath);
-		}
-	}
-
-	return skillFiles.sort();
-}
-
-// ── Conflict Detection ──────────────────────────────────────────────────────
-
-/** Check if two rules contradict each other (regex pairs + directive clash) */
-export function detectRuleConflict(
-	ruleA: string,
-	ruleB: string,
-): { reason: string; kind: ConflictKind } | null {
-	const normA = ruleA.toLowerCase().trim();
-	const normB = ruleB.toLowerCase().trim();
-
-	// Strategy 1: Hardcoded regex pairs (fast, high confidence)
-	for (const [patternA, patternB] of CONTRADICTION_PAIRS) {
-		if (
-			(patternA.test(normA) && patternB.test(normB)) ||
-			(patternB.test(normA) && patternA.test(normB))
-		) {
-			return {
-				reason: `"${ruleA.slice(0, 60)}" vs "${ruleB.slice(0, 60)}"`,
-				kind: "regex-pair",
-			};
-		}
-	}
-
-	// Strategy 2: Semantic directive clash (broader, medium confidence)
-	const clashReason = detectDirectiveClash(ruleA, ruleB);
-	if (clashReason) {
-		return { reason: clashReason, kind: "directive-clash" };
-	}
-
-	return null;
-}
-
-/** Scan all skills for conflicting critical rules */
-export async function findConflicts(
-	skillsDir: string,
-): Promise<SkillConflict[]> {
-	const skillPaths = await discoverSkills(skillsDir);
-	const allRules: SkillCriticalRule[] = [];
-
-	for (const sp of skillPaths) {
-		const parsed = await parseSkillFile(sp);
-		if (!parsed) continue;
-
-		for (const rule of parsed.rules) {
-			allRules.push({
-				skillName: parsed.name,
-				skillPath: sp,
-				rule,
-				normalized: rule.toLowerCase().trim(),
-			});
-		}
-	}
-
-	const conflicts: SkillConflict[] = [];
-
-	// Compare every pair (O(n^2) but skill count is small ~20-50)
-	for (let i = 0; i < allRules.length; i++) {
-		for (let j = i + 1; j < allRules.length; j++) {
-			const a = allRules[i];
-			const b = allRules[j];
-
-			// Skip rules from the same skill
-			if (a.skillName === b.skillName) continue;
-
-			const result = detectRuleConflict(a.rule, b.rule);
-			if (result) {
-				conflicts.push({
-					ruleA: a,
-					ruleB: b,
-					reason: result.reason,
-					kind: result.kind,
-				});
-			}
-		}
-	}
-
-	return conflicts;
-}
-
-// ── Context Budget ──────────────────────────────────────────────────────────
-
-/** Calculate token budget for all installed skills */
-export async function calculateBudget(
-	skillsDir: string,
-	budget: number = DEFAULT_BUDGET,
-): Promise<SkillBudgetResult> {
-	const skillPaths = await discoverSkills(skillsDir);
-	const entries: SkillBudgetEntry[] = [];
-
-	for (const sp of skillPaths) {
-		const parsed = await parseSkillFile(sp);
-		if (!parsed) continue;
-
-		entries.push({
-			skillName: parsed.name,
-			skillPath: sp,
-			tokens: estimateTokens(parsed.rawContent),
-		});
-	}
-
-	// Sort by token count descending (biggest consumers first)
-	entries.sort((a, b) => b.tokens - a.tokens);
-
-	const totalTokens = entries.reduce((sum, e) => sum + e.tokens, 0);
-	const overBudget = totalTokens > budget;
-
-	const suggestions: string[] = [];
-	if (overBudget) {
-		const excess = totalTokens - budget;
-		suggestions.push(`Over budget by ~${excess} tokens`);
-
-		// Suggest disabling the largest skills until under budget
-		let saved = 0;
-		for (const entry of entries) {
-			if (saved >= excess) break;
-			suggestions.push(
-				`Consider disabling "${entry.skillName}" (~${entry.tokens} tokens)`,
-			);
-			saved += entry.tokens;
-		}
-	}
-
-	const optimizations = generateBudgetOptimizations(
-		entries,
-		totalTokens,
-		budget,
-	);
-
-	return {
-		entries,
-		totalTokens,
-		budget,
-		overBudget,
-		suggestions,
-		optimizations,
-	};
-}
-
-// ── Duplicate Detection ─────────────────────────────────────────────────────
-
-/** Find skills that overlap in scope/triggers */
-export async function findDuplicates(
-	skillsDir: string,
-): Promise<SkillDuplicate[]> {
-	const skillPaths = await discoverSkills(skillsDir);
-
-	const skillData: Array<{ name: string; triggers: string[] }> = [];
-
-	for (const sp of skillPaths) {
-		const parsed = await parseSkillFile(sp);
-		if (!parsed || parsed.triggers.length === 0) continue;
-		skillData.push({ name: parsed.name, triggers: parsed.triggers });
-	}
-
-	const duplicates: SkillDuplicate[] = [];
-
-	for (let i = 0; i < skillData.length; i++) {
-		for (let j = i + 1; j < skillData.length; j++) {
-			const a = skillData[i];
-			const b = skillData[j];
-
-			const sharedTriggers = a.triggers.filter((t) =>
-				b.triggers.some((bt) => bt.includes(t) || t.includes(bt)),
-			);
-
-			if (sharedTriggers.length === 0) continue;
-
-			const maxTriggers = Math.max(a.triggers.length, b.triggers.length);
-			const similarity =
-				maxTriggers > 0
-					? Math.round((sharedTriggers.length / maxTriggers) * 100)
-					: 0;
-
-			if (similarity >= 30) {
-				duplicates.push({
-					skillA: a.name,
-					skillB: b.name,
-					sharedTriggers,
-					similarity,
-				});
-			}
-		}
-	}
-
-	// Sort by similarity descending
-	duplicates.sort((a, b) => b.similarity - a.similarity);
-
-	return duplicates;
-}
+export {
+	discoverSkills,
+	estimateTokens,
+	extractCriticalRules,
+	extractTriggers,
+	parseSkillFile,
+} from "./skills/parsing.js";
 
 // ── Full Doctor ─────────────────────────────────────────────────────────────
 

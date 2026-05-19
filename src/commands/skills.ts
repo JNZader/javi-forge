@@ -16,161 +16,32 @@ import type {
 	SkillRegistryGateResult,
 	SkillScore,
 } from "../types/index.js";
+import {
+	CHARS_PER_TOKEN,
+	CONTRADICTION_PAIRS,
+	DEFAULT_BUDGET,
+	DEFAULT_REGISTRY_THRESHOLD,
+	DEFAULT_SKILLS_DIR,
+	DEFAULT_THRESHOLD,
+} from "./skills/constants.js";
+import { detectDirectiveClash } from "./skills/directives.js";
 
-// ── Constants ────────────────────────────────────────────────────────────────
+// ── Re-exports (facade) ──────────────────────────────────────────────────────
 
-const DEFAULT_SKILLS_DIR = path.join(
-	process.env.HOME ?? "~",
-	".claude",
-	"skills",
-);
-
-const DEFAULT_BUDGET = 8000;
-
-/** Approximate tokens per character (GPT/Claude rough average) */
-const CHARS_PER_TOKEN = 4;
-
-// ── Contradiction keywords (pairs that signal opposite intent) ───────────────
-
-const CONTRADICTION_PAIRS: [RegExp, RegExp][] = [
-	[/\buse semicolons\b/i, /\bno semicolons\b/i],
-	[/\bsemicolons required\b/i, /\bno semicolons\b/i],
-	[/\bsingle quotes\b/i, /\bdouble quotes\b/i],
-	[/\btabs\b/i, /\bspaces\b/i],
-	[/\b2[- ]?spaces?\b/i, /\b4[- ]?spaces?\b/i],
-	[/\bclass[- ]?based\b/i, /\bfunctional\b/i],
-	[/\bOOP\b/i, /\bfunctional\b/i],
-	[/\bmutable\b/i, /\bimmutable\b/i],
-	[/\bany\b.*\ballowed\b/i, /\bno any\b/i],
-	[/\bdefault export\b/i, /\bnamed export\b/i],
-	[/\bnever use\b/i, /\balways use\b/i],
-	[/\bavoid\b/i, /\bprefer\b/i],
-	[/\bdo not\b/i, /\bmust\b/i],
-];
-
-// ── Directive extraction (semantic conflict detection) ─────────────────────
-
-/** A directive is a sentiment + subject extracted from a rule */
-export interface RuleDirective {
-	sentiment: "positive" | "negative";
-	subject: string;
-}
-
-/**
- * Positive and negative signal patterns.
- * Order matters — first match wins, so more specific patterns go first.
- */
-const POSITIVE_SIGNALS: RegExp[] = [
-	/\balways use\b/i,
-	/\bmust use\b/i,
-	/\bprefer\b/i,
-	/\balways\b/i,
-	/\bmust\b/i,
-	/\brequire\b/i,
-	/\buse\b/i,
-	/\benable\b/i,
-	/\bshould\b/i,
-];
-
-const NEGATIVE_SIGNALS: RegExp[] = [
-	/\bnever use\b/i,
-	/\bdo not use\b/i,
-	/\bdon't use\b/i,
-	/\bnever\b/i,
-	/\bavoid\b/i,
-	/\bdo not\b/i,
-	/\bdon't\b/i,
-	/\bdisable\b/i,
-	/\bno\b/i,
-	/\bforbid\b/i,
-];
-
-/**
- * Extract a directive (sentiment + subject) from a rule string.
- * Returns null if the rule has no clear directive.
- */
-export function extractDirective(rule: string): RuleDirective | null {
-	const norm = rule.toLowerCase().trim();
-
-	// Try negative first (more specific: "never use X" before "use X")
-	for (const pattern of NEGATIVE_SIGNALS) {
-		const match = norm.match(pattern);
-		if (match) {
-			const subject = norm
-				.slice((match.index ?? 0) + match[0].length)
-				.trim()
-				.replace(/^(the|a|an)\s+/i, "")
-				.replace(/[.;,!]+$/, "")
-				.trim();
-			if (subject.length >= 3) {
-				return { sentiment: "negative", subject };
-			}
-		}
-	}
-
-	for (const pattern of POSITIVE_SIGNALS) {
-		const match = norm.match(pattern);
-		if (match) {
-			const subject = norm
-				.slice((match.index ?? 0) + match[0].length)
-				.trim()
-				.replace(/^(the|a|an)\s+/i, "")
-				.replace(/[.;,!]+$/, "")
-				.trim();
-			if (subject.length >= 3) {
-				return { sentiment: "positive", subject };
-			}
-		}
-	}
-
-	return null;
-}
-
-/**
- * Check if two subjects are similar enough to be "about the same thing".
- * Uses simple word-overlap (Jaccard-like) — no external NLP needed.
- */
-export function subjectsSimilar(
-	a: string,
-	b: string,
-	threshold = 0.5,
-): boolean {
-	const wordsA = new Set(a.split(/\s+/).filter((w) => w.length > 2));
-	const wordsB = new Set(b.split(/\s+/).filter((w) => w.length > 2));
-
-	if (wordsA.size === 0 || wordsB.size === 0) return false;
-
-	let intersection = 0;
-	for (const w of wordsA) {
-		if (wordsB.has(w)) intersection++;
-	}
-
-	const union = new Set([...wordsA, ...wordsB]).size;
-	return union > 0 && intersection / union >= threshold;
-}
-
-/**
- * Detect a directive clash between two rules:
- * opposite sentiments about the same subject.
- */
-export function detectDirectiveClash(
-	ruleA: string,
-	ruleB: string,
-): string | null {
-	const dA = extractDirective(ruleA);
-	const dB = extractDirective(ruleB);
-
-	if (!dA || !dB) return null;
-	if (dA.sentiment === dB.sentiment) return null;
-
-	if (subjectsSimilar(dA.subject, dB.subject)) {
-		const posRule = dA.sentiment === "positive" ? ruleA : ruleB;
-		const negRule = dA.sentiment === "negative" ? ruleA : ruleB;
-		return `Directive clash on "${dA.subject}": positive="${posRule.slice(0, 50)}" vs negative="${negRule.slice(0, 50)}"`;
-	}
-
-	return null;
-}
+export {
+	CHARS_PER_TOKEN,
+	CONTRADICTION_PAIRS,
+	DEFAULT_BUDGET,
+	DEFAULT_REGISTRY_THRESHOLD,
+	DEFAULT_SKILLS_DIR,
+	DEFAULT_THRESHOLD,
+} from "./skills/constants.js";
+export type { RuleDirective } from "./skills/directives.js";
+export {
+	detectDirectiveClash,
+	extractDirective,
+	subjectsSimilar,
+} from "./skills/directives.js";
 
 // ── Budget Optimization ─────────────────────────────────────────────────────
 
@@ -622,8 +493,6 @@ export async function runSkillsDoctor(
 
 // ── Quality Scoring ────────────────────────────────────────────────────────
 
-const DEFAULT_THRESHOLD = 50;
-
 /** Vague terms that reduce clarity score */
 const VAGUE_TERMS = [
 	/\bstuff\b/i,
@@ -710,9 +579,6 @@ const DANGEROUS_PATTERNS: { pattern: RegExp; label: string; weight: number }[] =
 			weight: 10,
 		},
 	];
-
-/** Default registry quality threshold */
-const DEFAULT_REGISTRY_THRESHOLD = 60;
 
 /**
  * Score completeness (0-100): frontmatter fields, critical rules, structure.

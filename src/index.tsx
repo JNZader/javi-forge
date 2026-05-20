@@ -4,26 +4,24 @@ import path from "node:path";
 import { render } from "ink";
 import meow from "meow";
 import React from "react";
+import { handleCi } from "./cli/dispatch/ci.js";
+import {
+	handleAnalyze,
+	handleDoctor,
+	handleInitDefault,
+	handleLlmsTxt,
+	handlePlugin,
+} from "./cli/dispatch/simple-renderers.js";
+import { handleTdd } from "./cli/dispatch/tdd.js";
 import { FLAGS_SCHEMA, HELP_TEXT } from "./cli/help.js";
 import {
 	createInkStdin,
 	detectCI,
 	setupUpdateNotifier,
-	VALID_CI,
-	VALID_MEMORY,
-	VALID_STACKS,
 } from "./cli/runtime.js";
-import type { CIMode } from "./commands/ci.js";
 import type { SecurityMode } from "./commands/security.js";
-import type { CIProvider, MemoryOption, Stack } from "./types/index.js";
-import AnalyzeUI from "./ui/AnalyzeUI.js";
-import App from "./ui/App.js";
 import AutoSkills from "./ui/AutoSkills.js";
-import CI from "./ui/CI.js";
 import { CIProvider as CIContextProvider } from "./ui/CIContext.js";
-import Doctor from "./ui/Doctor.js";
-import LlmsTxt from "./ui/LlmsTxt.js";
-import Plugin from "./ui/Plugin.js";
 import Skills from "./ui/Skills.js";
 
 // Check for updates in background (non-blocking, cached 24h)
@@ -43,109 +41,22 @@ const inkStdin = createInkStdin();
 
 switch (subcommand) {
 	case "tdd": {
-		if (cli.input[1] === "init") {
-			const { installTddHooks } = await import("./commands/tdd.js");
-			const { installed, errors } = await installTddHooks(process.cwd());
-			if (installed.length > 0) {
-				console.log(`\u2713 Installed TDD hooks: ${installed.join(", ")}`);
-				console.log("  Pre-commit hook enforces tests must pass before commit");
-			}
-			for (const err of errors) {
-				console.error(`\u2717 ${err}`);
-			}
-			process.exit(errors.length > 0 ? 1 : 0);
-		} else if (cli.input[1] === "pipeline") {
-			const { installTddPipelineHook } = await import(
-				"./commands/tdd-pipeline.js"
-			);
-			const mode =
-				(cli.flags as Record<string, unknown>).mode === "warn"
-					? ("warn" as const)
-					: ("strict" as const);
-			const result = await installTddPipelineHook(process.cwd(), mode);
-			if (result.installed.length > 0) {
-				console.log(
-					`\u2713 Installed TDD pipeline hook: ${result.installed.join(", ")} [${result.mode}]`,
-				);
-				console.log(
-					`  Pre-push hook enforces TDD pipeline (${result.mode} mode)`,
-				);
-			}
-			for (const skip of result.skipped) {
-				console.log(`\u26A0 ${skip}`);
-			}
-			for (const err of result.errors) {
-				console.error(`\u2717 ${err}`);
-			}
-			process.exit(result.errors.length > 0 ? 1 : 0);
-		} else {
-			console.error("Usage: javi-forge tdd <command>");
-			console.error("  init      Install TDD-enforcing pre-commit hook");
-			console.error(
-				"  pipeline  Install TDD pipeline pre-push hook (--mode strict|warn)",
-			);
-			process.exit(1);
-		}
+		await handleTdd(cli);
 		break;
 	}
 
 	case "ci": {
-		// Sub-command: javi-forge ci init → install git hooks
-		if (cli.input[1] === "init") {
-			const { installCIHooks } = await import("./commands/ci.js");
-			const { installed, errors } = await installCIHooks(process.cwd());
-			if (installed.length > 0) {
-				console.log(`✓ Installed git hooks: ${installed.join(", ")}`);
-				console.log("  Hooks call javi-forge ci (with npx fallback)");
-			}
-			for (const err of errors) {
-				console.error(`✗ ${err}`);
-			}
-			process.exit(errors.length > 0 ? 1 : 0);
-			break;
-		}
-
-		const ciMode: CIMode = cli.flags.detect
-			? "detect"
-			: cli.flags.shell
-				? "shell"
-				: cli.flags.quick
-					? "quick"
-					: "full";
-
-		render(
-			<CIContextProvider isCI={true}>
-				<CI
-					projectDir={process.cwd()}
-					mode={ciMode}
-					noDocker={!cli.flags.docker}
-					noGhagga={!cli.flags.ciGhagga}
-					noSecurity={!cli.flags.security}
-					timeout={cli.flags.timeout}
-				/>
-			</CIContextProvider>,
-			{ stdin: inkStdin },
-		);
+		await handleCi(cli, { inkStdin, isCI });
 		break;
 	}
 
 	case "doctor": {
-		render(
-			<CIContextProvider isCI={isCI}>
-				<Doctor />
-			</CIContextProvider>,
-			{ stdin: inkStdin },
-		);
+		handleDoctor(cli, { inkStdin, isCI });
 		break;
 	}
 
 	case "analyze": {
-		render(
-			<CIContextProvider isCI={isCI}>
-				<AnalyzeUI dryRun={cli.flags.dryRun} />
-			</CIContextProvider>,
-			{ stdin: inkStdin },
-		);
+		handleAnalyze(cli, { inkStdin, isCI });
 		break;
 	}
 
@@ -218,55 +129,12 @@ switch (subcommand) {
 	}
 
 	case "llms-txt": {
-		render(
-			<CIContextProvider isCI={isCI}>
-				<LlmsTxt projectDir={process.cwd()} dryRun={cli.flags.dryRun} />
-			</CIContextProvider>,
-			{ stdin: inkStdin },
-		);
+		handleLlmsTxt(cli, { inkStdin, isCI });
 		break;
 	}
 
 	case "plugin": {
-		const pluginAction = cli.input[1] as
-			| "add"
-			| "remove"
-			| "list"
-			| "search"
-			| "validate"
-			| "sync"
-			| "export"
-			| "import"
-			| "export-skills"
-			| undefined;
-		const VALID_PLUGIN_ACTIONS = [
-			"add",
-			"remove",
-			"list",
-			"search",
-			"validate",
-			"sync",
-			"export",
-			"import",
-			"export-skills",
-		];
-		const action =
-			pluginAction && VALID_PLUGIN_ACTIONS.includes(pluginAction)
-				? pluginAction
-				: "list";
-		const target = cli.input[2];
-
-		render(
-			<CIContextProvider isCI={isCI}>
-				<Plugin
-					action={action}
-					target={target}
-					dryRun={cli.flags.dryRun}
-					codex={cli.flags.codex}
-				/>
-			</CIContextProvider>,
-			{ stdin: inkStdin },
-		);
+		handlePlugin(cli, { inkStdin, isCI });
 		break;
 	}
 
@@ -520,32 +388,7 @@ switch (subcommand) {
 		break;
 	}
 	default: {
-		const presetStack = VALID_STACKS.includes(cli.flags.stack)
-			? (cli.flags.stack as Stack)
-			: undefined;
-		const presetCI = VALID_CI.includes(cli.flags.ci)
-			? (cli.flags.ci as CIProvider)
-			: undefined;
-		const presetMemory = VALID_MEMORY.includes(cli.flags.memory)
-			? (cli.flags.memory as MemoryOption)
-			: undefined;
-		const presetName = cli.flags.projectName || undefined;
-
-		render(
-			<CIContextProvider isCI={isCI}>
-				<App
-					dryRun={cli.flags.dryRun}
-					presetStack={presetStack}
-					presetCI={presetCI}
-					presetMemory={presetMemory}
-					presetName={presetName}
-					presetGhagga={cli.flags.ghagga}
-					presetMock={cli.flags.mock ?? false}
-					presetLocalAi={cli.flags.localAi ?? false}
-				/>
-			</CIContextProvider>,
-			{ stdin: inkStdin },
-		);
+		handleInitDefault(cli, { inkStdin, isCI });
 		break;
 	}
 }

@@ -124,4 +124,6 @@ export const FLAGS_SCHEMA = {
 	repo: { type: "string", default: "" },
 	// Workflow flags
 	template: { type: "string", default: "" },
+	// TDD flags
+	mode: { type: "string", default: "strict" },
 } as const;

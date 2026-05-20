@@ -15,15 +15,11 @@ import type { CIMode } from "../../commands/ci.js";
 import CI from "../../ui/CI.js";
 import { CIProvider as CIContextProvider } from "../../ui/CIContext.js";
 import type { FLAGS_SCHEMA } from "../help.js";
+import type { RendererCtx } from "./simple-renderers.js";
 
 type CLI = Result<typeof FLAGS_SCHEMA>;
 
-export type CiCtx = {
-	inkStdin: NodeJS.ReadStream;
-	isCI: boolean;
-};
-
-export async function handleCi(cli: CLI, ctx: CiCtx): Promise<void> {
+export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 	// Sub-command: javi-forge ci init → install git hooks
 	if (cli.input[1] === "init") {
 		const { installCIHooks } = await import("../../commands/ci.js");

@@ -29,9 +29,7 @@ export async function handleTdd(cli: CLI): Promise<void> {
 			"../../commands/tdd-pipeline.js"
 		);
 		const mode =
-			(cli.flags as Record<string, unknown>).mode === "warn"
-				? ("warn" as const)
-				: ("strict" as const);
+			cli.flags.mode === "warn" ? ("warn" as const) : ("strict" as const);
 		const result = await installTddPipelineHook(process.cwd(), mode);
 		if (result.installed.length > 0) {
 			console.log(

@@ -6,14 +6,7 @@ import {
 	SECURITY_HOOKS_DIR,
 	TEMPLATES_DIR,
 } from "../constants.js";
-import { generateSmartClaudeMd } from "../lib/claudemd.js";
 import { backupIfExists, ensureDirExists } from "../lib/common.js";
-import { generateContextDir } from "../lib/context.js";
-import { detectProjectStack } from "../lib/stack-detector.js";
-import {
-	generateDeployWorkflow,
-	getDeployDestination,
-} from "../lib/template.js";
 import type {
 	AgentSkillsManifest,
 	ForgeManifest,
@@ -23,6 +16,9 @@ import type {
 import { report } from "./init/report.js";
 import { stepAISync } from "./init/steps/ai-sync.js";
 import { stepCITemplate, stepDependabot } from "./init/steps/ci.js";
+import { stepClaudeMd } from "./init/steps/claude-md.js";
+import { stepContextDir } from "./init/steps/context-dir.js";
+import { stepDockerDeploy } from "./init/steps/docker-deploy.js";
 import { stepGhagga } from "./init/steps/ghagga.js";
 import { stepGitHooks, stepGitInit } from "./init/steps/git.js";
 import { stepGitignore } from "./init/steps/gitignore.js";
@@ -95,187 +91,13 @@ export async function initProject(
 	await stepMock(ctx);
 
 	// ── Step 11: Generate .context/ directory ──────────────────────────────────
-	const stepContext = "context-dir";
-	report(onStep, stepContext, "Generate .context/ directory", "running");
-	try {
-		if (contextDir) {
-			const contextDirPath = path.join(projectDir, ".context");
-			if (await fs.pathExists(contextDirPath)) {
-				report(
-					onStep,
-					stepContext,
-					"Generate .context/ directory",
-					"done",
-					"already exists",
-				);
-			} else {
-				if (!dryRun) {
-					const { index, summary } = await generateContextDir(options);
-					await ensureDirExists(contextDirPath);
-					await fs.writeFile(
-						path.join(contextDirPath, "INDEX.md"),
-						index,
-						"utf-8",
-					);
-					await fs.writeFile(
-						path.join(contextDirPath, "summary.md"),
-						summary,
-						"utf-8",
-					);
-				}
-				report(
-					onStep,
-					stepContext,
-					"Generate .context/ directory",
-					"done",
-					dryRun
-						? "dry-run: would generate .context/"
-						: ".context/INDEX.md + summary.md",
-				);
-			}
-		} else {
-			report(
-				onStep,
-				stepContext,
-				"Generate .context/ directory",
-				"skipped",
-				"not selected",
-			);
-		}
-	} catch (e) {
-		report(
-			onStep,
-			stepContext,
-			"Generate .context/ directory",
-			"error",
-			String(e),
-		);
-	}
+	await stepContextDir(ctx);
 
 	// ── Step 12: Generate CLAUDE.md (smart: project-aware) ─────────────────────
-	const stepClaudeMd = "claude-md";
-	report(onStep, stepClaudeMd, "Generate CLAUDE.md", "running");
-	try {
-		if (claudeMd) {
-			const claudeMdPath = path.join(projectDir, "CLAUDE.md");
-			if (await fs.pathExists(claudeMdPath)) {
-				report(
-					onStep,
-					stepClaudeMd,
-					"Generate CLAUDE.md",
-					"done",
-					"already exists",
-				);
-			} else {
-				if (!dryRun) {
-					// Detect project stack for smart CLAUDE.md generation
-					const detection = await detectProjectStack(projectDir).catch(
-						() => null,
-					);
-					const content = generateSmartClaudeMd(options, detection);
-					await fs.writeFile(claudeMdPath, content, "utf-8");
-					const skillCount = detection?.recommendedSkills.length ?? 0;
-					report(
-						onStep,
-						stepClaudeMd,
-						"Generate CLAUDE.md",
-						"done",
-						skillCount > 0
-							? `CLAUDE.md (${skillCount} skills detected)`
-							: "CLAUDE.md",
-					);
-				} else {
-					report(
-						onStep,
-						stepClaudeMd,
-						"Generate CLAUDE.md",
-						"done",
-						"dry-run: would generate CLAUDE.md",
-					);
-				}
-			}
-		} else {
-			report(
-				onStep,
-				stepClaudeMd,
-				"Generate CLAUDE.md",
-				"skipped",
-				"not selected",
-			);
-		}
-	} catch (e) {
-		report(onStep, stepClaudeMd, "Generate CLAUDE.md", "error", String(e));
-	}
+	await stepClaudeMd(ctx);
 
 	// ── Step 13: Docker zero-downtime deploy ───────────────────────────────────
-	const stepDeploy = "docker-deploy";
-	report(onStep, stepDeploy, "Scaffold Docker zero-downtime deploy", "running");
-	try {
-		if (options.dockerDeploy) {
-			const deployDest = getDeployDestination(ciProvider);
-			if (deployDest) {
-				const fullDest = path.join(projectDir, deployDest);
-				if (await fs.pathExists(fullDest)) {
-					report(
-						onStep,
-						stepDeploy,
-						"Scaffold Docker zero-downtime deploy",
-						"done",
-						"already exists",
-					);
-				} else {
-					const serviceName = options.dockerServiceName || "app";
-					const content = await generateDeployWorkflow(ciProvider, serviceName);
-					if (content) {
-						if (!dryRun) {
-							await backupIfExists(fullDest);
-							await ensureDirExists(path.dirname(fullDest));
-							await fs.writeFile(fullDest, content, "utf-8");
-						}
-						report(
-							onStep,
-							stepDeploy,
-							"Scaffold Docker zero-downtime deploy",
-							"done",
-							dryRun ? `dry-run: would create ${deployDest}` : deployDest,
-						);
-					} else {
-						report(
-							onStep,
-							stepDeploy,
-							"Scaffold Docker zero-downtime deploy",
-							"error",
-							`no deploy template for ${ciProvider}`,
-						);
-					}
-				}
-			} else {
-				report(
-					onStep,
-					stepDeploy,
-					"Scaffold Docker zero-downtime deploy",
-					"error",
-					`no deploy destination for ${ciProvider}`,
-				);
-			}
-		} else {
-			report(
-				onStep,
-				stepDeploy,
-				"Scaffold Docker zero-downtime deploy",
-				"skipped",
-				"not selected",
-			);
-		}
-	} catch (e) {
-		report(
-			onStep,
-			stepDeploy,
-			"Scaffold Docker zero-downtime deploy",
-			"error",
-			String(e),
-		);
-	}
+	await stepDockerDeploy(ctx);
 
 	// ── Step 14: Security hooks scaffold ────────────────────────────────────────
 	const stepSecurity = "security-hooks";

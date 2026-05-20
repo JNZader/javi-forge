@@ -1,12 +1,8 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
 import {
 	AGENT_SKILLS_MANIFEST_FILE,
-	FORGE_ROOT,
 	LOCAL_AI_TEMPLATE_DIR,
-	MODULES_DIR,
 	SECURITY_HOOKS_DIR,
 	TEMPLATES_DIR,
 } from "../constants.js";
@@ -25,13 +21,15 @@ import type {
 	InitOptions,
 } from "../types/index.js";
 import { report } from "./init/report.js";
+import { stepAISync } from "./init/steps/ai-sync.js";
 import { stepCITemplate, stepDependabot } from "./init/steps/ci.js";
+import { stepGhagga } from "./init/steps/ghagga.js";
 import { stepGitHooks, stepGitInit } from "./init/steps/git.js";
 import { stepGitignore } from "./init/steps/gitignore.js";
 import { stepMemory } from "./init/steps/memory.js";
+import { stepMock } from "./init/steps/mock.js";
+import { stepSDD } from "./init/steps/sdd.js";
 import type { StepCallback, StepContext } from "./init/types.js";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Main init orchestrator: bootstraps a project with CI, git hooks,
@@ -85,242 +83,16 @@ export async function initProject(
 	await stepMemory(ctx);
 
 	// ── Step 7: AI config sync (delegated to javi-ai) ──────────────────────────
-	const stepAI = "ai-sync";
-	report(onStep, stepAI, "Sync AI config via javi-ai", "running");
-	try {
-		if (aiSync) {
-			if (!dryRun) {
-				try {
-					const { stderr } = await execFileAsync(
-						"npx",
-						["javi-ai", "sync", "--project-dir", projectDir, "--target", "all"],
-						{
-							cwd: projectDir,
-							timeout: 120_000,
-						},
-					);
-					// javi-ai may exit 0 but crash (e.g. Ink raw mode error) — detect via stderr
-					if (
-						stderr &&
-						(stderr.includes("Raw mode is not supported") ||
-							stderr.includes("ERROR"))
-					) {
-						report(
-							onStep,
-							stepAI,
-							"Sync AI config via javi-ai",
-							"error",
-							"javi-ai crashed. Run manually: npx javi-ai sync --project-dir . --target all",
-						);
-					} else {
-						report(
-							onStep,
-							stepAI,
-							"Sync AI config via javi-ai",
-							"done",
-							"javi-ai sync --target all",
-						);
-					}
-				} catch (syncErr: unknown) {
-					const msg =
-						syncErr instanceof Error ? syncErr.message : String(syncErr);
-					if (
-						msg.includes("ENOENT") ||
-						msg.includes("not found") ||
-						msg.includes("ERR_MODULE_NOT_FOUND")
-					) {
-						report(
-							onStep,
-							stepAI,
-							"Sync AI config via javi-ai",
-							"error",
-							"javi-ai not found. Install with: npm install -g javi-ai (or run npx javi-ai sync manually)",
-						);
-					} else {
-						report(onStep, stepAI, "Sync AI config via javi-ai", "error", msg);
-					}
-				}
-			} else {
-				report(
-					onStep,
-					stepAI,
-					"Sync AI config via javi-ai",
-					"done",
-					"dry-run: would run javi-ai sync --target all",
-				);
-			}
-		} else {
-			report(
-				onStep,
-				stepAI,
-				"Sync AI config via javi-ai",
-				"skipped",
-				"not selected",
-			);
-		}
-	} catch (e) {
-		report(onStep, stepAI, "Sync AI config via javi-ai", "error", String(e));
-	}
+	await stepAISync(ctx);
 
 	// ── Step 8: SDD (Spec-Driven Development) ─────────────────────────────────
-	const stepSDD = "sdd";
-	report(onStep, stepSDD, "Set up SDD (openspec/)", "running");
-	try {
-		if (sdd) {
-			if (!dryRun) {
-				const openspecDir = path.join(projectDir, "openspec");
-				await ensureDirExists(openspecDir);
-				// Create a README if none exists
-				const readmePath = path.join(openspecDir, "README.md");
-				if (!(await fs.pathExists(readmePath))) {
-					await fs.writeFile(
-						readmePath,
-						`# openspec/\n\nSpec-Driven Development artifacts for ${projectName}.\n\nSee: /sdd:new <name> to start a new change.\n`,
-						"utf-8",
-					);
-				}
-			}
-			report(onStep, stepSDD, "Set up SDD (openspec/)", "done");
-		} else {
-			report(
-				onStep,
-				stepSDD,
-				"Set up SDD (openspec/)",
-				"skipped",
-				"not selected",
-			);
-		}
-	} catch (e) {
-		report(onStep, stepSDD, "Set up SDD (openspec/)", "error", String(e));
-	}
+	await stepSDD(ctx);
 
 	// ── Step 9: GHAGGA ────────────────────────────────────────────────────────
-	const stepGhagga = "ghagga";
-	report(onStep, stepGhagga, "Install GHAGGA review system", "running");
-	try {
-		if (ghagga) {
-			const ghaggaSrc = path.join(MODULES_DIR, "ghagga");
-			if (await fs.pathExists(ghaggaSrc)) {
-				if (!dryRun) {
-					const ghaggaDest = path.join(
-						projectDir,
-						".javi-forge",
-						"modules",
-						"ghagga",
-					);
-					await ensureDirExists(ghaggaDest);
-					await fs.copy(ghaggaSrc, ghaggaDest, {
-						overwrite: false,
-						errorOnExist: false,
-					});
-
-					// Copy ghagga caller workflow to CI provider location
-					if (ciProvider === "github") {
-						const workflowSrc = path.join(
-							FORGE_ROOT,
-							"templates",
-							"github",
-							"ghagga-review.yml",
-						);
-						if (await fs.pathExists(workflowSrc)) {
-							const workflowDest = path.join(
-								projectDir,
-								".github",
-								"workflows",
-								"ghagga-review.yml",
-							);
-							await ensureDirExists(path.dirname(workflowDest));
-							await fs.copy(workflowSrc, workflowDest, { overwrite: false });
-						}
-					}
-				}
-				report(onStep, stepGhagga, "Install GHAGGA review system", "done");
-			} else {
-				report(
-					onStep,
-					stepGhagga,
-					"Install GHAGGA review system",
-					"error",
-					"module not found",
-				);
-			}
-		} else {
-			report(
-				onStep,
-				stepGhagga,
-				"Install GHAGGA review system",
-				"skipped",
-				"not selected",
-			);
-		}
-	} catch (e) {
-		report(
-			onStep,
-			stepGhagga,
-			"Install GHAGGA review system",
-			"error",
-			String(e),
-		);
-	}
+	await stepGhagga(ctx);
 
 	// ── Step 10: Mock-first mode ───────────────────────────────────────────────
-	const stepMock = "mock";
-	if (options.mock) {
-		report(onStep, stepMock, "Configure mock-first mode", "running");
-		try {
-			if (!dryRun) {
-				// Create .env.example with mock values
-				const envExample = `# Mock environment — no real API keys required
-# Copy to .env to use: cp .env.example .env
-
-# Database
-DATABASE_URL=postgresql://mock:mock@localhost:5432/mock_db
-
-# Auth
-JWT_SECRET=mock-jwt-secret-for-local-development
-SESSION_SECRET=mock-session-secret
-
-# External APIs (mock mode — no real calls)
-MOCK_MODE=true
-API_KEY=mock-api-key-not-real
-STRIPE_KEY=sk_test_mock_not_real
-SENDGRID_KEY=SG.mock_not_real
-
-# Feature flags
-ENABLE_ANALYTICS=false
-ENABLE_EMAILS=false
-ENABLE_WEBHOOKS=false
-`;
-				const envExamplePath = path.join(projectDir, ".env.example");
-				if (!(await fs.pathExists(envExamplePath))) {
-					await fs.writeFile(envExamplePath, envExample, "utf-8");
-				}
-
-				// Create .env from example
-				const envPath = path.join(projectDir, ".env");
-				if (!(await fs.pathExists(envPath))) {
-					await fs.writeFile(envPath, envExample, "utf-8");
-				}
-			}
-			report(
-				onStep,
-				stepMock,
-				"Configure mock-first mode",
-				"done",
-				".env.example + .env with mock values",
-			);
-		} catch (e) {
-			report(onStep, stepMock, "Configure mock-first mode", "error", String(e));
-		}
-	} else {
-		report(
-			onStep,
-			stepMock,
-			"Configure mock-first mode",
-			"skipped",
-			"not selected",
-		);
-	}
+	await stepMock(ctx);
 
 	// ── Step 11: Generate .context/ directory ──────────────────────────────────
 	const stepContext = "context-dir";

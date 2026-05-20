@@ -22,8 +22,8 @@ const execFileAsync = promisify(execFile);
 export const stepAISync: StepFn = async (ctx) => {
 	const { projectDir, dryRun, onStep, options } = ctx;
 	const { aiSync } = options;
-	const stepAI = "ai-sync";
-	report(onStep, stepAI, "Sync AI config via javi-ai", "running");
+	const stepId = "ai-sync";
+	report(onStep, stepId, "Sync AI config via javi-ai", "running");
 	try {
 		if (aiSync) {
 			if (!dryRun) {
@@ -44,7 +44,7 @@ export const stepAISync: StepFn = async (ctx) => {
 					) {
 						report(
 							onStep,
-							stepAI,
+							stepId,
 							"Sync AI config via javi-ai",
 							"error",
 							"javi-ai crashed. Run manually: npx javi-ai sync --project-dir . --target all",
@@ -52,7 +52,7 @@ export const stepAISync: StepFn = async (ctx) => {
 					} else {
 						report(
 							onStep,
-							stepAI,
+							stepId,
 							"Sync AI config via javi-ai",
 							"done",
 							"javi-ai sync --target all",
@@ -68,19 +68,19 @@ export const stepAISync: StepFn = async (ctx) => {
 					) {
 						report(
 							onStep,
-							stepAI,
+							stepId,
 							"Sync AI config via javi-ai",
 							"error",
 							"javi-ai not found. Install with: npm install -g javi-ai (or run npx javi-ai sync manually)",
 						);
 					} else {
-						report(onStep, stepAI, "Sync AI config via javi-ai", "error", msg);
+						report(onStep, stepId, "Sync AI config via javi-ai", "error", msg);
 					}
 				}
 			} else {
 				report(
 					onStep,
-					stepAI,
+					stepId,
 					"Sync AI config via javi-ai",
 					"done",
 					"dry-run: would run javi-ai sync --target all",
@@ -89,13 +89,13 @@ export const stepAISync: StepFn = async (ctx) => {
 		} else {
 			report(
 				onStep,
-				stepAI,
+				stepId,
 				"Sync AI config via javi-ai",
 				"skipped",
 				"not selected",
 			);
 		}
 	} catch (e) {
-		report(onStep, stepAI, "Sync AI config via javi-ai", "error", String(e));
+		report(onStep, stepId, "Sync AI config via javi-ai", "error", String(e));
 	}
 };

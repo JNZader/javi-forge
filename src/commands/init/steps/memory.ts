@@ -20,8 +20,8 @@ import type { StepFn } from "../types.js";
 export const stepMemory: StepFn = async (ctx) => {
 	const { projectDir, dryRun, onStep, options } = ctx;
 	const { memory, projectName } = options;
-	const stepMem = "memory";
-	report(onStep, stepMem, `Install memory module: ${memory}`, "running");
+	const stepId = "memory";
+	report(onStep, stepId, `Install memory module: ${memory}`, "running");
 	try {
 		if (memory !== "none") {
 			const moduleSrc = path.join(MODULES_DIR, memory);
@@ -54,11 +54,11 @@ export const stepMemory: StepFn = async (ctx) => {
 						}
 					}
 				}
-				report(onStep, stepMem, `Install memory module: ${memory}`, "done");
+				report(onStep, stepId, `Install memory module: ${memory}`, "done");
 			} else {
 				report(
 					onStep,
-					stepMem,
+					stepId,
 					`Install memory module: ${memory}`,
 					"error",
 					"module not found",
@@ -67,7 +67,7 @@ export const stepMemory: StepFn = async (ctx) => {
 		} else {
 			report(
 				onStep,
-				stepMem,
+				stepId,
 				`Install memory module: ${memory}`,
 				"skipped",
 				"none selected",
@@ -76,7 +76,7 @@ export const stepMemory: StepFn = async (ctx) => {
 	} catch (e) {
 		report(
 			onStep,
-			stepMem,
+			stepId,
 			`Install memory module: ${memory}`,
 			"error",
 			String(e),

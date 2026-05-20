@@ -22,8 +22,8 @@ const execFileAsync = promisify(execFile);
  */
 export const stepGitInit: StepFn = async (ctx) => {
 	const { projectDir, dryRun, onStep } = ctx;
-	const stepGit = "git-init";
-	report(onStep, stepGit, "Initialize git repository", "running");
+	const stepId = "git-init";
+	report(onStep, stepId, "Initialize git repository", "running");
 	try {
 		const gitDir = path.join(projectDir, ".git");
 		if (!(await fs.pathExists(gitDir))) {
@@ -32,7 +32,7 @@ export const stepGitInit: StepFn = async (ctx) => {
 			}
 			report(
 				onStep,
-				stepGit,
+				stepId,
 				"Initialize git repository",
 				"done",
 				"initialized",
@@ -40,14 +40,14 @@ export const stepGitInit: StepFn = async (ctx) => {
 		} else {
 			report(
 				onStep,
-				stepGit,
+				stepId,
 				"Initialize git repository",
 				"done",
 				"already exists",
 			);
 		}
 	} catch (e) {
-		report(onStep, stepGit, "Initialize git repository", "error", String(e));
+		report(onStep, stepId, "Initialize git repository", "error", String(e));
 	}
 };
 
@@ -64,8 +64,8 @@ export const stepGitInit: StepFn = async (ctx) => {
  */
 export const stepGitHooks: StepFn = async (ctx) => {
 	const { projectDir, dryRun, onStep } = ctx;
-	const stepHooks = "git-hooks";
-	report(onStep, stepHooks, "Configure git hooks path", "running");
+	const stepId = "git-hooks";
+	report(onStep, stepId, "Configure git hooks path", "running");
 	try {
 		const ciLocalSrc = CI_LOCAL_DIR;
 		const ciLocalDest = path.join(projectDir, "ci-local");
@@ -92,7 +92,7 @@ export const stepGitHooks: StepFn = async (ctx) => {
 			}
 			report(
 				onStep,
-				stepHooks,
+				stepId,
 				"Configure git hooks path",
 				"done",
 				"ci-local/hooks",
@@ -100,13 +100,13 @@ export const stepGitHooks: StepFn = async (ctx) => {
 		} else {
 			report(
 				onStep,
-				stepHooks,
+				stepId,
 				"Configure git hooks path",
 				"skipped",
 				"no ci-local dir",
 			);
 		}
 	} catch (e) {
-		report(onStep, stepHooks, "Configure git hooks path", "error", String(e));
+		report(onStep, stepId, "Configure git hooks path", "error", String(e));
 	}
 };

@@ -4,10 +4,11 @@ import type { StepCallback } from "./types.js";
 /**
  * Emit a step progress event via the callback.
  *
- * Replicates verbatim the local `report()` helper that previously lived
- * inside src/commands/init.ts. Behavior MUST stay byte-identical so that
- * tests asserting on emitted steps[] (and the new ordering contract test)
- * keep passing through the PR 1-6 extraction.
+ * Centralized helper extracted during the init.ts split. Functionally
+ * identical to the original inline report function, with an explicit
+ * `void` return type added for type clarity. Behavior MUST stay
+ * compatible so tests asserting on emitted steps[] (and the ordering
+ * contract test) keep passing through the PR 1-6 extraction.
  */
 export function report(
 	onStep: StepCallback,

@@ -62,14 +62,22 @@ export const stepManifest: StepFn = async (ctx) => {
 			await fs.writeJson(path.join(manifestDir, "manifest.json"), manifest, {
 				spaces: 2,
 			});
+			report(
+				onStep,
+				stepId,
+				"Write forge manifest",
+				"done",
+				".javi-forge/manifest.json",
+			);
+		} else {
+			report(
+				onStep,
+				stepId,
+				"Write forge manifest",
+				"done",
+				"dry-run: would write .javi-forge/manifest.json",
+			);
 		}
-		report(
-			onStep,
-			stepId,
-			"Write forge manifest",
-			"done",
-			".javi-forge/manifest.json",
-		);
 	} catch (e) {
 		report(onStep, stepId, "Write forge manifest", "error", String(e));
 	}

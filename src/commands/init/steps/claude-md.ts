@@ -34,6 +34,8 @@ export const stepClaudeMd: StepFn = async (ctx) => {
 					);
 					const content = generateSmartClaudeMd(options, detection);
 					await fs.writeFile(claudeMdPath, content, "utf-8");
+					// detection itself can be null from .catch(() => null) above;
+					// recommendedSkills is always an array if detection succeeds.
 					const skillCount = detection?.recommendedSkills.length ?? 0;
 					report(
 						onStep,

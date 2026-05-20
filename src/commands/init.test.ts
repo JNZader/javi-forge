@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ForgeManifest, InitOptions, InitStep } from "../types/index.js";
+import type { InitOptions, InitStep } from "../types/index.js";
 
 // ── Mock fs-extra ────────────────────────────────────────────────────────────
 vi.mock("fs-extra", () => {
@@ -313,24 +313,6 @@ describe("initProject", () => {
 		);
 		expect(aiStep).toBeDefined();
 		expect(aiStep!.detail).toContain("javi-ai not found");
-	});
-
-	it("reports steps in order via callback", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.endsWith(".git")) return false as never;
-			return true as never;
-		});
-
-		const steps = await collectSteps(makeOptions());
-		const stepIds = steps.map((s) => s.id);
-
-		// First step should be git-init
-		expect(stepIds[0]).toBe("git-init");
-
-		// Manifest should be among the last
-		const manifestIdx = stepIds.lastIndexOf("manifest");
-		expect(manifestIdx).toBeGreaterThan(stepIds.indexOf("git-init"));
 	});
 
 	it("skips dependabot for non-github providers", async () => {

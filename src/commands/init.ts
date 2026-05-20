@@ -1,30 +1,27 @@
 import path from "node:path";
 import fs from "fs-extra";
-import {
-	AGENT_SKILLS_MANIFEST_FILE,
-	LOCAL_AI_TEMPLATE_DIR,
-	SECURITY_HOOKS_DIR,
-	TEMPLATES_DIR,
-} from "../constants.js";
-import { backupIfExists, ensureDirExists } from "../lib/common.js";
+import { AGENT_SKILLS_MANIFEST_FILE } from "../constants.js";
+import { ensureDirExists } from "../lib/common.js";
 import type {
 	AgentSkillsManifest,
 	ForgeManifest,
-	HookProfile,
 	InitOptions,
 } from "../types/index.js";
 import { report } from "./init/report.js";
 import { stepAISync } from "./init/steps/ai-sync.js";
 import { stepCITemplate, stepDependabot } from "./init/steps/ci.js";
 import { stepClaudeMd } from "./init/steps/claude-md.js";
+import { stepCodeGraph } from "./init/steps/code-graph.js";
 import { stepContextDir } from "./init/steps/context-dir.js";
 import { stepDockerDeploy } from "./init/steps/docker-deploy.js";
 import { stepGhagga } from "./init/steps/ghagga.js";
 import { stepGitHooks, stepGitInit } from "./init/steps/git.js";
 import { stepGitignore } from "./init/steps/gitignore.js";
+import { stepLocalAi } from "./init/steps/local-ai.js";
 import { stepMemory } from "./init/steps/memory.js";
 import { stepMock } from "./init/steps/mock.js";
 import { stepSDD } from "./init/steps/sdd.js";
+import { stepHookProfile, stepSecurityHooks } from "./init/steps/security.js";
 import type { StepCallback, StepContext } from "./init/types.js";
 
 /**
@@ -47,7 +44,6 @@ export async function initProject(
 		contextDir,
 		claudeMd,
 		securityHooks,
-		hookProfile,
 		dryRun,
 	} = options;
 
@@ -100,268 +96,16 @@ export async function initProject(
 	await stepDockerDeploy(ctx);
 
 	// ── Step 14: Security hooks scaffold ────────────────────────────────────────
-	const stepSecurity = "security-hooks";
-	report(onStep, stepSecurity, "Scaffold security hooks", "running");
-	try {
-		if (securityHooks) {
-			if (await fs.pathExists(SECURITY_HOOKS_DIR)) {
-				if (!dryRun) {
-					// Copy 6-layer git security hooks into ci-local/hooks/security/
-					const secHooksDest = path.join(
-						projectDir,
-						"ci-local",
-						"hooks",
-						"security",
-					);
-					await ensureDirExists(secHooksDest);
-					const hookFiles = await fs.readdir(SECURITY_HOOKS_DIR);
-					const gitHooks = hookFiles.filter((f) => !f.endsWith(".json"));
-					for (const hook of gitHooks) {
-						const src = path.join(SECURITY_HOOKS_DIR, hook);
-						const dest = path.join(secHooksDest, hook);
-						await fs.copy(src, dest, { overwrite: false });
-						await fs.chmod(dest, 0o755);
-					}
-
-					// Copy runtime security settings (kiteguard-style) to .claude/
-					const settingsSrc = path.join(
-						SECURITY_HOOKS_DIR,
-						"claude-settings-security.json",
-					);
-					if (await fs.pathExists(settingsSrc)) {
-						const claudeDir = path.join(projectDir, ".claude");
-						await ensureDirExists(claudeDir);
-						const settingsDest = path.join(claudeDir, "settings.json");
-						if (!(await fs.pathExists(settingsDest))) {
-							await fs.copy(settingsSrc, settingsDest);
-						}
-					}
-				}
-				report(
-					onStep,
-					stepSecurity,
-					"Scaffold security hooks",
-					"done",
-					dryRun
-						? "dry-run: would scaffold security hooks"
-						: "6 git layers + runtime hooks",
-				);
-			} else {
-				report(
-					onStep,
-					stepSecurity,
-					"Scaffold security hooks",
-					"error",
-					"security-hooks templates not found",
-				);
-			}
-		} else {
-			report(
-				onStep,
-				stepSecurity,
-				"Scaffold security hooks",
-				"skipped",
-				"not selected",
-			);
-		}
-	} catch (e) {
-		report(onStep, stepSecurity, "Scaffold security hooks", "error", String(e));
-	}
+	await stepSecurityHooks(ctx);
 
 	// ── Step 14b: Write hook profile ─────────────────────────────────────────────
-	const stepHookProfile = "hook-profile";
-	report(onStep, stepHookProfile, "Write hook reliability profile", "running");
-	try {
-		if (securityHooks) {
-			if (!dryRun) {
-				const hooksDir = path.join(projectDir, "ci-local", "hooks");
-				await ensureDirExists(hooksDir);
-				const profilePath = path.join(hooksDir, "profile.json");
-				const resolvedProfile: HookProfile = hookProfile ?? "standard";
-				await fs.writeJson(
-					profilePath,
-					{ profile: resolvedProfile },
-					{ spaces: 2 },
-				);
-			}
-			report(
-				onStep,
-				stepHookProfile,
-				"Write hook reliability profile",
-				"done",
-				dryRun
-					? `dry-run: would write profile.json (${hookProfile ?? "standard"})`
-					: `ci-local/hooks/profile.json (${hookProfile ?? "standard"})`,
-			);
-		} else {
-			report(
-				onStep,
-				stepHookProfile,
-				"Write hook reliability profile",
-				"skipped",
-				"security hooks not selected",
-			);
-		}
-	} catch (e) {
-		report(
-			onStep,
-			stepHookProfile,
-			"Write hook reliability profile",
-			"error",
-			String(e),
-		);
-	}
+	await stepHookProfile(ctx);
 
 	// ── Step 15: RepoForge code graph scaffolding ───────────────────────────────
-	const stepGraph = "code-graph";
-	report(onStep, stepGraph, "Scaffold RepoForge code graph", "running");
-	try {
-		if (options.codeGraph) {
-			if (!dryRun) {
-				// 1. Copy .repoforge.yaml config
-				const repoforgeConfigSrc = path.join(
-					TEMPLATES_DIR,
-					"common",
-					"repoforge",
-					"repoforge.yaml",
-				);
-				const repoforgeConfigDest = path.join(projectDir, ".repoforge.yaml");
-				if (!(await fs.pathExists(repoforgeConfigDest))) {
-					await fs.copy(repoforgeConfigSrc, repoforgeConfigDest);
-				}
-
-				// 2. Ensure .repoforge/ output dir exists
-				await ensureDirExists(path.join(projectDir, ".repoforge"));
-
-				// 3. Copy CI workflow for graph generation (GitHub only)
-				if (ciProvider === "github") {
-					const graphWorkflowSrc = path.join(
-						TEMPLATES_DIR,
-						"github",
-						"repoforge-graph.yml",
-					);
-					if (await fs.pathExists(graphWorkflowSrc)) {
-						const graphWorkflowDest = path.join(
-							projectDir,
-							".github",
-							"workflows",
-							"repoforge-graph.yml",
-						);
-						await ensureDirExists(path.dirname(graphWorkflowDest));
-						await backupIfExists(graphWorkflowDest);
-						await fs.copy(graphWorkflowSrc, graphWorkflowDest, {
-							overwrite: false,
-						});
-					}
-				}
-
-				// 4. Copy MCP config snippet for repoforge code intelligence
-				const mcpSnippetSrc = path.join(
-					TEMPLATES_DIR,
-					"common",
-					"repoforge",
-					"mcp-repoforge-snippet.json",
-				);
-				if (await fs.pathExists(mcpSnippetSrc)) {
-					const mcpSnippetDest = path.join(
-						projectDir,
-						".repoforge",
-						"mcp-config-snippet.json",
-					);
-					let content = await fs.readFile(mcpSnippetSrc, "utf-8");
-					content = content.replace(/__PROJECT_NAME__/g, projectName);
-					await fs.writeFile(mcpSnippetDest, content, "utf-8");
-				}
-			}
-			report(
-				onStep,
-				stepGraph,
-				"Scaffold RepoForge code graph",
-				"done",
-				dryRun
-					? "dry-run: would scaffold .repoforge.yaml + CI + MCP"
-					: ".repoforge.yaml + CI + MCP snippet",
-			);
-		} else {
-			report(
-				onStep,
-				stepGraph,
-				"Scaffold RepoForge code graph",
-				"skipped",
-				"not selected",
-			);
-		}
-	} catch (e) {
-		report(
-			onStep,
-			stepGraph,
-			"Scaffold RepoForge code graph",
-			"error",
-			String(e),
-		);
-	}
+	await stepCodeGraph(ctx);
 
 	// ── Step 16: Local AI dev stack ────────────────────────────────────────────
-	const stepLocalAi = "local-ai";
-	report(onStep, stepLocalAi, "Scaffold local AI dev stack", "running");
-	try {
-		if (options.localAi) {
-			if (await fs.pathExists(LOCAL_AI_TEMPLATE_DIR)) {
-				const composeDest = path.join(projectDir, "docker-compose.yml");
-				const envDest = path.join(projectDir, ".env.local-ai");
-				if (!dryRun) {
-					// Copy docker-compose.yml (skip if exists)
-					if (!(await fs.pathExists(composeDest))) {
-						await fs.copy(
-							path.join(LOCAL_AI_TEMPLATE_DIR, "docker-compose.yml"),
-							composeDest,
-						);
-					}
-					// Copy .env.example as .env.local-ai
-					const envSrc = path.join(LOCAL_AI_TEMPLATE_DIR, ".env.example");
-					if (
-						(await fs.pathExists(envSrc)) &&
-						!(await fs.pathExists(envDest))
-					) {
-						await fs.copy(envSrc, envDest);
-					}
-				}
-				report(
-					onStep,
-					stepLocalAi,
-					"Scaffold local AI dev stack",
-					"done",
-					dryRun
-						? "dry-run: would create docker-compose.yml + .env.local-ai"
-						: "docker-compose.yml + .env.local-ai",
-				);
-			} else {
-				report(
-					onStep,
-					stepLocalAi,
-					"Scaffold local AI dev stack",
-					"error",
-					"local-ai template not found",
-				);
-			}
-		} else {
-			report(
-				onStep,
-				stepLocalAi,
-				"Scaffold local AI dev stack",
-				"skipped",
-				"not selected",
-			);
-		}
-	} catch (e) {
-		report(
-			onStep,
-			stepLocalAi,
-			"Scaffold local AI dev stack",
-			"error",
-			String(e),
-		);
-	}
+	await stepLocalAi(ctx);
 
 	// ── Step 17: Generate Agent Skills manifest (skills.json) ─────────────────
 	const stepSkills = "agent-skills";

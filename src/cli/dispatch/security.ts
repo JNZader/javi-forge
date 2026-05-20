@@ -8,11 +8,11 @@
  */
 
 import type { SecurityMode } from "../../commands/security.js";
+import { VALID_SECURITY_ACTIONS } from "../validators.js";
 import type { CLI } from "./types.js";
 
 export async function handleSecurity(cli: CLI): Promise<void> {
 	const securityAction = cli.input[1] as string | undefined;
-	const VALID_SECURITY_ACTIONS = ["baseline", "check", "update", "allowlist"];
 	if (!securityAction || !VALID_SECURITY_ACTIONS.includes(securityAction)) {
 		console.error(
 			"Usage: javi-forge security <baseline|check|update|allowlist>",
@@ -59,7 +59,7 @@ export async function handleSecurity(cli: CLI): Promise<void> {
 			: "low") as "critical" | "high" | "moderate" | "low" | "info",
 		staleDays: cli.flags.staleDays,
 	};
-	const jsonOutput = !!cli.flags.json;
+	const jsonOutput = cli.flags.json;
 
 	try {
 		const result = await runSecurity(

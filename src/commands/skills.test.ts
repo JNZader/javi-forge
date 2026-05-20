@@ -4,10 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("fs-extra", () => {
 	const mockFs = {
 		pathExists: vi.fn(),
-		readFile: vi.fn(),
-		readdir: vi.fn(),
-		readJson: vi.fn(),
-		ensureDir: vi.fn(),
 	};
 	return { default: mockFs, ...mockFs };
 });

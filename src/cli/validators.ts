@@ -28,3 +28,11 @@ export const VALID_MEMORY = [
 	"memory-simple",
 	"none",
 ];
+
+/** Valid action values accepted by the `security` command. */
+export const VALID_SECURITY_ACTIONS = [
+	"baseline",
+	"check",
+	"update",
+	"allowlist",
+];

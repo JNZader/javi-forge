@@ -4,7 +4,6 @@ import { promisify } from "node:util";
 import fs from "fs-extra";
 import {
 	AGENT_SKILLS_MANIFEST_FILE,
-	CI_LOCAL_DIR,
 	FORGE_ROOT,
 	LOCAL_AI_TEMPLATE_DIR,
 	MODULES_DIR,
@@ -27,22 +26,12 @@ import type {
 	ForgeManifest,
 	HookProfile,
 	InitOptions,
-	InitStep,
 } from "../types/index.js";
+import { report } from "./init/report.js";
+import { stepGitHooks, stepGitInit } from "./init/steps/git.js";
+import type { StepCallback, StepContext } from "./init/types.js";
 
 const execFileAsync = promisify(execFile);
-
-type StepCallback = (step: InitStep) => void;
-
-function report(
-	onStep: StepCallback,
-	id: string,
-	label: string,
-	status: InitStep["status"],
-	detail?: string,
-) {
-	onStep({ id, label, status, detail });
-}
 
 /**
  * Main init orchestrator: bootstraps a project with CI, git hooks,
@@ -73,81 +62,15 @@ export async function initProject(
 		await ensureDirExists(projectDir);
 	}
 
+	// Shared context passed to every extracted step. Other steps will be
+	// migrated to this signature in PR 2-6.
+	const ctx: StepContext = { options, projectDir, dryRun, onStep };
+
 	// ── Step 1: Initialize git ────────────────────────────────────────────────
-	const stepGit = "git-init";
-	report(onStep, stepGit, "Initialize git repository", "running");
-	try {
-		const gitDir = path.join(projectDir, ".git");
-		if (!(await fs.pathExists(gitDir))) {
-			if (!dryRun) {
-				await execFileAsync("git", ["init"], { cwd: projectDir });
-			}
-			report(
-				onStep,
-				stepGit,
-				"Initialize git repository",
-				"done",
-				"initialized",
-			);
-		} else {
-			report(
-				onStep,
-				stepGit,
-				"Initialize git repository",
-				"done",
-				"already exists",
-			);
-		}
-	} catch (e) {
-		report(onStep, stepGit, "Initialize git repository", "error", String(e));
-	}
+	await stepGitInit(ctx);
 
 	// ── Step 2: Configure git hooks path ──────────────────────────────────────
-	const stepHooks = "git-hooks";
-	report(onStep, stepHooks, "Configure git hooks path", "running");
-	try {
-		const ciLocalSrc = CI_LOCAL_DIR;
-		const ciLocalDest = path.join(projectDir, "ci-local");
-		if (await fs.pathExists(ciLocalSrc)) {
-			if (!dryRun) {
-				await fs.copy(ciLocalSrc, ciLocalDest, {
-					overwrite: false,
-					errorOnExist: false,
-				});
-				// Set core.hooksPath to ci-local/hooks
-				const hooksDir = path.join(ciLocalDest, "hooks");
-				if (await fs.pathExists(hooksDir)) {
-					// Ensure hooks are executable
-					const hookFiles = await fs.readdir(hooksDir);
-					for (const hook of hookFiles) {
-						await fs.chmod(path.join(hooksDir, hook), 0o755);
-					}
-					await execFileAsync(
-						"git",
-						["config", "core.hooksPath", "ci-local/hooks"],
-						{ cwd: projectDir },
-					);
-				}
-			}
-			report(
-				onStep,
-				stepHooks,
-				"Configure git hooks path",
-				"done",
-				"ci-local/hooks",
-			);
-		} else {
-			report(
-				onStep,
-				stepHooks,
-				"Configure git hooks path",
-				"skipped",
-				"no ci-local dir",
-			);
-		}
-	} catch (e) {
-		report(onStep, stepHooks, "Configure git hooks path", "error", String(e));
-	}
+	await stepGitHooks(ctx);
 
 	// ── Step 3: Copy CI template ──────────────────────────────────────────────
 	const stepCI = "ci-template";

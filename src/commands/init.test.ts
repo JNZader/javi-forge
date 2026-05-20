@@ -994,4 +994,70 @@ describe("initProject", () => {
 		);
 		expect(profileCall).toBeUndefined();
 	});
+
+	// ── Step ordering contract ────────────────────────────────────────────────
+	// Locks the EXACT order of all 19 step IDs emitted by initProject. This
+	// contract MUST stay green through every PR in the init.ts split refactor
+	// (PRs 1-6). If you add/remove/reorder a step, update this test
+	// intentionally — never just to "make it pass".
+	it("emits steps in exact known order", async () => {
+		// .git doesn't exist so git-init reports 'done', not skipped
+		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
+			const s = String(p);
+			if (s.endsWith(".git")) return false as never;
+			return true as never;
+		});
+
+		const steps: InitStep[] = [];
+		await initProject(
+			makeOptions({
+				// Enable every opt-in flag so every step reaches a terminal status
+				memory: "engram",
+				aiSync: true,
+				sdd: true,
+				ghagga: true,
+				mock: true,
+				contextDir: true,
+				claudeMd: true,
+				securityHooks: true,
+				hookProfile: "standard",
+				codeGraph: true,
+				dockerDeploy: true,
+				localAi: true,
+			}),
+			(s) => {
+				steps.push(s);
+			},
+		);
+
+		// Filter to terminal status events (one per step) and assert exact order.
+		const stepIds = steps
+			.filter(
+				(s) =>
+					s.status === "done" || s.status === "skipped" || s.status === "error",
+			)
+			.map((s) => s.id);
+
+		expect(stepIds).toEqual([
+			"git-init",
+			"git-hooks",
+			"ci-template",
+			"gitignore",
+			"dependabot",
+			"memory",
+			"ai-sync",
+			"sdd",
+			"ghagga",
+			"mock",
+			"context-dir",
+			"claude-md",
+			"docker-deploy",
+			"security-hooks",
+			"hook-profile",
+			"code-graph",
+			"local-ai",
+			"agent-skills",
+			"manifest",
+		]);
+	});
 });

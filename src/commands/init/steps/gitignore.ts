@@ -16,8 +16,8 @@ import type { StepFn } from "../types.js";
  */
 export const stepGitignore: StepFn = async (ctx) => {
 	const { projectDir, dryRun, onStep } = ctx;
-	const stepGitignore = "gitignore";
-	report(onStep, stepGitignore, "Generate .gitignore", "running");
+	const stepId = "gitignore";
+	report(onStep, stepId, "Generate .gitignore", "running");
 	try {
 		const templatePath = path.join(FORGE_ROOT, ".gitignore.template");
 		const dest = path.join(projectDir, ".gitignore");
@@ -25,31 +25,13 @@ export const stepGitignore: StepFn = async (ctx) => {
 			if (!dryRun) {
 				await fs.copy(templatePath, dest);
 			}
-			report(
-				onStep,
-				stepGitignore,
-				"Generate .gitignore",
-				"done",
-				"from template",
-			);
+			report(onStep, stepId, "Generate .gitignore", "done", "from template");
 		} else if (await fs.pathExists(dest)) {
-			report(
-				onStep,
-				stepGitignore,
-				"Generate .gitignore",
-				"done",
-				"already exists",
-			);
+			report(onStep, stepId, "Generate .gitignore", "done", "already exists");
 		} else {
-			report(
-				onStep,
-				stepGitignore,
-				"Generate .gitignore",
-				"skipped",
-				"no template",
-			);
+			report(onStep, stepId, "Generate .gitignore", "skipped", "no template");
 		}
 	} catch (e) {
-		report(onStep, stepGitignore, "Generate .gitignore", "error", String(e));
+		report(onStep, stepId, "Generate .gitignore", "error", String(e));
 	}
 };

@@ -1,6 +1,4 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
 import {
 	PLUGIN_ASSET_DIRS,
@@ -20,8 +18,7 @@ import type {
 } from "../types/index.js";
 import { generateAgentSkillsManifest } from "./agent-skills.js";
 import { autoWirePlugins } from "./auto-wire.js";
-
-const execFileAsync = promisify(execFile);
+import { execFileAsync } from "./exec.js";
 
 const KEBAB_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;

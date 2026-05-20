@@ -1,6 +1,5 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
 import { refreshContextDir } from "../lib/context.js";
 import {
@@ -9,9 +8,8 @@ import {
 	openShell,
 	runInContainer,
 } from "../lib/docker.js";
+import { execFileAsync } from "../lib/exec.js";
 import type { Stack } from "../types/index.js";
-
-const execFileAsync = promisify(execFile);
 
 // =============================================================================
 // Types

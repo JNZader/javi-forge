@@ -1,11 +1,6 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { execFileAsync } from "../../../lib/exec.js";
 import { report } from "../report.js";
 import type { StepFn } from "../types.js";
-
-// Duplicate the promisify setup here so the step file is self-contained.
-// A shared lib/exec.ts is deferred to a later cleanup PR.
-const execFileAsync = promisify(execFile);
 
 /**
  * Step 7: AI config sync (delegated to javi-ai).

@@ -1,6 +1,4 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
 import {
 	FORGE_ROOT,
@@ -10,6 +8,7 @@ import {
 } from "../constants.js";
 import { detectStack } from "../lib/common.js";
 import { refreshContextDir } from "../lib/context.js";
+import { execFileAsync } from "../lib/exec.js";
 import { listInstalledPlugins } from "../lib/plugin.js";
 import type {
 	DoctorCheck,
@@ -17,8 +16,6 @@ import type {
 	DoctorSection,
 	ForgeManifest,
 } from "../types/index.js";
-
-const execFileAsync = promisify(execFile);
 
 export type CheckStatus = "ok" | "fail" | "skip";
 

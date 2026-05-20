@@ -3,6 +3,8 @@
  * in parallel during quality scoring. Collects results and aggregates.
  */
 
+import { execFileAsync } from "./exec.js";
+
 // ── Types ──
 
 export type JobStatus = "pending" | "running" | "done" | "error";
@@ -73,10 +75,6 @@ export type JobExecutor = (job: BatchJob) => Promise<BatchJob>;
  */
 export function createShellExecutor(timeoutMs: number = 60_000): JobExecutor {
 	return async (job: BatchJob): Promise<BatchJob> => {
-		const { execFile } = await import("node:child_process");
-		const { promisify } = await import("node:util");
-		const execFileAsync = promisify(execFile);
-
 		job.status = "running";
 		job.startedAt = Date.now();
 

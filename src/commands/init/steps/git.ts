@@ -1,14 +1,9 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
 import { CI_LOCAL_DIR } from "../../../constants.js";
+import { execFileAsync } from "../../../lib/exec.js";
 import { report } from "../report.js";
 import type { StepFn } from "../types.js";
-
-// Duplicate the promisify setup here so the step file is self-contained.
-// A shared lib/exec.ts is deferred to a later cleanup PR.
-const execFileAsync = promisify(execFile);
 
 /**
  * Step 1: Initialize git repository.

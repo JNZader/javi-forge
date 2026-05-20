@@ -1,7 +1,6 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
+import { execFileAsync } from "../lib/exec.js";
 import type {
 	SecurityBaseline,
 	SecurityCheckOptions,
@@ -12,8 +11,6 @@ import type {
 	Stack,
 } from "../types/index.js";
 import { detectCIStack } from "./ci.js";
-
-const execFileAsync = promisify(execFile);
 
 // =============================================================================
 // Types

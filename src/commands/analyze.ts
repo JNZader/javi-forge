@@ -1,8 +1,5 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { execFileAsync } from "../lib/exec.js";
 import type { InitStep } from "../types/index.js";
-
-const execFileAsync = promisify(execFile);
 
 type StepCallback = (step: InitStep) => void;
 

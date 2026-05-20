@@ -15,10 +15,7 @@ import { backupIfExists, ensureDirExists } from "../lib/common.js";
 import { generateContextDir } from "../lib/context.js";
 import { detectProjectStack } from "../lib/stack-detector.js";
 import {
-	generateCIWorkflow,
-	generateDependabotYml,
 	generateDeployWorkflow,
-	getCIDestination,
 	getDeployDestination,
 } from "../lib/template.js";
 import type {
@@ -28,7 +25,10 @@ import type {
 	InitOptions,
 } from "../types/index.js";
 import { report } from "./init/report.js";
+import { stepCITemplate, stepDependabot } from "./init/steps/ci.js";
 import { stepGitHooks, stepGitInit } from "./init/steps/git.js";
+import { stepGitignore } from "./init/steps/gitignore.js";
+import { stepMemory } from "./init/steps/memory.js";
 import type { StepCallback, StepContext } from "./init/types.js";
 
 const execFileAsync = promisify(execFile);
@@ -73,170 +73,16 @@ export async function initProject(
 	await stepGitHooks(ctx);
 
 	// ── Step 3: Copy CI template ──────────────────────────────────────────────
-	const stepCI = "ci-template";
-	report(onStep, stepCI, `Copy ${ciProvider} CI workflow`, "running");
-	try {
-		const ciContent = await generateCIWorkflow(stack, ciProvider);
-		if (ciContent) {
-			const dest = path.join(projectDir, getCIDestination(ciProvider));
-			if (!dryRun) {
-				await backupIfExists(dest);
-				await ensureDirExists(path.dirname(dest));
-				await fs.writeFile(dest, ciContent, "utf-8");
-			}
-			report(
-				onStep,
-				stepCI,
-				`Copy ${ciProvider} CI workflow`,
-				"done",
-				getCIDestination(ciProvider),
-			);
-		} else {
-			report(
-				onStep,
-				stepCI,
-				`Copy ${ciProvider} CI workflow`,
-				"skipped",
-				`no template for ${stack}`,
-			);
-		}
-	} catch (e) {
-		report(
-			onStep,
-			stepCI,
-			`Copy ${ciProvider} CI workflow`,
-			"error",
-			String(e),
-		);
-	}
+	await stepCITemplate(ctx);
 
 	// ── Step 4: Generate .gitignore ───────────────────────────────────────────
-	const stepGitignore = "gitignore";
-	report(onStep, stepGitignore, "Generate .gitignore", "running");
-	try {
-		const templatePath = path.join(FORGE_ROOT, ".gitignore.template");
-		const dest = path.join(projectDir, ".gitignore");
-		if ((await fs.pathExists(templatePath)) && !(await fs.pathExists(dest))) {
-			if (!dryRun) {
-				await fs.copy(templatePath, dest);
-			}
-			report(
-				onStep,
-				stepGitignore,
-				"Generate .gitignore",
-				"done",
-				"from template",
-			);
-		} else if (await fs.pathExists(dest)) {
-			report(
-				onStep,
-				stepGitignore,
-				"Generate .gitignore",
-				"done",
-				"already exists",
-			);
-		} else {
-			report(
-				onStep,
-				stepGitignore,
-				"Generate .gitignore",
-				"skipped",
-				"no template",
-			);
-		}
-	} catch (e) {
-		report(onStep, stepGitignore, "Generate .gitignore", "error", String(e));
-	}
+	await stepGitignore(ctx);
 
 	// ── Step 5: Generate dependabot.yml ───────────────────────────────────────
-	const stepDeps = "dependabot";
-	report(onStep, stepDeps, "Generate dependabot.yml", "running");
-	try {
-		if (ciProvider === "github") {
-			const content = await generateDependabotYml([stack], true);
-			const dest = path.join(projectDir, ".github", "dependabot.yml");
-			if (!dryRun) {
-				await backupIfExists(dest);
-				await ensureDirExists(path.dirname(dest));
-				await fs.writeFile(dest, content, "utf-8");
-			}
-			report(onStep, stepDeps, "Generate dependabot.yml", "done");
-		} else {
-			report(
-				onStep,
-				stepDeps,
-				"Generate dependabot.yml",
-				"skipped",
-				`not needed for ${ciProvider}`,
-			);
-		}
-	} catch (e) {
-		report(onStep, stepDeps, "Generate dependabot.yml", "error", String(e));
-	}
+	await stepDependabot(ctx);
 
 	// ── Step 6: Install memory module ─────────────────────────────────────────
-	const stepMem = "memory";
-	report(onStep, stepMem, `Install memory module: ${memory}`, "running");
-	try {
-		if (memory !== "none") {
-			const moduleSrc = path.join(MODULES_DIR, memory);
-			if (await fs.pathExists(moduleSrc)) {
-				if (!dryRun) {
-					// Copy module files to project
-					const moduleDest = path.join(
-						projectDir,
-						".javi-forge",
-						"modules",
-						memory,
-					);
-					await ensureDirExists(moduleDest);
-					await fs.copy(moduleSrc, moduleDest, {
-						overwrite: false,
-						errorOnExist: false,
-					});
-
-					// If engram, copy .mcp-config-snippet.json to project with placeholder replacement
-					if (memory === "engram") {
-						const snippetSrc = path.join(moduleSrc, ".mcp-config-snippet.json");
-						if (await fs.pathExists(snippetSrc)) {
-							const snippetDest = path.join(
-								projectDir,
-								".mcp-config-snippet.json",
-							);
-							let content = await fs.readFile(snippetSrc, "utf-8");
-							content = content.replace(/__PROJECT_NAME__/g, projectName);
-							await fs.writeFile(snippetDest, content, "utf-8");
-						}
-					}
-				}
-				report(onStep, stepMem, `Install memory module: ${memory}`, "done");
-			} else {
-				report(
-					onStep,
-					stepMem,
-					`Install memory module: ${memory}`,
-					"error",
-					"module not found",
-				);
-			}
-		} else {
-			report(
-				onStep,
-				stepMem,
-				`Install memory module: ${memory}`,
-				"skipped",
-				"none selected",
-			);
-		}
-	} catch (e) {
-		report(
-			onStep,
-			stepMem,
-			`Install memory module: ${memory}`,
-			"error",
-			String(e),
-		);
-	}
+	await stepMemory(ctx);
 
 	// ── Step 7: AI config sync (delegated to javi-ai) ──────────────────────────
 	const stepAI = "ai-sync";

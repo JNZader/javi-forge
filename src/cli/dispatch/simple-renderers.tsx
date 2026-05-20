@@ -9,7 +9,6 @@
  */
 
 import { render } from "ink";
-import type { Result } from "meow";
 import React from "react";
 import type { CIProvider, MemoryOption, Stack } from "../../types/index.js";
 import AnalyzeUI from "../../ui/AnalyzeUI.js";
@@ -18,15 +17,8 @@ import { CIProvider as CIContextProvider } from "../../ui/CIContext.js";
 import Doctor from "../../ui/Doctor.js";
 import LlmsTxt from "../../ui/LlmsTxt.js";
 import Plugin from "../../ui/Plugin.js";
-import type { FLAGS_SCHEMA } from "../help.js";
 import { VALID_CI, VALID_MEMORY, VALID_STACKS } from "../runtime.js";
-
-type CLI = Result<typeof FLAGS_SCHEMA>;
-
-export type RendererCtx = {
-	inkStdin: NodeJS.ReadStream;
-	isCI: boolean;
-};
+import type { CLI, RendererCtx } from "./types.js";
 
 export function handleDoctor(_cli: CLI, ctx: RendererCtx): void {
 	render(

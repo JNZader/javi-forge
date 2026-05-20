@@ -72,9 +72,10 @@ switch (subcommand) {
 		break;
 	}
 
-	case "skills":
+	case "skills": {
 		await handleSkillsCmd(cli, { inkStdin, isCI });
 		break;
+	}
 
 	case "skill": {
 		await handleSkillPublish(cli);

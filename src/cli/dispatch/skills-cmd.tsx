@@ -11,15 +11,11 @@
 
 import path from "node:path";
 import { render } from "ink";
-import type { Result } from "meow";
 import React from "react";
 import AutoSkills from "../../ui/AutoSkills.js";
 import { CIProvider as CIContextProvider } from "../../ui/CIContext.js";
 import Skills from "../../ui/Skills.js";
-import type { FLAGS_SCHEMA } from "../help.js";
-import type { RendererCtx } from "./simple-renderers.js";
-
-type CLI = Result<typeof FLAGS_SCHEMA>;
+import type { CLI, RendererCtx } from "./types.js";
 
 const VALID_SKILLS_ACTIONS = [
 	"doctor",

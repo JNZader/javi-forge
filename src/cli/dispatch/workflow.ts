@@ -7,10 +7,7 @@
  * at the top of this file.
  */
 
-import type { Result } from "meow";
-import type { FLAGS_SCHEMA } from "../help.js";
-
-type CLI = Result<typeof FLAGS_SCHEMA>;
+import type { CLI } from "./types.js";
 
 export async function handleWorkflow(cli: CLI): Promise<void> {
 	const workflowAction = cli.input[1] as string | undefined;

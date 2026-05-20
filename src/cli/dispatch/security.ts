@@ -7,11 +7,8 @@
  * at the top of this file.
  */
 
-import type { Result } from "meow";
 import type { SecurityMode } from "../../commands/security.js";
-import type { FLAGS_SCHEMA } from "../help.js";
-
-type CLI = Result<typeof FLAGS_SCHEMA>;
+import type { CLI } from "./types.js";
 
 export async function handleSecurity(cli: CLI): Promise<void> {
 	const securityAction = cli.input[1] as string | undefined;

@@ -9,15 +9,11 @@
  */
 
 import { render } from "ink";
-import type { Result } from "meow";
 import React from "react";
 import type { CIMode } from "../../commands/ci.js";
 import CI from "../../ui/CI.js";
 import { CIProvider as CIContextProvider } from "../../ui/CIContext.js";
-import type { FLAGS_SCHEMA } from "../help.js";
-import type { RendererCtx } from "./simple-renderers.js";
-
-type CLI = Result<typeof FLAGS_SCHEMA>;
+import type { CLI, RendererCtx } from "./types.js";
 
 export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 	// Sub-command: javi-forge ci init → install git hooks

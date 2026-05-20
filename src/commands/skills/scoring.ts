@@ -5,109 +5,50 @@ import type {
 } from "../../types/index.js";
 import { DEFAULT_REGISTRY_THRESHOLD, DEFAULT_THRESHOLD } from "./constants.js";
 import { estimateTokens, parseSkillFile } from "./parsing.js";
+import { ACTION_VERBS, VAGUE_TERMS } from "./rules.js";
 
-// ── Shared scoring lexicons ─────────────────────────────────────────────────
+// ── Local types ─────────────────────────────────────────────────────────────
 
-/** Vague terms that reduce clarity score */
-export const VAGUE_TERMS = [
-	/\bstuff\b/i,
-	/\bthings?\b/i,
-	/\betc\.?\b/i,
-	/\bmisc\b/i,
-	/\bvarious\b/i,
-	/\bsome\b/i,
-	/\bmaybe\b/i,
-	/\bprobably\b/i,
-];
+type ParsedSkill = {
+	name: string;
+	rules: string[];
+	rawContent: string;
+	triggers: string[];
+};
 
-/** Action verbs that indicate actionable rules */
-export const ACTION_VERBS = [
-	/\buse\b/i,
-	/\bavoid\b/i,
-	/\bprefer\b/i,
-	/\bnever\b/i,
-	/\balways\b/i,
-	/\bmust\b/i,
-	/\bshould\b/i,
-	/\bshall\b/i,
-	/\bensure\b/i,
-	/\bwrite\b/i,
-	/\bcreate\b/i,
-	/\bfollow\b/i,
-	/\bdo not\b/i,
-	/\bapply\b/i,
-	/\bimplement\b/i,
-	/\brun\b/i,
-];
+// ── Dangerous content patterns (private to scoreSafety) ─────────────────────
 
 /** Dangerous patterns in skill content that indicate safety risks */
-const DANGEROUS_PATTERNS: { pattern: RegExp; label: string; weight: number }[] =
-	[
-		{ pattern: /\beval\s*\(/i, label: "eval() usage", weight: 20 },
-		{ pattern: /\bexec\s*\(/i, label: "exec() usage", weight: 15 },
-		{
-			pattern: /\bchild_process\b/i,
-			label: "child_process reference",
-			weight: 10,
-		},
-		{ pattern: /\brm\s+-rf\b/i, label: "rm -rf command", weight: 20 },
-		{
-			pattern: /\bcurl\b.*\|\s*(?:sh|bash)\b/i,
-			label: "curl piped to shell",
-			weight: 25,
-		},
-		{ pattern: /\bsudo\b/i, label: "sudo usage", weight: 15 },
-		{ pattern: /\bchmod\s+777\b/i, label: "chmod 777", weight: 15 },
-		{
-			pattern: /\b(?:password|secret|token|api_key)\s*[:=]\s*['"][^'"]+['"]/i,
-			label: "hardcoded secret",
-			weight: 25,
-		},
-		{
-			pattern: /\b__proto__\b|\bconstructor\s*\[/i,
-			label: "prototype pollution",
-			weight: 20,
-		},
-		{
-			pattern: /\binnerHTML\s*=/i,
-			label: "innerHTML assignment (XSS risk)",
-			weight: 10,
-		},
-		{
-			pattern: /\bdangerouslySetInnerHTML\b/i,
-			label: "dangerouslySetInnerHTML",
-			weight: 10,
-		},
-		{
-			pattern: /\bno[- ]?verify\b.*\bgit\b|\bgit\b.*\bno[- ]?verify\b/i,
-			label: "git --no-verify bypass",
-			weight: 10,
-		},
-		{
-			pattern: /\bforce[- ]?push\b|\bpush\s+--force\b/i,
-			label: "force push instruction",
-			weight: 10,
-		},
-		{
-			pattern: /\bdisable.*(?:eslint|typescript|security)\b/i,
-			label: "linter/security disable",
-			weight: 10,
-		},
-	];
+const DANGEROUS_PATTERNS: { pattern: RegExp; weight: number }[] = [
+	{ pattern: /\beval\s*\(/i, weight: 20 },
+	{ pattern: /\bexec\s*\(/i, weight: 15 },
+	{ pattern: /\bchild_process\b/i, weight: 10 },
+	{ pattern: /\brm\s+-rf\b/i, weight: 20 },
+	{ pattern: /\bcurl\b.*\|\s*(?:sh|bash)\b/i, weight: 25 },
+	{ pattern: /\bsudo\b/i, weight: 15 },
+	{ pattern: /\bchmod\s+777\b/i, weight: 15 },
+	{
+		pattern: /\b(?:password|secret|token|api_key)\s*[:=]\s*['"][^'"]+['"]/i,
+		weight: 25,
+	},
+	{ pattern: /\b__proto__\b|\bconstructor\s*\[/i, weight: 20 },
+	{ pattern: /\binnerHTML\s*=/i, weight: 10 },
+	{ pattern: /\bdangerouslySetInnerHTML\b/i, weight: 10 },
+	{
+		pattern: /\bno[- ]?verify\b.*\bgit\b|\bgit\b.*\bno[- ]?verify\b/i,
+		weight: 10,
+	},
+	{ pattern: /\bforce[- ]?push\b|\bpush\s+--force\b/i, weight: 10 },
+	{ pattern: /\bdisable.*(?:eslint|typescript|security)\b/i, weight: 10 },
+];
 
 // ── Dimension scorers ──────────────────────────────────────────────────────
 
 /**
  * Score completeness (0-100): frontmatter fields, critical rules, structure.
  */
-export function scoreCompleteness(parsed: {
-	name: string;
-	rules: string[];
-	rawContent: string;
-	triggers: string[];
-}): number {
+export function scoreCompleteness(parsed: ParsedSkill): number {
 	let score = 0;
-	const max = 100;
 
 	// Has a name (10 pts)
 	if (parsed.name && parsed.name.length > 0) score += 10;
@@ -129,20 +70,14 @@ export function scoreCompleteness(parsed: {
 	else if (len >= 500) score += 20;
 	else if (len >= 200) score += 10;
 
-	return Math.min(score, max);
+	return Math.min(score, 100);
 }
 
 /**
  * Score clarity (0-100): description quality, rule actionability, no vague terms.
  */
-export function scoreClarity(parsed: {
-	name: string;
-	rules: string[];
-	rawContent: string;
-	triggers: string[];
-}): number {
+export function scoreClarity(parsed: ParsedSkill): number {
 	let score = 0;
-	const max = 100;
 
 	// Trigger description exists and is meaningful (>= 50 chars in raw = 20 pts)
 	if (parsed.rawContent.length >= 50) score += 20;
@@ -178,20 +113,14 @@ export function scoreClarity(parsed: {
 	// Base content score for having structured sections (10 pts)
 	if (/^#+\s/m.test(parsed.rawContent)) score += 10;
 
-	return Math.max(0, Math.min(score, max));
+	return Math.max(0, Math.min(score, 100));
 }
 
 /**
  * Score testability (0-100): Given/When/Then scenarios, specific rules.
  */
-export function scoreTestability(parsed: {
-	name: string;
-	rules: string[];
-	rawContent: string;
-	triggers: string[];
-}): number {
+export function scoreTestability(parsed: ParsedSkill): number {
 	let score = 0;
-	const max = 100;
 
 	// Has Given/When/Then scenarios (40 pts)
 	const gwtMatches = parsed.rawContent.match(
@@ -223,18 +152,13 @@ export function scoreTestability(parsed: {
 	// Has a "Testing" or "Test" section (10 pts)
 	if (/^#+\s.*test/im.test(parsed.rawContent)) score += 10;
 
-	return Math.min(score, max);
+	return Math.min(score, 100);
 }
 
 /**
  * Score token efficiency (0-100): information density (rules per 1000 tokens).
  */
-export function scoreTokenEfficiency(parsed: {
-	name: string;
-	rules: string[];
-	rawContent: string;
-	triggers: string[];
-}): number {
+export function scoreTokenEfficiency(parsed: ParsedSkill): number {
 	const tokens = estimateTokens(parsed.rawContent);
 	if (tokens === 0) return 0;
 
@@ -268,12 +192,7 @@ export function scoreTokenEfficiency(parsed: {
  * Score safety (0-100): absence of dangerous patterns, injection risks, credential leaks.
  * Starts at 100 and deducts for each dangerous pattern found.
  */
-export function scoreSafety(parsed: {
-	name: string;
-	rules: string[];
-	rawContent: string;
-	triggers: string[];
-}): number {
+export function scoreSafety(parsed: ParsedSkill): number {
 	let score = 100;
 
 	for (const { pattern, weight } of DANGEROUS_PATTERNS) {
@@ -300,12 +219,7 @@ export function scoreSafety(parsed: {
  * Score agent readiness (0-100): how well-prepared a skill is for AI agent consumption.
  * Checks for triggers, tool restrictions, examples, structured output, and error handling.
  */
-export function scoreAgentReadiness(parsed: {
-	name: string;
-	rules: string[];
-	rawContent: string;
-	triggers: string[];
-}): number {
+export function scoreAgentReadiness(parsed: ParsedSkill): number {
 	let score = 0;
 
 	// Has triggers for auto-activation (25 pts)

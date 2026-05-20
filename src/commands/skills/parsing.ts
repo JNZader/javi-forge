@@ -22,14 +22,18 @@ export async function parseSkillFile(skillPath: string): Promise<{
 	const raw = await fs.readFile(skillPath, "utf-8");
 	const fm = parseFrontmatter(raw);
 
+	const rawName = fm?.data?.name;
 	const name =
-		(fm?.data?.name as string) ?? path.basename(path.dirname(skillPath));
+		typeof rawName === "string"
+			? rawName
+			: path.basename(path.dirname(skillPath));
 
 	// Extract critical rules — look for "Critical Rules" or numbered list after it
 	const rules = extractCriticalRules(fm?.content ?? raw);
 
 	// Extract trigger keywords from description
-	const description = (fm?.data?.description as string) ?? "";
+	const rawDesc = fm?.data?.description;
+	const description = typeof rawDesc === "string" ? rawDesc : "";
 	const triggers = extractTriggers(description);
 
 	return { name, rules, rawContent: raw, triggers };

@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "fs-extra";
+import { DEFAULT_SKILLS_DIR } from "../commands/skills/constants.js";
 import type { StackDetectionResult } from "./stack-detector.js";
 import { detectProjectStack } from "./stack-detector.js";
 
@@ -26,14 +27,6 @@ export interface AutoInstallOptions {
 	/** If true, skip actually copying files */
 	dryRun?: boolean;
 }
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-const DEFAULT_SKILLS_DIR = path.join(
-	process.env.HOME ?? "~",
-	".claude",
-	"skills",
-);
 
 // ── Core ───────────────────────────────────────────────────────────────────
 

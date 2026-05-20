@@ -4,7 +4,9 @@ import type {
 	SkillBenchmarkResult,
 } from "../../types/index.js";
 import { estimateTokens, parseSkillFile } from "./parsing.js";
-import { ACTION_VERBS, VAGUE_TERMS } from "./scoring.js";
+import { ACTION_VERBS, VAGUE_TERMS } from "./rules.js";
+
+// ── Skill benchmarking ──────────────────────────────────────────────────────
 
 /**
  * Run structural quality benchmark checks against a skill.

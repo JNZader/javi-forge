@@ -5,6 +5,7 @@ import { render } from "ink";
 import meow from "meow";
 import React from "react";
 import { handleCi } from "./cli/dispatch/ci.js";
+import { handleSecurity } from "./cli/dispatch/security.js";
 import {
 	handleAnalyze,
 	handleDoctor,
@@ -12,14 +13,15 @@ import {
 	handleLlmsTxt,
 	handlePlugin,
 } from "./cli/dispatch/simple-renderers.js";
+import { handleSkillPublish } from "./cli/dispatch/skill-publish.js";
 import { handleTdd } from "./cli/dispatch/tdd.js";
+import { handleWorkflow } from "./cli/dispatch/workflow.js";
 import { FLAGS_SCHEMA, HELP_TEXT } from "./cli/help.js";
 import {
 	createInkStdin,
 	detectCI,
 	setupUpdateNotifier,
 } from "./cli/runtime.js";
-import type { SecurityMode } from "./commands/security.js";
 import AutoSkills from "./ui/AutoSkills.js";
 import { CIProvider as CIContextProvider } from "./ui/CIContext.js";
 import Skills from "./ui/Skills.js";
@@ -61,70 +63,7 @@ switch (subcommand) {
 	}
 
 	case "workflow": {
-		const workflowAction = cli.input[1] as string | undefined;
-		const VALID_WORKFLOW_ACTIONS = ["show", "validate", "list"];
-		if (!workflowAction || !VALID_WORKFLOW_ACTIONS.includes(workflowAction)) {
-			console.error("Usage: javi-forge workflow <show|validate|list>");
-			console.error("  show      Render a workflow graph as ASCII");
-			console.error(
-				"  validate  Validate project state against a workflow graph",
-			);
-			console.error(
-				"  list      List available workflows and built-in templates",
-			);
-			console.error("");
-			console.error("  Options:");
-			console.error(
-				"    --template <name>  Use a built-in template (ci-pipeline, release, feature-flow)",
-			);
-			console.error("    <file>             Path to a .dot or .mermaid file");
-			process.exit(1);
-			break;
-		}
-
-		const { runWorkflowShow, runWorkflowValidate, runWorkflowList } =
-			await import("./commands/workflow.js");
-		const workflowTarget = cli.input[2];
-		const workflowTemplate = cli.flags.template || undefined;
-		const onStep = (step: {
-			id: string;
-			label: string;
-			status: string;
-			detail?: string;
-		}) => {
-			const icon =
-				step.status === "done"
-					? "\u2713"
-					: step.status === "error"
-						? "\u2717"
-						: "\u25CB";
-			console.log(`${icon} ${step.label}`);
-			if (step.detail) console.log(`  ${step.detail}`);
-		};
-
-		try {
-			if (workflowAction === "show") {
-				const output = await runWorkflowShow(process.cwd(), onStep, {
-					target: workflowTarget,
-					template: workflowTemplate,
-				});
-				if (output) console.log(`\n${output}`);
-				else process.exit(1);
-			} else if (workflowAction === "validate") {
-				const output = await runWorkflowValidate(process.cwd(), onStep, {
-					target: workflowTarget,
-					template: workflowTemplate,
-				});
-				if (output) console.log(`\n${output}`);
-				else process.exit(1);
-			} else {
-				const output = await runWorkflowList(process.cwd(), onStep);
-				console.log(`\n${output}`);
-			}
-		} catch (e) {
-			console.error(`\u2717 ${e instanceof Error ? e.message : String(e)}`);
-			process.exit(1);
-		}
+		await handleWorkflow(cli);
 		break;
 	}
 
@@ -261,130 +200,12 @@ switch (subcommand) {
 	}
 
 	case "skill": {
-		const skillAction = cli.input[1] as string | undefined;
-
-		if (skillAction !== "publish") {
-			console.error("Usage: javi-forge skill <publish>");
-			console.error(
-				"  publish  Package a skill directory for marketplace distribution",
-			);
-			process.exit(1);
-			break;
-		}
-
-		const targetDir = cli.input[2] ?? process.cwd();
-		const { publishSkill } = await import("./lib/skill-publish.js");
-		const result = await publishSkill({
-			skillDir: path.resolve(targetDir),
-			author: cli.flags.author || undefined,
-			repository: cli.flags.repo || undefined,
-			dryRun: cli.flags.dryRun,
-		});
-
-		if (result.success) {
-			console.log(
-				`\u2713 Published: ${result.manifest?.name}@${result.manifest?.version}`,
-			);
-			console.log(`  plugin.json: ${result.pluginJsonPath}`);
-			if (result.manifest?.tags?.length) {
-				console.log(`  tags: ${result.manifest.tags.join(", ")}`);
-			}
-			if (cli.flags.dryRun) {
-				console.log("  (dry-run: no files written)");
-			}
-		} else {
-			console.error(`\u2717 ${result.error}`);
-			process.exit(1);
-		}
+		await handleSkillPublish(cli);
 		break;
 	}
 
 	case "security": {
-		const securityAction = cli.input[1] as string | undefined;
-		const VALID_SECURITY_ACTIONS = ["baseline", "check", "update", "allowlist"];
-		if (!securityAction || !VALID_SECURITY_ACTIONS.includes(securityAction)) {
-			console.error(
-				"Usage: javi-forge security <baseline|check|update|allowlist>",
-			);
-			console.error(
-				"  baseline   Create security baseline from current audit findings",
-			);
-			console.error(
-				"  check      Check for regressions against baseline (exits non-zero if found)",
-			);
-			console.error(
-				"  update     Re-snapshot baseline (acknowledge current vulns)",
-			);
-			console.error(
-				"  allowlist  Add all current findings to the allowlist (suppress in future checks)",
-			);
-			console.error("");
-			console.error("  Options (check mode):");
-			console.error(
-				"    --min-severity <level>  Only fail on regressions >= level (critical|high|moderate|low|info)",
-			);
-			console.error(
-				"    --stale-days <N>        Warn if baseline older than N days (default: 30)",
-			);
-			console.error(
-				"    --json                  Output result as JSON (for CI integration)",
-			);
-			process.exit(1);
-			break;
-		}
-
-		const { runSecurity } = await import("./commands/security.js");
-		const mode = securityAction as SecurityMode;
-		const rawMinSev = (cli.flags as Record<string, unknown>).minSeverity as
-			| string
-			| undefined;
-		const validSeverities: string[] = [
-			"critical",
-			"high",
-			"moderate",
-			"low",
-			"info",
-		];
-		const checkOptions = {
-			minSeverity: (rawMinSev && validSeverities.includes(rawMinSev)
-				? rawMinSev
-				: "low") as "critical" | "high" | "moderate" | "low" | "info",
-			staleDays: (cli.flags as Record<string, unknown>).staleDays as
-				| number
-				| undefined,
-		};
-		const jsonOutput = !!(cli.flags as Record<string, unknown>).json;
-
-		try {
-			const result = await runSecurity(
-				mode,
-				process.cwd(),
-				(step) => {
-					if (jsonOutput) return; // suppress step output in JSON mode
-					const icon =
-						step.status === "done"
-							? "\u2713"
-							: step.status === "error"
-								? "\u2717"
-								: step.status === "skipped"
-									? "-"
-									: "\u25CB";
-					console.log(`${icon} ${step.label}`);
-					if (step.detail) console.log(`  ${step.detail}`);
-				},
-				checkOptions,
-			);
-
-			if (jsonOutput && result) {
-				console.log(JSON.stringify(result, null, 2));
-			}
-
-			if (mode === "check" && result && result.filteredRegressions.length > 0) {
-				process.exit(1);
-			}
-		} catch {
-			process.exit(1);
-		}
+		await handleSecurity(cli);
 		break;
 	}
 	default: {

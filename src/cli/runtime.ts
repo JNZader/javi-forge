@@ -1,38 +1,19 @@
 /**
- * Runtime utilities for the CLI entry point:
- *   - Validator constants for `init` flags
+ * Runtime adapters for the CLI entry point:
  *   - CI environment detection
  *   - TTY-aware stdin shim for Ink
  *   - update-notifier bootstrap
  *
  * Kept dependency-light: only `node:stream` and `update-notifier`.
- * Heavy runtimes (react, ink, meow, command modules) are NOT imported
- * here — they remain lazy-loaded from `src/index.tsx`.
+ * Heavy command modules (`./commands/*.js`) remain lazy-loaded from the
+ * dispatch handlers themselves. `react`, `ink`, and `meow` are eagerly
+ * imported at the CLI entry script (`src/index.tsx`) — not here.
+ *
+ * Pure-data validator constants live in `./validators.js` (separated to
+ * keep runtime adapters and data tables apart).
  */
 import { PassThrough } from "node:stream";
 import updateNotifier from "update-notifier";
-
-/** Valid `--stack` values accepted by the `init` command. */
-export const VALID_STACKS = [
-	"node",
-	"python",
-	"go",
-	"rust",
-	"java-gradle",
-	"java-maven",
-	"elixir",
-];
-
-/** Valid `--ci` provider values accepted by the `init` command. */
-export const VALID_CI = ["github", "gitlab", "woodpecker"];
-
-/** Valid `--memory` module values accepted by the `init` command. */
-export const VALID_MEMORY = [
-	"engram",
-	"obsidian-brain",
-	"memory-simple",
-	"none",
-];
 
 /** Detects whether the CLI is running in a non-interactive / CI context. */
 export function detectCI(flags: { batch?: boolean }): boolean {

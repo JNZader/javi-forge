@@ -86,6 +86,7 @@ switch (subcommand) {
 		await handleSecurity(cli);
 		break;
 	}
+
 	default: {
 		handleInitDefault(cli, { inkStdin, isCI });
 		break;

@@ -5,6 +5,10 @@
  * when constructing the `meow` parser.
  */
 
+/**
+ * Help banner shown by meow when `--help` is passed or invalid args are supplied.
+ * Multi-line template literal — preserve exact formatting (whitespace is significant).
+ */
 export const HELP_TEXT = `
   Usage
     $ javi-forge [command] [options]

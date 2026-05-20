@@ -45,9 +45,7 @@ export async function handleSecurity(cli: CLI): Promise<void> {
 
 	const { runSecurity } = await import("../../commands/security.js");
 	const mode = securityAction as SecurityMode;
-	const rawMinSev = (cli.flags as Record<string, unknown>).minSeverity as
-		| string
-		| undefined;
+	const rawMinSev = cli.flags.minSeverity;
 	const validSeverities: string[] = [
 		"critical",
 		"high",
@@ -59,11 +57,9 @@ export async function handleSecurity(cli: CLI): Promise<void> {
 		minSeverity: (rawMinSev && validSeverities.includes(rawMinSev)
 			? rawMinSev
 			: "low") as "critical" | "high" | "moderate" | "low" | "info",
-		staleDays: (cli.flags as Record<string, unknown>).staleDays as
-			| number
-			| undefined,
+		staleDays: cli.flags.staleDays,
 	};
-	const jsonOutput = !!(cli.flags as Record<string, unknown>).json;
+	const jsonOutput = !!cli.flags.json;
 
 	try {
 		const result = await runSecurity(

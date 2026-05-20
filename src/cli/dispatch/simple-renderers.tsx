@@ -17,7 +17,7 @@ import { CIProvider as CIContextProvider } from "../../ui/CIContext.js";
 import Doctor from "../../ui/Doctor.js";
 import LlmsTxt from "../../ui/LlmsTxt.js";
 import Plugin from "../../ui/Plugin.js";
-import { VALID_CI, VALID_MEMORY, VALID_STACKS } from "../runtime.js";
+import { VALID_CI, VALID_MEMORY, VALID_STACKS } from "../validators.js";
 import type { CLI, RendererCtx } from "./types.js";
 
 export function handleDoctor(_cli: CLI, ctx: RendererCtx): void {

@@ -343,18 +343,12 @@ describe("ensureImage", () => {
 describe("runInContainer", () => {
 	const projectDir = "/tmp/proj";
 
-	beforeEach(() => {
-		// Stack detection: project has package.json → node
-		fs.pathExists.mockImplementation(async (p: string) =>
-			p.endsWith("package.json"),
-		);
-	});
-
 	it("builds correct docker run args with default options", async () => {
 		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
 
 		const result = await runInContainer({
 			projectDir,
+			image: "javi-forge-ci-node",
 			command: "pnpm test",
 			stream: false,
 		});
@@ -380,6 +374,36 @@ describe("runInContainer", () => {
 		expect(args[args.length - 1]).toBe("pnpm test");
 	});
 
+	it("never performs marker detection — the image comes from the caller", async () => {
+		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
+		await runInContainer({
+			projectDir,
+			image: "javi-forge-ci-python",
+			command: "pytest",
+			stream: false,
+		});
+		// No filesystem probing: resolution happened once, upstream.
+		expect(fs.pathExists).not.toHaveBeenCalled();
+		expect(fs.readFile).not.toHaveBeenCalled();
+		const args = spawnMock.mock.calls[0]?.[1] as string[];
+		expect(args).toContain("javi-forge-ci-python");
+		expect(args).not.toContain("javi-forge-ci-node");
+	});
+
+	it("passes a digest-pinned image through verbatim", async () => {
+		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
+		const pinned =
+			"node:22-slim@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+		await runInContainer({
+			projectDir,
+			image: pinned,
+			command: "node --version",
+			stream: false,
+		});
+		const args = spawnMock.mock.calls[0]?.[1] as string[];
+		expect(args).toContain(pinned);
+	});
+
 	it("uses --mount syntax to avoid colon-in-path attacks", async () => {
 		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
 		// Colon-containing path is legal on Linux but would hijack the `-v`
@@ -387,6 +411,7 @@ describe("runInContainer", () => {
 		const evilDir = "/tmp/a:/etc";
 		await runInContainer({
 			projectDir: evilDir,
+			image: "javi-forge-ci-node",
 			command: "echo x",
 			stream: false,
 		});
@@ -404,6 +429,7 @@ describe("runInContainer", () => {
 		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
 		await runInContainer({
 			projectDir,
+			image: "javi-forge-ci-node",
 			command: "pnpm test",
 			timeout: 120,
 			stream: false,
@@ -416,6 +442,7 @@ describe("runInContainer", () => {
 		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
 		await runInContainer({
 			projectDir,
+			image: "javi-forge-ci-node",
 			command: "ls",
 			user: "root",
 			stream: false,
@@ -435,6 +462,7 @@ describe("runInContainer", () => {
 		);
 		const result = await runInContainer({
 			projectDir,
+			image: "javi-forge-ci-node",
 			command: "echo hi",
 			stream: false,
 		});
@@ -456,6 +484,7 @@ describe("runInContainer", () => {
 
 		const result = await runInContainer({
 			projectDir,
+			image: "javi-forge-ci-node",
 			command: "x",
 			stream: false,
 		});
@@ -465,7 +494,12 @@ describe("runInContainer", () => {
 	it("rejects on process error", async () => {
 		spawnMock.mockReturnValue(fakeProc({ error: new Error("docker missing") }));
 		await expect(
-			runInContainer({ projectDir, command: "x", stream: false }),
+			runInContainer({
+				projectDir,
+				image: "javi-forge-ci-node",
+				command: "x",
+				stream: false,
+			}),
 		).rejects.toThrow(/docker missing/);
 	});
 });
@@ -477,15 +511,9 @@ describe("runInContainer", () => {
 describe("openShell", () => {
 	const projectDir = "/tmp/proj";
 
-	beforeEach(() => {
-		fs.pathExists.mockImplementation(async (p: string) =>
-			p.endsWith("package.json"),
-		);
-	});
-
 	it("builds an interactive docker run with bash -c", async () => {
 		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
-		await openShell(projectDir);
+		await openShell(projectDir, "javi-forge-ci-node");
 
 		const args = spawnMock.mock.calls[0]?.[1] as string[];
 		expect(args).toContain("-it");
@@ -499,48 +527,89 @@ describe("openShell", () => {
 		);
 	});
 
+	it("never performs marker detection", async () => {
+		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
+		await openShell(projectDir, "javi-forge-ci-go");
+		expect(fs.pathExists).not.toHaveBeenCalled();
+		const args = spawnMock.mock.calls[0]?.[1] as string[];
+		expect(args).toContain("javi-forge-ci-go");
+	});
+
 	it("propagates spawn errors", async () => {
 		spawnMock.mockReturnValue(fakeProc({ error: new Error("oops") }));
-		await expect(openShell(projectDir)).rejects.toThrow(/oops/);
+		await expect(openShell(projectDir, "javi-forge-ci-node")).rejects.toThrow(
+			/oops/,
+		);
 	});
 });
 
 // =============================================================================
-// detectStackFromDir (exercised via runInContainer)
+// ensureImage — build-context (Slice B)
 // =============================================================================
 
-describe("detectStackFromDir (via runInContainer)", () => {
-	const projectDir = "/tmp/proj";
+describe("ensureImage — build-context", () => {
+	const contextDir = "/tmp/proj/ci/docker";
 
-	const stackFor = async (marker: string, expectedImage: string) => {
-		fs.pathExists.mockImplementation(async (p: string) => p.endsWith(marker));
-		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
-		await runInContainer({ projectDir, command: "x", stream: false });
-		const args = spawnMock.mock.calls[0]?.[1] as string[];
-		expect(args).toContain(expectedImage);
-	};
-
-	it("detects java-gradle from build.gradle.kts", () =>
-		stackFor("build.gradle.kts", "javi-forge-ci-java-gradle"));
-	it("detects java-gradle from build.gradle", () =>
-		stackFor("build.gradle", "javi-forge-ci-java-gradle"));
-	it("detects java-maven from pom.xml", () =>
-		stackFor("pom.xml", "javi-forge-ci-java-maven"));
-	it("detects node from package.json", () =>
-		stackFor("package.json", "javi-forge-ci-node"));
-	it("detects go from go.mod", () => stackFor("go.mod", "javi-forge-ci-go"));
-	it("detects rust from Cargo.toml", () =>
-		stackFor("Cargo.toml", "javi-forge-ci-rust"));
-	it("detects python from pyproject.toml", () =>
-		stackFor("pyproject.toml", "javi-forge-ci-python"));
-	it("detects python from requirements.txt", () =>
-		stackFor("requirements.txt", "javi-forge-ci-python"));
-
-	it("falls back to node when no marker present", async () => {
+	it("fails closed when the build context has no Dockerfile", async () => {
 		fs.pathExists.mockResolvedValue(false);
+		await expect(
+			ensureImage({
+				stack: "node",
+				buildContext: contextDir,
+				imageTag: "javi-forge-ci-backend",
+			}),
+		).rejects.toThrow(/Dockerfile/);
+		expect(spawnMock).not.toHaveBeenCalled();
+	});
+
+	it("builds deterministically from the context Dockerfile", async () => {
+		fs.pathExists.mockResolvedValue(true);
+		fs.readFile.mockResolvedValue("FROM python:3.12-slim\n");
+		execFileMock.mockImplementation((_cmd, _args, cb) => {
+			(cb as (e: Error | null) => void)(new Error("no image"));
+			return undefined as never;
+		});
 		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
-		await runInContainer({ projectDir, command: "x", stream: false });
-		const args = spawnMock.mock.calls[0]?.[1] as string[];
-		expect(args).toContain("javi-forge-ci-node");
+
+		const name = await ensureImage({
+			stack: "node",
+			buildContext: contextDir,
+			imageTag: "javi-forge-ci-backend",
+		});
+
+		expect(name).toBe("javi-forge-ci-backend");
+		// The context Dockerfile is the source of truth — never overwritten.
+		expect(fs.writeFile).not.toHaveBeenCalled();
+		const callArgs = spawnMock.mock.calls[0]?.[1] as string[];
+		expect(callArgs).toContain("-f");
+		expect(callArgs).toContain(`${contextDir}/Dockerfile`);
+		expect(callArgs).toContain("-t");
+		expect(callArgs).toContain("javi-forge-ci-backend");
+		// The build context directory is the final argument.
+		expect(callArgs[callArgs.length - 1]).toBe(contextDir);
+	});
+
+	it("skips the build when the context Dockerfile hash matches the image label", async () => {
+		const content = "FROM python:3.12-slim\nRUN pip install ruff\n";
+		const crypto = await import("node:crypto");
+		const hash = crypto.createHash("sha256").update(content).digest("hex");
+
+		fs.pathExists.mockResolvedValue(true);
+		fs.readFile.mockResolvedValue(content);
+		execFileMock.mockImplementation((_cmd, _args, cb) => {
+			(
+				cb as (e: Error | null, out: { stdout: string; stderr: string }) => void
+			)(null, { stdout: `${hash}\n`, stderr: "" });
+			return undefined as never;
+		});
+
+		const name = await ensureImage({
+			stack: "node",
+			buildContext: contextDir,
+			imageTag: "javi-forge-ci-backend",
+		});
+
+		expect(name).toBe("javi-forge-ci-backend");
+		expect(spawnMock).not.toHaveBeenCalled();
 	});
 });

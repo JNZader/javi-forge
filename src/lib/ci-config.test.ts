@@ -218,6 +218,20 @@ describe("parseCIConfig — validation errors (fail closed)", () => {
 		);
 	});
 
+	it("rejects runner names that are not docker-tag safe", () => {
+		expectError(
+			"version: 1\nrunners:\n  - name: bad name!\n    stack: node",
+			/name/i,
+		);
+	});
+
+	it("rejects requires entries with shell-unsafe characters", () => {
+		expectError(
+			'version: 1\nrunners:\n  - name: x\n    stack: node\n    requires: ["rm -rf /"]',
+			/requires/i,
+		);
+	});
+
 	it("collects multiple errors in one report", () => {
 		try {
 			parseCIConfig("runners:\n  - directory: /abs");

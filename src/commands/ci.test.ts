@@ -786,3 +786,165 @@ runners:
 		expect(steps.some((s) => s.id.startsWith("lint:"))).toBe(false);
 	});
 });
+
+// =============================================================================
+// runCI — required-tool fail-closed checks (task 5)
+// =============================================================================
+
+describe("runCI — required tools (native)", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-tools-"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	const writeConfig = (yaml: string) =>
+		fs.outputFile(path.join(tmpDir, ".javi-forge", "ci.yaml"), yaml);
+
+	it("fails closed naming runner, tool and environment when a tool is missing", async () => {
+		await writeConfig(`
+version: 1
+runners:
+  - name: backend
+    stack: python
+    directory: .
+    lint: echo should-not-run >> lint-ran.txt
+    requires: [definitely-missing-tool-xyz]
+`);
+
+		const steps: CIStep[] = [];
+		await expect(
+			runCI(
+				{
+					projectDir: tmpDir,
+					mode: "quick",
+					noDocker: true,
+					noGhagga: true,
+					noSecurity: true,
+				},
+				(s) => steps.push({ ...s }),
+			),
+		).rejects.toThrow(/backend[\s\S]*definitely-missing-tool-xyz/);
+
+		const toolsStep = steps.filter((s) => s.id === "tools:backend").at(-1);
+		expect(toolsStep?.status).toBe("error");
+		expect(toolsStep?.detail).toContain("definitely-missing-tool-xyz");
+		// The missing tool must never become a skipped/successful check:
+		// no phase of the failing runner may execute.
+		expect(await fs.pathExists(path.join(tmpDir, "lint-ran.txt"))).toBe(false);
+	});
+
+	it("passes the tool check when all required tools exist", async () => {
+		await writeConfig(`
+version: 1
+runners:
+  - name: backend
+    stack: python
+    lint: echo ok >> lint-ran.txt
+    requires: [bash, sh]
+`);
+
+		const steps: CIStep[] = [];
+		await runCI(
+			{
+				projectDir: tmpDir,
+				mode: "quick",
+				noDocker: true,
+				noGhagga: true,
+				noSecurity: true,
+			},
+			(s) => steps.push({ ...s }),
+		);
+
+		const toolsStep = steps.filter((s) => s.id === "tools:backend").at(-1);
+		expect(toolsStep?.status).toBe("done");
+		expect(await fs.pathExists(path.join(tmpDir, "lint-ran.txt"))).toBe(true);
+	});
+
+	it("checks tools before setup, so setup never runs with a missing tool", async () => {
+		await writeConfig(`
+version: 1
+runners:
+  - name: backend
+    stack: python
+    setup: echo setup-ran >> setup-ran.txt
+    requires: [definitely-missing-tool-xyz]
+`);
+
+		await expect(
+			runCI(
+				{
+					projectDir: tmpDir,
+					mode: "quick",
+					noDocker: true,
+					noGhagga: true,
+					noSecurity: true,
+				},
+				() => {},
+			),
+		).rejects.toThrow(/definitely-missing-tool-xyz/);
+		expect(await fs.pathExists(path.join(tmpDir, "setup-ran.txt"))).toBe(false);
+	});
+
+	it("runs setup commands in the runner directory before lint", async () => {
+		await fs.ensureDir(path.join(tmpDir, "backend"));
+		await writeConfig(`
+version: 1
+runners:
+  - name: backend
+    stack: python
+    directory: backend
+    setup: echo setup > ../phase-order.txt
+    lint: echo lint >> ../phase-order.txt
+`);
+
+		await runCI(
+			{
+				projectDir: tmpDir,
+				mode: "quick",
+				noDocker: true,
+				noGhagga: true,
+				noSecurity: true,
+			},
+			() => {},
+		);
+
+		const order = (
+			await fs.readFile(path.join(tmpDir, "phase-order.txt"), "utf-8")
+		)
+			.trim()
+			.split("\n");
+		expect(order).toEqual(["setup", "lint"]);
+		// setup ran inside backend/ — relative path resolved there
+		expect(
+			await fs.pathExists(path.join(tmpDir, "backend", "phase-order.txt")),
+		).toBe(false);
+	});
+
+	it("ignores build-context in native mode (no image needed)", async () => {
+		await writeConfig(`
+version: 1
+runners:
+  - name: custom
+    stack: node
+    build-context: ./ci/docker
+    lint: echo ok >> lint-ran.txt
+`);
+
+		await runCI(
+			{
+				projectDir: tmpDir,
+				mode: "quick",
+				noDocker: true,
+				noGhagga: true,
+				noSecurity: true,
+			},
+			() => {},
+		);
+		expect(await fs.pathExists(path.join(tmpDir, "lint-ran.txt"))).toBe(true);
+	});
+});

@@ -10,6 +10,7 @@ import {
 import { refreshContextDir } from "../lib/context.js";
 import {
 	ensureImage,
+	getImageName,
 	isDockerAvailable,
 	openShell,
 	runInContainer,
@@ -510,8 +511,9 @@ export async function runCI(
 			throw new Error("--shell requires Docker");
 		}
 		report(onStep, "docker-image", "Building Docker image", "running");
+		let shellImage: string;
 		try {
-			await ensureImage({
+			shellImage = await ensureImage({
 				stack: stackInfo.stackType,
 				javaVersion: stackInfo.javaVersion,
 			});
@@ -526,7 +528,7 @@ export async function runCI(
 			);
 			throw e;
 		}
-		await openShell(projectDir);
+		await openShell(projectDir, shellImage);
 		return;
 	}
 
@@ -604,9 +606,9 @@ export async function runCI(
 	}
 
 	// ── Runner execution ─────────────────────────────────────────────────────────
-	if (resolved.source === "auto") {
+	if (resolved.source === "auto" && primary) {
 		// Legacy zero-config path — unchanged single-stack behavior.
-		await runLegacySteps(stackInfo, {
+		await runLegacySteps(stackInfo, primary, {
 			projectDir,
 			mode,
 			noDocker,
@@ -698,6 +700,7 @@ interface RunnerStepContext {
 /** Legacy zero-config execution — identical to the pre-mixed-stack behavior. */
 async function runLegacySteps(
 	stackInfo: CIStackInfo,
+	runner: ResolvedRunner,
 	ctx: RunnerStepContext,
 ): Promise<void> {
 	const { projectDir, mode, noDocker, timeout, onStep } = ctx;
@@ -706,7 +709,7 @@ async function runLegacySteps(
 		const stepLint = "lint";
 		report(onStep, stepLint, `Lint: ${stackInfo.lintCmd}`, "running");
 		try {
-			await runStep(stackInfo.lintCmd, projectDir, noDocker, timeout);
+			await runStep(stackInfo.lintCmd, projectDir, noDocker, timeout, runner);
 			report(onStep, stepLint, "Lint passed", "done");
 		} catch (e) {
 			report(onStep, stepLint, "Lint failed", "error", String(e));
@@ -725,6 +728,7 @@ async function runLegacySteps(
 				projectDir,
 				noDocker,
 				timeout,
+				runner,
 				"root",
 			);
 			report(onStep, stepCompile, "Compile passed", "done");
@@ -738,7 +742,7 @@ async function runLegacySteps(
 		const stepTest = "test";
 		report(onStep, stepTest, `Test: ${stackInfo.testCmd}`, "running");
 		try {
-			await runStep(stackInfo.testCmd, projectDir, noDocker, timeout);
+			await runStep(stackInfo.testCmd, projectDir, noDocker, timeout, runner);
 			report(onStep, stepTest, "Tests passed", "done");
 		} catch (e) {
 			report(onStep, stepTest, "Tests failed", "error", String(e));
@@ -752,8 +756,10 @@ interface ConfiguredRunnerContext extends RunnerStepContext {
 }
 
 /**
- * Execute one configured runner: per-runner image, then setup/lint/compile/
- * test/security commands in order, inside the runner's working directory.
+ * Execute one configured runner: resolve the image (default stack image,
+ * explicit/digest-pinned image, or deterministic build-context build),
+ * verify required tools fail-closed, then run setup/lint/compile/test/
+ * security commands in order, inside the runner's working directory.
  * Any failure aborts the whole run — nothing is ever skipped silently.
  */
 async function runConfiguredRunner(
@@ -762,40 +768,91 @@ async function runConfiguredRunner(
 ): Promise<void> {
 	const { projectDir, mode, noDocker, noSecurity, timeout, onStep } = ctx;
 
+	// ── Image resolution (Docker mode only) ────────────────────────────────────
+	let imageName: string | undefined;
 	if (!noDocker) {
 		const stepImage = `docker-image:${runner.name}`;
-		if (runner.buildContext) {
-			// Fail closed: build contexts are resolved and validated here, but
-			// building them is Slice B (docker.ts runInContainer refactor).
-			const message = `runner "${runner.name}": build-context is not supported yet (Slice B) — use image or the default stack image`;
-			report(onStep, stepImage, `Image for ${runner.name}`, "error", message);
-			throw new Error(message);
-		}
-		if (runner.image) {
-			report(
-				onStep,
-				stepImage,
-				`Using configured image ${runner.image}`,
-				"done",
-			);
-		} else {
-			report(
-				onStep,
-				stepImage,
-				`Building image for ${runner.name} (${runner.stack})`,
-				"running",
-			);
-			try {
-				await ensureImage({
+		try {
+			if (runner.buildContext) {
+				report(
+					onStep,
+					stepImage,
+					`Building image for ${runner.name} from ${runner.buildContext}`,
+					"running",
+				);
+				imageName = await ensureImage({
+					stack: runner.stack,
+					buildContext: path.resolve(projectDir, runner.buildContext),
+					imageTag: `javi-forge-ci-${runner.name}`,
+				});
+			} else if (runner.image) {
+				// Explicit image (digest pins pass through verbatim).
+				imageName = runner.image;
+				report(
+					onStep,
+					stepImage,
+					`Using configured image ${runner.image}`,
+					"done",
+				);
+			} else {
+				report(
+					onStep,
+					stepImage,
+					`Building image for ${runner.name} (${runner.stack})`,
+					"running",
+				);
+				imageName = await ensureImage({
 					stack: runner.stack,
 					javaVersion: runner.javaVersion,
 				});
-				report(onStep, stepImage, "Docker image ready", "done");
-			} catch (e) {
-				report(onStep, stepImage, "Building Docker image", "error", String(e));
-				throw e;
+			}
+			if (!runner.image) {
+				report(onStep, stepImage, `Docker image ready (${imageName})`, "done");
+			}
+		} catch (e) {
+			report(onStep, stepImage, "Building Docker image", "error", String(e));
+			throw e;
+		}
+	}
+
+	// ── Required tools (fail closed, before any phase) ─────────────────────────
+	if (runner.requiredTools.length > 0) {
+		const stepTools = `tools:${runner.name}`;
+		const envDesc = noDocker
+			? `native environment (directory "${runner.directory}")`
+			: `image ${imageName}`;
+		report(
+			onStep,
+			stepTools,
+			`Checking required tools [${runner.name}]: ${runner.requiredTools.join(", ")}`,
+			"running",
+		);
+		for (const tool of runner.requiredTools) {
+			try {
+				await runStep(
+					`command -v ${tool}`,
+					projectDir,
+					noDocker,
+					timeout,
+					runner,
+					undefined,
+					imageName,
+				);
+			} catch {
+				const message =
+					`runner "${runner.name}": required tool "${tool}" not found in ${envDesc} — ` +
+					"install it in the runner image/environment or remove it from requires";
+				report(
+					onStep,
+					stepTools,
+					`Missing required tool [${runner.name}]: ${tool}`,
+					"error",
+					message,
+				);
+				throw new Error(message);
 			}
 		}
+		report(onStep, stepTools, `Required tools OK [${runner.name}]`, "done");
 	}
 
 	const phases: Array<{
@@ -839,7 +896,15 @@ async function runConfiguredRunner(
 				"running",
 			);
 			try {
-				await runStep(cmd, projectDir, noDocker, timeout, phase.user, runner);
+				await runStep(
+					cmd,
+					projectDir,
+					noDocker,
+					timeout,
+					runner,
+					phase.user,
+					imageName,
+				);
 				report(
 					onStep,
 					stepId,
@@ -865,12 +930,13 @@ async function runStep(
 	projectDir: string,
 	noDocker: boolean,
 	timeout: number,
+	runner: ResolvedRunner,
 	user?: string,
-	runner?: ResolvedRunner,
+	imageOverride?: string,
 ): Promise<void> {
 	if (noDocker) {
-		// Run natively, in the runner's working directory when configured.
-		const cwd = runner ? path.join(projectDir, runner.directory) : projectDir;
+		// Run natively, in the runner's working directory.
+		const cwd = path.join(projectDir, runner.directory);
 		await new Promise<void>((resolve, reject) => {
 			const proc = spawn("bash", ["-c", command], {
 				cwd,
@@ -885,21 +951,21 @@ async function runStep(
 			proc.on("error", reject);
 		});
 	} else {
-		// The resolved runner pins stack/image and working directory; Docker
-		// only falls back to marker detection when no runner is provided
-		// (legacy callers). Slice B removes that fallback entirely.
+		// The image is always resolved upstream (per-runner ensureImage,
+		// explicit config image, or the default per-stack image). Docker
+		// receives it verbatim and never re-detects anything.
+		const image = imageOverride ?? runner.image ?? getImageName(runner.stack);
 		const workdir =
-			runner && runner.directory !== "."
+			runner.directory !== "."
 				? `/home/runner/work/${runner.directory}`
 				: "/home/runner/work";
 		const result = await runInContainer({
 			projectDir,
+			image,
 			command: `cd ${workdir} && ${command}`,
 			timeout,
 			stream: true,
 			user,
-			stack: runner?.stack,
-			image: runner?.image,
 		});
 		if (result.exitCode !== 0) {
 			throw new Error(`Command failed with exit code ${result.exitCode}`);

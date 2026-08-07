@@ -87,6 +87,12 @@ const VALID_STACKS: readonly string[] = [
 export const CI_STACKS = VALID_STACKS;
 
 const TOP_LEVEL_FIELDS = new Set(["version", "runners"]);
+
+/** Runner names become docker image tags — keep them tag-safe. */
+const RUNNER_NAME_RE = /^[a-zA-Z0-9_][a-zA-Z0-9._-]*$/;
+
+/** Required tools are checked via `command -v <tool>` — no shell metachars. */
+const TOOL_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._+~-]*$/;
 const RUNNER_FIELDS = new Set([
 	"name",
 	"stack",
@@ -162,6 +168,12 @@ function validateRunner(
 			path: `${base}.name`,
 			message: "name is required and must be a non-empty string",
 		});
+	} else if (!RUNNER_NAME_RE.test(name.trim())) {
+		errors.push({
+			path: `${base}.name`,
+			message:
+				"name must start with a letter, digit or underscore and contain only [a-zA-Z0-9._-] (it is used as a docker image tag)",
+		});
 	}
 
 	const stack = raw.stack;
@@ -230,6 +242,20 @@ function validateRunner(
 		});
 	}
 
+	const requires = normalizeStringList(
+		raw.requires,
+		`${base}.requires`,
+		errors,
+	);
+	for (const tool of requires) {
+		if (!TOOL_NAME_RE.test(tool)) {
+			errors.push({
+				path: `${base}.requires`,
+				message: `requires entry "${tool}" has unsafe characters — expected a plain tool name like python, ruff or node`,
+			});
+		}
+	}
+
 	// If anything failed, the caller discards all runners (fail closed).
 	return {
 		name: typeof name === "string" ? name.trim() : "",
@@ -242,7 +268,7 @@ function validateRunner(
 		build: normalizeCommands(raw.build, `${base}.build`, errors),
 		test: normalizeCommands(raw.test, `${base}.test`, errors),
 		security: normalizeCommands(raw.security, `${base}.security`, errors),
-		requires: normalizeStringList(raw.requires, `${base}.requires`, errors),
+		requires,
 	};
 }
 

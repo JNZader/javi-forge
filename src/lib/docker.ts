@@ -12,6 +12,12 @@ import { execFileAsync } from "./exec.js";
 export interface DockerRunOptions {
 	/** Absolute path to mount as /home/runner/work */
 	projectDir: string;
+	/**
+	 * Pre-resolved image from the CI runner (required). Passed through
+	 * verbatim, including digest pins (`name@sha256:...`). runInContainer
+	 * never performs marker detection — resolution happens once, upstream.
+	 */
+	image: string;
 	/** Command to run inside the container */
 	command: string;
 	/** Timeout in seconds (default: 600) */
@@ -20,17 +26,6 @@ export interface DockerRunOptions {
 	stream?: boolean;
 	/** Override the user to run as inside the container (default: runner) */
 	user?: string;
-	/**
-	 * Pre-resolved stack from the CI runner. When provided, no marker
-	 * detection is performed. Omit only for legacy callers (Slice B removes
-	 * the fallback entirely).
-	 */
-	stack?: Stack;
-	/**
-	 * Pre-resolved image from the CI runner config. Takes precedence over
-	 * the per-stack default image.
-	 */
-	image?: string;
 }
 
 export interface DockerRunResult {
@@ -45,6 +40,14 @@ export interface DockerImageOptions {
 	javaVersion?: string;
 	/** Directory where Dockerfiles are stored (defaults to package-bundled dir) */
 	dockerfilesDir?: string;
+	/**
+	 * Custom build context directory (must contain a Dockerfile, which is
+	 * the source of truth and is never overwritten). Mutually exclusive
+	 * with dockerfilesDir.
+	 */
+	buildContext?: string;
+	/** Image tag for build-context builds (default: derived from the stack) */
+	imageTag?: string;
 }
 
 // =============================================================================
@@ -150,26 +153,51 @@ export async function isDockerAvailable(): Promise<boolean> {
  * Ensure a CI Docker image exists and is up-to-date.
  * Rebuilds only if the Dockerfile content has changed (hash-based staleness check).
  * Returns the image name.
+ *
+ * Two modes:
+ *   - per-stack (default): the Dockerfile is generated/managed by javi-forge
+ *   - build-context: the configured context directory provides its own
+ *     Dockerfile (source of truth, never overwritten); fails closed if
+ *     the Dockerfile is missing.
  */
 export async function ensureImage(
 	options: DockerImageOptions,
 ): Promise<string> {
-	const { stack, javaVersion, dockerfilesDir } = options;
-	const imageName = getImageName(stack);
+	const { stack, javaVersion, dockerfilesDir, buildContext, imageTag } =
+		options;
 
-	// Resolve Dockerfile path
-	const dockerDir =
-		dockerfilesDir ??
-		path.join(
-			path.dirname(new URL(import.meta.url).pathname),
-			"../../ci-local/docker",
-		);
-	const dockerfilePath = path.join(dockerDir, `${stack}.Dockerfile`);
+	let imageName: string;
+	let dockerfilePath: string;
+	let contextDir: string;
 
-	// Write Dockerfile if it doesn't exist yet (first run)
-	if (!(await fs.pathExists(dockerfilePath))) {
-		await fs.ensureDir(dockerDir);
-		await fs.writeFile(dockerfilePath, getDockerfileContent(stack), "utf-8");
+	if (buildContext) {
+		imageName = imageTag ?? getImageName(stack);
+		dockerfilePath = path.join(buildContext, "Dockerfile");
+		contextDir = buildContext;
+		// Fail closed: a build context without a Dockerfile is a config error,
+		// never something to silently work around.
+		if (!(await fs.pathExists(dockerfilePath))) {
+			throw new Error(
+				`build-context "${buildContext}" has no Dockerfile — ` +
+					"add one or use image/stack defaults instead",
+			);
+		}
+	} else {
+		imageName = getImageName(stack);
+		const dockerDir =
+			dockerfilesDir ??
+			path.join(
+				path.dirname(new URL(import.meta.url).pathname),
+				"../../ci-local/docker",
+			);
+		dockerfilePath = path.join(dockerDir, `${stack}.Dockerfile`);
+		contextDir = dockerDir;
+
+		// Write Dockerfile if it doesn't exist yet (first run)
+		if (!(await fs.pathExists(dockerfilePath))) {
+			await fs.ensureDir(dockerDir);
+			await fs.writeFile(dockerfilePath, getDockerfileContent(stack), "utf-8");
+		}
 	}
 
 	// Staleness check: compare Dockerfile hash with the one embedded in the image label
@@ -204,11 +232,15 @@ export async function ensureImage(
 		imageName,
 	];
 
-	if (javaVersion && (stack === "java-gradle" || stack === "java-maven")) {
+	if (
+		!buildContext &&
+		javaVersion &&
+		(stack === "java-gradle" || stack === "java-maven")
+	) {
 		buildArgs.push("--build-arg", `JAVA_VERSION=${javaVersion}`);
 	}
 
-	buildArgs.push(dockerDir);
+	buildArgs.push(contextDir);
 
 	await new Promise<void>((resolve, reject) => {
 		const proc = spawn("docker", buildArgs, { stdio: "inherit" });
@@ -235,12 +267,18 @@ export async function ensureImage(
 export async function runInContainer(
 	options: DockerRunOptions,
 ): Promise<DockerRunResult> {
-	const { projectDir, command, timeout = 600, stream = true, user } = options;
-	// Prefer the pre-resolved runner's image/stack; marker detection is only
-	// a fallback for legacy callers and must not override a resolved runner.
-	const imageName =
-		options.image ??
-		getImageName(options.stack ?? (await detectStackFromDir(projectDir)));
+	const {
+		projectDir,
+		image,
+		command,
+		timeout = 600,
+		stream = true,
+		user,
+	} = options;
+	// The image is always pre-resolved by the caller (resolveCIRunners →
+	// ensureImage or an explicit/digest-pinned config image). No marker
+	// detection happens on this path — ever.
+	const imageName = image;
 
 	const isInteractive = process.stdin.isTTY && stream;
 	// Use --mount instead of -v: the -v form parses the value as a single
@@ -294,10 +332,13 @@ export async function runInContainer(
 
 /**
  * Open an interactive shell inside the CI container.
+ * The image must be pre-resolved by the caller (no marker detection here).
  */
-export async function openShell(projectDir: string): Promise<void> {
-	const stack = await detectStackFromDir(projectDir);
-	const imageName = getImageName(stack);
+export async function openShell(
+	projectDir: string,
+	image: string,
+): Promise<void> {
+	const imageName = image;
 
 	await new Promise<void>((resolve, reject) => {
 		const proc = spawn(
@@ -324,27 +365,4 @@ export async function openShell(projectDir: string): Promise<void> {
 		proc.on("close", () => resolve());
 		proc.on("error", reject);
 	});
-}
-
-// =============================================================================
-// Internal helpers
-// =============================================================================
-
-async function detectStackFromDir(projectDir: string): Promise<Stack> {
-	if (await fs.pathExists(path.join(projectDir, "build.gradle.kts")))
-		return "java-gradle";
-	if (await fs.pathExists(path.join(projectDir, "build.gradle")))
-		return "java-gradle";
-	if (await fs.pathExists(path.join(projectDir, "pom.xml")))
-		return "java-maven";
-	if (await fs.pathExists(path.join(projectDir, "package.json"))) return "node";
-	if (await fs.pathExists(path.join(projectDir, "go.mod"))) return "go";
-	if (await fs.pathExists(path.join(projectDir, "Cargo.toml"))) return "rust";
-	if (
-		(await fs.pathExists(path.join(projectDir, "pyproject.toml"))) ||
-		(await fs.pathExists(path.join(projectDir, "requirements.txt"))) ||
-		(await fs.pathExists(path.join(projectDir, "setup.py")))
-	)
-		return "python";
-	return "node"; // fallback
 }

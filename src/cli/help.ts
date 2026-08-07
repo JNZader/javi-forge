@@ -69,6 +69,10 @@ export const HELP_TEXT = `
     --quick         Lint + compile only (fast, for pre-commit)
     --shell         Open interactive shell in CI container
     --detect        Show detected stack and exit
+    --config PATH   Load ordered CI runners from a versioned config file
+                    (default discovery: .javi-forge/ci.yaml)
+    --stack STACK   Force a single explicit stack (single-stack repos only —
+                    insufficient for hybrid repos; use --config instead)
     --no-docker     Run commands natively (no Docker)
     --no-ci-ghagga  Skip GHAGGA review
     --no-security   Skip Semgrep security scan
@@ -109,6 +113,7 @@ export const FLAGS_SCHEMA = {
 	quick: { type: "boolean", default: false },
 	shell: { type: "boolean", default: false },
 	detect: { type: "boolean", default: false },
+	config: { type: "string", default: "" },
 	docker: { type: "boolean", default: true },
 	ciGhagga: { type: "boolean", default: true },
 	security: { type: "boolean", default: true },

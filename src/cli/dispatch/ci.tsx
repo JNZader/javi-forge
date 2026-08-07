@@ -47,6 +47,8 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 				noGhagga={!cli.flags.ciGhagga}
 				noSecurity={!cli.flags.security}
 				timeout={cli.flags.timeout}
+				config={cli.flags.config || undefined}
+				stack={cli.flags.stack || undefined}
 			/>
 		</CIContextProvider>,
 		{ stdin: ctx.inkStdin },

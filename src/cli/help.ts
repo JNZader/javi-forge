@@ -93,6 +93,7 @@ export const HELP_TEXT = `
     $ javi-forge ci --no-ci-ghagga --no-security
     $ javi-forge ci --no-docker
     $ javi-forge ci --shell
+    $ javi-forge ci --config .javi-forge/ci.yaml
     $ javi-forge analyze
     $ javi-forge doctor
     $ javi-forge plugin add mapbox/agent-skills

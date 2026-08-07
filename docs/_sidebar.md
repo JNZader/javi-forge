@@ -1,6 +1,7 @@
 - [Home](/)
 - [Getting Started](getting-started.md)
 - [Commands](commands.md)
+- [CI Runners (mixed-stack)](ci-runners.md)
 - [Templates](templates.md)
 - [CI Providers](ci-providers.md)
 - [Memory](memory.md)

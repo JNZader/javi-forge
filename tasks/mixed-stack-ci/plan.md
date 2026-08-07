@@ -76,9 +76,9 @@ Docker execution must not re-detect the stack.
 | 3 | Resolve auto-detected or configured runners once in `src/commands/ci.ts` | 1-2 | done (Slice A) |
 | 4 | Refactor `src/lib/docker.ts` so `runInContainer()` accepts the resolved runner/image/build context | 3 | done (Slice B) |
 | 5 | Add dependency setup and required-tool fail-closed checks per runner | 3-4 | done (Slice B) |
-| 6 | Add Node + Python mixed-repository unit and integration fixtures | 1-5 | pending |
-| 7 | Add hook integration coverage proving a failing runner blocks push | 5-6 | pending |
-| 8 | Document single-stack overrides, mixed config, custom images, and migration | 1-7 | pending |
+| 6 | Add Node + Python mixed-repository unit and integration fixtures | 1-5 | done (Slice C) |
+| 7 | Add hook integration coverage proving a failing runner blocks push | 5-6 | done (Slice C) |
+| 8 | Document single-stack overrides, mixed config, custom images, and migration | 1-7 | done (Slice C) |
 | 9 | Validate the fix against Consorcio Canalero without `--no-verify` | 1-8 | pending |
 | 10 | Release the fix and remove the audited incident workaround from normal workflow | 9 | pending |
 

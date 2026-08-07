@@ -26,4 +26,9 @@ describe("help / FLAGS_SCHEMA — CI runner options", () => {
 		expect(ciSection).toContain("--stack");
 		expect(ciSection.toLowerCase()).toMatch(/hybrid/);
 	});
+
+	it("shows a --config usage example", () => {
+		const examples = HELP_TEXT.split("Examples")[1] ?? "";
+		expect(examples).toContain("ci --config");
+	});
 });

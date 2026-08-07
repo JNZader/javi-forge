@@ -48,6 +48,40 @@ npx javi-forge init --dry-run --project-name app --stack node --ci github --batc
 
 ---
 
+## ci
+
+Run the local CI simulation (lint + compile + test + security + ghagga).
+Single-stack repositories need no configuration — the stack is auto-detected
+from marker files. Hybrid repositories declare ordered runners in
+`.javi-forge/ci.yaml` (see [CI Runners](ci-runners.md)).
+
+```bash
+javi-forge ci                                  # full run (Docker)
+javi-forge ci --quick                          # lint + compile only
+javi-forge ci --detect                         # show resolved runners and exit
+javi-forge ci --stack python                   # force one stack (single-stack repos only)
+javi-forge ci --config .javi-forge/ci.yaml     # explicit runner config
+javi-forge ci --no-docker                      # run natively
+```
+
+### Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--quick` | boolean | `false` | Lint + compile only (used by the pre-commit hook) |
+| `--shell` | boolean | `false` | Open an interactive shell in the CI container |
+| `--detect` | boolean | `false` | Show resolved stack/runners and exit |
+| `--config` | string | `.javi-forge/ci.yaml` if present | Versioned mixed-runner config |
+| `--stack` | string | — | Explicit single-stack override (insufficient for hybrid repos) |
+| `--no-docker` | boolean | `false` | Run commands natively |
+| `--no-ci-ghagga` | boolean | `false` | Skip GHAGGA review |
+| `--no-security` | boolean | `false` | Skip Semgrep scan |
+| `--timeout` | number | `600` | Per-step timeout in seconds |
+
+`--config` and `--stack` are mutually exclusive (rejected as ambiguous).
+
+---
+
 ## ci init
 
 Install git hooks directly into `.git/hooks/` without copying files into the project. This is the **recommended approach for existing repositories**.

@@ -133,6 +133,43 @@ npx javi-forge security check
 npx javi-forge llms-txt
 ```
 
+### Mixed-stack CI (hybrid repositories)
+
+By default `ci` auto-detects a **single** stack from marker files — zero
+config, unchanged for single-stack repos. Hybrid repositories (e.g. Node
+frontend + Python backend) declare every toolchain in a versioned config,
+`.javi-forge/ci.yaml`:
+
+```yaml
+version: 1
+runners:
+  - name: backend
+    stack: python
+    directory: backend
+    setup: pip install -r requirements.txt
+    lint: ruff check .
+    test: pytest
+    requires: [python3, ruff, pytest]
+  - name: frontend
+    stack: node
+    lint: pnpm run lint
+    test: pnpm run test
+    requires: [node, pnpm]
+```
+
+Runners execute in order, each in its own directory and image, and every
+`requires` tool is verified fail-closed before any phase runs — a missing
+tool aborts with an explicit error instead of a skipped check. Custom
+images, digest pinning (`image: name@sha256:…`) and custom
+`build-context` Dockerfiles are supported.
+
+- `javi-forge ci --config <path>` — load explicit runners
+- `javi-forge ci --stack python` — force a single stack (single-stack
+  repos only; insufficient for hybrid repos)
+
+Full guide: [docs/ci-runners.md](docs/ci-runners.md) (config reference,
+migration from auto-detection, troubleshooting, trust boundary).
+
 ### CLI Flags
 
 | Flag | Type | Default | Description |

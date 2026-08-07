@@ -20,6 +20,17 @@ export interface DockerRunOptions {
 	stream?: boolean;
 	/** Override the user to run as inside the container (default: runner) */
 	user?: string;
+	/**
+	 * Pre-resolved stack from the CI runner. When provided, no marker
+	 * detection is performed. Omit only for legacy callers (Slice B removes
+	 * the fallback entirely).
+	 */
+	stack?: Stack;
+	/**
+	 * Pre-resolved image from the CI runner config. Takes precedence over
+	 * the per-stack default image.
+	 */
+	image?: string;
 }
 
 export interface DockerRunResult {
@@ -225,8 +236,11 @@ export async function runInContainer(
 	options: DockerRunOptions,
 ): Promise<DockerRunResult> {
 	const { projectDir, command, timeout = 600, stream = true, user } = options;
-	const stack = await detectStackFromDir(projectDir);
-	const imageName = getImageName(stack);
+	// Prefer the pre-resolved runner's image/stack; marker detection is only
+	// a fallback for legacy callers and must not override a resolved runner.
+	const imageName =
+		options.image ??
+		getImageName(options.stack ?? (await detectStackFromDir(projectDir)));
 
 	const isInteractive = process.stdin.isTTY && stream;
 	// Use --mount instead of -v: the -v form parses the value as a single

@@ -83,6 +83,9 @@ const VALID_STACKS: readonly string[] = [
 	"elixir",
 ];
 
+/** Stacks accepted by the CI config schema and the --stack override. */
+export const CI_STACKS = VALID_STACKS;
+
 const TOP_LEVEL_FIELDS = new Set(["version", "runners"]);
 const RUNNER_FIELDS = new Set([
 	"name",

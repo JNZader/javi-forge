@@ -1,6 +1,12 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import fs from "fs-extra";
+import {
+	CI_STACKS,
+	type CIRunnerConfig,
+	findCIConfig,
+	loadCIConfig,
+} from "../lib/ci-config.js";
 import { refreshContextDir } from "../lib/context.js";
 import {
 	ensureImage,
@@ -28,6 +34,10 @@ export interface CIOptions {
 	noSecurity?: boolean;
 	/** Timeout in seconds for each Docker step (default: 600) */
 	timeout?: number;
+	/** Explicit CI config path (--config). Default: .javi-forge/ci.yaml if present */
+	config?: string;
+	/** Explicit single-stack override (--stack). Insufficient for hybrid repos */
+	stack?: string;
 }
 
 export type CIStepStatus = "pending" | "running" | "done" | "error" | "skipped";
@@ -199,6 +209,216 @@ async function buildCICommands(
 }
 
 // =============================================================================
+// Runner resolution (single resolution point — Docker never re-detects)
+// =============================================================================
+
+/**
+ * Immutable runner produced by resolveCIRunners(). Later stages (Docker
+ * execution, required-tool checks) receive this object and must not
+ * re-detect anything from filesystem markers.
+ */
+export interface ResolvedRunner {
+	name: string;
+	stack: Stack;
+	buildTool: string;
+	javaVersion: string;
+	/** Working directory relative to the project root */
+	directory: string;
+	/** Explicit container image (skips the default per-stack image) */
+	image?: string;
+	/** Docker build context directory (execution lands in Slice B) */
+	buildContext?: string;
+	setupCmds: readonly string[];
+	lintCmds: readonly string[];
+	compileCmds: readonly string[];
+	testCmds: readonly string[];
+	securityCmds: readonly string[];
+	requiredTools: readonly string[];
+}
+
+export type RunnerSource = "auto" | "config" | "stack-override";
+
+export interface ResolvedRunners {
+	readonly source: RunnerSource;
+	readonly runners: readonly ResolvedRunner[];
+}
+
+export interface ResolveRunnerOptions {
+	/** Explicit config path (--config). Wins over default discovery */
+	config?: string;
+	/** Explicit single-stack override (--stack) */
+	stack?: string;
+}
+
+function freezeRunner(runner: {
+	name: string;
+	stack: Stack;
+	buildTool: string;
+	javaVersion: string;
+	directory: string;
+	image?: string;
+	buildContext?: string;
+	setupCmds: string[];
+	lintCmds: string[];
+	compileCmds: string[];
+	testCmds: string[];
+	securityCmds: string[];
+	requiredTools: string[];
+}): ResolvedRunner {
+	return Object.freeze({
+		...runner,
+		setupCmds: Object.freeze([...runner.setupCmds]),
+		lintCmds: Object.freeze([...runner.lintCmds]),
+		compileCmds: Object.freeze([...runner.compileCmds]),
+		testCmds: Object.freeze([...runner.testCmds]),
+		securityCmds: Object.freeze([...runner.securityCmds]),
+		requiredTools: Object.freeze([...runner.requiredTools]),
+	});
+}
+
+function freezeRunners(
+	source: RunnerSource,
+	runners: ResolvedRunner[],
+): ResolvedRunners {
+	return Object.freeze({ source, runners: Object.freeze(runners) });
+}
+
+/** Build-tool heuristic for a known stack in a given directory. */
+async function detectBuildTool(stack: Stack, dir: string): Promise<string> {
+	switch (stack) {
+		case "node":
+			if (await fs.pathExists(path.join(dir, "pnpm-lock.yaml"))) return "pnpm";
+			if (await fs.pathExists(path.join(dir, "yarn.lock"))) return "yarn";
+			return "npm";
+		case "python":
+			if (await fs.pathExists(path.join(dir, "uv.lock"))) return "uv";
+			if (await fs.pathExists(path.join(dir, "poetry.lock"))) return "poetry";
+			return "pip";
+		case "java-gradle":
+			return "gradle";
+		case "java-maven":
+			return "mvn";
+		case "go":
+			return "go";
+		case "rust":
+			return "cargo";
+		default:
+			return "";
+	}
+}
+
+function toList(command: string | null): string[] {
+	return command ? [command] : [];
+}
+
+async function resolveConfiguredRunner(
+	projectDir: string,
+	config: CIRunnerConfig,
+): Promise<ResolvedRunner> {
+	const runnerDir = path.join(projectDir, config.directory);
+	const buildTool = await detectBuildTool(config.stack, runnerDir);
+	const defaults = await buildCICommands(config.stack, buildTool, runnerDir);
+	return freezeRunner({
+		name: config.name,
+		stack: config.stack,
+		buildTool,
+		javaVersion: "21",
+		directory: config.directory,
+		image: config.image,
+		buildContext: config.buildContext,
+		setupCmds: config.setup,
+		lintCmds: config.lint.length > 0 ? config.lint : toList(defaults.lintCmd),
+		compileCmds:
+			config.build.length > 0 ? config.build : toList(defaults.compileCmd),
+		testCmds: config.test.length > 0 ? config.test : toList(defaults.testCmd),
+		securityCmds: config.security,
+		requiredTools: config.requires,
+	});
+}
+
+async function resolveExplicitStackRunner(
+	projectDir: string,
+	stack: Stack,
+): Promise<ResolvedRunner> {
+	const buildTool = await detectBuildTool(stack, projectDir);
+	const defaults = await buildCICommands(stack, buildTool, projectDir);
+	return freezeRunner({
+		name: stack,
+		stack,
+		buildTool,
+		javaVersion: "21",
+		directory: ".",
+		setupCmds: [],
+		lintCmds: toList(defaults.lintCmd),
+		compileCmds: toList(defaults.compileCmd),
+		testCmds: toList(defaults.testCmd),
+		securityCmds: [],
+		requiredTools: [],
+	});
+}
+
+/**
+ * Resolve the ordered runner list exactly once per CI run.
+ *
+ * Precedence (fail closed on ambiguity):
+ *   1. --config <path> (or discovered .javi-forge/ci.yaml) → configured runners
+ *   2. --stack <stack> → single explicit runner (single-stack repos only)
+ *   3. otherwise → single auto-detected runner (zero-config default)
+ */
+export async function resolveCIRunners(
+	projectDir: string,
+	options: ResolveRunnerOptions = {},
+): Promise<ResolvedRunners> {
+	const { config, stack } = options;
+
+	if (config && stack) {
+		throw new Error(
+			"Ambiguous CI options: --config and --stack cannot be used together. " +
+				"Use --config for hybrid repositories.",
+		);
+	}
+
+	if (stack) {
+		if (!CI_STACKS.includes(stack)) {
+			throw new Error(
+				`Unknown stack "${stack}". Valid stacks: ${CI_STACKS.join(", ")}`,
+			);
+		}
+		return freezeRunners("stack-override", [
+			await resolveExplicitStackRunner(projectDir, stack as Stack),
+		]);
+	}
+
+	const configPath = config ?? (await findCIConfig(projectDir));
+	if (configPath) {
+		const ciConfig = await loadCIConfig(configPath);
+		const runners: ResolvedRunner[] = [];
+		for (const runnerConfig of ciConfig.runners) {
+			runners.push(await resolveConfiguredRunner(projectDir, runnerConfig));
+		}
+		return freezeRunners("config", runners);
+	}
+
+	// Zero-config default: single auto-detected runner (unchanged behavior).
+	const info = await detectCIStack(projectDir);
+	return freezeRunners("auto", [
+		freezeRunner({
+			name: info.stackType,
+			stack: info.stackType,
+			buildTool: info.buildTool,
+			javaVersion: info.javaVersion,
+			directory: ".",
+			setupCmds: [],
+			lintCmds: toList(info.lintCmd),
+			compileCmds: toList(info.compileCmd),
+			testCmds: toList(info.testCmd),
+			securityCmds: [],
+			requiredTools: [],
+		}),
+	]);
+}
+
+// =============================================================================
 // GHAGGA check
 // =============================================================================
 
@@ -225,6 +445,21 @@ function report(
 	onStep({ id, label, status, detail });
 }
 
+/** Detect-step label: legacy format for auto, explicit otherwise. */
+function describeRunners(resolved: ResolvedRunners): string {
+	const first = resolved.runners[0];
+	if (resolved.source === "auto" && first) {
+		return `Stack: ${first.stack} (${first.buildTool})`;
+	}
+	if (resolved.source === "stack-override" && first) {
+		return `Stack: ${first.stack} (${first.buildTool}, --stack override)`;
+	}
+	const summary = resolved.runners
+		.map((r) => `${r.name} (${r.stack})`)
+		.join(", ");
+	return `Config: ${resolved.runners.length} runner(s) — ${summary}`;
+}
+
 export async function runCI(
 	options: CIOptions,
 	onStep: CIStepCallback,
@@ -238,22 +473,32 @@ export async function runCI(
 		timeout = 600,
 	} = options;
 
-	// ── Detect stack ────────────────────────────────────────────────────────────
+	// ── Resolve runners (once — nothing downstream re-detects) ─────────────────
 	const stepDetect = "detect";
 	report(onStep, stepDetect, "Detecting stack", "running");
-	let stackInfo: CIStackInfo;
+	let resolved: ResolvedRunners;
 	try {
-		stackInfo = await detectCIStack(projectDir);
-		report(
-			onStep,
-			stepDetect,
-			`Stack: ${stackInfo.stackType} (${stackInfo.buildTool})`,
-			"done",
-		);
+		resolved = await resolveCIRunners(projectDir, {
+			config: options.config,
+			stack: options.stack,
+		});
+		report(onStep, stepDetect, describeRunners(resolved), "done");
 	} catch (e) {
 		report(onStep, stepDetect, "Detecting stack", "error", String(e));
 		throw e;
 	}
+
+	// Legacy single-runner view for the zero-config auto path. Keeping this
+	// shape guarantees single-stack repositories behave exactly as before.
+	const primary = resolved.runners[0];
+	const stackInfo: CIStackInfo = {
+		stackType: primary?.stack ?? "node",
+		buildTool: primary?.buildTool ?? "npm",
+		javaVersion: primary?.javaVersion ?? "21",
+		lintCmd: primary?.lintCmds[0] ?? null,
+		compileCmd: primary?.compileCmds[0] ?? null,
+		testCmd: primary?.testCmds[0] ?? null,
+	};
 
 	// ── Detect mode ─────────────────────────────────────────────────────────────
 	if (mode === "detect") return;
@@ -302,23 +547,26 @@ export async function runCI(
 		}
 		report(onStep, stepDocker, "Docker available", "done");
 
-		// Build image
-		const stepImage = "docker-image";
-		report(
-			onStep,
-			stepImage,
-			`Building image for ${stackInfo.stackType}`,
-			"running",
-		);
-		try {
-			await ensureImage({
-				stack: stackInfo.stackType,
-				javaVersion: stackInfo.javaVersion,
-			});
-			report(onStep, stepImage, "Docker image ready", "done");
-		} catch (e) {
-			report(onStep, stepImage, "Building Docker image", "error", String(e));
-			throw e;
+		// Build image (auto path only — configured runners ensure their own
+		// image inside the runner loop)
+		if (resolved.source === "auto") {
+			const stepImage = "docker-image";
+			report(
+				onStep,
+				stepImage,
+				`Building image for ${stackInfo.stackType}`,
+				"running",
+			);
+			try {
+				await ensureImage({
+					stack: stackInfo.stackType,
+					javaVersion: stackInfo.javaVersion,
+				});
+				report(onStep, stepImage, "Docker image ready", "done");
+			} catch (e) {
+				report(onStep, stepImage, "Building Docker image", "error", String(e));
+				throw e;
+			}
 		}
 	}
 
@@ -355,50 +603,28 @@ export async function runCI(
 		);
 	}
 
-	// ── Lint ─────────────────────────────────────────────────────────────────────
-	if (stackInfo.lintCmd) {
-		const stepLint = "lint";
-		report(onStep, stepLint, `Lint: ${stackInfo.lintCmd}`, "running");
-		try {
-			await runStep(stackInfo.lintCmd, projectDir, noDocker, timeout);
-			report(onStep, stepLint, "Lint passed", "done");
-		} catch (e) {
-			report(onStep, stepLint, "Lint failed", "error", String(e));
-			throw e;
-		}
-	}
-
-	// ── Compile ──────────────────────────────────────────────────────────────────
-	if (stackInfo.compileCmd) {
-		const stepCompile = "compile";
-		report(onStep, stepCompile, `Compile: ${stackInfo.compileCmd}`, "running");
-		try {
-			// Run as root inside the container to rm/build output dirs owned by any host user,
-			// then chown back to runner so subsequent test steps can read the output.
-			await runStep(
-				stackInfo.compileCmd,
+	// ── Runner execution ─────────────────────────────────────────────────────────
+	if (resolved.source === "auto") {
+		// Legacy zero-config path — unchanged single-stack behavior.
+		await runLegacySteps(stackInfo, {
+			projectDir,
+			mode,
+			noDocker,
+			timeout,
+			onStep,
+		});
+	} else {
+		// Configured (or --stack override) runners execute in declared order,
+		// each in its own working directory.
+		for (const runner of resolved.runners) {
+			await runConfiguredRunner(runner, {
 				projectDir,
+				mode,
 				noDocker,
+				noSecurity,
 				timeout,
-				"root",
-			);
-			report(onStep, stepCompile, "Compile passed", "done");
-		} catch (e) {
-			report(onStep, stepCompile, "Compile failed", "error", String(e));
-			throw e;
-		}
-	}
-
-	// ── Test (full mode only) ────────────────────────────────────────────────────
-	if (mode === "full" && stackInfo.testCmd) {
-		const stepTest = "test";
-		report(onStep, stepTest, `Test: ${stackInfo.testCmd}`, "running");
-		try {
-			await runStep(stackInfo.testCmd, projectDir, noDocker, timeout);
-			report(onStep, stepTest, "Tests passed", "done");
-		} catch (e) {
-			report(onStep, stepTest, "Tests failed", "error", String(e));
-			throw e;
+				onStep,
+			});
 		}
 	}
 
@@ -461,18 +687,193 @@ export async function runCI(
 // Step runners
 // =============================================================================
 
+interface RunnerStepContext {
+	projectDir: string;
+	mode: CIMode;
+	noDocker: boolean;
+	timeout: number;
+	onStep: CIStepCallback;
+}
+
+/** Legacy zero-config execution — identical to the pre-mixed-stack behavior. */
+async function runLegacySteps(
+	stackInfo: CIStackInfo,
+	ctx: RunnerStepContext,
+): Promise<void> {
+	const { projectDir, mode, noDocker, timeout, onStep } = ctx;
+
+	if (stackInfo.lintCmd) {
+		const stepLint = "lint";
+		report(onStep, stepLint, `Lint: ${stackInfo.lintCmd}`, "running");
+		try {
+			await runStep(stackInfo.lintCmd, projectDir, noDocker, timeout);
+			report(onStep, stepLint, "Lint passed", "done");
+		} catch (e) {
+			report(onStep, stepLint, "Lint failed", "error", String(e));
+			throw e;
+		}
+	}
+
+	if (stackInfo.compileCmd) {
+		const stepCompile = "compile";
+		report(onStep, stepCompile, `Compile: ${stackInfo.compileCmd}`, "running");
+		try {
+			// Run as root inside the container to rm/build output dirs owned by any host user,
+			// then chown back to runner so subsequent test steps can read the output.
+			await runStep(
+				stackInfo.compileCmd,
+				projectDir,
+				noDocker,
+				timeout,
+				"root",
+			);
+			report(onStep, stepCompile, "Compile passed", "done");
+		} catch (e) {
+			report(onStep, stepCompile, "Compile failed", "error", String(e));
+			throw e;
+		}
+	}
+
+	if (mode === "full" && stackInfo.testCmd) {
+		const stepTest = "test";
+		report(onStep, stepTest, `Test: ${stackInfo.testCmd}`, "running");
+		try {
+			await runStep(stackInfo.testCmd, projectDir, noDocker, timeout);
+			report(onStep, stepTest, "Tests passed", "done");
+		} catch (e) {
+			report(onStep, stepTest, "Tests failed", "error", String(e));
+			throw e;
+		}
+	}
+}
+
+interface ConfiguredRunnerContext extends RunnerStepContext {
+	noSecurity: boolean;
+}
+
+/**
+ * Execute one configured runner: per-runner image, then setup/lint/compile/
+ * test/security commands in order, inside the runner's working directory.
+ * Any failure aborts the whole run — nothing is ever skipped silently.
+ */
+async function runConfiguredRunner(
+	runner: ResolvedRunner,
+	ctx: ConfiguredRunnerContext,
+): Promise<void> {
+	const { projectDir, mode, noDocker, noSecurity, timeout, onStep } = ctx;
+
+	if (!noDocker) {
+		const stepImage = `docker-image:${runner.name}`;
+		if (runner.buildContext) {
+			// Fail closed: build contexts are resolved and validated here, but
+			// building them is Slice B (docker.ts runInContainer refactor).
+			const message = `runner "${runner.name}": build-context is not supported yet (Slice B) — use image or the default stack image`;
+			report(onStep, stepImage, `Image for ${runner.name}`, "error", message);
+			throw new Error(message);
+		}
+		if (runner.image) {
+			report(
+				onStep,
+				stepImage,
+				`Using configured image ${runner.image}`,
+				"done",
+			);
+		} else {
+			report(
+				onStep,
+				stepImage,
+				`Building image for ${runner.name} (${runner.stack})`,
+				"running",
+			);
+			try {
+				await ensureImage({
+					stack: runner.stack,
+					javaVersion: runner.javaVersion,
+				});
+				report(onStep, stepImage, "Docker image ready", "done");
+			} catch (e) {
+				report(onStep, stepImage, "Building Docker image", "error", String(e));
+				throw e;
+			}
+		}
+	}
+
+	const phases: Array<{
+		id: string;
+		label: string;
+		cmds: readonly string[];
+		user?: string;
+		skip: boolean;
+	}> = [
+		{ id: "setup", label: "Setup", cmds: runner.setupCmds, skip: false },
+		{ id: "lint", label: "Lint", cmds: runner.lintCmds, skip: false },
+		{
+			id: "compile",
+			label: "Compile",
+			cmds: runner.compileCmds,
+			user: "root",
+			skip: false,
+		},
+		{
+			id: "test",
+			label: "Test",
+			cmds: runner.testCmds,
+			skip: mode !== "full",
+		},
+		{
+			id: "security",
+			label: "Security",
+			cmds: runner.securityCmds,
+			skip: mode !== "full" || noSecurity,
+		},
+	];
+
+	for (const phase of phases) {
+		if (phase.skip) continue;
+		const stepId = `${phase.id}:${runner.name}`;
+		for (const cmd of phase.cmds) {
+			report(
+				onStep,
+				stepId,
+				`${phase.label} [${runner.name}]: ${cmd}`,
+				"running",
+			);
+			try {
+				await runStep(cmd, projectDir, noDocker, timeout, phase.user, runner);
+				report(
+					onStep,
+					stepId,
+					`${phase.label} [${runner.name}] passed`,
+					"done",
+				);
+			} catch (e) {
+				report(
+					onStep,
+					stepId,
+					`${phase.label} [${runner.name}] failed`,
+					"error",
+					String(e),
+				);
+				throw e;
+			}
+		}
+	}
+}
+
 async function runStep(
 	command: string,
 	projectDir: string,
 	noDocker: boolean,
 	timeout: number,
 	user?: string,
+	runner?: ResolvedRunner,
 ): Promise<void> {
 	if (noDocker) {
-		// Run natively
+		// Run natively, in the runner's working directory when configured.
+		const cwd = runner ? path.join(projectDir, runner.directory) : projectDir;
 		await new Promise<void>((resolve, reject) => {
 			const proc = spawn("bash", ["-c", command], {
-				cwd: projectDir,
+				cwd,
 				stdio: "inherit",
 				env: { ...process.env, CI: "true" },
 			});
@@ -484,12 +885,21 @@ async function runStep(
 			proc.on("error", reject);
 		});
 	} else {
+		// The resolved runner pins stack/image and working directory; Docker
+		// only falls back to marker detection when no runner is provided
+		// (legacy callers). Slice B removes that fallback entirely.
+		const workdir =
+			runner && runner.directory !== "."
+				? `/home/runner/work/${runner.directory}`
+				: "/home/runner/work";
 		const result = await runInContainer({
 			projectDir,
-			command: `cd /home/runner/work && ${command}`,
+			command: `cd ${workdir} && ${command}`,
 			timeout,
 			stream: true,
 			user,
+			stack: runner?.stack,
+			image: runner?.image,
 		});
 		if (result.exitCode !== 0) {
 			throw new Error(`Command failed with exit code ${result.exitCode}`);

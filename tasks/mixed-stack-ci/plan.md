@@ -74,8 +74,8 @@ Docker execution must not re-detect the stack.
 | 1 | Define the versioned mixed-runner config schema and validation errors | — | done (Slice A) |
 | 2 | Extend CI CLI options with `--config` and a functional `--stack` override | 1 | done (Slice A) |
 | 3 | Resolve auto-detected or configured runners once in `src/commands/ci.ts` | 1-2 | done (Slice A) |
-| 4 | Refactor `src/lib/docker.ts` so `runInContainer()` accepts the resolved runner/image/build context | 3 | pending |
-| 5 | Add dependency setup and required-tool fail-closed checks per runner | 3-4 | pending |
+| 4 | Refactor `src/lib/docker.ts` so `runInContainer()` accepts the resolved runner/image/build context | 3 | done (Slice B) |
+| 5 | Add dependency setup and required-tool fail-closed checks per runner | 3-4 | done (Slice B) |
 | 6 | Add Node + Python mixed-repository unit and integration fixtures | 1-5 | pending |
 | 7 | Add hook integration coverage proving a failing runner blocks push | 5-6 | pending |
 | 8 | Document single-stack overrides, mixed config, custom images, and migration | 1-7 | pending |

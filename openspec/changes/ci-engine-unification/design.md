@@ -248,7 +248,21 @@ Mutation testing: Stryker mutates `src/constants.ts`, so the new `HOOK_ASSETS_DI
 
 ## Coverage Guard (R4)
 
-MEASURED baseline (`coverage/clover.xml`, current `main`): **3256 statements, 3001 covered = 92.2%** (conditionals 1723/2070 = 83.2%). Deleting ~52 fully covered lines moves global line coverage from `3001/3256` to `2949/3204` = 92.04% — a delta of **≈ −0.13pp**, comfortably inside the `−0.5pp` guard and far above the 85/80 floors. Branch count is NET NEGATIVE: −1 executor fork (`source==="auto"`), −2 image fallbacks (`?? runner.image ?? getImageName`), +1 naming selection, +1 image invariant, both directly tested. Slice 1 lands coverage on the currently-0% prologue `ensureImage` try/catch (ci.ts:562-571) and the auto Docker leaf, so the net is UP. Procedure: record `pnpm test:coverage` numbers at the end of slice 1 as the baseline; slice 2 must land `>= baseline − 0.5pp` and `>= 85/80`. Thresholds are never lowered.
+MEASURED baseline — re-measured during the slice-1 apply by running `pnpm test:coverage` on both trees. The figures quoted in the design phase came from a STALE `coverage/clover.xml` and were wrong; these are the real ones:
+
+| Tree | Lines | Branches |
+| --- | --- | --- |
+| `main` | 3265 / 3725 = **87.65%** | 1880 / 2411 = **77.97%** |
+| slice 1 (this branch) | 3291 / 3725 = **88.34%** | 1902 / 2411 = **78.88%** |
+
+Two facts this exposes, both pre-existing and neither caused by this change:
+
+- `pnpm test:coverage` FAILS on `main` — the configured 80% branch threshold in `vitest.config.ts` is unmet (77.97%). The gap is pre-existing debt, tracked in `docs/BACKLOG.md` (COV-1), out of scope here.
+- `pnpm validate` does NOT run coverage, so those thresholds gate nothing in CI or in the hooks today (COV-2).
+
+Slice 1 moves both numbers UP (+0.69pp lines, +0.91pp branches) by landing the previously-0% prologue `ensureImage` try/catch (ci.ts:562-571) and the auto Docker leaf.
+
+**Slice-2 coverage guard = NO REGRESSION vs the slice-1 measured baseline**: `pnpm test:coverage` must report `>= 88.34%` lines and `>= 78.88%` branches. The `vitest.config.ts` thresholds are left EXACTLY as they are — not raised, not lowered. Structurally the collapse is branch-negative: −1 executor fork (`source==="auto"`), −2 image fallbacks (`?? runner.image ?? getImageName`), +1 naming selection, +1 image invariant, both directly tested.
 
 ## Non-Goals (explicit)
 

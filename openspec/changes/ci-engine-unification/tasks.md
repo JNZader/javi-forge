@@ -154,6 +154,23 @@ construction at v1. The gate is satisfied (no hook has zero variants), so 3b can
 proceed: every hook installed by any released `ci init` classifies as
 `legacy-v0`, never `foreign`.
 
+#### SLICE-3a COVERAGE READINGS — informative, NOT a gate
+
+Same machine, same session, same command (`npx vitest run --coverage`),
+developer box with Docker available, base measured from the NAMED branch `main`
+(never a detached HEAD — `crash-recovery.test.ts` asserts the real branch name).
+`coverage/clover.xml` project totals:
+
+| Tree | Lines | Branches |
+|---|---|---|
+| base — `main` @ `c4ea116` (slice-2 merge) | 3290/3707 = 88.751% | 1910/2412 = 79.187% |
+| head — slice 3a @ `c6ddeaa` | 3291/3708 = 88.754% | 1910/2412 = 79.187% |
+
+Delta: lines +0.003pp, branches equal (identical counts) — `head >= base` on
+both AS PERCENTAGES, gate PASSED. Both runs exit non-zero on the configured 80%
+branch threshold (COV-1, pre-existing on `main`), which is orthogonal to this
+gate. `pnpm validate` exits 0 on the head (77 files, 1310 passed, 4 skipped).
+
 **3a scope note**: `installCIHooks` still reads the inline `*_HOOK` constants.
 Switching it to `HOOK_ASSETS_DIR` and deleting the constants is task 3.20, which
 this file assigns to 3b; 3a is additive only (assets + manifest + constant +

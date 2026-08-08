@@ -34,26 +34,36 @@ type HookManifest = Record<HookName, HookManifestEntry>;
 /**
  * Snapshot of the manifest as it was RELEASED. It is part of the binding
  * forward-maintenance rule (design.md D6): any PR that changes the bytes of a
- * hook asset must append the outgoing body hash to `historical[]` and update
- * this snapshot in the SAME PR. Updating only the manifest fails the guard
- * below, so a body change cannot silently brick `ci init` for the installed
- * fleet (R2).
+ * hook asset must APPEND the outgoing body hash to `historical[]` and APPEND
+ * the same hash to this snapshot list in the SAME PR. `historical[]` is
+ * APPEND-ONLY: the guard asserts the manifest list still STARTS WITH the full
+ * released list, so erasing, replacing or reordering a released hash — even
+ * while "updating the snapshot" — requires an explicit deletion in this file
+ * that a reviewer sees. A count can be bumped honestly while a hash is
+ * silently rewritten; a list cannot (JDA6-001/JDB6-001). This is the R2
+ * fleet-brick guard: every released hash must remain recognizable forever.
  */
 const RELEASED_SNAPSHOT: Record<
 	HookName,
-	{ sha256: string; historicalCount: number }
+	{ sha256: string; historical: string[] }
 > = {
 	"pre-commit": {
 		sha256: "811f34ce57517e129554bc9c09801a66c0207332cd3e7f2950db43a40580e914",
-		historicalCount: 1,
+		historical: [
+			"811f34ce57517e129554bc9c09801a66c0207332cd3e7f2950db43a40580e914",
+		],
 	},
 	"pre-push": {
 		sha256: "7de58640aeef33085a49f31f1d9d0c8bacde0069d6d3265ae41aa8d3cd14d7a5",
-		historicalCount: 1,
+		historical: [
+			"7de58640aeef33085a49f31f1d9d0c8bacde0069d6d3265ae41aa8d3cd14d7a5",
+		],
 	},
 	"commit-msg": {
 		sha256: "1c23a60cd4ba7f6bc666da400b5d2971c4294782c8d9ce41543e7815de11a1d6",
-		historicalCount: 1,
+		historical: [
+			"1c23a60cd4ba7f6bc666da400b5d2971c4294782c8d9ce41543e7815de11a1d6",
+		],
 	},
 };
 
@@ -69,24 +79,32 @@ const readManifest = (): HookManifest =>
 	) as HookManifest;
 
 /**
- * Pure comparison behind the forward-maintenance guard: `historical[]` must
- * STRICTLY GROW (and must retain the outgoing hash) whenever the manifest hash
- * moves away from the released snapshot, and must never shrink otherwise.
+ * Pure comparison behind the forward-maintenance guard. Two invariants:
+ * (1) APPEND-ONLY — the manifest's `historical[]` must still START WITH the
+ *     complete released hash list, in order (no erasure, no rewrite, no
+ *     reorder of anything ever released);
+ * (2) GROWTH — whenever the manifest hash moves away from the released one,
+ *     the outgoing released hash must be present and the list must be
+ *     strictly longer than the released list.
  * Returns the reasons the invariant is violated — empty means it holds.
  */
 function historyMaintenanceViolations(
-	released: { sha256: string; historicalCount: number },
+	released: { sha256: string; historical: string[] },
 	current: { sha256: string; historical: HistoricalEntry[] },
 ): string[] {
 	const violations: string[] = [];
 	const hashes = current.historical.map((entry) => entry.sha256);
 
+	const prefixIntact =
+		hashes.length >= released.historical.length &&
+		released.historical.every((hash, i) => hashes[i] === hash);
+	if (!prefixIntact) {
+		violations.push(
+			"historical[] no longer starts with the released hash list (append-only violated)",
+		);
+	}
+
 	if (current.sha256 === released.sha256) {
-		if (hashes.length < released.historicalCount) {
-			violations.push(
-				`historical[] shrank from ${released.historicalCount} to ${hashes.length} entries`,
-			);
-		}
 		return violations;
 	}
 
@@ -95,9 +113,9 @@ function historyMaintenanceViolations(
 			`outgoing body hash ${released.sha256} was not appended to historical[]`,
 		);
 	}
-	if (hashes.length <= released.historicalCount) {
+	if (hashes.length <= released.historical.length) {
 		violations.push(
-			`historical[] did not grow: ${released.historicalCount} -> ${hashes.length}`,
+			`historical[] did not grow: ${released.historical.length} -> ${hashes.length}`,
 		);
 	}
 	return violations;
@@ -143,7 +161,7 @@ describe("hook assets", () => {
 });
 
 describe("historyMaintenanceViolations", () => {
-	const released = { sha256: "a".repeat(64), historicalCount: 1 };
+	const released = { sha256: "a".repeat(64), historical: ["a".repeat(64)] };
 
 	it("accepts an unchanged hash with an unchanged history", () => {
 		expect(
@@ -160,7 +178,9 @@ describe("historyMaintenanceViolations", () => {
 				sha256: "a".repeat(64),
 				historical: [],
 			}),
-		).toEqual(["historical[] shrank from 1 to 0 entries"]);
+		).toEqual([
+			"historical[] no longer starts with the released hash list (append-only violated)",
+		]);
 	});
 
 	it("accepts a changed hash when the outgoing hash was appended", () => {
@@ -185,7 +205,22 @@ describe("historyMaintenanceViolations", () => {
 				],
 			}),
 		).toEqual([
+			"historical[] no longer starts with the released hash list (append-only violated)",
 			`outgoing body hash ${"a".repeat(64)} was not appended to historical[]`,
+		]);
+	});
+
+	it("rejects rewriting a released hash even when the snapshot's own sha256 is also updated (fleet-brick attack)", () => {
+		expect(
+			historyMaintenanceViolations(
+				{ sha256: "b".repeat(64), historical: ["a".repeat(64)] },
+				{
+					sha256: "b".repeat(64),
+					historical: [{ sha256: "b".repeat(64), firstCommit: "def5678" }],
+				},
+			),
+		).toEqual([
+			"historical[] no longer starts with the released hash list (append-only violated)",
 		]);
 	});
 

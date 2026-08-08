@@ -86,3 +86,17 @@ Two blind judges, both **APPROVE** — zero BLOCKER/CRITICAL candidates, no fix 
 | JDA5-005 | judgment-day | ci.test.ts beforeEach | SUGGESTION | info | mockClear() does not clear queued mock*Once values — latent cross-test poisoning. → consider mockReset/restoreMocks in slice 3. |
 | JDA5-006 | judgment-day | ci.test.ts:1510-1513 | SUGGESTION | info | Exact-object assertion on internal ensureImage call shape — implementation coupling, redundant next to the observable assertions. |
 | JDB5-005 | judgment-day | ci.test.ts:1435-1455 | SUGGESTION | info | Invariant-throw test reaches the branch via a state production cannot produce — coverage by construction, documented as such. |
+
+## Apply slice 3a — judgment-day (hook asset extraction)
+
+Two blind judges, both **APPROVE** — zero BLOCKER/CRITICAL. Byte-fidelity verified independently by BOTH via different methods (byte accounting + sha256 recomputation); both REFUTED the orchestrator brief's escape premise (ci.ts:1062 has `\\\\b` → renders `\\b`, asset correct). Census reproduced under --full-history (12 revisions, 1 variant/hook, firstCommit 5587b3b — the render-invariant biome commit 248e1b2 verified). Convergent info findings hardened post-round on this branch:
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JDA6-001 / JDB6-001 (convergent) | judgment-day | hook-assets.test.ts snapshot | WARNING | fixed | Guard compared a COUNT — the documented snapshot-update path let a dev rewrite historical[0] and go green (fleet-brick attack traced independently by both judges). Hardened: RELEASED_SNAPSHOT holds the full hash LIST with an append-only PREFIX assertion + explicit attack-case test (21st test). |
+| JDA6-004 / JDB6-002 (convergent) | judgment-day | repo root | WARNING | fixed | No .gitattributes — core.autocrlf=true checkout would CRLF the hashed assets. Added: `assets/hooks/** text eol=lf`. |
+| JDA6-006 / JDB6-003 (convergent) | judgment-day | design.md D6:89 | SUGGESTION | fixed | Design still described the rejected git-show/skip-when-unavailable guard; next 3b reader would regress it. Rewritten to the implemented pure-file append-only mechanism. |
+| JDA6-002 / JDB6-004 (convergent) | judgment-day | hook-assets.test.ts (absent guard) | WARNING | info | Live byte-equivalence assertion (installCIHooks output vs assets) is possible ONLY while the inline constants exist — after 3.20 the claim is unfalsifiable forever. → MUST land as the FIRST task of 3b, before the constants are deleted. |
+| JDA6-003 | judgment-day | build-hook-history.mjs:147 | SUGGESTION | info | rev-list --all determinism depends on local refs (census narrative "259 commits" now reads 276 — ref growth); load-bearing figures reproduce. One-shot bootstrap, accepted. |
+| JDA6-005 | judgment-day | build-hook-history.mjs exports | SUGGESTION | info | renderTemplateLiteral/extractHooks exported but never imported by tests — renderer has zero direct coverage; outside lint scope. Accepted for a one-shot script. |
+| JDB6-005 | judgment-day | tasks.md coverage label | SUGGESTION | info | Readings recorded against c6ddeaa while branch head was 3dae961 (immaterial: file outside coverage/lint/tsconfig scope; numbers reproduce). Label hygiene only. |

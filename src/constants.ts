@@ -23,6 +23,9 @@ export const WORKFLOWS_DIR = path.join(FORGE_ROOT, "workflows");
 /** CI-local directory */
 export const CI_LOCAL_DIR = path.join(FORGE_ROOT, "ci-local");
 
+/** Git hook assets directory (installed by `javi-forge ci init`) */
+export const HOOK_ASSETS_DIR = path.join(FORGE_ROOT, "assets", "hooks");
+
 /** Security hooks template directory */
 export const SECURITY_HOOKS_DIR = path.join(TEMPLATES_DIR, "security-hooks");
 

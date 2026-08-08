@@ -142,7 +142,7 @@ Unification leaves these seams CLEAN provided one executor owns the phase loop a
 - **`ci init` bypasses Ink** — `handleCi` calls `installCIHooks` and `process.exit` directly (dispatch/ci.tsx:20-31); the hook work has no TUI surface.
 - **Second consumer of `detectCIStack`** — `tdd.ts` / `tdd-pipeline.ts`.
 - **Self-CI blind spot** — `.github/workflows/ci.yml` runs `--quick --no-docker --no-ci-ghagga`; Docker execution, full mode, security and ghagga are unexercised.
-- **Coverage/mutation gates** — 85 lines / 80 branches + stryker. Deleting `runLegacySteps` removes ~50 well-covered lines; new branching in `runConfiguredRunner` without new tests can drop branch coverage under 80. `openspec/config.yaml` forbids lowering thresholds.
+- **Coverage/mutation gates** — 85 lines / 80 branches + stryker. Deleting `runLegacySteps` removes ~50 well-covered lines; new branching in `runConfiguredRunner` without new tests can drop branch coverage under 80. DECLARES vs ENFORCES: `openspec/config.yaml:18-19,61` DECLARES the policy (`coverage_thresholds`, "never lower the coverage thresholds to make a change pass") but executes nothing; the numbers that actually ENFORCE at runtime are `vitest.config.ts:19` (`thresholds: { lines: 85, branches: 80 }`), and even those only bite under `pnpm test:coverage` — `pnpm validate` does not run coverage. The gate this change is held to is the same-run delta (R4 below), not either file's absolute numbers.
 - **Frozen CLI contract** — hooks in ~8 repos invoke `--quick --no-docker --no-security --no-ci-ghagga` and bare `javi-forge ci`. These flag names cannot change.
 - **Schema v1 is locked** — `parseCIConfig` rejects `version != 1` and unknown top-level keys (ci-config.ts:308-319).
 

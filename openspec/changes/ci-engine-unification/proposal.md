@@ -53,7 +53,7 @@ Exploration Approach 1 (executor) + A + C (hooks). `resolveCIRunners` already sy
 - Bare `auto` step ids pinned by `ci.test.ts:767-787`.
 - `detectCIStack` / `CIStackInfo` is a SECOND public contract (`tdd.ts:124`, `tdd-pipeline.ts:135`) — not deleted, not reshaped.
 - Frozen CLI flags used by installed hooks: `--quick --no-docker --no-security --no-ci-ghagga` and bare `javi-forge ci`.
-- Coverage thresholds 85 lines / 80 branches MUST NOT be lowered (`openspec/config.yaml`).
+- Coverage thresholds MUST NOT be lowered — declared in `openspec/config.yaml:19-21`, enforced by `vitest.config.ts:19`; the gate for this change is the same-run delta (R4), never the absolute floor.
 - `ci.yaml` schema v1: no new keys.
 - Auto image build stays BEFORE the `.context/` refresh step.
 
@@ -86,7 +86,7 @@ Three independent PRs, each revertible alone. Slice 1 is additive (tests only) �
 - [ ] Observable behavior identical: step ids, labels, phase order, exit codes, flag contract unchanged.
 - [ ] All pre-existing tests pass UNCHANGED; the only test-file edits are ADDED characterization tests.
 - [ ] Slice 2 production diff is net-negative.
-- [ ] Coverage stays >= 85 lines / 80 branches without lowering thresholds.
+- [ ] Coverage does not regress: at each slice's verify, same-run delta — head >= merge-base on lines AND branches, identical command/machine/session; configured thresholds in `vitest.config.ts` never lowered. Absolute percentages are informative only, never the gate.
 - [ ] `runLegacySteps` no longer exists; `runStep` is the only execution leaf.
 - [ ] `ci init` on a repo with an old unmarked hook UPGRADES it; on a hand-edited or foreign hook it REFUSES and says why.
 - [ ] Generated hooks are executed by tests, not grepped.

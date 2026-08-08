@@ -182,7 +182,7 @@ Record B1 / B2 / B3 as backlog items and fix them BETWEEN SDDs (fix-between-SDDs
 - **R1 (high)** — the legacy Docker path has ZERO test coverage and is not exercised by self-CI (`--no-docker`). Unifying it blind is how a silent regression ships to a globally installed CLI. Mitigation: slice 1.
 - **R2 (high)** — the fleet of ~8 repos runs OLD unmarked hooks and will never re-init. A no-clobber policy that does not recognize legacy content bricks `ci init` for all of them.
 - **R3 (medium)** — step-id naming keyed on the wrong predicate (`runners.length === 1` instead of `source === "auto"`) silently renames ids for single-runner CONFIGS, breaking any downstream consumer of the step stream.
-- **R4 (medium)** — deleting a well-covered function can drop line/branch coverage below the 85/80 gate; thresholds must not be lowered (openspec/config.yaml).
+- **R4 (medium)** — deleting a well-covered function can drop line/branch coverage. Gate = same-run delta at each slice's verify (`head >= base`, design.md "Coverage Guard (R4)"); the configured thresholds live in `vitest.config.ts` (NOT `openspec/config.yaml`) and must not be lowered.
 - **R5 (medium)** — moving the auto image build into the runner loop changes emitted step ORDER (image after `.context/` refresh instead of before). Observable; decide explicitly, do not let it happen by accident.
 - **R6 (low)** — `ci.yaml` schema v1 unknown-key rejection means gates-v2 will fail closed on older binaries. Out of scope here, but the refactor must not add config keys.
 

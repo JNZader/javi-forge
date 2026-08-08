@@ -248,21 +248,52 @@ Mutation testing: Stryker mutates `src/constants.ts`, so the new `HOOK_ASSETS_DI
 
 ## Coverage Guard (R4)
 
-MEASURED baseline — re-measured during the slice-1 apply by running `pnpm test:coverage` on both trees. The figures quoted in the design phase came from a STALE `coverage/clover.xml` and were wrong; these are the real ones:
+**The gate is a SAME-RUN DELTA, never an absolute percentage.** At slice-N verify
+time, run `npx vitest run --coverage` TWICE on the SAME machine within the SAME
+session — once with the working tree at the merge-base (the previous slice's
+head) and once at the slice head — using the identical command and the identical
+environment. The gate is `head >= base` on BOTH lines and branches, tolerance 0.
+
+Why the form, not just the number: absolute figures were written into this design
+three times and were wrong three times. They fail in two independent ways.
+
+1. **Stale by one commit.** Any number written down is measured against a tree
+   that the next commit invalidates; the document then asserts a floor nobody
+   re-measured.
+2. **Environment-dependent.** The Docker-gated suites
+   (`src/__integration__/ci-*.integration.test.ts`) execute on a developer box
+   with Docker and a prebuilt image, and `skipIf` themselves out in CI. The same
+   commit therefore reports different coverage on different machines, so no
+   absolute number is portable enough to gate on.
+
+A same-run delta is immune to both: base and head are measured under the same
+conditions, so the environment cancels out and neither side can be stale.
+
+INFORMATIVE measurements (context only — NOT the gate). Environment: developer
+box, Docker available with the `javi-forge-node` image present, so the
+Docker-gated integration suites RAN. `pnpm test:coverage` / `npx vitest run
+--coverage`, project totals from `coverage/clover.xml`:
 
 | Tree | Lines | Branches |
 | --- | --- | --- |
-| `main` | 3265 / 3725 = **87.65%** | 1880 / 2411 = **77.97%** |
-| slice 1 (this branch) | 3291 / 3725 = **88.34%** | 1902 / 2411 = **78.88%** |
+| `main` @ `2a0abaa` | 3265 / 3725 = 87.65% | 1880 / 2411 = 77.97% |
+| slice 1 @ `12d9b4d` | 3291 / 3725 = 88.34% | 1902 / 2411 = 78.88% |
+| slice 1 @ `1f5c69b` (current head) | 3300 / 3725 = 88.59% | 1904 / 2411 = 78.97% |
 
-Two facts this exposes, both pre-existing and neither caused by this change:
+The drift between the last two rows is exactly the point: same branch, two
+commits apart, and the "floor" moved. Read these rows as history, not as a gate.
 
-- `pnpm test:coverage` FAILS on `main` — the configured 80% branch threshold in `vitest.config.ts` is unmet (77.97%). The gap is pre-existing debt, tracked in `docs/BACKLOG.md` (COV-1), out of scope here.
+Two facts they expose, both pre-existing and neither caused by this change:
+
+- `pnpm test:coverage` FAILS on `main` — the configured 80% branch threshold in `vitest.config.ts` is unmet (77.97%). The gap is pre-existing debt, tracked in `docs/BACKLOG.md` (COV-1), out of scope here. That failure is orthogonal to the delta gate: the delta can pass while the configured threshold still fails.
 - `pnpm validate` does NOT run coverage, so those thresholds gate nothing in CI or in the hooks today (COV-2).
 
-Slice 1 moves both numbers UP (+0.69pp lines, +0.91pp branches) by landing the previously-0% prologue `ensureImage` try/catch (ci.ts:562-571) and the auto Docker leaf.
+Slice 1 moves both numbers UP relative to `main` by landing the previously-0% prologue `ensureImage` try/catch (ci.ts:562-571) and the auto Docker leaf.
 
-**Slice-2 coverage guard = NO REGRESSION vs the slice-1 measured baseline**: `pnpm test:coverage` must report `>= 88.34%` lines and `>= 78.88%` branches. The `vitest.config.ts` thresholds are left EXACTLY as they are — not raised, not lowered. Structurally the collapse is branch-negative: −1 executor fork (`source==="auto"`), −2 image fallbacks (`?? runner.image ?? getImageName`), +1 naming selection, +1 image invariant, both directly tested.
+**Slice-2 coverage guard**: run the same-run delta with base = the slice-1 merge
+head and head = the slice-2 branch head; require lines and branches both `>=`
+base. The `vitest.config.ts` thresholds are left EXACTLY as they are — not
+raised, not lowered. Structurally the collapse is branch-negative: −1 executor fork (`source==="auto"`), −2 image fallbacks (`?? runner.image ?? getImageName`), +1 naming selection, +1 image invariant, both directly tested.
 
 ## Non-Goals (explicit)
 

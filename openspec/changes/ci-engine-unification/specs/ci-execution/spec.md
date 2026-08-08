@@ -120,16 +120,27 @@ unchanged; the only test edits allowed are ADDED tests.
 
 ### Requirement: Coverage must not regress
 
-The refactor MUST NOT reduce measured line or branch coverage below the slice-1
-baseline recorded in `design.md` (lines 88.34%, branches 78.88%), and MUST NOT
-lower the configured thresholds in `vitest.config.ts`.
+The refactor MUST NOT reduce measured line or branch coverage, measured as a
+SAME-RUN DELTA: at each slice's verify step `npx vitest run --coverage` MUST be
+run TWICE on the same machine in the same session — once with the working tree
+at the merge-base (the previous slice's head) and once at the slice head — with
+the identical command and environment. Both lines and branches MUST satisfy
+`head >= base` (tolerance 0). The configured thresholds in `vitest.config.ts`
+MUST NOT be lowered.
+
+Absolute coverage percentages MUST NOT be used as the gate. They are stale one
+commit after they are written, and they vary by environment because the
+Docker-gated integration suites run on a developer box and `skipIf` out in CI.
+Recorded percentages are informative context only and MUST carry their commit
+and environment.
 
 The configured 80% branch floor is currently UNMET on `main` (77.97%). That gap
 is pre-existing, is not introduced or closed by this change, and is tracked as
-COV-1 in `docs/BACKLOG.md` — out of scope here.
+COV-1 in `docs/BACKLOG.md` — out of scope here. The delta gate is independent of
+it: the delta can pass while the configured threshold still fails.
 
 #### Scenario: Coverage gate after deleting the legacy executor
 
 - GIVEN the legacy executor is deleted
-- WHEN `pnpm test:coverage` runs
-- THEN measured lines >= 88.34 and branches >= 78.88, with the configured thresholds unchanged
+- WHEN `npx vitest run --coverage` is run on the merge-base tree and then on the slice head, same machine and same session
+- THEN head lines >= base lines AND head branches >= base branches, with the configured thresholds unchanged

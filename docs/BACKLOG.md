@@ -84,14 +84,19 @@ validate a CI config or discover `ci` flags.
 Source: `openspec/changes/ci-engine-unification/design.md` (Coverage Guard) and
 `openspec/changes/ci-engine-unification/review-ledger.md` (JDB2-003).
 
-### COV-1 — Branch coverage is 78.88%, below the configured 80% floor
+### COV-1 — Branch coverage is ~79%, below the configured 80% floor
 
 `pnpm test:coverage` FAILS on `main` and on the slice-1 branch: the configured
 80% branch threshold is unmet. This is pre-existing debt, not introduced by
-`ci-engine-unification` (slice 1 moves branches UP, 77.97% → 78.88%).
+`ci-engine-unification` (slice 1 moves branches UP).
 
 - Evidence: `vitest.config.ts` coverage thresholds; measured `coverage/clover.xml`
-  — `main` 1880/2411 conditionals = 77.97%, slice 1 1902/2411 = 78.88%.
+  on a developer box WITH Docker and the `javi-forge-node` image present (the
+  Docker-gated integration suites ran; without Docker, and in CI, they `skipIf`
+  out and these figures shift) — `main` @ 2a0abaa 1880/2411 conditionals =
+  77.97%, slice 1 @ 12d9b4d 1902/2411 = 78.88%, slice 1 @ 1f5c69b 1904/2411 =
+  78.97%. Treat every figure as an environment- and commit-specific reading, not
+  a floor: the SDD's own gate is a same-run delta, not an absolute number.
 - Suggested fix: close the ~1.1pp gap as its own effort — target the least-covered
   branch clusters rather than blanket-adding tests. Do NOT lower the threshold.
 

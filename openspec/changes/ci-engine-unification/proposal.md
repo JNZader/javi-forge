@@ -68,7 +68,7 @@ Global linuxbrew install plus installed hooks in ~8 repos. Observable CI behavio
 | R1 — legacy Docker path has zero coverage and self-CI runs `--no-docker` | High | Slice 1 lands Docker-gated e2e BEFORE the collapse |
 | R2 — fleet runs OLD unmarked hooks and never re-inits | High | Historical-content hash table → classify as `managed:v0`, allow upgrade |
 | R3 — naming keyed on `runners.length` would rename ids for single-runner CONFIGS | Med | Key strictly on `resolved.source === "auto"`; test both shapes |
-| R4 — deleting a well-covered function drops coverage under 85/80 | Med | Slice 1 adds coverage first; thresholds never lowered |
+| R4 — deleting a well-covered function drops measured coverage | Med | Slice 1 adds coverage first; same-run delta gate at each verify (`head >= base`, see design.md "Coverage Guard (R4)"); thresholds never lowered |
 | R5 — image build silently moves after `.context/` refresh | Med | Step ORDER pinned by a slice-1 test; order decided explicitly, not by accident |
 | R6 — schema v1 rejects unknown keys on older binaries | Low | No config keys added in this change |
 

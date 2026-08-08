@@ -43,28 +43,41 @@ execution". ADDED tests only — no pre-existing assertion may be edited.
 - [x] 1.7 ADD test "`--stack node` step ids as-is": run `runCI` with `--stack node` on a node repo and assert suffixed ids exactly as emitted today (freeze B1; do NOT fix it). (scenario "Stack override emits suffixed ids")
 - [x] 1.8 ADD test "auto emits no setup/security/tool steps": assert no emitted id matches `setup*`, `security:*` or `tools*`. (requirement "Auto path inherits configured phases as no-ops")
 - [x] 1.9 Create `src/__integration__/ci-auto-docker.integration.test.ts`: auto resolution against REAL Docker, gated exactly like `ci-mixed.integration.test.ts` (skip unless Docker is available AND the javi-forge node image already exists locally). Opportunistic by design — record the residual R1 gap in the PR body.
-- [x] 1.10 Create `src/__integration__/ci-hooks-exec.integration.test.ts`: temp git repo + `installCIHooks`, then EXECUTE hooks DIRECTLY via their shebang (`spawn(hookPath)`), NOT `sh <hook>`. Table-drive `commit-msg` blocked/allowed messages asserting exit 1/0. (`ci-hook-install` → "Hooks are verified by execution") — DEVIATION from the planned `sh <hook>`: the hooks declare `#!/usr/bin/env bash` and use bash arrays, which `sh` (dash on Debian/Ubuntu) cannot parse; invoking through `sh` would test a shell git never uses and fail on syntax. Executing the file directly is what git does.
+- [x] 1.10 Create `src/__integration__/ci-hooks-exec.integration.test.ts`: temp git repo + `installCIHooks`, then EXECUTE hooks DIRECTLY via their shebang (`spawn(hookPath)`), NOT `sh <hook>`. Table-drive `commit-msg` blocked/allowed messages asserting exit 1/0. (`ci-hook-install` → "Hooks are verified by execution") — DEVIATION from the planned `sh <hook>`: the hooks declare `#!/bin/bash` (ci.ts:1030/:1047/:1069) and use bash arrays, which `sh` (dash on Debian/Ubuntu) cannot parse; invoking through `sh` would test a shell git never uses and fail on syntax. Executing the file directly is what git does.
 - [x] 1.11 In the same file, execute `pre-commit` and `pre-push` with a stub `javi-forge` (and stub `docker`) placed first on `PATH`; assert the stub received the frozen flag string `--quick --no-docker --no-security --no-ci-ghagga` and that a non-zero stub exit aborts the hook. (scenario "Generated pre-commit runs")
 - [x] 1.12 Run `pnpm test` and `pnpm validate`; confirm every pre-existing assertion in `src/commands/ci.test.ts` is untouched (`git diff` shows additions only in that file).
-- [x] 1.13 Run `pnpm test:coverage`; record lines/branches from `coverage/clover.xml` in the PR body as the SLICE-1 BASELINE (design records main at 3001/3256 = 92.2% lines, 83.2% branches). Slice 2 must land `>= baseline − 0.5pp` and `>= 85/80`.
+- [x] 1.13 Run `npx vitest run --coverage` on the merge-base (`main`) and on this branch head, same machine and same session, and record BOTH readings in the PR body as informative context. The gate is the SAME-RUN DELTA (`head >= base` on lines and branches), not any absolute percentage — see the section below and design.md "Coverage Guard (R4)".
 
-### MEASURED SLICE-1 BASELINE (supersedes the design's R4 numbers)
+### COVERAGE READINGS — informative, NOT a gate
 
-`coverage/clover.xml`, project totals, same tree, `pnpm test:coverage`:
+The gate is a SAME-RUN DELTA measured at verify time (design.md "Coverage Guard
+(R4)", spec `ci-execution` → "Coverage must not regress"). The numbers below are
+history: they identify a tree and an environment, and they are stale the moment
+the next commit lands. Do NOT copy them into a later slice as a floor.
+
+Environment for every row: developer box, Docker available with the
+`javi-forge-node` image present, so the Docker-gated integration suites RAN. On a
+machine without Docker (and in CI) those suites `skipIf` out and the same commit
+reports different numbers — which is precisely why the gate is a delta.
+
+`coverage/clover.xml` project totals:
 
 | Tree | Lines | Branches |
 |---|---|---|
-| `main` (2a0abaa) | 3265/3725 = **87.65%** | 1880/2411 = **77.97%** |
-| slice 1 (this PR) | 3291/3725 = **88.34%** (+0.69pp) | 1902/2411 = **78.88%** (+0.91pp) |
+| `main` (2a0abaa) | 3265/3725 = 87.65% | 1880/2411 = 77.97% |
+| slice 1 @ 12d9b4d | 3291/3725 = 88.34% | 1902/2411 = 78.88% |
+| slice 1 @ 1f5c69b (current head) | 3300/3725 = 88.59% | 1904/2411 = 78.97% |
 
-The design's claimed baseline (3001/3256 = 92.2% lines, 83.2% branches) does NOT
-reproduce; the real denominator is 3725 statements / 2411 conditionals.
+The design phase's claimed baseline (3001/3256 = 92.2% lines, 83.2% branches) did
+NOT reproduce and is retired; the real denominator is 3725 statements / 2411
+conditionals.
 
 **Pre-existing failure, NOT introduced here**: `pnpm test:coverage` already fails
 its 80% branch threshold on `main` (77.97%). `pnpm test` and `pnpm validate` are
-green on both trees — `validate` does not run coverage. Slice 2's exit criterion
-`>= 85/80` is therefore UNREACHABLE without separate branch-coverage work; treat
-it as a blocker to resolve before slice 2 rather than a gate slice 2 can pass.
+green on both trees — `validate` does not run coverage. That unmet threshold is
+tracked as COV-1 in `docs/BACKLOG.md` and is orthogonal to the delta gate: later
+slices are gated on not regressing, not on reaching the configured floor, so no
+slice is blocked on closing COV-1.
 
 ## Phase 2: Slice 2 — Executor Collapse (PR 2)
 
@@ -84,7 +97,7 @@ Spec: `ci-execution` → "Single execution path", "Step-id and label naming",
 - [ ] 2.11 ADD a configured-runner ordering test: with `securityCmds` set and full mode, assert `security:<runner>` is emitted LAST inside the runner — after `test:<runner>` and before the top-level Semgrep step — and that it is skipped under `--no-security` and non-full modes. (folds JDA-R2-003)
   - NOTE (JDB2-008): the file-wide `ensureImage` mock in `ci.test.ts` is production-faithful ONLY for the no-`buildContext` case (it returns `getImageName(stack)` and ignores `imageTag`). BEFORE adding any build-context or explicit-`imageTag` runner row, extend the mock to `options.imageTag ?? getImageName(options.stack)` — otherwise the test asserts against a value production would never return.
 - [ ] 2.12 Run `pnpm test`; verify all slice-1 characterization tests pass with ZERO assertion edits (scenario "Collapse lands on a green safety net").
-- [ ] 2.13 Run `pnpm test:coverage`; assert NO REGRESSION vs the measured slice-1 baseline: lines `>= 88.34%` and branches `>= 78.88%`. The configured thresholds in `vitest.config.ts` stay untouched (the 80% branch floor is already unmet on `main` — pre-existing, tracked as COV-1 in `docs/BACKLOG.md`).
+- [ ] 2.13 SAME-RUN DELTA coverage gate (do NOT compare against any number written in this file): run `npx vitest run --coverage` twice on the same machine in the same session — once with the tree at the slice-1 head (the merge-base of this slice) and once at the slice-2 head, identical command and environment — and require `head >= base` on BOTH lines and branches, tolerance 0. Record both absolute readings in the PR body as informative context, labeled with their commit and whether Docker was available. The configured thresholds in `vitest.config.ts` stay untouched (the 80% branch floor is already unmet on `main` — pre-existing, tracked as COV-1 in `docs/BACKLOG.md`); a failing configured threshold does not fail this gate, and a passing one does not satisfy it.
 
 ## Phase 3: Slice 3 — Hook Assets, Marker, Classification (PR 3)
 
@@ -117,4 +130,4 @@ exceeds the 400-line budget.
 - [ ] 3.19 ADD hash-input semantics tests (D6): install → re-classify = `managed-current` with zero writes (bytes + mtime unchanged); body unchanged with a bumped marker version → `managed-outdated`, NOT `managed-edited`; one body byte changed → `managed-edited`; marker naming a DIFFERENT hook → `foreign`; CRLF-converted managed hook → `foreign`.
 - [ ] 3.20 Delete the three inline `*_HOOK` template constants from `src/commands/ci.ts` and read templates from `HOOK_ASSETS_DIR` instead. Leave the pre-existing substring greps at `ci.test.ts:262-298` UNTOUCHED — they must still pass against the installed file.
 - [ ] 3.21 Packaging: add `assets/` to the `files` array in `package.json`; in `scripts/verify-package-contents.mjs` add ALL FOUR paths (`assets/hooks/pre-commit`, `assets/hooks/pre-push`, `assets/hooks/commit-msg`, `assets/hooks/manifest.json`) to `REQUIRED_FILES` and `assets/` to `REQUIRED_PREFIXES`. Listing one asset is NOT sufficient — the prefix check passes on any single match (JD-008).
-- [ ] 3.22 Run `pnpm package:check`, `pnpm test:hooks`, `pnpm test:coverage` and `pnpm validate`; confirm the `ci-hooks-exec` integration tests from slice 1 still pass against marker-carrying hooks and that coverage stays `>= 85/80`.
+- [ ] 3.22 Run `pnpm package:check`, `pnpm test:hooks` and `pnpm validate`; confirm the `ci-hooks-exec` integration tests from slice 1 still pass against marker-carrying hooks. For coverage, apply the SAME-RUN DELTA gate (as in 2.13): `npx vitest run --coverage` at the slice-2 head and at the slice-3 head, same machine and session, requiring `head >= base` on lines and branches.

@@ -1,0 +1,15 @@
+#!/bin/bash
+# Pre-commit: quick CI check via javi-forge
+# To skip: git commit --no-verify
+set -e
+echo "PRE-COMMIT: Running quick check..."
+if command -v javi-forge &>/dev/null; then
+  javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
+else
+  npx javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
+fi || {
+  echo ""
+  echo "Quick check FAILED — fix the issues above before committing."
+  echo "To skip: git commit --no-verify"
+  exit 1
+}

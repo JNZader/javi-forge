@@ -128,12 +128,53 @@ exceeds the 400-line budget.
 
 ### 3a — Assets, manifest, bootstrap
 
-- [ ] 3.1 Create `scripts/build-hook-history.mjs` (dev-only, NOT packed): `git rev-list --all -- src/commands/ci.ts` → `git show <rev>:src/commands/ci.ts` → regex-slice each `const *_HOOK = \`…\`;` → RENDER the literal (un-escape) → dedupe → sha256. ABORT if an unescaped `${` appears; skip revisions where the constant is absent.
-- [ ] 3.2 Run `scripts/build-hook-history.mjs`. If it produces ZERO historical variants for any hook, BLOCK the slice and report — do not ship. The variant count is an output, not an assumption.
-- [ ] 3.3 Create `assets/hooks/pre-commit`, `assets/hooks/pre-push`, `assets/hooks/commit-msg` as the verbatim RENDERED templates (no marker lines, exactly one trailing `\n`). Content must be byte-identical to the current inline literals; do NOT adopt `ci-local/hooks/*`.
-- [ ] 3.4 Create `assets/hooks/manifest.json`: per hook `{ version: 1, sha256, historical: [{ sha256, firstCommit }] }` from 3.2.
-- [ ] 3.5 In `src/constants.ts`, export `HOOK_ASSETS_DIR = path.join(FORGE_ROOT, "assets", "hooks")` following the `TEMPLATES_DIR` / `CI_LOCAL_DIR` pattern.
-- [ ] 3.6 ADD manifest guard tests (resolving assets through `HOOK_ASSETS_DIR`, never a hard-coded path, so Stryker mutants on the constant are killed — JD-015): (a) `sha256(asset body) === manifest[hook].sha256` (asset-drift); (b) `manifest[hook].sha256 === historical[v0].sha256` per hook (v1 byte-equivalence to the inline literal — scenario "Extracted template is byte-equivalent"); (c) PURE-FILE forward-maintenance guard (JDA-R2-001): assert `historical[]` STRICTLY GROWS whenever `manifest[hook].sha256` changes — implemented against files only, with NO `git show` and NO skip-when-history-unavailable branch, because `actions/checkout` `fetch-depth: 1` would make a git-based guard skip exactly in CI.
+- [x] 3.1 Create `scripts/build-hook-history.mjs` (dev-only, NOT packed): `git rev-list --all -- src/commands/ci.ts` → `git show <rev>:src/commands/ci.ts` → regex-slice each `const *_HOOK = \`…\`;` → RENDER the literal (un-escape) → dedupe → sha256. ABORT if an unescaped `${` appears; skip revisions where the constant is absent.
+- [x] 3.2 Run `scripts/build-hook-history.mjs`. If it produces ZERO historical variants for any hook, BLOCK the slice and report — do not ship. The variant count is an output, not an assumption.
+- [x] 3.3 Create `assets/hooks/pre-commit`, `assets/hooks/pre-push`, `assets/hooks/commit-msg` as the verbatim RENDERED templates (no marker lines, exactly one trailing `\n`). Content must be byte-identical to the current inline literals; do NOT adopt `ci-local/hooks/*`.
+- [x] 3.4 Create `assets/hooks/manifest.json`: per hook `{ version: 1, sha256, historical: [{ sha256, firstCommit }] }` from 3.2.
+- [x] 3.5 In `src/constants.ts`, export `HOOK_ASSETS_DIR = path.join(FORGE_ROOT, "assets", "hooks")` following the `TEMPLATES_DIR` / `CI_LOCAL_DIR` pattern.
+- [x] 3.6 ADD manifest guard tests (resolving assets through `HOOK_ASSETS_DIR`, never a hard-coded path, so Stryker mutants on the constant are killed — JD-015): (a) `sha256(asset body) === manifest[hook].sha256` (asset-drift); (b) `manifest[hook].sha256 === historical[v0].sha256` per hook (v1 byte-equivalence to the inline literal — scenario "Extracted template is byte-equivalent"); (c) PURE-FILE forward-maintenance guard (JDA-R2-001): assert `historical[]` STRICTLY GROWS whenever `manifest[hook].sha256` changes — implemented against files only, with NO `git show` and NO skip-when-history-unavailable branch, because `actions/checkout` `fetch-depth: 1` would make a git-based guard skip exactly in CI.
+
+#### 3a OUTPUT — `build-hook-history.mjs` variant census (gate 3.2)
+
+Run on `feat/ci-unification-s3a-hook-assets`, full (non-shallow) clone, 259
+commits reachable, 12 revisions touch `src/commands/ci.ts`, all 12 readable,
+zero unknown `*_HOOK` constants:
+
+| Hook | Distinct historical variants | First commit | v0 sha256 |
+|---|---|---|---|
+| `pre-commit` | 1 | `5587b3b` | `811f34ce…0580e914` |
+| `pre-push` | 1 | `5587b3b` | `7de58640…cd14d7a5` |
+| `commit-msg` | 1 | `5587b3b` | `1c23a60c…de11a1d6` |
+
+The three constants were introduced in `5587b3b` and their bytes never changed
+since, so each hook has exactly ONE historical variant and it is byte-identical
+to HEAD — which is why `manifest[hook].sha256 === historical[0].sha256` holds by
+construction at v1. The gate is satisfied (no hook has zero variants), so 3b can
+proceed: every hook installed by any released `ci init` classifies as
+`legacy-v0`, never `foreign`.
+
+#### SLICE-3a COVERAGE READINGS — informative, NOT a gate
+
+Same machine, same session, same command (`npx vitest run --coverage`),
+developer box with Docker available, base measured from the NAMED branch `main`
+(never a detached HEAD — `crash-recovery.test.ts` asserts the real branch name).
+`coverage/clover.xml` project totals:
+
+| Tree | Lines | Branches |
+|---|---|---|
+| base — `main` @ `c4ea116` (slice-2 merge) | 3290/3707 = 88.751% | 1910/2412 = 79.187% |
+| head — slice 3a @ `c6ddeaa` | 3291/3708 = 88.754% | 1910/2412 = 79.187% |
+
+Delta: lines +0.003pp, branches equal (identical counts) — `head >= base` on
+both AS PERCENTAGES, gate PASSED. Both runs exit non-zero on the configured 80%
+branch threshold (COV-1, pre-existing on `main`), which is orthogonal to this
+gate. `pnpm validate` exits 0 on the head (77 files, 1310 passed, 4 skipped).
+
+**3a scope note**: `installCIHooks` still reads the inline `*_HOOK` constants.
+Switching it to `HOOK_ASSETS_DIR` and deleting the constants is task 3.20, which
+this file assigns to 3b; 3a is additive only (assets + manifest + constant +
+guard tests) and changes zero runtime behavior.
 
 ### 3b — Classification, backup, force, packaging
 

@@ -1,3 +1,9 @@
+## [1.8.0](https://github.com/JNZader/javi-forge/compare/v1.7.1...v1.8.0) (2026-08-08)
+
+### Features
+
+* **ci:** extract git hook templates to shipped, hashed assets (slice 3a/4) ([#3](https://github.com/JNZader/javi-forge/issues/3)) ([0eb9ce6](https://github.com/JNZader/javi-forge/commit/0eb9ce69f3683a415a7c8c0a487ba6502e6bc336))
+
 ## [1.7.1](https://github.com/JNZader/javi-forge/compare/v1.7.0...v1.7.1) (2026-08-08)
 
 ### Refactoring

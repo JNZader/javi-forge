@@ -21,16 +21,19 @@ import {
 // Docker code path (they all run with `noDocker: true` or in `detect` mode), so
 // the mock only becomes observable inside the characterization block below.
 //
-// `ensureImage` is PRODUCTION-FAITHFUL on purpose: without a `buildContext` the
-// real implementation returns exactly `getImageName(stack)` (docker.ts:186), so
-// the image assertions hold identically before and after the executor collapse.
+// `ensureImage` is PRODUCTION-FAITHFUL on purpose: the real implementation
+// returns `imageTag ?? getImageName(stack)` (docker.ts:174,186), so the image
+// assertions hold identically before and after the executor collapse — for the
+// default per-stack image AND for a build-context runner, whose tag is the one
+// production would return.
 vi.mock("../lib/docker.js", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../lib/docker.js")>();
 	return {
 		...actual,
 		isDockerAvailable: vi.fn(async () => true),
-		ensureImage: vi.fn(async (options: { stack: Stack }) =>
-			actual.getImageName(options.stack),
+		ensureImage: vi.fn(
+			async (options: { stack: Stack; imageTag?: string }) =>
+				options.imageTag ?? actual.getImageName(options.stack),
 		),
 		runInContainer: vi.fn(async () => ({
 			exitCode: 0,
@@ -1482,5 +1485,93 @@ ${extra}`,
 		expect(quick.map((s) => s.id)).not.toContain("security:api");
 		// Quick mode also drops the test phase — proof the run really was quick.
 		expect(quick.map((s) => s.id)).not.toContain("test:api");
+	});
+
+	it("threads a build-context runner's built tag into every container run", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), { scripts: {} });
+		await fs.outputFile(
+			path.join(tmpDir, "docker", "Dockerfile"),
+			"FROM scratch\n",
+		);
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			`version: 1
+runners:
+  - name: api
+    stack: node
+    build-context: docker
+    lint: echo lint
+`,
+		);
+
+		const steps = await run(tmpDir, { mode: "quick" });
+
+		expect(ensureImage).toHaveBeenCalledWith({
+			stack: "node",
+			buildContext: path.resolve(tmpDir, "docker"),
+			imageTag: "javi-forge-ci-api",
+		});
+		// The tag the build produced — NOT the default per-stack image — is what
+		// every step runs in.
+		const images = vi
+			.mocked(runInContainer)
+			.mock.calls.map(([options]) => options.image);
+		expect(images).toEqual(["javi-forge-ci-api"]);
+		expect(images).not.toContain(getImageName("node"));
+
+		const image = steps.filter((s) => s.id === "docker-image:api");
+		expect(image.map((s) => [s.label, s.status])).toEqual([
+			["Building image for api from docker", "running"],
+			["Docker image ready (javi-forge-ci-api)", "done"],
+		]);
+	});
+
+	it("threads an explicitly configured image verbatim and builds nothing", async () => {
+		const pinned =
+			"registry.example.com/api@sha256:0000000000000000000000000000000000000000000000000000000000000000";
+		await fs.writeJson(path.join(tmpDir, "package.json"), { scripts: {} });
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			`version: 1
+runners:
+  - name: api
+    stack: node
+    image: "${pinned}"
+    lint: echo lint
+`,
+		);
+
+		const steps = await run(tmpDir, { mode: "quick" });
+
+		expect(ensureImage).not.toHaveBeenCalled();
+		const images = vi
+			.mocked(runInContainer)
+			.mock.calls.map(([options]) => options.image);
+		expect(images).toEqual([pinned]);
+
+		// A configured image reports done once — there is no build to report ready.
+		const image = steps.filter((s) => s.id === "docker-image:api");
+		expect(image.map((s) => [s.label, s.status])).toEqual([
+			[`Using configured image ${pinned}`, "done"],
+		]);
+	});
+
+	it("fails the runner when the image build fails, before any step runs", async () => {
+		await makeSingleRunnerConfig(tmpDir);
+		vi.mocked(ensureImage).mockRejectedValueOnce(
+			new Error("docker build boom"),
+		);
+
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, ...DOCKER_FULL }, (s) =>
+				steps.push({ ...s }),
+			),
+		).rejects.toThrow(/docker build boom/);
+
+		const image = steps.filter((s) => s.id === "docker-image:api").at(-1);
+		expect(image?.status).toBe("error");
+		expect(image?.detail).toContain("docker build boom");
+		expect(runInContainer).not.toHaveBeenCalled();
 	});
 });

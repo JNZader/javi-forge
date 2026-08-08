@@ -21,16 +21,19 @@ import {
 // Docker code path (they all run with `noDocker: true` or in `detect` mode), so
 // the mock only becomes observable inside the characterization block below.
 //
-// `ensureImage` is PRODUCTION-FAITHFUL on purpose: without a `buildContext` the
-// real implementation returns exactly `getImageName(stack)` (docker.ts:186), so
-// the image assertions hold identically before and after the executor collapse.
+// `ensureImage` is PRODUCTION-FAITHFUL on purpose: the real implementation
+// returns `imageTag ?? getImageName(stack)` (docker.ts:174,186), so the image
+// assertions hold identically before and after the executor collapse — for the
+// default per-stack image AND for a build-context runner, whose tag is the one
+// production would return.
 vi.mock("../lib/docker.js", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../lib/docker.js")>();
 	return {
 		...actual,
 		isDockerAvailable: vi.fn(async () => true),
-		ensureImage: vi.fn(async (options: { stack: Stack }) =>
-			actual.getImageName(options.stack),
+		ensureImage: vi.fn(
+			async (options: { stack: Stack; imageTag?: string }) =>
+				options.imageTag ?? actual.getImageName(options.stack),
 		),
 		runInContainer: vi.fn(async () => ({
 			exitCode: 0,
@@ -1259,5 +1262,316 @@ describe("characterization: auto + docker", () => {
 		const security = steps.filter((s) => s.id === "security");
 		expect(security).toHaveLength(1);
 		expect(security[0]?.status).toBe("skipped");
+	});
+});
+
+// =============================================================================
+// Unified executor — naming keyed on resolution source (slice 2)
+// =============================================================================
+
+describe("unified executor: naming keyed on resolution source", () => {
+	let tmpDir: string;
+
+	/** Full mode with Docker on; security + ghagga off unless a test says otherwise. */
+	const DOCKER_FULL = {
+		mode: "full" as const,
+		noDocker: false,
+		noGhagga: true,
+		noSecurity: true,
+	};
+
+	const run = async (
+		projectDir: string,
+		options: Record<string, unknown> = {},
+	): Promise<CIStep[]> => {
+		const steps: CIStep[] = [];
+		await runCI({ projectDir, ...DOCKER_FULL, ...options }, (s) =>
+			steps.push({ ...s }),
+		);
+		return steps;
+	};
+
+	/** Node repo with no ci.yaml → `resolved.source === "auto"` → BARE naming. */
+	const makeAutoRepo = async (dir: string): Promise<void> => {
+		await fs.writeJson(path.join(dir, "package.json"), {
+			scripts: { lint: "eslint .", build: "tsc", test: "vitest run" },
+		});
+		await fs.writeFile(path.join(dir, "pnpm-lock.yaml"), "");
+	};
+
+	/**
+	 * EXACTLY ONE configured runner → `resolved.source === "config"` → SUFFIXED
+	 * naming. This is the R3 guard: a single-runner CONFIG must never be renamed
+	 * to bare ids just because there happens to be one runner.
+	 */
+	const makeSingleRunnerConfig = async (
+		dir: string,
+		extra = "",
+	): Promise<void> => {
+		await fs.writeJson(path.join(dir, "package.json"), { scripts: {} });
+		await fs.outputFile(
+			path.join(dir, ".javi-forge", "ci.yaml"),
+			`version: 1
+runners:
+  - name: api
+    stack: node
+    lint: echo lint
+    build: echo build
+    test: echo test
+${extra}`,
+		);
+	};
+
+	interface NamingRow {
+		readonly mode: "bare" | "suffixed";
+		readonly phase: string;
+		readonly stepId: string;
+		readonly running: string;
+		readonly done: string;
+	}
+
+	const NAMING_ROWS: readonly NamingRow[] = [
+		{
+			mode: "bare",
+			phase: "lint",
+			stepId: "lint",
+			running: "Lint: pnpm run lint",
+			done: "Lint passed",
+		},
+		{
+			mode: "bare",
+			phase: "compile",
+			stepId: "compile",
+			running:
+				"Compile: rm -rf dist/ && pnpm run build && chown -R runner:runner dist/ 2>/dev/null || true",
+			done: "Compile passed",
+		},
+		{
+			// `doneLabel` lives here and NOWHERE else: bare test steps say "Tests
+			// passed" while the phase label is "Test".
+			mode: "bare",
+			phase: "test",
+			stepId: "test",
+			running: "Test: pnpm run test",
+			done: "Tests passed",
+		},
+		{
+			mode: "suffixed",
+			phase: "lint",
+			stepId: "lint:api",
+			running: "Lint [api]: echo lint",
+			done: "Lint [api] passed",
+		},
+		{
+			mode: "suffixed",
+			phase: "compile",
+			stepId: "compile:api",
+			running: "Compile [api]: echo build",
+			done: "Compile [api] passed",
+		},
+		{
+			// The row that catches `doneLabel` leaking into suffixed mode: this MUST
+			// stay "Test [api] passed", never "Tests [api] passed".
+			mode: "suffixed",
+			phase: "test",
+			stepId: "test:api",
+			running: "Test [api]: echo test",
+			done: "Test [api] passed",
+		},
+	];
+
+	beforeEach(async () => {
+		vi.mocked(isDockerAvailable).mockClear();
+		vi.mocked(ensureImage).mockClear();
+		vi.mocked(runInContainer).mockClear();
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-naming-"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	it.each(NAMING_ROWS)("$mode mode names the $phase phase $stepId", async ({
+		mode,
+		stepId,
+		running,
+		done,
+	}) => {
+		if (mode === "bare") {
+			await makeAutoRepo(tmpDir);
+		} else {
+			await makeSingleRunnerConfig(tmpDir);
+		}
+
+		const steps = await run(tmpDir);
+		const emitted = steps.filter((s) => s.id === stepId);
+
+		expect(emitted.map((s) => [s.label, s.status])).toEqual([
+			[running, "running"],
+			[done, "done"],
+		]);
+	});
+
+	it("never emits bare ids or bare done labels for a single-runner CONFIG", async () => {
+		await makeSingleRunnerConfig(tmpDir);
+
+		const steps = await run(tmpDir);
+		const ids = steps.map((s) => s.id);
+		const labels = steps.map((s) => s.label);
+
+		// The stream is real — the absences below are meaningful.
+		expect(ids).toEqual(
+			expect.arrayContaining(["lint:api", "compile:api", "test:api"]),
+		);
+		for (const bare of ["lint", "compile", "test"]) {
+			expect(ids).not.toContain(bare);
+		}
+		expect(labels).not.toContain("Tests [api] passed");
+		expect(labels).not.toContain("Tests passed");
+	});
+
+	it("throws an invariant error when a Docker step has no resolved image", async () => {
+		// Production `ensureImage` always returns a name; this forces the defensive
+		// branch that replaces the old `?? runner.image ?? getImageName(stack)`
+		// fallback chain, so a missing image fails loudly instead of being
+		// silently re-derived from the stack.
+		await makeSingleRunnerConfig(tmpDir);
+		vi.mocked(ensureImage).mockResolvedValueOnce(
+			undefined as unknown as string,
+		);
+
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, ...DOCKER_FULL }, (s) =>
+				steps.push({ ...s }),
+			),
+		).rejects.toThrow(/image/i);
+
+		expect(runInContainer).not.toHaveBeenCalled();
+		expect(steps.some((s) => s.status === "error")).toBe(true);
+	});
+
+	it("runs the per-runner security phase LAST, before the top-level scan", async () => {
+		await makeSingleRunnerConfig(tmpDir, "    security: echo audit\n");
+
+		const steps = await run(tmpDir, { noSecurity: false });
+		const ids = [...new Set(steps.map((s) => s.id))];
+
+		expect(ids).toEqual([
+			"detect",
+			"docker-check",
+			"context-refresh",
+			"docker-image:api",
+			"lint:api",
+			"compile:api",
+			"test:api",
+			"security:api",
+			"security",
+		]);
+		// Per-runner security runs after test and before the top-level Semgrep step.
+		expect(ids.indexOf("security:api")).toBeGreaterThan(
+			ids.indexOf("test:api"),
+		);
+		expect(ids.indexOf("security:api")).toBeLessThan(ids.indexOf("security"));
+	});
+
+	it("skips the per-runner security phase under --no-security and outside full mode", async () => {
+		await makeSingleRunnerConfig(tmpDir, "    security: echo audit\n");
+
+		const noSecurity = await run(tmpDir, { noSecurity: true });
+		expect(noSecurity.map((s) => s.id)).not.toContain("security:api");
+
+		const quick = await run(tmpDir, { mode: "quick", noSecurity: false });
+		expect(quick.map((s) => s.id)).not.toContain("security:api");
+		// Quick mode also drops the test phase — proof the run really was quick.
+		expect(quick.map((s) => s.id)).not.toContain("test:api");
+	});
+
+	it("threads a build-context runner's built tag into every container run", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), { scripts: {} });
+		await fs.outputFile(
+			path.join(tmpDir, "docker", "Dockerfile"),
+			"FROM scratch\n",
+		);
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			`version: 1
+runners:
+  - name: api
+    stack: node
+    build-context: docker
+    lint: echo lint
+`,
+		);
+
+		const steps = await run(tmpDir, { mode: "quick" });
+
+		expect(ensureImage).toHaveBeenCalledWith({
+			stack: "node",
+			buildContext: path.resolve(tmpDir, "docker"),
+			imageTag: "javi-forge-ci-api",
+		});
+		// The tag the build produced — NOT the default per-stack image — is what
+		// every step runs in.
+		const images = vi
+			.mocked(runInContainer)
+			.mock.calls.map(([options]) => options.image);
+		expect(images).toEqual(["javi-forge-ci-api"]);
+		expect(images).not.toContain(getImageName("node"));
+
+		const image = steps.filter((s) => s.id === "docker-image:api");
+		expect(image.map((s) => [s.label, s.status])).toEqual([
+			["Building image for api from docker", "running"],
+			["Docker image ready (javi-forge-ci-api)", "done"],
+		]);
+	});
+
+	it("threads an explicitly configured image verbatim and builds nothing", async () => {
+		const pinned =
+			"registry.example.com/api@sha256:0000000000000000000000000000000000000000000000000000000000000000";
+		await fs.writeJson(path.join(tmpDir, "package.json"), { scripts: {} });
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			`version: 1
+runners:
+  - name: api
+    stack: node
+    image: "${pinned}"
+    lint: echo lint
+`,
+		);
+
+		const steps = await run(tmpDir, { mode: "quick" });
+
+		expect(ensureImage).not.toHaveBeenCalled();
+		const images = vi
+			.mocked(runInContainer)
+			.mock.calls.map(([options]) => options.image);
+		expect(images).toEqual([pinned]);
+
+		// A configured image reports done once — there is no build to report ready.
+		const image = steps.filter((s) => s.id === "docker-image:api");
+		expect(image.map((s) => [s.label, s.status])).toEqual([
+			[`Using configured image ${pinned}`, "done"],
+		]);
+	});
+
+	it("fails the runner when the image build fails, before any step runs", async () => {
+		await makeSingleRunnerConfig(tmpDir);
+		vi.mocked(ensureImage).mockRejectedValueOnce(
+			new Error("docker build boom"),
+		);
+
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, ...DOCKER_FULL }, (s) =>
+				steps.push({ ...s }),
+			),
+		).rejects.toThrow(/docker build boom/);
+
+		const image = steps.filter((s) => s.id === "docker-image:api").at(-1);
+		expect(image?.status).toBe("error");
+		expect(image?.detail).toContain("docker build boom");
+		expect(runInContainer).not.toHaveBeenCalled();
 	});
 });

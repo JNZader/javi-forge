@@ -252,7 +252,7 @@ Mutation testing: Stryker mutates `src/constants.ts`, so the new `HOOK_ASSETS_DI
 time, run `npx vitest run --coverage` TWICE on the SAME machine within the SAME
 session — once with the working tree at the merge-base (the previous slice's
 head) and once at the slice head — using the identical command and the identical
-environment. The gate is `head >= base` on BOTH lines and branches, tolerance 0.
+environment. The gate is `head >= base` on BOTH lines and branches, tolerance 0. Both metrics are compared as PERCENTAGES (covered/total), never raw covered counts — a deletion refactor legitimately shrinks absolute counts while the ratio holds or rises. Observed inter-run jitter on this suite is ±1 branch on an identical tree (measured slices 1-2); a delta within ±1 branch counts as equal, so "tolerance 0" applies to the percentage beyond that measured noise band.
 
 Why the form, not just the number: absolute figures were written into this design
 three times and were wrong three times. They fail in two independent ways.

@@ -81,23 +81,45 @@ slice is blocked on closing COV-1.
 
 ## Phase 2: Slice 2 — Executor Collapse (PR 2)
 
-Spec: `ci-execution` → "Single execution path", "Step-id and label naming",
-"Coverage floors preserved". Net-negative diff. RED→GREEN per TDD.
+Spec: `ci-execution` → "Single execution path", "Step-id and label naming
+keyed on resolution source", "Coverage must not regress". Net-negative diff.
+RED→GREEN per TDD.
 
-- [ ] 2.1 RED: in `src/commands/ci.test.ts` ADD a naming table test over `NAMING_MODE`: bare rows for auto (`lint`, `Lint: {cmd}`, `Lint passed`, test → `Tests passed`) and suffixed rows for a SINGLE-runner config named `api` (`lint:api`, `Lint [api]: {cmd}`, `Lint [api] passed`, test → `Test [api] passed`, NEVER `Tests [api] passed`). (D2 / R3 guard)
-- [ ] 2.2 In `src/commands/ci.ts`, add `const NAMING_MODE = { BARE: "bare", SUFFIXED: "suffixed" } as const` + `type NamingMode`, and phase descriptors carrying `label` and `doneLabel`. Apply `doneLabel` in BARE mode ONLY; suffixed keeps today's `${phase.label} [${runner.name}] passed` composition (ci.ts:880-886).
-- [ ] 2.3 In `runCI`, select the mode once: `resolved.source === "auto" ? BARE : SUFFIXED`, and carry it on `RunnerExecContext.naming`. Never key naming on `runners.length`.
-- [ ] 2.4 Rename `runConfiguredRunner` → `runRunner` and merge `RunnerStepContext` / `ConfiguredRunnerContext` into the single `RunnerExecContext` interface from the design.
-- [ ] 2.5 In the prologue (ci.ts:536-573, INSIDE the existing `if (!noDocker)` guard), capture the `ensureImage` return into `autoImage` and pass it as `ctx.preresolvedImage`. Set it iff `resolved.source === "auto" && !noDocker`. Do not move the build.
-- [ ] 2.6 In `runRunner`, nest the image skip INSIDE the existing `!noDocker` guard: `if (!noDocker) { if (ctx.preresolvedImage) { image = ctx.preresolvedImage } else { …resolve/ensure… } }`. `--no-docker` must still emit zero image steps. (D1)
-- [ ] 2.7 Convert `runStep` to the `RunStepOptions` options object; delete the `imageOverride ?? runner.image ?? getImageName(runner.stack)` fallback chain and add an internal invariant throw when `!noDocker` and `image` is missing. (D3)
-- [ ] 2.8 RED→GREEN: ADD a test asserting `runStep` throws when `!noDocker` and no image is supplied (covers the new branch).
-- [ ] 2.9 Delete `runLegacySteps` and every reference to it; route auto through `runRunner`.
-- [ ] 2.10 Remove the now-unused `getImageName` import from the `../lib/docker.js` import block at `src/commands/ci.ts:13` (biome `noUnusedImports` fails the build otherwise). (JD-011)
-- [ ] 2.11 ADD a configured-runner ordering test: with `securityCmds` set and full mode, assert `security:<runner>` is emitted LAST inside the runner — after `test:<runner>` and before the top-level Semgrep step — and that it is skipped under `--no-security` and non-full modes. (folds JDA-R2-003)
+- [x] 2.1 RED: in `src/commands/ci.test.ts` ADD a naming table test over `NAMING_MODE`: bare rows for auto (`lint`, `Lint: {cmd}`, `Lint passed`, test → `Tests passed`) and suffixed rows for a SINGLE-runner config named `api` (`lint:api`, `Lint [api]: {cmd}`, `Lint [api] passed`, test → `Test [api] passed`, NEVER `Tests [api] passed`). (D2 / R3 guard)
+- [x] 2.2 In `src/commands/ci.ts`, add `const NAMING_MODE = { BARE: "bare", SUFFIXED: "suffixed" } as const` + `type NamingMode`, and phase descriptors carrying `label` and `doneLabel`. Apply `doneLabel` in BARE mode ONLY; suffixed keeps today's `${phase.label} [${runner.name}] passed` composition (ci.ts:880-886).
+- [x] 2.3 In `runCI`, select the mode once: `resolved.source === "auto" ? BARE : SUFFIXED`, and carry it on `RunnerExecContext.naming`. Never key naming on `runners.length`.
+- [x] 2.4 Rename `runConfiguredRunner` → `runRunner` and merge `RunnerStepContext` / `ConfiguredRunnerContext` into the single `RunnerExecContext` interface from the design.
+- [x] 2.5 In the prologue (ci.ts:536-573, INSIDE the existing `if (!noDocker)` guard), capture the `ensureImage` return into `autoImage` and pass it as `ctx.preresolvedImage`. Set it iff `resolved.source === "auto" && !noDocker`. Do not move the build.
+- [x] 2.6 In `runRunner`, nest the image skip INSIDE the existing `!noDocker` guard: `if (!noDocker) { if (ctx.preresolvedImage) { image = ctx.preresolvedImage } else { …resolve/ensure… } }`. `--no-docker` must still emit zero image steps. (D1)
+- [x] 2.7 Convert `runStep` to the `RunStepOptions` options object; delete the `imageOverride ?? runner.image ?? getImageName(runner.stack)` fallback chain and add an internal invariant throw when `!noDocker` and `image` is missing. (D3)
+- [x] 2.8 RED→GREEN: ADD a test asserting `runStep` throws when `!noDocker` and no image is supplied (covers the new branch).
+- [x] 2.9 Delete `runLegacySteps` and every reference to it; route auto through `runRunner`.
+- [x] 2.10 Remove the now-unused `getImageName` import from the `../lib/docker.js` import block at `src/commands/ci.ts:13` (biome `noUnusedImports` fails the build otherwise). (JD-011)
+- [x] 2.11 ADD a configured-runner ordering test: with `securityCmds` set and full mode, assert `security:<runner>` is emitted LAST inside the runner — after `test:<runner>` and before the top-level Semgrep step — and that it is skipped under `--no-security` and non-full modes. (folds JDA-R2-003)
   - NOTE (JDB2-008): the file-wide `ensureImage` mock in `ci.test.ts` is production-faithful ONLY for the no-`buildContext` case (it returns `getImageName(stack)` and ignores `imageTag`). BEFORE adding any build-context or explicit-`imageTag` runner row, extend the mock to `options.imageTag ?? getImageName(options.stack)` — otherwise the test asserts against a value production would never return.
-- [ ] 2.12 Run `pnpm test`; verify all slice-1 characterization tests pass with ZERO assertion edits (scenario "Collapse lands on a green safety net").
-- [ ] 2.13 SAME-RUN DELTA coverage gate (do NOT compare against any number written in this file): run `npx vitest run --coverage` twice on the same machine in the same session — once with the tree at the slice-1 head (the merge-base of this slice) and once at the slice-2 head, identical command and environment — and require `head >= base` on BOTH lines and branches, tolerance 0. Record both absolute readings in the PR body as informative context, labeled with their commit and whether Docker was available. The configured thresholds in `vitest.config.ts` stay untouched (the 80% branch floor is already unmet on `main` — pre-existing, tracked as COV-1 in `docs/BACKLOG.md`); a failing configured threshold does not fail this gate, and a passing one does not satisfy it.
+- [x] 2.12 Run `pnpm test`; verify all slice-1 characterization tests pass with ZERO assertion edits (scenario "Collapse lands on a green safety net").
+- [x] 2.13 SAME-RUN DELTA coverage gate (do NOT compare against any number written in this file): run `npx vitest run --coverage` twice on the same machine in the same session — once with the tree at the slice-1 head (the merge-base of this slice) and once at the slice-2 head, identical command and environment — and require `head >= base` on BOTH lines and branches, tolerance 0. Record both absolute readings in the PR body as informative context, labeled with their commit and whether Docker was available. The configured thresholds in `vitest.config.ts` stay untouched (the 80% branch floor is already unmet on `main` — pre-existing, tracked as COV-1 in `docs/BACKLOG.md`); a failing configured threshold does not fail this gate, and a passing one does not satisfy it. `pnpm test:coverage` (the same command behind a named script, `package.json:17`) may be run as an EXPLICITLY NON-GATING informative invocation — its red exit is COV-1, not a slice failure.
+
+### SLICE-2 COVERAGE READINGS — informative, NOT a gate
+
+Same machine, same session, same command (`npx vitest run --coverage`),
+developer box with Docker available and the `javi-forge-ci-node` image present,
+so the Docker-gated integration suites RAN in both runs. `coverage/clover.xml`
+project totals:
+
+| Tree | Lines | Branches |
+|---|---|---|
+| base — slice-1 merge head `c9b5e66` | 3300/3725 = 88.59% | 1905/2411 = 79.01% |
+| head — slice 2 @ `204cfd2` | 3290/3707 = 88.75% | 1910/2412 = 79.18% |
+
+Delta: lines +0.16pp, branches +0.17pp — `head >= base` on both, gate PASSED.
+Both runs exit non-zero on the configured 80% branch threshold (COV-1,
+pre-existing on `main`), which is orthogonal to this gate.
+
+Measurement gotcha for the next slice: run the base from a NAMED BRANCH, not a
+detached HEAD. `src/lib/__tests__/crash-recovery.test.ts:101` asserts the current
+branch name against the real repo, so a detached-HEAD base run fails that test
+and vitest then writes no `clover.xml` at all.
 
 ## Phase 3: Slice 3 — Hook Assets, Marker, Classification (PR 3)
 
@@ -130,4 +152,4 @@ exceeds the 400-line budget.
 - [ ] 3.19 ADD hash-input semantics tests (D6): install → re-classify = `managed-current` with zero writes (bytes + mtime unchanged); body unchanged with a bumped marker version → `managed-outdated`, NOT `managed-edited`; one body byte changed → `managed-edited`; marker naming a DIFFERENT hook → `foreign`; CRLF-converted managed hook → `foreign`.
 - [ ] 3.20 Delete the three inline `*_HOOK` template constants from `src/commands/ci.ts` and read templates from `HOOK_ASSETS_DIR` instead. Leave the pre-existing substring greps at `ci.test.ts:262-298` UNTOUCHED — they must still pass against the installed file.
 - [ ] 3.21 Packaging: add `assets/` to the `files` array in `package.json`; in `scripts/verify-package-contents.mjs` add ALL FOUR paths (`assets/hooks/pre-commit`, `assets/hooks/pre-push`, `assets/hooks/commit-msg`, `assets/hooks/manifest.json`) to `REQUIRED_FILES` and `assets/` to `REQUIRED_PREFIXES`. Listing one asset is NOT sufficient — the prefix check passes on any single match (JD-008).
-- [ ] 3.22 Run `pnpm package:check`, `pnpm test:hooks` and `pnpm validate`; confirm the `ci-hooks-exec` integration tests from slice 1 still pass against marker-carrying hooks. For coverage, apply the SAME-RUN DELTA gate (as in 2.13): `npx vitest run --coverage` at the slice-2 head and at the slice-3 head, same machine and session, requiring `head >= base` on lines and branches.
+- [ ] 3.22 Run `pnpm package:check`, `pnpm test:hooks` and `pnpm validate`; confirm the `ci-hooks-exec` integration tests from slice 1 still pass against marker-carrying hooks. For coverage, apply the SAME-RUN DELTA gate (as in 2.13): `npx vitest run --coverage` at the slice-2 head and at the slice-3 head, same machine and session, requiring `head >= base` on lines and branches AS PERCENTAGES (raw covered counts shrink legitimately on deletions; ±1-branch inter-run jitter counts as equal — measured in slices 1-2). `pnpm test:coverage` (the same command behind a named script, `package.json:17`) may be run as an EXPLICITLY NON-GATING informative invocation — a failing configured threshold does not fail this gate, and a passing one does not satisfy it. Measure the base from a NAMED BRANCH, never a detached HEAD (see the slice-2 readings section for why).

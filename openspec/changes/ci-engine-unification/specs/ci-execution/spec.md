@@ -125,7 +125,7 @@ SAME-RUN DELTA: at each slice's verify step `npx vitest run --coverage` MUST be
 run TWICE on the same machine in the same session — once with the working tree
 at the merge-base (the previous slice's head) and once at the slice head — with
 the identical command and environment. Both lines and branches MUST satisfy
-`head >= base` (tolerance 0). The configured thresholds in `vitest.config.ts`
+`head >= base` (tolerance 0), compared as PERCENTAGES (covered/total) — never raw covered counts, which legitimately shrink on deletion refactors — with the measured ±1-branch inter-run jitter counting as equal. The configured thresholds in `vitest.config.ts`
 MUST NOT be lowered.
 
 Absolute coverage percentages MUST NOT be used as the gate. They are stale one

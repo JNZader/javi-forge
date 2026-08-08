@@ -71,3 +71,18 @@ Convergence budget exhausted after round-2 fix. Verdict: JDB3-001/002/003 verifi
 | JDB4-002 | judgment-day | tasks.md:85 | WARNING | info | Phase 2 header cites spec requirement "Coverage floors preserved", renamed to "Coverage must not regress" by round-2 fix. Dangling reference — queued for the slice-2 apply prompt. |
 | JDB4-003 | judgment-day | tasks.md:100,:133 | SUGGESTION | info | Dropping `pnpm test:coverage` from command lists was based on a void rationale (the substitute `npx vitest run --coverage` is the identical command, package.json:17, red-gates identically). Harmless outcome; restore the named script as an explicitly non-gating invocation during slice 2. |
 | JDB4-004 | judgment-day | proposal.md:56 (fixed above), exploration.md:145 | SUGGESTION | info | Residual `openspec/config.yaml` threshold citations — declares vs enforces distinction now stated at proposal.md:56; exploration.md:145 left as historical record. |
+
+## Apply slice 2 — judgment-day (executor collapse)
+
+Two blind judges, both **APPROVE** — zero BLOCKER/CRITICAL candidates, no fix round. Behavior preservation verified line-by-line by both against the deleted `runLegacySteps`; invariant throw proven unreachable on all legitimate paths; naming keyed strictly on `resolved.source`; slice-1 net byte-intact (only the pre-authorized JDB2-008 mock extension). All findings below are severity-floor `info`.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JDA5-001 / JDB5-003 (convergent) | judgment-day | tasks.md 2.13/3.22, design Coverage Guard, spec ci-execution | WARNING | fixed | Gate metrology: unit never stated (raw covered-line counts DROP on a deletion refactor — 3300→3290 — gate only passes as percentages) AND ±1-branch inter-run jitter makes "tolerance 0" empirically false. Fixed post-round: gate restated as percentages with the observed ±1-branch equality band. |
+| JDB5-001 | judgment-day | ci.ts:897-904 | WARNING | info | Bare-mode FAILURE labels ("Tests failed") pinned by zero tests repo-wide; rewrite was correct by inspection but unguarded. → slice-3 test pass. |
+| JDA5-004 | judgment-day | ci.test.ts:1465-1470 | SUGGESTION | info | Config-path ordering test uses the Set pattern ruled insufficient in JDA2-001 — blind to duplicate emissions on the config path. → slice-3 test pass. |
+| JDB5-002 / JDA5-003 (convergent) | judgment-day | ci.ts:878/:632 + ui/CI.tsx:55 | WARNING | info | Latent bare-mode `security`/`setup` id collision with top-level step ids; TUI dedup would silently overwrite. Unreachable today (auto cmds frozen empty, pinned by slice-1 tests). Correctly parked → gates-v2 prompt. |
+| JDB5-004 | judgment-day | ci.test.ts:34-36 | SUGGESTION | info | Extended mock is MORE permissive than production (honors imageTag without buildContext; drops the no-Dockerfile fail-closed throw). No current test wrong. → tighten during slice 3 if touched. |
+| JDA5-005 | judgment-day | ci.test.ts beforeEach | SUGGESTION | info | mockClear() does not clear queued mock*Once values — latent cross-test poisoning. → consider mockReset/restoreMocks in slice 3. |
+| JDA5-006 | judgment-day | ci.test.ts:1510-1513 | SUGGESTION | info | Exact-object assertion on internal ensureImage call shape — implementation coupling, redundant next to the observable assertions. |
+| JDB5-005 | judgment-day | ci.test.ts:1435-1455 | SUGGESTION | info | Invariant-throw test reaches the branch via a state production cannot produce — coverage by construction, documented as such. |

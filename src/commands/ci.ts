@@ -10,7 +10,6 @@ import {
 import { refreshContextDir } from "../lib/context.js";
 import {
 	ensureImage,
-	getImageName,
 	isDockerAvailable,
 	openShell,
 	runInContainer,
@@ -533,6 +532,10 @@ export async function runCI(
 	}
 
 	// ── Check Docker ─────────────────────────────────────────────────────────────
+	// Image resolved by the prologue for the auto path — threaded into the
+	// executor so nothing downstream re-derives it. Set iff
+	// `resolved.source === "auto" && !noDocker`.
+	let autoImage: string | undefined;
 	if (!noDocker) {
 		const stepDocker = "docker-check";
 		report(onStep, stepDocker, "Checking Docker", "running");
@@ -560,7 +563,7 @@ export async function runCI(
 				"running",
 			);
 			try {
-				await ensureImage({
+				autoImage = await ensureImage({
 					stack: stackInfo.stackType,
 					javaVersion: stackInfo.javaVersion,
 				});
@@ -606,28 +609,22 @@ export async function runCI(
 	}
 
 	// ── Runner execution ─────────────────────────────────────────────────────────
-	if (resolved.source === "auto" && primary) {
-		// Legacy zero-config path — unchanged single-stack behavior.
-		await runLegacySteps(stackInfo, primary, {
+	// ONE executor for every resolution source. Naming is a function of
+	// `resolved.source` alone — never of `resolved.runners.length`, which would
+	// silently rename a single-runner CONFIG.
+	const naming: NamingMode =
+		resolved.source === "auto" ? NAMING_MODE.BARE : NAMING_MODE.SUFFIXED;
+	for (const runner of resolved.runners) {
+		await runRunner(runner, {
 			projectDir,
 			mode,
 			noDocker,
+			noSecurity,
 			timeout,
 			onStep,
+			naming,
+			preresolvedImage: resolved.source === "auto" ? autoImage : undefined,
 		});
-	} else {
-		// Configured (or --stack override) runners execute in declared order,
-		// each in its own working directory.
-		for (const runner of resolved.runners) {
-			await runConfiguredRunner(runner, {
-				projectDir,
-				mode,
-				noDocker,
-				noSecurity,
-				timeout,
-				onStep,
-			});
-		}
 	}
 
 	// ── Security scan (full mode only) ──────────────────────────────────────────
@@ -689,129 +686,126 @@ export async function runCI(
 // Step runners
 // =============================================================================
 
-interface RunnerStepContext {
+/**
+ * Step-id and label naming, keyed on `resolved.source` and nothing else.
+ * `bare` is the zero-config (auto) presentation; `suffixed` carries the runner
+ * name, including for a CONFIG that happens to declare exactly one runner.
+ */
+const NAMING_MODE = {
+	BARE: "bare",
+	SUFFIXED: "suffixed",
+} as const;
+type NamingMode = (typeof NAMING_MODE)[keyof typeof NAMING_MODE];
+
+interface RunnerExecContext {
 	projectDir: string;
 	mode: CIMode;
 	noDocker: boolean;
+	noSecurity: boolean;
 	timeout: number;
 	onStep: CIStepCallback;
+	naming: NamingMode;
+	/** Set only for `source === "auto"`: image built in the prologue. */
+	preresolvedImage?: string;
 }
 
-/** Legacy zero-config execution — identical to the pre-mixed-stack behavior. */
-async function runLegacySteps(
-	stackInfo: CIStackInfo,
-	runner: ResolvedRunner,
-	ctx: RunnerStepContext,
-): Promise<void> {
-	const { projectDir, mode, noDocker, timeout, onStep } = ctx;
-
-	if (stackInfo.lintCmd) {
-		const stepLint = "lint";
-		report(onStep, stepLint, `Lint: ${stackInfo.lintCmd}`, "running");
-		try {
-			await runStep(stackInfo.lintCmd, projectDir, noDocker, timeout, runner);
-			report(onStep, stepLint, "Lint passed", "done");
-		} catch (e) {
-			report(onStep, stepLint, "Lint failed", "error", String(e));
-			throw e;
-		}
-	}
-
-	if (stackInfo.compileCmd) {
-		const stepCompile = "compile";
-		report(onStep, stepCompile, `Compile: ${stackInfo.compileCmd}`, "running");
-		try {
-			// Run as root inside the container to rm/build output dirs owned by any host user,
-			// then chown back to runner so subsequent test steps can read the output.
-			await runStep(
-				stackInfo.compileCmd,
-				projectDir,
-				noDocker,
-				timeout,
-				runner,
-				"root",
-			);
-			report(onStep, stepCompile, "Compile passed", "done");
-		} catch (e) {
-			report(onStep, stepCompile, "Compile failed", "error", String(e));
-			throw e;
-		}
-	}
-
-	if (mode === "full" && stackInfo.testCmd) {
-		const stepTest = "test";
-		report(onStep, stepTest, `Test: ${stackInfo.testCmd}`, "running");
-		try {
-			await runStep(stackInfo.testCmd, projectDir, noDocker, timeout, runner);
-			report(onStep, stepTest, "Tests passed", "done");
-		} catch (e) {
-			report(onStep, stepTest, "Tests failed", "error", String(e));
-			throw e;
-		}
-	}
+interface RunPhase {
+	id: string;
+	label: string;
+	/**
+	 * Past-tense subject for the done/failed labels. Applies in BARE mode ONLY —
+	 * suffixed mode keeps `${label} [${name}] passed`, so a configured `test`
+	 * phase stays "Test [api] passed", never "Tests [api] passed".
+	 */
+	doneLabel?: string;
+	cmds: readonly string[];
+	user?: string;
+	skip: boolean;
 }
 
-interface ConfiguredRunnerContext extends RunnerStepContext {
-	noSecurity: boolean;
+interface RunStepOptions {
+	command: string;
+	projectDir: string;
+	noDocker: boolean;
+	timeout: number;
+	runner: ResolvedRunner;
+	user?: string;
+	/** REQUIRED when `!noDocker` — resolved upstream, never re-derived here. */
+	image?: string;
 }
 
 /**
- * Execute one configured runner: resolve the image (default stack image,
- * explicit/digest-pinned image, or deterministic build-context build),
- * verify required tools fail-closed, then run setup/lint/compile/test/
- * security commands in order, inside the runner's working directory.
+ * Execute one resolved runner, whatever its source: resolve the image (already
+ * built by the prologue for auto, otherwise the default stack image, an
+ * explicit/digest-pinned image, or a deterministic build-context build), verify
+ * required tools fail-closed, then run setup/lint/compile/test/security
+ * commands in order, inside the runner's working directory.
  * Any failure aborts the whole run — nothing is ever skipped silently.
  */
-async function runConfiguredRunner(
+async function runRunner(
 	runner: ResolvedRunner,
-	ctx: ConfiguredRunnerContext,
+	ctx: RunnerExecContext,
 ): Promise<void> {
-	const { projectDir, mode, noDocker, noSecurity, timeout, onStep } = ctx;
+	const { projectDir, mode, noDocker, noSecurity, timeout, onStep, naming } =
+		ctx;
+	const bare = naming === NAMING_MODE.BARE;
 
 	// ── Image resolution (Docker mode only) ────────────────────────────────────
 	let imageName: string | undefined;
 	if (!noDocker) {
-		const stepImage = `docker-image:${runner.name}`;
-		try {
-			if (runner.buildContext) {
-				report(
-					onStep,
-					stepImage,
-					`Building image for ${runner.name} from ${runner.buildContext}`,
-					"running",
-				);
-				imageName = await ensureImage({
-					stack: runner.stack,
-					buildContext: path.resolve(projectDir, runner.buildContext),
-					imageTag: `javi-forge-ci-${runner.name}`,
-				});
-			} else if (runner.image) {
-				// Explicit image (digest pins pass through verbatim).
-				imageName = runner.image;
-				report(
-					onStep,
-					stepImage,
-					`Using configured image ${runner.image}`,
-					"done",
-				);
-			} else {
-				report(
-					onStep,
-					stepImage,
-					`Building image for ${runner.name} (${runner.stack})`,
-					"running",
-				);
-				imageName = await ensureImage({
-					stack: runner.stack,
-					javaVersion: runner.javaVersion,
-				});
+		if (ctx.preresolvedImage) {
+			// Auto path: the prologue already built the image BEFORE the .context/
+			// refresh. Reuse it verbatim so no second `docker-image` step appears
+			// and the global step order is unchanged.
+			imageName = ctx.preresolvedImage;
+		} else {
+			const stepImage = `docker-image:${runner.name}`;
+			try {
+				if (runner.buildContext) {
+					report(
+						onStep,
+						stepImage,
+						`Building image for ${runner.name} from ${runner.buildContext}`,
+						"running",
+					);
+					imageName = await ensureImage({
+						stack: runner.stack,
+						buildContext: path.resolve(projectDir, runner.buildContext),
+						imageTag: `javi-forge-ci-${runner.name}`,
+					});
+				} else if (runner.image) {
+					// Explicit image (digest pins pass through verbatim).
+					imageName = runner.image;
+					report(
+						onStep,
+						stepImage,
+						`Using configured image ${runner.image}`,
+						"done",
+					);
+				} else {
+					report(
+						onStep,
+						stepImage,
+						`Building image for ${runner.name} (${runner.stack})`,
+						"running",
+					);
+					imageName = await ensureImage({
+						stack: runner.stack,
+						javaVersion: runner.javaVersion,
+					});
+				}
+				if (!runner.image) {
+					report(
+						onStep,
+						stepImage,
+						`Docker image ready (${imageName})`,
+						"done",
+					);
+				}
+			} catch (e) {
+				report(onStep, stepImage, "Building Docker image", "error", String(e));
+				throw e;
 			}
-			if (!runner.image) {
-				report(onStep, stepImage, `Docker image ready (${imageName})`, "done");
-			}
-		} catch (e) {
-			report(onStep, stepImage, "Building Docker image", "error", String(e));
-			throw e;
 		}
 	}
 
@@ -829,15 +823,14 @@ async function runConfiguredRunner(
 		);
 		for (const tool of runner.requiredTools) {
 			try {
-				await runStep(
-					`command -v ${tool}`,
+				await runStep({
+					command: `command -v ${tool}`,
 					projectDir,
 					noDocker,
 					timeout,
 					runner,
-					undefined,
-					imageName,
-				);
+					image: imageName,
+				});
 			} catch {
 				const message =
 					`runner "${runner.name}": required tool "${tool}" not found in ${envDesc} — ` +
@@ -855,13 +848,7 @@ async function runConfiguredRunner(
 		report(onStep, stepTools, `Required tools OK [${runner.name}]`, "done");
 	}
 
-	const phases: Array<{
-		id: string;
-		label: string;
-		cmds: readonly string[];
-		user?: string;
-		skip: boolean;
-	}> = [
+	const phases: RunPhase[] = [
 		{ id: "setup", label: "Setup", cmds: runner.setupCmds, skip: false },
 		{ id: "lint", label: "Lint", cmds: runner.lintCmds, skip: false },
 		{
@@ -874,6 +861,7 @@ async function runConfiguredRunner(
 		{
 			id: "test",
 			label: "Test",
+			doneLabel: "Tests",
 			cmds: runner.testCmds,
 			skip: mode !== "full",
 		},
@@ -887,35 +875,29 @@ async function runConfiguredRunner(
 
 	for (const phase of phases) {
 		if (phase.skip) continue;
-		const stepId = `${phase.id}:${runner.name}`;
+		const stepId = bare ? phase.id : `${phase.id}:${runner.name}`;
+		// `doneLabel` is BARE-only: suffixed mode keeps the historical
+		// `${label} [${name}] passed` composition.
+		const subject = bare ? (phase.doneLabel ?? phase.label) : phase.label;
+		const suffix = bare ? "" : ` [${runner.name}]`;
 		for (const cmd of phase.cmds) {
-			report(
-				onStep,
-				stepId,
-				`${phase.label} [${runner.name}]: ${cmd}`,
-				"running",
-			);
+			report(onStep, stepId, `${phase.label}${suffix}: ${cmd}`, "running");
 			try {
-				await runStep(
-					cmd,
+				await runStep({
+					command: cmd,
 					projectDir,
 					noDocker,
 					timeout,
 					runner,
-					phase.user,
-					imageName,
-				);
-				report(
-					onStep,
-					stepId,
-					`${phase.label} [${runner.name}] passed`,
-					"done",
-				);
+					user: phase.user,
+					image: imageName,
+				});
+				report(onStep, stepId, `${subject}${suffix} passed`, "done");
 			} catch (e) {
 				report(
 					onStep,
 					stepId,
-					`${phase.label} [${runner.name}] failed`,
+					`${subject}${suffix} failed`,
 					"error",
 					String(e),
 				);
@@ -925,15 +907,9 @@ async function runConfiguredRunner(
 	}
 }
 
-async function runStep(
-	command: string,
-	projectDir: string,
-	noDocker: boolean,
-	timeout: number,
-	runner: ResolvedRunner,
-	user?: string,
-	imageOverride?: string,
-): Promise<void> {
+async function runStep(options: RunStepOptions): Promise<void> {
+	const { command, projectDir, noDocker, timeout, runner, user, image } =
+		options;
 	if (noDocker) {
 		// Run natively, in the runner's working directory.
 		const cwd = path.join(projectDir, runner.directory);
@@ -951,10 +927,17 @@ async function runStep(
 			proc.on("error", reject);
 		});
 	} else {
-		// The image is always resolved upstream (per-runner ensureImage,
-		// explicit config image, or the default per-stack image). Docker
-		// receives it verbatim and never re-detects anything.
-		const image = imageOverride ?? runner.image ?? getImageName(runner.stack);
+		// The image is always resolved upstream (prologue build for auto,
+		// per-runner ensureImage, explicit config image, or the default
+		// per-stack image). Docker receives it verbatim and never re-detects
+		// anything, so a missing image is a bug — fail loudly instead of
+		// silently re-deriving a name that may not be the one that was built.
+		if (!image) {
+			throw new Error(
+				`internal invariant violated: no Docker image resolved for runner "${runner.name}" — ` +
+					"the image must be resolved before any step runs",
+			);
+		}
 		const workdir =
 			runner.directory !== "."
 				? `/home/runner/work/${runner.directory}`

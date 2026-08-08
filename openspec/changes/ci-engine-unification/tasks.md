@@ -34,19 +34,37 @@ Spec: `ci-execution` → "Characterization tests before the collapse", "Preserve
 step order", "Step-id naming"; `ci-hook-install` → "Hooks are verified by
 execution". ADDED tests only — no pre-existing assertion may be edited.
 
-- [ ] 1.1 Commit the untracked SDD scaffolding: `git add openspec/ .atl/` and commit `chore(sdd): scaffold ci-engine-unification change`. Nothing else in that commit.
-- [ ] 1.2 In `src/commands/ci.test.ts`, ADD a `describe("characterization: auto + docker")` block using `vi.mock("../lib/docker.js")` with `isDockerAvailable → true`, `ensureImage` returning `getImageName(runner.stack)` (production-faithful per docker.ts:186), `runInContainer` a spy. Fixture: node repo, no `.javi-forge/ci.yaml`, full mode.
-- [ ] 1.3 ADD test "global step order on auto+Docker": collect `onStep` ids and assert the sequence `detect, docker-check, docker-image, context-refresh, lint, compile, test`. (`ci-execution` → Preserved step order)
-- [ ] 1.4 ADD test "image build precedes context refresh": assert `ids.indexOf("docker-image") < ids.indexOf("context-refresh")` (R5 / scenario "Image build precedes context refresh").
-- [ ] 1.5 ADD test "image is threaded into every container run": assert every `runInContainer` call received `getImageName(runner.stack)`. This assertion MUST hold identically after slice 2 — do not use a sentinel value. (scenario "Image name is threaded, not re-derived")
-- [ ] 1.6 ADD test "`--user root` only on compile": assert `runInContainer` spy args have `user === "root"` for the compile command and `undefined` for lint and test.
-- [ ] 1.7 ADD test "`--stack node` step ids as-is": run `runCI` with `--stack node` on a node repo and assert suffixed ids exactly as emitted today (freeze B1; do NOT fix it). (scenario "Stack override emits suffixed ids")
-- [ ] 1.8 ADD test "auto emits no setup/security/tool steps": assert no emitted id matches `setup*`, `security:*` or `tools*`. (requirement "Auto path inherits configured phases as no-ops")
-- [ ] 1.9 Create `src/__integration__/ci-auto-docker.integration.test.ts`: auto resolution against REAL Docker, gated exactly like `ci-mixed.integration.test.ts` (skip unless Docker is available AND the javi-forge node image already exists locally). Opportunistic by design — record the residual R1 gap in the PR body.
-- [ ] 1.10 Create `src/__integration__/ci-hooks-exec.integration.test.ts`: temp git repo + `installCIHooks`, then EXECUTE hooks with `sh <hook>`. Table-drive `commit-msg` blocked/allowed messages asserting exit 1/0. (`ci-hook-install` → "Hooks are verified by execution")
-- [ ] 1.11 In the same file, execute `pre-commit` and `pre-push` with a stub `javi-forge` (and stub `docker`) placed first on `PATH`; assert the stub received the frozen flag string `--quick --no-docker --no-security --no-ci-ghagga` and that a non-zero stub exit aborts the hook. (scenario "Generated pre-commit runs")
-- [ ] 1.12 Run `pnpm test` and `pnpm validate`; confirm every pre-existing assertion in `src/commands/ci.test.ts` is untouched (`git diff` shows additions only in that file).
-- [ ] 1.13 Run `pnpm test:coverage`; record lines/branches from `coverage/clover.xml` in the PR body as the SLICE-1 BASELINE (design records main at 3001/3256 = 92.2% lines, 83.2% branches). Slice 2 must land `>= baseline − 0.5pp` and `>= 85/80`.
+- [x] 1.1 Commit the untracked SDD scaffolding: `git add openspec/ .atl/` and commit `chore(sdd): scaffold ci-engine-unification change`. Nothing else in that commit.
+- [x] 1.2 In `src/commands/ci.test.ts`, ADD a `describe("characterization: auto + docker")` block using `vi.mock("../lib/docker.js")` with `isDockerAvailable → true`, `ensureImage` returning `getImageName(runner.stack)` (production-faithful per docker.ts:186), `runInContainer` a spy. Fixture: node repo, no `.javi-forge/ci.yaml`, full mode.
+- [x] 1.3 ADD test "global step order on auto+Docker": collect `onStep` ids and assert the sequence `detect, docker-check, docker-image, context-refresh, lint, compile, test`. (`ci-execution` → Preserved step order)
+- [x] 1.4 ADD test "image build precedes context refresh": assert `ids.indexOf("docker-image") < ids.indexOf("context-refresh")` (R5 / scenario "Image build precedes context refresh").
+- [x] 1.5 ADD test "image is threaded into every container run": assert every `runInContainer` call received `getImageName(runner.stack)`. This assertion MUST hold identically after slice 2 — do not use a sentinel value. (scenario "Image name is threaded, not re-derived")
+- [x] 1.6 ADD test "`--user root` only on compile": assert `runInContainer` spy args have `user === "root"` for the compile command and `undefined` for lint and test.
+- [x] 1.7 ADD test "`--stack node` step ids as-is": run `runCI` with `--stack node` on a node repo and assert suffixed ids exactly as emitted today (freeze B1; do NOT fix it). (scenario "Stack override emits suffixed ids")
+- [x] 1.8 ADD test "auto emits no setup/security/tool steps": assert no emitted id matches `setup*`, `security:*` or `tools*`. (requirement "Auto path inherits configured phases as no-ops")
+- [x] 1.9 Create `src/__integration__/ci-auto-docker.integration.test.ts`: auto resolution against REAL Docker, gated exactly like `ci-mixed.integration.test.ts` (skip unless Docker is available AND the javi-forge node image already exists locally). Opportunistic by design — record the residual R1 gap in the PR body.
+- [x] 1.10 Create `src/__integration__/ci-hooks-exec.integration.test.ts`: temp git repo + `installCIHooks`, then EXECUTE hooks with `sh <hook>`. Table-drive `commit-msg` blocked/allowed messages asserting exit 1/0. (`ci-hook-install` → "Hooks are verified by execution")
+- [x] 1.11 In the same file, execute `pre-commit` and `pre-push` with a stub `javi-forge` (and stub `docker`) placed first on `PATH`; assert the stub received the frozen flag string `--quick --no-docker --no-security --no-ci-ghagga` and that a non-zero stub exit aborts the hook. (scenario "Generated pre-commit runs")
+- [x] 1.12 Run `pnpm test` and `pnpm validate`; confirm every pre-existing assertion in `src/commands/ci.test.ts` is untouched (`git diff` shows additions only in that file).
+- [x] 1.13 Run `pnpm test:coverage`; record lines/branches from `coverage/clover.xml` in the PR body as the SLICE-1 BASELINE (design records main at 3001/3256 = 92.2% lines, 83.2% branches). Slice 2 must land `>= baseline − 0.5pp` and `>= 85/80`.
+
+### MEASURED SLICE-1 BASELINE (supersedes the design's R4 numbers)
+
+`coverage/clover.xml`, project totals, same tree, `pnpm test:coverage`:
+
+| Tree | Lines | Branches |
+|---|---|---|
+| `main` (2a0abaa) | 3265/3725 = **87.65%** | 1880/2411 = **77.97%** |
+| slice 1 (this PR) | 3291/3725 = **88.34%** (+0.69pp) | 1902/2411 = **78.88%** (+0.91pp) |
+
+The design's claimed baseline (3001/3256 = 92.2% lines, 83.2% branches) does NOT
+reproduce; the real denominator is 3725 statements / 2411 conditionals.
+
+**Pre-existing failure, NOT introduced here**: `pnpm test:coverage` already fails
+its 80% branch threshold on `main` (77.97%). `pnpm test` and `pnpm validate` are
+green on both trees — `validate` does not run coverage. Slice 2's exit criterion
+`>= 85/80` is therefore UNREACHABLE without separate branch-coverage work; treat
+it as a blocker to resolve before slice 2 rather than a gate slice 2 can pass.
 
 ## Phase 2: Slice 2 — Executor Collapse (PR 2)
 

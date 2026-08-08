@@ -1,7 +1,14 @@
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	ensureImage,
+	getImageName,
+	isDockerAvailable,
+	runInContainer,
+} from "../lib/docker.js";
+import type { Stack } from "../types/index.js";
 import type { CIStep } from "./ci.js";
 import {
 	detectCIStack,
@@ -9,6 +16,29 @@ import {
 	resolveCIRunners,
 	runCI,
 } from "./ci.js";
+
+// Docker is mocked for this whole file. No pre-existing test in it reaches a
+// Docker code path (they all run with `noDocker: true` or in `detect` mode), so
+// the mock only becomes observable inside the characterization block below.
+//
+// `ensureImage` is PRODUCTION-FAITHFUL on purpose: without a `buildContext` the
+// real implementation returns exactly `getImageName(stack)` (docker.ts:186), so
+// the image assertions hold identically before and after the executor collapse.
+vi.mock("../lib/docker.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../lib/docker.js")>();
+	return {
+		...actual,
+		isDockerAvailable: vi.fn(async () => true),
+		ensureImage: vi.fn(async (options: { stack: Stack }) =>
+			actual.getImageName(options.stack),
+		),
+		runInContainer: vi.fn(async () => ({
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+		})),
+	};
+});
 
 // =============================================================================
 // detectCIStack
@@ -946,5 +976,178 @@ runners:
 			() => {},
 		);
 		expect(await fs.pathExists(path.join(tmpDir, "lint-ran.txt"))).toBe(true);
+	});
+});
+
+// =============================================================================
+// Characterization safety net — pins TODAY's observable behavior of the auto
+// path in Docker mode so the executor collapse can be verified against it.
+// These assertions must hold IDENTICALLY before and after the collapse.
+// =============================================================================
+
+describe("characterization: auto + docker", () => {
+	let tmpDir: string;
+
+	/** Full mode with Docker on; security + ghagga off to keep the stream deterministic. */
+	const AUTO_DOCKER = {
+		mode: "full" as const,
+		noDocker: false,
+		noGhagga: true,
+		noSecurity: true,
+	};
+
+	/** Emitted ids in first-emission order (each id is reported running → done). */
+	const uniqueIds = (steps: CIStep[]): string[] => [
+		...new Set(steps.map((s) => s.id)),
+	];
+
+	const runAuto = async (
+		projectDir: string,
+		options: Record<string, unknown> = {},
+	): Promise<CIStep[]> => {
+		const steps: CIStep[] = [];
+		await runCI({ projectDir, ...AUTO_DOCKER, ...options }, (s) =>
+			steps.push({ ...s }),
+		);
+		return steps;
+	};
+
+	const containerCalls = () =>
+		vi.mocked(runInContainer).mock.calls.map(([options]) => options);
+
+	beforeEach(async () => {
+		vi.mocked(isDockerAvailable).mockClear();
+		vi.mocked(ensureImage).mockClear();
+		vi.mocked(runInContainer).mockClear();
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-char-"));
+		// Node repo with no .javi-forge/ci.yaml → resolved.source === "auto".
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			scripts: { lint: "eslint .", build: "tsc", test: "vitest run" },
+		});
+		await fs.writeFile(path.join(tmpDir, "pnpm-lock.yaml"), "");
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	it("emits the global step order on auto+Docker", async () => {
+		const steps = await runAuto(tmpDir);
+
+		expect(uniqueIds(steps)).toEqual([
+			"detect",
+			"docker-check",
+			"docker-image",
+			"context-refresh",
+			"lint",
+			"compile",
+			"test",
+		]);
+	});
+
+	it("builds the image BEFORE refreshing .context/", async () => {
+		const ids = uniqueIds(await runAuto(tmpDir));
+
+		expect(ids).toContain("docker-image");
+		expect(ids).toContain("context-refresh");
+		expect(ids.indexOf("docker-image")).toBeLessThan(
+			ids.indexOf("context-refresh"),
+		);
+	});
+
+	it("threads the resolved image into every container run", async () => {
+		const resolved = await resolveCIRunners(tmpDir);
+		const runner = resolved.runners[0];
+		expect(runner?.stack).toBe("node");
+		const expectedImage = getImageName(runner?.stack ?? "node");
+		expect(expectedImage).toBe("javi-forge-ci-node");
+
+		await runAuto(tmpDir);
+
+		const calls = containerCalls();
+		// lint + compile + test — proves the loop below is not a ghost loop.
+		expect(calls).toHaveLength(3);
+		for (const call of calls) {
+			expect(call.image).toBe(expectedImage);
+		}
+	});
+
+	it("threads the resolved image for a non-node stack too", async () => {
+		const goDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "javi-forge-char-go-"),
+		);
+		try {
+			await fs.writeFile(
+				path.join(goDir, "go.mod"),
+				"module example.com/app\n",
+			);
+
+			const resolved = await resolveCIRunners(goDir);
+			expect(resolved.runners[0]?.stack).toBe("go");
+
+			await runAuto(goDir);
+
+			const calls = containerCalls();
+			expect(calls).toHaveLength(3);
+			for (const call of calls) {
+				expect(call.image).toBe("javi-forge-ci-go");
+			}
+		} finally {
+			await fs.remove(goDir);
+		}
+	});
+
+	it("runs ONLY the compile step as --user root", async () => {
+		await runAuto(tmpDir);
+
+		const calls = containerCalls();
+		expect(calls).toHaveLength(3);
+		const withCommand = (needle: string) =>
+			calls.filter((call) => call.command.includes(needle));
+
+		const lint = withCommand("pnpm run lint");
+		const compile = withCommand("pnpm run build");
+		const test = withCommand("pnpm run test");
+		expect(lint).toHaveLength(1);
+		expect(compile).toHaveLength(1);
+		expect(test).toHaveLength(1);
+
+		expect(compile[0]?.user).toBe("root");
+		expect(lint[0]?.user).toBeUndefined();
+		expect(test[0]?.user).toBeUndefined();
+	});
+
+	it("emits --stack node step ids exactly as they are today (B1 frozen)", async () => {
+		const steps = await runAuto(tmpDir, { stack: "node" });
+
+		// Suffixed ids and a per-runner image step AFTER context-refresh: this is
+		// the current stack-override shape, deliberately frozen, not fixed here.
+		expect(uniqueIds(steps)).toEqual([
+			"detect",
+			"docker-check",
+			"context-refresh",
+			"docker-image:node",
+			"lint:node",
+			"compile:node",
+			"test:node",
+		]);
+	});
+
+	it("emits no setup, per-runner security or tool-check steps for auto", async () => {
+		const resolved = await resolveCIRunners(tmpDir);
+		expect(resolved.source).toBe("auto");
+		// The phases exist in the configured executor but are no-ops for auto
+		// because the resolved runner carries no commands for them.
+		expect(resolved.runners[0]?.setupCmds).toEqual([]);
+		expect(resolved.runners[0]?.securityCmds).toEqual([]);
+		expect(resolved.runners[0]?.requiredTools).toEqual([]);
+
+		const ids = uniqueIds(await runAuto(tmpDir));
+
+		// The stream is real (phases did run) — so the absences below are meaningful.
+		expect(ids).toEqual(expect.arrayContaining(["lint", "compile", "test"]));
+		expect(ids.filter((id) => id.startsWith("setup"))).toEqual([]);
+		expect(ids.filter((id) => id.startsWith("security:"))).toEqual([]);
+		expect(ids.filter((id) => id.startsWith("tools"))).toEqual([]);
 	});
 });

@@ -24,6 +24,13 @@ jobs:
         with:
           version: 10
       - run: pnpm install --frozen-lockfile
+      # ci-mixed.integration.test.ts exercises the real ci pipeline, whose
+      # backend runner requires ruff from PATH. GitHub's ubuntu-latest image
+      # does not include it, so install it before running the suite.
+      - name: Install ruff (required tool for integration tests)
+        run: |
+          curl -LsSf https://astral.sh/ruff/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: pnpm build
       - run: pnpm test
       - run: pnpm package:check

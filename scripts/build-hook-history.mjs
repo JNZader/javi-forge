@@ -197,6 +197,32 @@ function main() {
 	const { history, revisions, revisionsWithSource, unknownConstants } =
 		collectHistory();
 
+	// The census is the deliverable of the gate — emit it even when the gate
+	// then fails, so the operator sees WHY.
+	const report = {
+		source: SOURCE_FILE,
+		revisionsTouchingSource: revisions,
+		revisionsReadable: revisionsWithSource,
+		unknownHookConstants: [...unknownConstants],
+		variantsPerHook: Object.fromEntries(
+			HOOK_NAMES.map((name) => [name, history[name].length]),
+		),
+		headHashes: Object.fromEntries(
+			HOOK_NAMES.map((name) => [name, sha256(current[name])]),
+		),
+	};
+	process.stderr.write(`${JSON.stringify(report, null, 2)}\n`);
+
+	// Block gate BEFORE any write: a manifest with an empty historical[] would
+	// classify every hook of the deployed fleet as `foreign` and refuse to
+	// upgrade it. Fail with nothing written rather than half-written.
+	const empty = HOOK_NAMES.filter((name) => history[name].length === 0);
+	if (empty.length > 0) {
+		throw new Error(
+			`ZERO historical variants for: ${empty.join(", ")} — refusing to ship a manifest that would classify the installed fleet as foreign`,
+		);
+	}
+
 	if (writeAssets) {
 		fs.mkdirSync(ASSETS_DIR, { recursive: true });
 		for (const hookName of HOOK_NAMES) {
@@ -219,27 +245,6 @@ function main() {
 			sha256: assetHash,
 			historical: history[hookName],
 		};
-	}
-
-	const report = {
-		source: SOURCE_FILE,
-		revisionsTouchingSource: revisions,
-		revisionsReadable: revisionsWithSource,
-		unknownHookConstants: [...unknownConstants],
-		variantsPerHook: Object.fromEntries(
-			HOOK_NAMES.map((name) => [name, history[name].length]),
-		),
-		headHashes: Object.fromEntries(
-			HOOK_NAMES.map((name) => [name, sha256(current[name])]),
-		),
-	};
-	process.stderr.write(`${JSON.stringify(report, null, 2)}\n`);
-
-	const empty = HOOK_NAMES.filter((name) => history[name].length === 0);
-	if (empty.length > 0) {
-		throw new Error(
-			`ZERO historical variants for: ${empty.join(", ")} — refusing to ship a manifest that would classify the installed fleet as foreign`,
-		);
 	}
 
 	if (writeManifest) {

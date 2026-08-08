@@ -5,6 +5,12 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     pool: 'forks',
+    // CI runs the suite inside the Javi forge runner container as the `runner`
+    // user (uid 1001) while node_modules is host-owned (uid 1000): vitest's
+    // default cacheDir under node_modules/.vite-temp cannot be written there
+    // (EACCES on the config timestamp). Point the cache at /tmp so the suite
+    // is runnable in the container without root-owned artifacts.
+    cacheDir: '/tmp/vitest-javi-forge',
     testTimeout: 30_000,
     coverage: {
       provider: 'v8',

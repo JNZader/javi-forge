@@ -83,8 +83,12 @@ describe("installCIHooks() — integration", () => {
 		expect(content).toContain("COMMIT_MSG_FILE");
 	});
 
-	it("overwrites existing hooks", async () => {
-		// Create a pre-existing hook
+	// REPLACES the pre-change "overwrites existing hooks" case. That assertion
+	// encoded the clobber behavior the `ci-hook-install` spec deletes outright
+	// ("No-clobber policy for foreign and edited hooks" → "Foreign hook is
+	// preserved": the file is unchanged and a reason is reported). It is not a
+	// weakened assertion — it is the inverted contract, asserted end to end.
+	it("preserves a foreign existing hook instead of overwriting it", async () => {
 		const hooksDir = path.join(tmpDir, ".git", "hooks");
 		await fs.ensureDir(hooksDir);
 		await fs.writeFile(
@@ -93,12 +97,12 @@ describe("installCIHooks() — integration", () => {
 		);
 
 		const { installed, errors } = await installCIHooks(tmpDir);
-		expect(errors).toHaveLength(0);
-		expect(installed).toContain("pre-commit");
+		expect(installed).not.toContain("pre-commit");
+		expect(errors).toHaveLength(1);
+		expect(errors[0]).toContain("is not a javi-forge hook");
 
 		const content = await readGenerated(tmpDir, ".git", "hooks", "pre-commit");
-		expect(content).not.toContain("echo old");
-		expect(content).toContain("javi-forge ci");
+		expect(content).toContain("echo old");
 	});
 
 	it("fails on non-git directory", async () => {

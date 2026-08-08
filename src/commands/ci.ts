@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import type { Stats } from "node:fs";
 import path from "node:path";
 import fs from "fs-extra";
+import { HOOK_ASSETS_DIR } from "../constants.js";
 import {
 	CI_STACKS,
 	type CIRunnerConfig,
@@ -1081,60 +1084,259 @@ done
 exit 0
 `;
 
+/**
+ * Classification of an existing `.git/hooks/<name>` before anything is written
+ * (design D6). Every state has exactly one write policy, so no hook is ever
+ * overwritten without a decision.
+ */
+export const HOOK_STATE = {
+	ABSENT: "absent",
+	MANAGED_CURRENT: "managed-current",
+	MANAGED_OUTDATED: "managed-outdated",
+	MANAGED_EDITED: "managed-edited",
+	LEGACY_V0: "legacy-v0",
+	FOREIGN: "foreign",
+	SYMLINK: "symlink",
+	/** Exists but is not a regular file (directory, fifo, device) — never forceable. */
+	NOT_A_FILE: "not-a-file",
+} as const;
+
+export type HookState = (typeof HOOK_STATE)[keyof typeof HOOK_STATE];
+
+export interface HookHistoricalEntry {
+	sha256: string;
+	firstCommit: string;
+}
+
+export interface HookManifestEntry {
+	version: number;
+	sha256: string;
+	historical: HookHistoricalEntry[];
+}
+
+export interface HookStateReport {
+	name: string;
+	state: HookState;
+}
+
+export interface InstallHooksResult {
+	installed: string[];
+	/** Hooks that were `managed-outdated` or `legacy-v0` and got REPLACED. */
+	upgraded: string[];
+	backups: string[];
+	errors: string[];
+	states: HookStateReport[];
+}
+
+const HOOK_NAMES = ["pre-commit", "pre-push", "commit-msg"] as const;
+
+const HOOK_MARKER_NAME_RE =
+	/^# javi-forge-hook: (?<name>[a-z-]+) v(?<version>\d+)$/;
+const HOOK_MARKER_HASH_RE = /^# javi-forge-hash: sha256:[0-9a-f]{64}$/;
+
+function sha256Utf8(value: string): string {
+	return createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex");
+}
+
+function errorCode(error: unknown): string {
+	return error && typeof error === "object" && "code" in error
+		? String((error as { code: unknown }).code)
+		: "";
+}
+
+function isReleasedBody(entry: HookManifestEntry, hash: string): boolean {
+	return entry.historical.some((historical) => historical.sha256 === hash);
+}
+
+/**
+ * Pure classification of hook CONTENT (D6 steps 1-5).
+ *
+ * The hash input is the body BELOW the marker block — the shebang stays in the
+ * body, the two marker lines are removed — so a version bump alone does not
+ * invalidate installed hooks. Lines are split on `\n` WITHOUT stripping a
+ * trailing `\r`: a CRLF-converted file fails the `$`-anchored marker regex,
+ * takes the unmarked path and classifies `foreign`, which is correct — it no
+ * longer matches anything released. The hash CLAIMED by the marker is never
+ * trusted; classification always recomputes against the shipped manifest.
+ */
+export function classifyHookContent(
+	content: string,
+	hookName: string,
+	entry: HookManifestEntry,
+): HookState {
+	const lines = content.split("\n");
+	const marker = HOOK_MARKER_NAME_RE.exec(lines[1] ?? "");
+
+	if (
+		lines[0]?.startsWith("#!") === true &&
+		marker?.groups !== undefined &&
+		HOOK_MARKER_HASH_RE.test(lines[2] ?? "")
+	) {
+		// The marker name is BOUND to the slot: someone else's marker never
+		// grants us permission to overwrite this file.
+		if (marker.groups.name !== hookName) {
+			return HOOK_STATE.FOREIGN;
+		}
+		const body = [lines[0], ...lines.slice(3)].join("\n");
+		const computed = sha256Utf8(body);
+		if (computed === entry.sha256) {
+			return Number(marker.groups.version) === entry.version
+				? HOOK_STATE.MANAGED_CURRENT
+				: HOOK_STATE.MANAGED_OUTDATED;
+		}
+		return isReleasedBody(entry, computed)
+			? HOOK_STATE.MANAGED_OUTDATED
+			: HOOK_STATE.MANAGED_EDITED;
+	}
+
+	// Unmarked: the whole file is the candidate body. Bytes identical to the
+	// CURRENT asset still classify legacy-v0 — the marker, not the content, is
+	// what makes a hook managed.
+	return isReleasedBody(entry, sha256Utf8(content))
+		? HOOK_STATE.LEGACY_V0
+		: HOOK_STATE.FOREIGN;
+}
+
+/** D6 step 0 — `lstat` first; only a regular file is ever read. */
+async function classifyHookPath(
+	hookPath: string,
+	hookName: string,
+	entry: HookManifestEntry,
+): Promise<HookState> {
+	let stat: Stats;
+	try {
+		stat = await fs.lstat(hookPath);
+	} catch (statErr: unknown) {
+		if (errorCode(statErr) === "ENOENT") {
+			return HOOK_STATE.ABSENT;
+		}
+		throw statErr;
+	}
+	if (stat.isSymbolicLink()) {
+		return HOOK_STATE.SYMLINK;
+	}
+	if (!stat.isFile()) {
+		return HOOK_STATE.NOT_A_FILE;
+	}
+	return classifyHookContent(
+		await fs.readFile(hookPath, "utf8"),
+		hookName,
+		entry,
+	);
+}
+
+/**
+ * Splice the marker block in after the shebang. The body is written unmodified,
+ * so the round-trip is byte-exact and a re-install classifies `managed-current`
+ * with zero writes.
+ */
+function renderHook(
+	body: string,
+	hookName: string,
+	entry: HookManifestEntry,
+): string {
+	const [shebang, ...rest] = body.split("\n");
+	return [
+		shebang,
+		`# javi-forge-hook: ${hookName} v${entry.version}`,
+		`# javi-forge-hash: sha256:${sha256Utf8(body)}`,
+		...rest,
+	].join("\n");
+}
+
+/**
+ * The backup path a forced overwrite would actually use, for the refusal
+ * message. Naming `.bak` unconditionally would be a lie whenever `.bak` is
+ * already taken by an earlier backup.
+ */
+async function describeBackupTarget(hookPath: string): Promise<string> {
+	const plain = `${hookPath}.bak`;
+	return (await fs.pathExists(plain)) ? `${plain}.<timestamp>` : plain;
+}
+
+async function refusalMessage(
+	hookPath: string,
+	state: HookState,
+): Promise<string> {
+	if (state === HOOK_STATE.SYMLINK) {
+		return `refusing to write through a symlink at ${hookPath}`;
+	}
+	if (state === HOOK_STATE.NOT_A_FILE) {
+		return `${hookPath} exists but is not a regular file. Refusing to overwrite; --force does not apply.`;
+	}
+	const target = await describeBackupTarget(hookPath);
+	const reason =
+		state === HOOK_STATE.MANAGED_EDITED
+			? "carries a javi-forge marker but its contents were modified locally"
+			: "exists and is not a javi-forge hook (no marker, and its contents match no released javi-forge template)";
+	return `${hookPath} ${reason}. Refusing to overwrite. Inspect it, then re-run 'javi-forge ci init --force' (the current file is saved as ${target}), or delete it.`;
+}
+
+async function loadHookManifest(): Promise<Record<string, HookManifestEntry>> {
+	return (await fs.readJson(
+		path.join(HOOK_ASSETS_DIR, "manifest.json"),
+	)) as Record<string, HookManifestEntry>;
+}
+
+const HOOK_BODIES: Record<string, string> = {
+	"pre-commit": PRE_COMMIT_HOOK,
+	"pre-push": PRE_PUSH_HOOK,
+	"commit-msg": COMMIT_MSG_HOOK,
+};
+
 export async function installCIHooks(
 	projectDir: string,
-): Promise<{ installed: string[]; errors: string[] }> {
+): Promise<InstallHooksResult> {
+	const empty = { installed: [], upgraded: [], backups: [], states: [] };
 	const gitDir = path.join(projectDir, ".git");
 	if (!(await fs.pathExists(gitDir))) {
 		return {
-			installed: [],
+			...empty,
 			errors: ["Not a git repository. Run git init first."],
 		};
 	}
 
 	const hooksDir = path.join(gitDir, "hooks");
 	await fs.ensureDir(hooksDir);
-
-	const hooks: Array<{ name: string; content: string }> = [
-		{ name: "pre-commit", content: PRE_COMMIT_HOOK },
-		{ name: "pre-push", content: PRE_PUSH_HOOK },
-		{ name: "commit-msg", content: COMMIT_MSG_HOOK },
-	];
+	const manifest = await loadHookManifest();
 
 	const installed: string[] = [];
+	const upgraded: string[] = [];
+	const backups: string[] = [];
 	const errors: string[] = [];
+	const states: HookStateReport[] = [];
 
-	for (const hook of hooks) {
-		const hookPath = path.join(hooksDir, hook.name);
+	for (const name of HOOK_NAMES) {
+		const hookPath = path.join(hooksDir, name);
+		const entry = manifest[name];
 		try {
-			// Refuse to follow symlinks. .git/hooks/<name> as a symlink to a
-			// sensitive file (e.g., ~/.ssh/authorized_keys) would otherwise be
-			// clobbered by writeFile. lstat reports the link, not the target.
-			let isSymlink = false;
-			try {
-				const stat = await fs.lstat(hookPath);
-				isSymlink = stat.isSymbolicLink();
-			} catch (statErr: unknown) {
-				const code =
-					statErr && typeof statErr === "object" && "code" in statErr
-						? (statErr as { code: string }).code
-						: "";
-				if (code !== "ENOENT") {
-					throw statErr;
-				}
-				// ENOENT is expected if the hook file doesn't exist yet.
+			const state = await classifyHookPath(hookPath, name, entry);
+			states.push({ name, state });
+
+			if (state === HOOK_STATE.MANAGED_CURRENT) {
+				continue;
 			}
-			if (isSymlink) {
-				throw new Error(`refusing to write through a symlink at ${hookPath}`);
+			if (
+				state === HOOK_STATE.SYMLINK ||
+				state === HOOK_STATE.NOT_A_FILE ||
+				state === HOOK_STATE.MANAGED_EDITED ||
+				state === HOOK_STATE.FOREIGN
+			) {
+				throw new Error(await refusalMessage(hookPath, state));
 			}
-			await fs.writeFile(hookPath, hook.content, { mode: 0o755 });
-			installed.push(hook.name);
+
+			await fs.writeFile(hookPath, renderHook(HOOK_BODIES[name], name, entry), {
+				mode: 0o755,
+			});
+			if (state === HOOK_STATE.ABSENT) {
+				installed.push(name);
+			} else {
+				upgraded.push(name);
+			}
 		} catch (e) {
-			errors.push(
-				`${hook.name}: ${e instanceof Error ? e.message : String(e)}`,
-			);
+			errors.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 
-	return { installed, errors };
+	return { installed, upgraded, backups, errors, states };
 }

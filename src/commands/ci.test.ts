@@ -1,7 +1,14 @@
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	ensureImage,
+	getImageName,
+	isDockerAvailable,
+	runInContainer,
+} from "../lib/docker.js";
+import type { Stack } from "../types/index.js";
 import type { CIStep } from "./ci.js";
 import {
 	detectCIStack,
@@ -9,6 +16,50 @@ import {
 	resolveCIRunners,
 	runCI,
 } from "./ci.js";
+
+// Docker is mocked for this whole file. No pre-existing test in it reaches a
+// Docker code path (they all run with `noDocker: true` or in `detect` mode), so
+// the mock only becomes observable inside the characterization block below.
+//
+// `ensureImage` is PRODUCTION-FAITHFUL on purpose: without a `buildContext` the
+// real implementation returns exactly `getImageName(stack)` (docker.ts:186), so
+// the image assertions hold identically before and after the executor collapse.
+vi.mock("../lib/docker.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../lib/docker.js")>();
+	return {
+		...actual,
+		isDockerAvailable: vi.fn(async () => true),
+		ensureImage: vi.fn(async (options: { stack: Stack }) =>
+			actual.getImageName(options.stack),
+		),
+		runInContainer: vi.fn(async () => ({
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+		})),
+	};
+});
+
+// The `semgrep`/`ghagga` availability probes shell out through this helper, so
+// whether their steps run is a property of the DEVELOPER'S PATH, not of the
+// code under test. Force both probes to "not installed" — everything else keeps
+// the real implementation — so full-mode characterization runs are deterministic
+// on every machine.
+vi.mock("../lib/exec.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../lib/exec.js")>();
+	const real = actual.execFileAsync as unknown as (
+		...args: unknown[]
+	) => Promise<unknown>;
+	return {
+		...actual,
+		execFileAsync: vi.fn(async (file: string, ...rest: unknown[]) => {
+			if (file === "semgrep" || file === "ghagga") {
+				throw new Error(`${file}: not found (stubbed for tests)`);
+			}
+			return real(file, ...rest);
+		}),
+	};
+});
 
 // =============================================================================
 // detectCIStack
@@ -946,5 +997,267 @@ runners:
 			() => {},
 		);
 		expect(await fs.pathExists(path.join(tmpDir, "lint-ran.txt"))).toBe(true);
+	});
+});
+
+// =============================================================================
+// Characterization safety net — pins TODAY's observable behavior of the auto
+// path in Docker mode so the executor collapse can be verified against it.
+// These assertions must hold IDENTICALLY before and after the collapse.
+// =============================================================================
+
+describe("characterization: auto + docker", () => {
+	let tmpDir: string;
+
+	/** Full mode with Docker on; security + ghagga off to keep the stream deterministic. */
+	const AUTO_DOCKER = {
+		mode: "full" as const,
+		noDocker: false,
+		noGhagga: true,
+		noSecurity: true,
+	};
+
+	/**
+	 * Emitted ids in first-emission order (each id is reported running → done).
+	 * NOTE: de-duplicating is blind to a step emitted TWICE — the raw-stream
+	 * assertions below cover that, do not replace them with this helper.
+	 */
+	const uniqueIds = (steps: CIStep[]): string[] => [
+		...new Set(steps.map((s) => s.id)),
+	];
+
+	/** Raw (non-deduplicated) id stream — sensitive to duplicate emissions. */
+	const rawIds = (steps: CIStep[]): string[] => steps.map((s) => s.id);
+
+	const countId = (steps: CIStep[], id: string): number =>
+		rawIds(steps).filter((emitted) => emitted === id).length;
+
+	const runAuto = async (
+		projectDir: string,
+		options: Record<string, unknown> = {},
+	): Promise<CIStep[]> => {
+		const steps: CIStep[] = [];
+		await runCI({ projectDir, ...AUTO_DOCKER, ...options }, (s) =>
+			steps.push({ ...s }),
+		);
+		return steps;
+	};
+
+	const containerCalls = () =>
+		vi.mocked(runInContainer).mock.calls.map(([options]) => options);
+
+	beforeEach(async () => {
+		vi.mocked(isDockerAvailable).mockClear();
+		vi.mocked(ensureImage).mockClear();
+		vi.mocked(runInContainer).mockClear();
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-char-"));
+		// Node repo with no .javi-forge/ci.yaml → resolved.source === "auto".
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			scripts: { lint: "eslint .", build: "tsc", test: "vitest run" },
+		});
+		await fs.writeFile(path.join(tmpDir, "pnpm-lock.yaml"), "");
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	it("emits the global step order on auto+Docker", async () => {
+		const steps = await runAuto(tmpDir);
+
+		expect(uniqueIds(steps)).toEqual([
+			"detect",
+			"docker-check",
+			"docker-image",
+			"context-refresh",
+			"lint",
+			"compile",
+			"test",
+		]);
+	});
+
+	it("builds the image BEFORE refreshing .context/", async () => {
+		const ids = uniqueIds(await runAuto(tmpDir));
+
+		expect(ids).toContain("docker-image");
+		expect(ids).toContain("context-refresh");
+		expect(ids.indexOf("docker-image")).toBeLessThan(
+			ids.indexOf("context-refresh"),
+		);
+	});
+
+	it("emits the image step EXACTLY ONCE (no duplicate docker-image)", async () => {
+		const steps = await runAuto(tmpDir);
+
+		// Every step reports twice through the same id: running → done/skipped.
+		// So today's auto+Docker stream carries exactly 2 `docker-image` events,
+		// produced by a SINGLE image build. A second emission (e.g. the auto path
+		// falling through into the per-runner image block) would raise this to 4
+		// and is invisible to the Set-based order assertions above.
+		expect(countId(steps, "docker-image")).toBe(2);
+		expect(countId(steps, "docker-check")).toBe(2);
+		expect(ensureImage).toHaveBeenCalledTimes(1);
+
+		// The whole raw stream, pinned: 7 ids × 2 emissions each.
+		expect(rawIds(steps)).toHaveLength(14);
+	});
+
+	it("emits ZERO image steps and never builds an image with --no-docker", async () => {
+		const steps: CIStep[] = [];
+		// Native execution shells out to the detected commands, whose outcome is
+		// environment-dependent (and irrelevant here): the Docker-gate assertions
+		// below hold on the emitted stream whether the run passes or fails.
+		await runCI({ projectDir: tmpDir, ...AUTO_DOCKER, noDocker: true }, (s) =>
+			steps.push({ ...s }),
+		).catch(() => undefined);
+
+		expect(countId(steps, "docker-image")).toBe(0);
+		expect(countId(steps, "docker-check")).toBe(0);
+		expect(ensureImage).not.toHaveBeenCalled();
+		expect(runInContainer).not.toHaveBeenCalled();
+	});
+
+	it("pins the label + status of every emitted step on auto+Docker", async () => {
+		const steps = await runAuto(tmpDir);
+
+		// Today's user-visible stream, measured — not designed. The executor
+		// collapse must reproduce these labels and statuses verbatim.
+		expect(steps.map((s) => [s.id, s.label, s.status] as const)).toEqual([
+			["detect", "Detecting stack", "running"],
+			["detect", "Stack: node (pnpm)", "done"],
+			["docker-check", "Checking Docker", "running"],
+			["docker-check", "Docker available", "done"],
+			["docker-image", "Building image for node", "running"],
+			["docker-image", "Docker image ready", "done"],
+			["context-refresh", "Refresh .context/ directory", "running"],
+			// No .context/ in the fixture → the refresh is skipped, not failed.
+			["context-refresh", "Refresh .context/ directory", "skipped"],
+			["lint", "Lint: pnpm run lint", "running"],
+			["lint", "Lint passed", "done"],
+			[
+				"compile",
+				"Compile: rm -rf dist/ && pnpm run build && chown -R runner:runner dist/ 2>/dev/null || true",
+				"running",
+			],
+			["compile", "Compile passed", "done"],
+			["test", "Test: pnpm run test", "running"],
+			["test", "Tests passed", "done"],
+		]);
+	});
+
+	it("threads the resolved image into every container run", async () => {
+		const resolved = await resolveCIRunners(tmpDir);
+		const runner = resolved.runners[0];
+		expect(runner?.stack).toBe("node");
+		const expectedImage = getImageName(runner?.stack ?? "node");
+		expect(expectedImage).toBe("javi-forge-ci-node");
+
+		await runAuto(tmpDir);
+
+		const calls = containerCalls();
+		// lint + compile + test — proves the loop below is not a ghost loop.
+		expect(calls).toHaveLength(3);
+		for (const call of calls) {
+			expect(call.image).toBe(expectedImage);
+		}
+	});
+
+	it("threads the resolved image for a non-node stack too", async () => {
+		const goDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "javi-forge-char-go-"),
+		);
+		try {
+			await fs.writeFile(
+				path.join(goDir, "go.mod"),
+				"module example.com/app\n",
+			);
+
+			const resolved = await resolveCIRunners(goDir);
+			expect(resolved.runners[0]?.stack).toBe("go");
+
+			await runAuto(goDir);
+
+			const calls = containerCalls();
+			expect(calls).toHaveLength(3);
+			for (const call of calls) {
+				expect(call.image).toBe("javi-forge-ci-go");
+			}
+		} finally {
+			await fs.remove(goDir);
+		}
+	});
+
+	it("runs ONLY the compile step as --user root", async () => {
+		await runAuto(tmpDir);
+
+		const calls = containerCalls();
+		expect(calls).toHaveLength(3);
+		const withCommand = (needle: string) =>
+			calls.filter((call) => call.command.includes(needle));
+
+		const lint = withCommand("pnpm run lint");
+		const compile = withCommand("pnpm run build");
+		const test = withCommand("pnpm run test");
+		expect(lint).toHaveLength(1);
+		expect(compile).toHaveLength(1);
+		expect(test).toHaveLength(1);
+
+		expect(compile[0]?.user).toBe("root");
+		expect(lint[0]?.user).toBeUndefined();
+		expect(test[0]?.user).toBeUndefined();
+	});
+
+	it("emits --stack node step ids exactly as they are today (B1 frozen)", async () => {
+		const steps = await runAuto(tmpDir, { stack: "node" });
+
+		// Suffixed ids and a per-runner image step AFTER context-refresh: this is
+		// the current stack-override shape, deliberately frozen, not fixed here.
+		expect(uniqueIds(steps)).toEqual([
+			"detect",
+			"docker-check",
+			"context-refresh",
+			"docker-image:node",
+			"lint:node",
+			"compile:node",
+			"test:node",
+		]);
+	});
+
+	it("emits no setup, per-runner security or tool-check steps for auto", async () => {
+		const resolved = await resolveCIRunners(tmpDir);
+		expect(resolved.source).toBe("auto");
+		// The phases exist in the configured executor but are no-ops for auto
+		// because the resolved runner carries no commands for them.
+		expect(resolved.runners[0]?.setupCmds).toEqual([]);
+		expect(resolved.runners[0]?.securityCmds).toEqual([]);
+		expect(resolved.runners[0]?.requiredTools).toEqual([]);
+
+		const ids = uniqueIds(await runAuto(tmpDir));
+
+		// The stream is real (phases did run) — so the absences below are meaningful.
+		expect(ids).toEqual(expect.arrayContaining(["lint", "compile", "test"]));
+		expect(ids.filter((id) => id.startsWith("setup"))).toEqual([]);
+		expect(ids.filter((id) => id.startsWith("security:"))).toEqual([]);
+		expect(ids.filter((id) => id.startsWith("tools"))).toEqual([]);
+	});
+
+	it("emits no per-runner security step in FULL mode with security ENABLED", async () => {
+		// The assertion above runs under `noSecurity: true`, where the configured
+		// executor skips the security phase unconditionally (ci.ts phases[].skip),
+		// so it cannot prove the auto path lacks per-runner security steps. This
+		// variant leaves security ON; the semgrep probe is stubbed unavailable at
+		// the module boundary, so the top-level step is deterministically skipped.
+		const steps = await runAuto(tmpDir, { noSecurity: false });
+		const ids = rawIds(steps);
+
+		// The stream is real — the absence below is meaningful.
+		expect(ids).toEqual(expect.arrayContaining(["lint", "compile", "test"]));
+		expect(ids.filter((id) => id.startsWith("security:"))).toEqual([]);
+
+		// The auto path emits only the single global `security` step, and today
+		// that step is a skip when semgrep is not installed.
+		const security = steps.filter((s) => s.id === "security");
+		expect(security).toHaveLength(1);
+		expect(security[0]?.status).toBe("skipped");
 	});
 });

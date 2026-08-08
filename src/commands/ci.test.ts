@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { HOOK_ASSETS_DIR } from "../constants.js";
 import {
 	ensureImage,
 	getImageName,
@@ -385,6 +386,66 @@ describe("installCIHooks", () => {
 		expect(result.installed).toEqual(
 			expect.arrayContaining(["pre-push", "commit-msg"]),
 		);
+	});
+});
+
+// =============================================================================
+// installCIHooks — LIVE byte-equivalence against the shipped assets
+//
+// This is the ONLY window in which the equivalence "what `ci init` writes ===
+// `assets/hooks/*`" is FALSIFIABLE (JDA6-002/JDB6-004): while `installCIHooks`
+// still writes the inline `*_HOOK` template literals, this test compares two
+// INDEPENDENT sources. Once task 3.20 switches the write source to the assets,
+// the same assertion keeps passing BY CONSTRUCTION — and that continuity is
+// exactly the proof that the switch changed no byte. It therefore has to land
+// FIRST, before the constants are deleted, and must never be edited afterwards.
+//
+// The marker block (task 3.11) is spliced in AFTER the shebang at install time
+// and is NOT part of the asset, so the comparison strips it when present. Before
+// 3.11 nothing is stripped and this is a raw byte comparison of the literals.
+// =============================================================================
+
+const HOOK_NAMES = ["pre-commit", "pre-push", "commit-msg"] as const;
+
+const MARKER_NAME_LINE = /^# javi-forge-hook: [a-z-]+ v\d+$/;
+const MARKER_HASH_LINE = /^# javi-forge-hash: sha256:[0-9a-f]{64}$/;
+
+/** Installed file minus the two marker lines (a no-op on an unmarked file). */
+function stripMarkerBlock(content: string): string {
+	const lines = content.split("\n");
+	const marked =
+		lines[0]?.startsWith("#!") === true &&
+		MARKER_NAME_LINE.test(lines[1] ?? "") &&
+		MARKER_HASH_LINE.test(lines[2] ?? "");
+	return marked ? [lines[0], ...lines.slice(3)].join("\n") : content;
+}
+
+describe("installCIHooks byte-equivalence with assets/hooks", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookeq-"));
+		await fs.ensureDir(path.join(tmpDir, ".git"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	it.each(
+		HOOK_NAMES,
+	)("writes %s byte-for-byte identical to its shipped asset, mode 0755", async (hook) => {
+		const asset = await fs.readFile(path.join(HOOK_ASSETS_DIR, hook));
+
+		await installCIHooks(tmpDir);
+
+		const hookPath = path.join(tmpDir, ".git", "hooks", hook);
+		const written = await fs.readFile(hookPath, "utf8");
+		const stat = await fs.stat(hookPath);
+
+		expect(written.length).toBeGreaterThan(0);
+		expect(stripMarkerBlock(written)).toBe(asset.toString("utf8"));
+		expect(stat.mode & 0o777).toBe(0o755);
 	});
 });
 

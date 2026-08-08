@@ -1,3 +1,9 @@
+## [1.7.1](https://github.com/JNZader/javi-forge/compare/v1.7.0...v1.7.1) (2026-08-08)
+
+### Refactoring
+
+* **ci:** collapse the two CI executors into one runner (slice 2/4) ([#2](https://github.com/JNZader/javi-forge/issues/2)) ([c4ea116](https://github.com/JNZader/javi-forge/commit/c4ea116c2e25d08c47f79f909c44294861f1fee2))
+
 ## [1.7.0](https://github.com/JNZader/javi-forge/compare/v1.6.0...v1.7.0) (2026-08-08)
 
 ### Features

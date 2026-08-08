@@ -1,0 +1,69 @@
+# openspec/config.yaml — SDD configuration for javi-forge
+schema: spec-driven
+
+context: |
+  Project: javi-forge — TypeScript CLI ("project scaffolding and AI-ready CI bootstrap"), npm package, v1.7.0.
+  Stack: Node >=22, TypeScript 6 (ESM, "type": "module"), meow 14 for arg parsing, Ink 7 + React 19 for TUI, yaml + fs-extra + glob.
+  Package manager: pnpm 10. Build: tsc -> dist/. Entry: dist/index.js (bin "javi-forge").
+  Architecture: src/index.tsx -> src/cli/dispatch/* (thin command routers) -> src/commands/* (command logic) -> src/lib/* (pure-ish helpers).
+  Testing: vitest 4 (globals, node env, forks pool), co-located *.test.ts, src/__integration__/, src/e2e/; coverage v8 (lines 85 / branches 80); stryker mutation testing.
+  Quality: biome (lint + format), tsc --noEmit (src and tests). Aggregate gate: pnpm validate.
+  Release: semantic-release from main; the CLI is consumed globally (linuxbrew) and by ~8 local repos via installed git hooks.
+  Style: tabs, double quotes, ESM-only imports, English identifiers and comments.
+
+testing:
+  strict_tdd: true
+  test_command: "pnpm test"
+  test_watch_command: "pnpm test:watch"
+  coverage_command: "pnpm test:coverage"
+  coverage_thresholds:
+    lines: 85
+    branches: 80
+  mutation_command: "pnpm test:mutation"
+  hook_regression_command: "pnpm test:hooks"
+  lint_command: "pnpm lint"
+  typecheck_command: "pnpm typecheck && pnpm typecheck:test"
+  build_command: "pnpm build"
+  package_check_command: "pnpm package:check"
+  layers:
+    unit: "vitest — co-located src/**/*.test.ts"
+    integration: "vitest — src/__integration__/*.integration.test.ts (real filesystem + real ruff/python on PATH)"
+    e2e: "vitest — src/e2e/*.e2e.test.ts (spawns the built CLI)"
+  offline: true
+  external_tools_expected_on_path:
+    - ruff        # required by src/__integration__/ci-mixed.integration.test.ts
+    - python3
+    - node
+    - docker      # optional; docker-dependent assertions are skipped when absent
+    - semgrep     # optional; security step degrades when absent
+    - ghagga      # optional; --no-ci-ghagga disables
+
+rules:
+  proposal:
+    - State the impact on installed consumers explicitly (global linuxbrew install + hooks in ~8 local repos).
+    - Include a rollback plan; this package is published to npm via semantic-release.
+  specs:
+    - Use Given/When/Then for scenarios.
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY).
+    - Any change to `.javi-forge/ci.yaml` handling MUST spell out schema version 1 backward compatibility.
+  design:
+    - Document architecture decisions with rationale.
+    - When unifying execution paths, enumerate the behavioral differences being collapsed, not just the target shape.
+  tasks:
+    - Group by phase, use hierarchical numbering.
+    - Keep tasks completable in one session.
+    - Keep each work unit under the 400-line review budget.
+  apply:
+    guidelines:
+      - Follow existing code patterns (tabs, ESM, biome formatting).
+      - Co-locate new unit tests as `{module}.test.ts` next to the module.
+      - Keep `src/lib/*` free of Ink/React imports; rendering belongs in `src/cli/dispatch/*`.
+      - Never lower the coverage thresholds to make a change pass.
+    tdd: true
+    test_command: "pnpm test"
+  verify:
+    test_command: "pnpm validate"
+    build_command: "pnpm build"
+    coverage_threshold: 85
+  archive:
+    - Warn before merging destructive deltas.

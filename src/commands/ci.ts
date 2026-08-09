@@ -153,15 +153,13 @@ async function buildCICommands(
 		case "java-gradle":
 			return {
 				lintCmd: "./gradlew spotlessCheck --no-daemon",
-				compileCmd:
-					"./gradlew clean classes testClasses --no-daemon && chown -R runner:runner build/ .gradle/ 2>/dev/null || true",
+				compileCmd: "./gradlew clean classes testClasses --no-daemon",
 				testCmd: "./gradlew test --no-daemon",
 			};
 		case "java-maven":
 			return {
 				lintCmd: "./mvnw spotless:check",
-				compileCmd:
-					"./mvnw clean compile test-compile && chown -R runner:runner target/ .mvn/ 2>/dev/null || true",
+				compileCmd: "./mvnw clean compile test-compile",
 				testCmd: "./mvnw test",
 			};
 		case "node": {
@@ -172,15 +170,14 @@ async function buildCICommands(
 			} catch {
 				/* no package.json */
 			}
-			// Clean dist/ before build and chown after so tests (as runner) can access output.
-			// Runs as root inside the container to handle host-owned output dirs.
+			// Clean dist/ before build so a stale directory never masks a broken
+			// build. The container runs as the host uid (see runInContainer,
+			// ENV-1), so output lands host-owned — no chown needed.
 			const buildPrefix = "rm -rf dist/ && ";
-			const buildSuffix =
-				" && chown -R runner:runner dist/ 2>/dev/null || true";
 			return {
 				lintCmd: pkgContent.includes('"lint"') ? `${buildTool} run lint` : null,
 				compileCmd: pkgContent.includes('"build"')
-					? `${buildPrefix}${buildTool} run build${buildSuffix}`
+					? `${buildPrefix}${buildTool} run build`
 					: null,
 				testCmd: pkgContent.includes('"test"')
 					? `${buildTool} ${buildTool === "npm" ? "test" : "run test"}`
@@ -196,15 +193,13 @@ async function buildCICommands(
 		case "go":
 			return {
 				lintCmd: "golangci-lint run",
-				compileCmd:
-					"go clean -cache && go build ./... && chown -R runner:runner . 2>/dev/null || true",
+				compileCmd: "go clean -cache && go build ./...",
 				testCmd: "go test ./...",
 			};
 		case "rust":
 			return {
 				lintCmd: "cargo clippy -- -D warnings",
-				compileCmd:
-					"cargo clean && cargo build && chown -R runner:runner target/ 2>/dev/null || true",
+				compileCmd: "cargo clean && cargo build",
 				testCmd: "cargo test",
 			};
 		default:
@@ -869,7 +864,6 @@ async function runRunner(
 			id: "compile",
 			label: "Compile",
 			cmds: runner.compileCmds,
-			user: "root",
 			skip: false,
 		},
 		{

@@ -144,3 +144,13 @@ behavioral row landed red first: 8 failing tests, then green).
 | JDA7-008 / JDB7-009 (convergent) | judgment-day | diff noise | SUGGESTION | info | Formatter-driven reflow inflated the diff around untouched lines. Accepted — the repo formats on write. |
 | JDB7-007 | judgment-day | ci-hooks.test.ts ENOSPC row | SUGGESTION | info | The ENOSPC mock sets `code` as an own enumerable property; a production `SystemError` carries it the same way, so `errorCode()` reads it identically. Noted, no change. |
 | JDB7-006b | judgment-day | package.json:19 `test:hooks` | SUGGESTION | info | `pnpm test:hooks` runs `ci-local/hooks/commit-msg.test.sh` — it exercises the ci-local variant, NOT the shipped `assets/hooks/*` this slice installs. Not misleading enough to rename mid-slice; recorded so nobody reads a green `test:hooks` as coverage of the shipped assets. |
+
+## Apply slice 3b — round 2 (scoped re-judge, judge A) — APPROVED
+
+All 7 verified items hold under trace. CRITICAL JD7-001 fixed at the single write site (:1435-1438), reachable on all five write paths; managed-current repair preserves bytes+mtime (asserted, not assumed); COPYFILE_EXCL spy goes red if the flag is deleted; spec reconciliation stricter in 7 of 8 edits. Empirical: validate 1370/4 exit 0 (red-first TDD ×8), package:check 361 files exit 0 (Dockerfile parked → tarball reproducible). Parked with accurate SEC-1 backlog entry: JDA7-003/004/005 (fd-based O_NOFOLLOW+fchmod hardening; local-attacker-with-.git-write threat model).
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JDA7-012 | judgment-day | ci.ts:1340-1345 | WARNING | info | assertHookManifestEntry validates historical is an array but not element shape — historical:[null] passes and later throws an unnamed TypeError (the class the fix eliminates). One-line .every(h => typeof h?.sha256 === "string") closes it → folded into SEC-1 follow-up, do NOT reopen the loop. |
+| JDA7-013 | judgment-day | ci.ts:1343,:1438 | SUGGESTION | info | Mode is normalized (0700→0755) not just repaired; sanctioned by the spec's MAY clause; narrower predicate noted as option. setuid/sticky safely preserved. Recorded design choice. |
+| JDA7-014 | judgment-day | ci.ts:1371-1381 | SUGGESTION | info | The ensureDir failure branch is the one fix-touched behavior with no test row (message verified correct by inspection). Coverage note, not a defect. |

@@ -51,6 +51,8 @@ and auto-detection yields exactly one runner. The `??` fallbacks are unreachable
   `?? null` on `lintCmds[0]`/`compileCmds[0]`/`testCmds[0]` STAYS — those lists
   can legitimately be empty. Zero behavior change, full suite green unchanged.
 
+> **Scope precision (R1 review, 2026-08-09)**: SEC-1's closure covers the WRITE path (`writeHookFile`, O_NOFOLLOW + fchmod) and the backup DESTINATION (COPYFILE_EXCL + fchmod-on-fd). Still parked, same local-attacker threat model, defense-in-depth only: (a) `repairHookMode`'s path-based chmod on the managed-current branch (R1-001), (b) `backupHook`'s source-side `stat`/`copyFile` follow symlinks — a post-classification swap can copy the link target into the backup before the write correctly aborts with ELOOP (R1-002), (c) the `nlink > 1` check. All three are strictly weaker than the code execution this attacker already holds.
+
 ### ENV-1 — Containerized CI runs leave `node_modules/.vite-temp` root-owned
 
 Containerized CI runs leave `node_modules/.vite-temp` owned by uid 1001 (the

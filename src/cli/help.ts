@@ -81,6 +81,11 @@ export const HELP_TEXT = `
   CI hooks (javi-forge ci init)
     Install git hooks that call javi-forge ci.
     No files copied — hooks reference the global CLI.
+    Existing hooks javi-forge did not write are refused, never clobbered.
+    --force         Overwrite a foreign or locally modified hook. The previous
+                    content is copied to a .bak sibling first; if that backup
+                    cannot be written, the hook is left untouched. Symlinked
+                    hook paths are refused even with --force.
 
   Examples
     $ javi-forge
@@ -88,6 +93,7 @@ export const HELP_TEXT = `
     $ javi-forge init --stack node --ci github
     $ javi-forge ci
     $ javi-forge ci init
+    $ javi-forge ci init --force
     $ javi-forge tdd init
     $ javi-forge ci --quick
     $ javi-forge ci --no-ci-ghagga --no-security
@@ -119,6 +125,8 @@ export const FLAGS_SCHEMA = {
 	ciGhagga: { type: "boolean", default: true },
 	security: { type: "boolean", default: true },
 	timeout: { type: "number", default: 600 },
+	// ci init: overwrite a foreign / locally modified hook (backs it up first)
+	force: { type: "boolean", default: false },
 	// Security check flags
 	minSeverity: { type: "string", default: "low" },
 	staleDays: { type: "number", default: 30 },

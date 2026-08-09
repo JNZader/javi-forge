@@ -2,7 +2,7 @@
 
 ## Technical Approach
 
-One executor (`runRunner`, the renamed `runConfiguredRunner`) drives every resolution source. Naming becomes data keyed on `resolved.source`; the auto image name is resolved in the prologue (order preserved) and threaded explicitly; `runStep` loses its `getImageName` re-derivation. Hook templates move to `assets/hooks/*` with a shipped `manifest.json` carrying the current hash plus the historical hashes that identify the unmarked fleet as `managed:v0`. `installCIHooks` classifies before writing and refuses foreign/edited hooks without `--force`; `--force` writes a `.bak` first.
+One executor (`runRunner`, the renamed `runConfiguredRunner`) drives every resolution source. Naming becomes data keyed on `resolved.source`; the auto image name is resolved in the prologue (order preserved) and threaded explicitly; `runStep` loses its `getImageName` re-derivation. Hook templates move to `assets/hooks/*` with a shipped `manifest.json` carrying the current hash plus the historical hashes that identify the unmarked fleet as `legacy-v0`. `installCIHooks` classifies before writing and refuses foreign/edited hooks without `--force`; `--force` writes a `.bak` first.
 
 ## Architecture Decisions
 
@@ -52,12 +52,12 @@ One executor (`runRunner`, the renamed `runConfiguredRunner`) drives every resol
 |---|---|
 | `src/cli/help.ts:103` `FLAGS_SCHEMA` | `force: { type: "boolean", default: false }` (global flag table, shared by all commands) |
 | `src/cli/dispatch/ci.tsx:22` | `installCIHooks(process.cwd(), { force: cli.flags.force })` |
-| `src/cli/dispatch/ci.tsx:23-30` | Print `backups` (`⚠ Backed up existing pre-commit → .git/hooks/pre-commit.bak`) and print `upgraded` DISTINCTLY from fresh installs (`↑ Upgraded pre-commit (was managed:v0)` vs `✓ Installed pre-commit`); refusals arrive in `errors[]`, so the existing `process.exit(errors.length > 0 ? 1 : 0)` keeps refusal = exit 1 with no new branch |
+| `src/cli/dispatch/ci.tsx:23-30` | Print `backups` (`⚠ Backed up existing pre-commit → .git/hooks/pre-commit.bak`) and print `upgraded` DISTINCTLY from fresh installs (`↑ Upgraded pre-commit (was legacy-v0)` vs `✓ Installed pre-commit`); refusals arrive in `errors[]`, so the existing `process.exit(errors.length > 0 ? 1 : 0)` keeps refusal = exit 1 with no new branch |
 | `src/cli/help.ts` help text | Document `--force` under `ci init` |
 
 Refusal is an ERROR, not a silent skip: partial installs stay per-hook isolated (today's semantics), so two clean hooks install while a foreign third fails the command.
 
-### D5 — `managed:v0` inventory built from git history, shipped as hashes
+### D5 — `legacy-v0` inventory built from git history, shipped as hashes
 
 **Choice**: one-shot dev script `scripts/build-hook-history.mjs`: `git rev-list --all -- src/commands/ci.ts` → `git show <rev>:src/commands/ci.ts` → regex-slice each `const *_HOOK = \`…\`;` → render the literal (it has ZERO `${}` interpolations; the script ABORTS if an unescaped `${` appears) → dedupe → sha256 → `assets/hooks/manifest.json` `historical[]` with the first commit sha per variant. Revisions where the constant is absent are skipped; the number of distinct variants is an OUTPUT of the script, not an assumption.
 **Alternatives**: ship no history (bricks `ci init` for ~8 repos — R2); fuzzy/normalized matching (accepts hand-edits as managed).

@@ -1,3 +1,9 @@
+## [1.12.0](https://github.com/JNZader/javi-forge/compare/v1.11.0...v1.12.0) (2026-08-09)
+
+### Features
+
+* **ci:** gates-v2 changed-file diff engine (git-diff.ts, slice 2/4) ([#9](https://github.com/JNZader/javi-forge/issues/9)) ([dd36a4f](https://github.com/JNZader/javi-forge/commit/dd36a4f35a6d7168e57cde0044e30f0b651bee11))
+
 ## [1.11.0](https://github.com/JNZader/javi-forge/compare/v1.10.1...v1.11.0) (2026-08-09)
 
 ### Features

@@ -53,3 +53,12 @@ Two blind judges, both APPROVE, zero BLOCKER/CRITICAL, no fix round. Judge B ver
 |---|---|---|---|---|---|
 | JDA-A-001 / JDB-S1-001 (convergent) | judgment-day | ci-config.ts:493-521 / ci.ts:521-542 | WARNING | info | Theoretical fail-closed edges: empty `gates: []` beside real runners hard-fails (defensible, named); shell mode picks primary runner's image in a multi-runner v2 config. Both in-scope-correct for slice 1, recorded as forward-looking. |
 | JDA-A-002 | judgment-day | coverage | WARNING | info | Judge A (read-only sandbox) could not re-run coverage; judge B confirmed empirically on a real branch (crash-recovery detached-HEAD caveat addressed). |
+
+## Apply slice 2 — judgment-day (git-diff engine) — APPROVED
+
+Two blind judges, both APPROVE, zero BLOCKER/CRITICAL, no fix round. Judge B verified EMPIRICALLY (tsx probes in scratch repos): 40-zero sentinel is exact-match (a sha starting with 0 is KEPT), shallow-clone base THROWS (git exit 128 propagates, never []-swallow, never widen), ACMR excludes deletions, union-dedupe correct. UNWIRED confirmed (no importers). 1436 tests green.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JDA-001 / JDB-S2-001 (convergent) | judgment-day | git-diff.ts:87-88 | WARNING | info | **SLICE-4 REQUIREMENT**: GitHub-push fallback uses `GITHUB_SHA` as diff base, but on actions/checkout HEAD===GITHUB_SHA → empty diff → scope:changed gates skip on GitHub pushes (visible skip, NOT a false-green, per B). The correct push base is `github.event.before` (not a default env var). Faithfully implements design.md:108 — a design-level semantic weakness, inert while unwired. Slice-4 wiring author MUST reconsider the GitHub-push base (e.g. accept an explicit base override, or document that scope:changed on GitHub push needs github.event.before wired via CI config) before consuming changedFiles. |
+| JDB-S2-002 | judgment-day | git-diff.ts:84-86 | SUGGESTION | info | GITHUB_BASE_REF set but origin/<ref> unfetched (shallow) → falls through to local candidates correctly. Intentional/safe. |

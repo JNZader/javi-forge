@@ -132,7 +132,12 @@ describe("parseCIConfig — validation errors (fail closed)", () => {
 	});
 
 	it("rejects an unsupported version", () => {
-		expectError("version: 2\nrunners: []", /version/i);
+		// version 2 is now a supported, additive schema (see the gates suite below);
+		// a genuinely out-of-set version (3) is the one that must still fail closed.
+		expectError(
+			"version: 3\nrunners:\n  - name: x\n    stack: node",
+			/version/i,
+		);
 	});
 
 	it("rejects a version given as a string", () => {
@@ -240,6 +245,190 @@ describe("parseCIConfig — validation errors (fail closed)", () => {
 			expect(e).toBeInstanceOf(CIConfigError);
 			expect((e as CIConfigError).errors.length).toBeGreaterThanOrEqual(3);
 		}
+	});
+});
+
+// =============================================================================
+// parseCIConfig — version:2 negotiation (additive, fail-closed preserved)
+// =============================================================================
+
+describe("parseCIConfig — version negotiation {1,2}", () => {
+	const expectError = (yaml: string, match: RegExp) => {
+		try {
+			parseCIConfig(yaml);
+			expect.unreachable("expected parseCIConfig to throw");
+		} catch (e) {
+			expect(e).toBeInstanceOf(CIConfigError);
+			expect((e as CIConfigError).message).toMatch(match);
+		}
+	};
+
+	it("parses a version 1 config byte-identically (regression, no gate machinery)", () => {
+		const config = parseCIConfig(VALID_CONFIG);
+		expect(config.version).toBe(1);
+		expect(config.runners).toHaveLength(2);
+		// A v1 config must carry NO gates key — the shape is identical to today.
+		expect("gates" in config).toBe(false);
+		expect(config.gates).toBeUndefined();
+	});
+
+	it("accepts version 2 with runners and no gates", () => {
+		const config = parseCIConfig(
+			"version: 2\nrunners:\n  - name: api\n    stack: go",
+		);
+		expect(config.version).toBe(2);
+		expect(config.runners).toHaveLength(1);
+	});
+
+	it("rejects a version 1 config that declares gates with a named error", () => {
+		expectError(
+			"version: 1\nrunners:\n  - name: api\n    stack: go\ngates:\n  - id: lint\n    run: echo hi",
+			/gates require version: 2/,
+		);
+	});
+
+	it("surfaces 'gates require version: 2' BEFORE a generic unknown-field error", () => {
+		try {
+			parseCIConfig(
+				"version: 1\nrunners:\n  - name: api\n    stack: go\ngates:\n  - id: lint\n    run: echo hi",
+			);
+			expect.unreachable("expected parseCIConfig to throw");
+		} catch (e) {
+			const err = e as CIConfigError;
+			const gatesErr = err.errors.find((x) => x.path === "gates");
+			expect(gatesErr?.message).toBe("gates require version: 2");
+			// It must NOT be reported as a generic unknown field.
+			expect(gatesErr?.message).not.toMatch(/unknown field/);
+		}
+	});
+
+	it("rejects a version 2 config with NEITHER runners nor gates (fail closed)", () => {
+		expectError("version: 2", /runners or gates/i);
+	});
+
+	it("rejects an unknown top-level key under version 2 (fail closed)", () => {
+		expectError(
+			"version: 2\nsurprise: true\ngates:\n  - id: lint\n    run: echo hi",
+			/unknown.*surprise|surprise/i,
+		);
+	});
+});
+
+// =============================================================================
+// parseCIConfig — gates block schema (version 2)
+// =============================================================================
+
+describe("parseCIConfig — gates schema", () => {
+	const V2 = (gatesYaml: string): string => `version: 2\n${gatesYaml}`;
+
+	const expectError = (yaml: string, match: RegExp) => {
+		try {
+			parseCIConfig(yaml);
+			expect.unreachable("expected parseCIConfig to throw");
+		} catch (e) {
+			expect(e).toBeInstanceOf(CIConfigError);
+			expect((e as CIConfigError).message).toMatch(match);
+		}
+	};
+
+	it("accepts a gates-only config and defaults mode=blocking, scope=all", () => {
+		const config = parseCIConfig(
+			V2("gates:\n  - id: coverage\n    run: echo cover"),
+		);
+		expect(config.runners).toHaveLength(0);
+		expect(config.gates).toHaveLength(1);
+		const gate = config.gates?.[0];
+		expect(gate?.id).toBe("coverage");
+		expect(gate?.run).toEqual(["echo cover"]);
+		expect(gate?.mode).toBe("blocking");
+		expect(gate?.scope).toBe("all");
+		expect(gate?.baseline).toBeUndefined();
+		expect(gate?.env).toBeUndefined();
+	});
+
+	it("normalizes a list `run` and reads mode/scope/baseline/env", () => {
+		const config = parseCIConfig(
+			V2(
+				[
+					"gates:",
+					"  - id: audit",
+					"    run:",
+					"      - echo one",
+					"      - echo two",
+					"    mode: informative",
+					"    scope: changed",
+					"    baseline: .baseline/audit.json",
+					"    env:",
+					"      FOO: bar",
+				].join("\n"),
+			),
+		);
+		const gate = config.gates?.[0];
+		expect(gate?.run).toEqual(["echo one", "echo two"]);
+		expect(gate?.mode).toBe("informative");
+		expect(gate?.scope).toBe("changed");
+		expect(gate?.baseline).toBe(".baseline/audit.json");
+		expect(gate?.env).toEqual({ FOO: "bar" });
+	});
+
+	it("rejects a duplicate gate id with a named error", () => {
+		try {
+			parseCIConfig(
+				V2(
+					"gates:\n  - id: dup\n    run: echo a\n  - id: dup\n    run: echo b",
+				),
+			);
+			expect.unreachable("expected parseCIConfig to throw");
+		} catch (e) {
+			const err = e as CIConfigError;
+			expect(
+				err.errors.some((x) => /duplicate gate id "dup"/.test(x.message)),
+			).toBe(true);
+		}
+	});
+
+	it("rejects an invalid mode naming the field and value", () => {
+		try {
+			parseCIConfig(V2("gates:\n  - id: g\n    run: echo a\n    mode: warn"));
+			expect.unreachable("expected parseCIConfig to throw");
+		} catch (e) {
+			const err = e as CIConfigError;
+			const modeErr = err.errors.find((x) => x.path === "gates[0].mode");
+			expect(modeErr?.message).toMatch(/blocking, informative/);
+			expect(modeErr?.message).toContain("warn");
+		}
+	});
+
+	it("rejects an invalid scope naming the field and value", () => {
+		try {
+			parseCIConfig(
+				V2("gates:\n  - id: g\n    run: echo a\n    scope: staged"),
+			);
+			expect.unreachable("expected parseCIConfig to throw");
+		} catch (e) {
+			const err = e as CIConfigError;
+			const scopeErr = err.errors.find((x) => x.path === "gates[0].scope");
+			expect(scopeErr?.message).toMatch(/all, changed/);
+			expect(scopeErr?.message).toContain("staged");
+		}
+	});
+
+	it("rejects a tag-unsafe gate id", () => {
+		expectError(
+			V2("gates:\n  - id: bad id!\n    run: echo a"),
+			/gates\[0\]\.id/,
+		);
+	});
+
+	it("rejects a gate without a run", () => {
+		expectError(V2("gates:\n  - id: g"), /gates\[0\]\.run/);
+	});
+
+	it("rejects an unknown gate field (fail closed)", () => {
+		expectError(
+			V2("gates:\n  - id: g\n    run: echo a\n    bogus: 1"),
+			/gates\[0\]\.bogus|unknown field "bogus"/,
+		);
 	});
 });
 

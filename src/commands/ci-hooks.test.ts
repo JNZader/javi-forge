@@ -427,6 +427,35 @@ describe("installCIHooks classification and write policy", () => {
 		expect(await fs.readFile(target, "utf8")).toBe("ORIGINAL");
 	});
 
+	it("refuses a symlink planted AFTER classification (O_NOFOLLOW closes the race)", async () => {
+		// The window SEC-1 hardens: the path classified as ABSENT is replaced by
+		// a symlink before the write lands. Reading the hook asset is the last
+		// step before that write, so it is where the attacker is simulated.
+		const target = path.join(tmpDir, "victim");
+		await fs.writeFile(target, "ORIGINAL");
+		const realReadFile = fs.readFile.bind(fs) as typeof fs.readFile;
+		const spy = vi.spyOn(fs, "readFile").mockImplementation((async (
+			file: string,
+			encoding: unknown,
+		) => {
+			if (file === path.join(HOOK_ASSETS_DIR, "pre-commit")) {
+				await fs.symlink(target, hookPathFor("pre-commit"));
+			}
+			return await realReadFile(file, encoding as never);
+		}) as never);
+
+		try {
+			const result = await installCIHooks(tmpDir);
+
+			const error = result.errors.find((e) => e.startsWith("pre-commit:"));
+			expect(error).toContain("ELOOP");
+			expect(result.installed).not.toContain("pre-commit");
+			expect(await fs.readFile(target, "utf8")).toBe("ORIGINAL");
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
 	it("refuses a non-regular hook path with a named reason", async () => {
 		await fs.ensureDir(hookPathFor("pre-commit"));
 
@@ -732,6 +761,46 @@ describe("installCIHooks manifest failures", () => {
 		vi.spyOn(fs, "readJson").mockResolvedValue({
 			...manifest,
 			"pre-push": { ...manifest["pre-push"], historical: "not-an-array" },
+		});
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-commit", "commit-msg"]),
+		);
+		const error = result.errors.find((e) => e.startsWith("pre-push:"));
+		expect(error).toContain(manifestPath);
+		expect(error).toContain("reinstall javi-forge");
+		expect(
+			await fs.pathExists(path.join(tmpDir, ".git", "hooks", "pre-push")),
+		).toBe(false);
+	});
+
+	it("reports a per-hook named error when a historical element is null", async () => {
+		const manifest = realManifest();
+		vi.spyOn(fs, "readJson").mockResolvedValue({
+			...manifest,
+			"pre-push": { ...manifest["pre-push"], historical: [null] },
+		});
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-commit", "commit-msg"]),
+		);
+		const error = result.errors.find((e) => e.startsWith("pre-push:"));
+		expect(error).toContain(manifestPath);
+		expect(error).toContain("reinstall javi-forge");
+		expect(
+			await fs.pathExists(path.join(tmpDir, ".git", "hooks", "pre-push")),
+		).toBe(false);
+	});
+
+	it("reports a per-hook named error when a historical element is a raw string", async () => {
+		const manifest = realManifest();
+		vi.spyOn(fs, "readJson").mockResolvedValue({
+			...manifest,
+			"pre-push": { ...manifest["pre-push"], historical: ["raw-string"] },
 		});
 
 		const result = await installCIHooks(tmpDir);

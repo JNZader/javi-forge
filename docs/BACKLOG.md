@@ -42,6 +42,16 @@ and auto-detection yields exactly one runner. The `??` fallbacks are unreachable
 - Suggested fix: remove after the `ci-engine-unification` collapse lands — they
   may disappear naturally with the legacy view. Verify at that point rather than
   deleting now.
+- **CLOSED 2026-08-09**: invariant re-verified on `main` after the collapse —
+  the config path throws before resolving when `runners` is empty
+  (`src/lib/ci-config.ts:321-326`), and the `auto` and `stack-override` paths
+  each build exactly one runner (`resolveCIRunners`). Removed the `?? "node"` /
+  `?? "npm"` / `?? "21"` defaults and the two `&& first` truthiness guards in
+  `describeRunners`; the invariant is now stated once as a comment. The
+  `?? null` on `lintCmds[0]`/`compileCmds[0]`/`testCmds[0]` STAYS — those lists
+  can legitimately be empty. Zero behavior change, full suite green unchanged.
+
+> **Scope precision (R1 review, 2026-08-09)**: SEC-1's closure covers the WRITE path (`writeHookFile`, O_NOFOLLOW + fchmod) and the backup DESTINATION (COPYFILE_EXCL + fchmod-on-fd). Still parked, same local-attacker threat model, defense-in-depth only: (a) `repairHookMode`'s path-based chmod on the managed-current branch (R1-001), (b) `backupHook`'s source-side `stat`/`copyFile` follow symlinks — a post-classification swap can copy the link target into the backup before the write correctly aborts with ELOOP (R1-002), (c) the `nlink > 1` check. All three are strictly weaker than the code execution this attacker already holds.
 
 ### ENV-1 — Containerized CI runs leave `node_modules/.vite-temp` root-owned
 
@@ -116,5 +126,27 @@ therefore invisible until someone runs the command by hand.
 - **What**: the classify→write window on the HOOK path uses plain `fs.writeFile` (no O_NOFOLLOW) and the backup `chmod` is path-based (follows symlinks). A concurrent local attacker with write access to `.git/hooks` could plant a symlink inside the window. The backup CREATE is already atomic (COPYFILE_EXCL); this extends the property to the final write and the mode fix.
 - **Fix shape**: `fs.open(hookPath, O_WRONLY|O_TRUNC|O_NOFOLLOW)` + write on the fd + `fchmod(fd, 0o755)`; same fd-based pattern for the backup chmod. Also consider `nlink > 1` refusal (hardlink truncation, mitigated by fs.protected_hardlinks=1 on modern Linux).
 - **Threat model**: local attacker who ALREADY has write access to the repo's .git — low priority, defense in depth. Pre-existing class (the old clobber path had the same exposure with a smaller window).
+- **CLOSED 2026-08-09**: shipped `writeHookFile()` in `src/commands/ci.ts` — the
+  final hook write now goes through an FD opened
+  `O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW` (mode `0755` on create) with
+  `filehandle.writeFile` + `filehandle.chmod` (fchmod) in a `try/finally`
+  close, so bytes and mode provably land on the same inode. The backup-side
+  mode restore in `backupHook` is likewise fchmod on an FD opened
+  `O_RDONLY|O_NOFOLLOW` right after the `COPYFILE_EXCL` create. `O_NOFOLLOW`
+  degrades to `0` where the platform lacks it (Windows). Covered by
+  "refuses a symlink planted AFTER classification (O_NOFOLLOW closes the race)"
+  in `src/commands/ci-hooks.test.ts`, which plants the symlink during the asset
+  read and asserts `ELOOP` plus an untouched victim file; verified RED against
+  the old `fs.writeFile` path. All pre-existing hook tests pass unchanged.
+- **Residual, still parked**: the `nlink > 1` (hardlink truncation) refusal was
+  deliberately NOT added. `O_NOFOLLOW` does not stop a hardlink; on modern
+  Linux `fs.protected_hardlinks=1` mitigates the cross-owner case.
 
 > Follow-up (JDA7-012, one line): tighten `assertHookManifestEntry` with `.every((h) => typeof h?.sha256 === "string")` so a `historical:[null]` manifest yields a NAMED error.
+>
+> **CLOSED 2026-08-09**: shipped. `assertHookManifestEntry` now rejects any
+> `historical` element without a string `sha256`, so `historical: [null]` and
+> `historical: ["raw"]` surface as the named manifest error (path + reason +
+> reinstall remedy) instead of an unnamed `TypeError` raised later inside
+> `isReleasedBody`. Two RED-first tests added in `src/commands/ci-hooks.test.ts`
+> ("installCIHooks manifest failures"); sibling hooks still install.

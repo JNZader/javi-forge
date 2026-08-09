@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import fs from "fs-extra";
 import { HOOK_ASSETS_DIR } from "../constants.js";
@@ -448,13 +449,21 @@ function report(
 	onStep({ id, label, status, detail });
 }
 
-/** Detect-step label: legacy format for auto, explicit otherwise. */
+/**
+ * Detect-step label: legacy format for auto, explicit otherwise.
+ *
+ * INVARIANT (holds for every `ResolvedRunners` value): `runners` is never
+ * empty. The config path rejects an empty list before resolving
+ * (`src/lib/ci-config.ts` — "runners is required and must be a non-empty
+ * list"), and the `auto` and `stack-override` paths each yield exactly one
+ * runner. `runners[0]` therefore needs no fallback.
+ */
 function describeRunners(resolved: ResolvedRunners): string {
 	const first = resolved.runners[0];
-	if (resolved.source === "auto" && first) {
+	if (resolved.source === "auto") {
 		return `Stack: ${first.stack} (${first.buildTool})`;
 	}
-	if (resolved.source === "stack-override" && first) {
+	if (resolved.source === "stack-override") {
 		return `Stack: ${first.stack} (${first.buildTool}, --stack override)`;
 	}
 	const summary = resolved.runners
@@ -493,14 +502,16 @@ export async function runCI(
 
 	// Legacy single-runner view for the zero-config auto path. Keeping this
 	// shape guarantees single-stack repositories behave exactly as before.
+	// `runners[0]` is always present — see the invariant on `describeRunners`.
+	// The command lists CAN be empty, so those keep their `?? null`.
 	const primary = resolved.runners[0];
 	const stackInfo: CIStackInfo = {
-		stackType: primary?.stack ?? "node",
-		buildTool: primary?.buildTool ?? "npm",
-		javaVersion: primary?.javaVersion ?? "21",
-		lintCmd: primary?.lintCmds[0] ?? null,
-		compileCmd: primary?.compileCmds[0] ?? null,
-		testCmd: primary?.testCmds[0] ?? null,
+		stackType: primary.stack,
+		buildTool: primary.buildTool,
+		javaVersion: primary.javaVersion,
+		lintCmd: primary.lintCmds[0] ?? null,
+		compileCmd: primary.compileCmds[0] ?? null,
+		testCmd: primary.testCmds[0] ?? null,
 	};
 
 	// ── Detect mode ─────────────────────────────────────────────────────────────
@@ -1280,7 +1291,15 @@ async function backupHook(hookPath: string): Promise<string> {
 				`could not write the backup ${candidate} (${errorCode(copyErr) || "unknown error"}): ${copyErr instanceof Error ? copyErr.message : String(copyErr)}. The hook was left unchanged.`,
 			);
 		}
-		await fs.chmod(candidate, original.mode);
+		// The mode restore addresses the FD of the file THIS call just created,
+		// not the path: a symlink planted at `candidate` after the
+		// `COPYFILE_EXCL` copy cannot capture the mode change (SEC-1).
+		const handle = await fsp.open(candidate, constants.O_RDONLY | O_NOFOLLOW);
+		try {
+			await handle.chmod(original.mode);
+		} finally {
+			await handle.close();
+		}
 		return candidate;
 	}
 
@@ -1320,13 +1339,56 @@ function assertHookManifestEntry(
 			? `has no "${hookName}" entry`
 			: typeof entry.sha256 !== "string" ||
 					typeof entry.version !== "number" ||
-					!Array.isArray(entry.historical)
-				? `has a malformed "${hookName}" entry (expected version:number, sha256:string, historical:array)`
+					!Array.isArray(entry.historical) ||
+					!entry.historical.every((h) => typeof h?.sha256 === "string")
+				? `has a malformed "${hookName}" entry (expected version:number, sha256:string, historical:array of {sha256:string})`
 				: "";
 	if (problem !== "") {
 		throw new Error(
 			`${MANIFEST_PATH} ${problem}. The javi-forge install is incomplete; ${REINSTALL_REMEDY}.`,
 		);
+	}
+}
+
+/**
+ * `O_NOFOLLOW` on the platforms that have it, a no-op flag elsewhere. Windows
+ * has no such flag AND no hook-symlink threat worth the crash of an
+ * `undefined` in a bitmask.
+ */
+const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
+
+/**
+ * Write the hook through a FILE DESCRIPTOR, never through the path (SEC-1).
+ *
+ * `classifyHookPath` established moments earlier that `hookPath` is a regular
+ * file, but a local attacker with write access to `.git/hooks` could swap a
+ * symlink in during that window and turn the write into an arbitrary-write
+ * primitive. `O_NOFOLLOW` closes it: if the path IS a symlink when the write
+ * finally happens, `open` fails with `ELOOP` and the hook surfaces as a named
+ * per-hook error instead of clobbering the link target. Everything after the
+ * open then addresses the FD — `fchmod`, not a second path lookup — so the
+ * bytes and the mode provably land on the same inode.
+ *
+ * The mode argument applies ONLY when the file is CREATED: overwriting an
+ * existing 0644 hook would leave it non-executable and git would silently skip
+ * it. The `fchmod` is therefore unconditional, on every write path, which also
+ * makes the final mode independent of the umask.
+ *
+ * NOT covered (deferred by decision in SEC-1): a hardlink to a victim file
+ * survives `O_NOFOLLOW`. On modern Linux `fs.protected_hardlinks=1` blocks the
+ * cross-owner case; an `nlink > 1` refusal is parked in the backlog.
+ */
+async function writeHookFile(hookPath: string, content: string): Promise<void> {
+	const handle = await fsp.open(
+		hookPath,
+		constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | O_NOFOLLOW,
+		HOOK_MODE,
+	);
+	try {
+		await handle.writeFile(content, "utf8");
+		await handle.chmod(HOOK_MODE);
+	} finally {
+		await handle.close();
 	}
 }
 
@@ -1428,14 +1490,7 @@ export async function installCIHooks(
 			}
 
 			const body = await readHookBody(name);
-			// The `mode` option applies ONLY when the file is CREATED: overwriting
-			// an existing 0644 hook would leave it non-executable and git would
-			// silently skip it. The chmod is therefore unconditional, on every
-			// write path, which also makes the mode independent of the umask.
-			await fs.writeFile(hookPath, renderHook(body, name, entry), {
-				mode: HOOK_MODE,
-			});
-			await fs.chmod(hookPath, HOOK_MODE);
+			await writeHookFile(hookPath, renderHook(body, name, entry));
 			// `upgraded` means "javi-forge content was replaced by newer
 			// javi-forge content". A forced overwrite of someone else's file is a
 			// fresh install, not an upgrade.

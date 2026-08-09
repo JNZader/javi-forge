@@ -19,10 +19,24 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 	// Sub-command: javi-forge ci init → install git hooks
 	if (cli.input[1] === "init") {
 		const { installCIHooks } = await import("../../commands/ci.js");
-		const { installed, errors } = await installCIHooks(process.cwd());
+		const { installed, upgraded, backups, errors, states } =
+			await installCIHooks(process.cwd(), {
+				force: cli.flags.force === true,
+			});
+		for (const backup of backups) {
+			console.log(`⚠ Backed up the previous hook → ${backup}`);
+		}
 		if (installed.length > 0) {
 			console.log(`✓ Installed git hooks: ${installed.join(", ")}`);
 			console.log("  Hooks call javi-forge ci (with npx fallback)");
+		}
+		// Upgrades are reported DISTINCTLY from fresh installs: replacing an
+		// older javi-forge hook is not the same event as writing a new one.
+		for (const hook of upgraded) {
+			const was = states.find((entry) => entry.name === hook)?.state;
+			console.log(
+				`↑ Upgraded ${hook}${was === undefined ? "" : ` (was ${was})`}`,
+			);
 		}
 		for (const err of errors) {
 			console.error(`✗ ${err}`);

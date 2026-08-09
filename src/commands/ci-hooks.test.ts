@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOOK_ASSETS_DIR } from "../constants.js";
 import {
 	classifyHookContent,
@@ -356,6 +356,167 @@ describe("installCIHooks classification and write policy", () => {
 		expect(error).toContain("is not a regular file");
 		expect((await fs.lstat(hookPathFor("pre-commit"))).isDirectory()).toBe(
 			true,
+		);
+	});
+});
+
+// =============================================================================
+// installCIHooks --force — the backup protocol (D4)
+// =============================================================================
+
+describe("installCIHooks --force and the backup protocol", () => {
+	let tmpDir: string;
+	let hooksDir: string;
+	let preCommit: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookbak-"));
+		hooksDir = path.join(tmpDir, ".git", "hooks");
+		await fs.ensureDir(hooksDir);
+		preCommit = path.join(hooksDir, "pre-commit");
+	});
+
+	afterEach(async () => {
+		vi.restoreAllMocks();
+		await fs.remove(tmpDir);
+	});
+
+	it("backs a foreign hook up before overwriting it, preserving bytes and mode", async () => {
+		// Deliberately NOT valid UTF-8: the backup must copy the original BYTES,
+		// never a utf8 decode/encode round-trip.
+		const original = Buffer.from([
+			0x23, 0x21, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x62, 0x61, 0x73, 0x68, 0x0a,
+			0xff, 0xfe, 0x0a,
+		]);
+		await fs.writeFile(preCommit, original);
+		await fs.chmod(preCommit, 0o700);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(result.backups).toContain(`${preCommit}.bak`);
+		expect(result.installed).toContain("pre-commit");
+		expect(result.errors).toEqual([]);
+		expect(await fs.readFile(`${preCommit}.bak`)).toEqual(original);
+		expect((await fs.stat(`${preCommit}.bak`)).mode & 0o777).toBe(0o700);
+		expect(await fs.readFile(preCommit, "utf8")).toContain(
+			"# javi-forge-hook: pre-commit v1",
+		);
+	});
+
+	it("backs a managed-edited hook up before overwriting it", async () => {
+		await installCIHooks(tmpDir);
+		const edited = `${await fs.readFile(preCommit, "utf8")}echo mine\n`;
+		await fs.writeFile(preCommit, edited);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(await fs.readFile(`${preCommit}.bak`, "utf8")).toBe(edited);
+		expect(result.backups).toContain(`${preCommit}.bak`);
+		expect(await fs.readFile(preCommit, "utf8")).not.toBe(edited);
+	});
+
+	it("never clobbers an earlier backup — falls through to a timestamped target", async () => {
+		await fs.writeFile(preCommit, "#!/bin/bash\necho foreign\n");
+		await fs.writeFile(`${preCommit}.bak`, "EARLIER BACKUP");
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(await fs.readFile(`${preCommit}.bak`, "utf8")).toBe(
+			"EARLIER BACKUP",
+		);
+		const used = result.backups.find((backup) =>
+			backup.startsWith(`${preCommit}.bak.`),
+		);
+		expect(used).toBeDefined();
+		expect(await fs.readFile(used as string, "utf8")).toBe(
+			"#!/bin/bash\necho foreign\n",
+		);
+	});
+
+	it("refuses even WITH --force when the backup target is a symlink", async () => {
+		const sensitive = path.join(tmpDir, "authorized_keys");
+		await fs.writeFile(sensitive, "SSH KEYS");
+		const foreign = "#!/bin/bash\necho foreign\n";
+		await fs.writeFile(preCommit, foreign);
+		await fs.symlink(sensitive, `${preCommit}.bak`);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(await fs.readFile(sensitive, "utf8")).toBe("SSH KEYS");
+		expect(await fs.readFile(preCommit, "utf8")).toBe(foreign);
+		expect(result.installed).not.toContain("pre-commit");
+		expect(result.errors.find((e) => e.startsWith("pre-commit:"))).toContain(
+			"backup",
+		);
+	});
+
+	it("refuses even WITH --force when the backup target is a directory", async () => {
+		const foreign = "#!/bin/bash\necho foreign\n";
+		await fs.writeFile(preCommit, foreign);
+		await fs.ensureDir(`${preCommit}.bak`);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(await fs.readFile(preCommit, "utf8")).toBe(foreign);
+		expect(result.installed).not.toContain("pre-commit");
+		expect((await fs.lstat(`${preCommit}.bak`)).isDirectory()).toBe(true);
+	});
+
+	it("leaves the hook BYTE-UNCHANGED when the backup write throws, and installs siblings", async () => {
+		const foreign = "#!/bin/bash\necho foreign\n";
+		await fs.writeFile(preCommit, foreign);
+		vi.spyOn(fs, "copyFile").mockRejectedValue(
+			Object.assign(new Error("no space left on device"), { code: "ENOSPC" }),
+		);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(await fs.readFile(preCommit, "utf8")).toBe(foreign);
+		expect(await fs.pathExists(`${preCommit}.bak`)).toBe(false);
+		expect(result.installed).not.toContain("pre-commit");
+		expect(result.backups).toEqual([]);
+		expect(result.errors.find((e) => e.startsWith("pre-commit:"))).toContain(
+			"ENOSPC",
+		);
+		// Sibling hooks are untouched by the failure.
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-push", "commit-msg"]),
+		);
+	});
+
+	it("keeps refusing a symlinked hook path with --force, target intact", async () => {
+		const target = path.join(tmpDir, "target");
+		await fs.writeFile(target, "ORIGINAL");
+		await fs.symlink(target, preCommit);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(await fs.readFile(target, "utf8")).toBe("ORIGINAL");
+		expect(result.installed).not.toContain("pre-commit");
+		expect(result.backups).toEqual([]);
+	});
+
+	it("keeps refusing a non-regular hook path with --force", async () => {
+		await fs.ensureDir(preCommit);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(result.installed).not.toContain("pre-commit");
+		expect((await fs.lstat(preCommit)).isDirectory()).toBe(true);
+	});
+
+	it("does not back up hooks it would write anyway (absent, legacy-v0)", async () => {
+		await fs.writeFile(
+			path.join(hooksDir, "pre-push"),
+			fs.readFileSync(path.join(HOOK_ASSETS_DIR, "pre-push"), "utf8"),
+		);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(result.backups).toEqual([]);
+		expect(result.upgraded).toContain("pre-push");
+		expect(await fs.pathExists(path.join(hooksDir, "pre-push.bak"))).toBe(
+			false,
 		);
 	});
 });

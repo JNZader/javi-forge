@@ -32,3 +32,26 @@ describe("help / FLAGS_SCHEMA — CI runner options", () => {
 		expect(examples).toContain("ci --config");
 	});
 });
+
+// =============================================================================
+// ci init --force (design D4)
+// =============================================================================
+
+describe("help / FLAGS_SCHEMA — ci init --force", () => {
+	it("declares a --force boolean flag defaulting to false", () => {
+		expect(FLAGS_SCHEMA).toHaveProperty("force");
+		expect(FLAGS_SCHEMA.force.type).toBe("boolean");
+		expect(FLAGS_SCHEMA.force.default).toBe(false);
+	});
+
+	it("documents --force and the .bak guarantee under CI hooks", () => {
+		const hooksSection = HELP_TEXT.split("CI hooks")[1] ?? "";
+		expect(hooksSection).toContain("--force");
+		expect(hooksSection).toContain(".bak");
+	});
+
+	it("shows a ci init --force usage example", () => {
+		const examples = HELP_TEXT.split("Examples")[1] ?? "";
+		expect(examples).toContain("ci init --force");
+	});
+});

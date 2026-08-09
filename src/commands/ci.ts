@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import type { Stats } from "node:fs";
+import { constants, type Stats } from "node:fs";
 import path from "node:path";
 import fs from "fs-extra";
 import { HOOK_ASSETS_DIR } from "../constants.js";
@@ -1119,6 +1119,11 @@ export interface HookStateReport {
 	state: HookState;
 }
 
+export interface InstallHooksOptions {
+	/** Overwrite `foreign` / `managed-edited` hooks, backing them up first. */
+	force?: boolean;
+}
+
 export interface InstallHooksResult {
 	installed: string[];
 	/** Hooks that were `managed-outdated` or `legacy-v0` and got REPLACED. */
@@ -1129,6 +1134,9 @@ export interface InstallHooksResult {
 }
 
 const HOOK_NAMES = ["pre-commit", "pre-push", "commit-msg"] as const;
+
+/** Bound on the `.bak.{epochMs}-{n}` ladder before a forced install gives up. */
+const BACKUP_RETRY_BUDGET = 8;
 
 const HOOK_MARKER_NAME_RE =
 	/^# javi-forge-hook: (?<name>[a-z-]+) v(?<version>\d+)$/;
@@ -1197,20 +1205,26 @@ export function classifyHookContent(
 		: HOOK_STATE.FOREIGN;
 }
 
+async function lstatOrNull(target: string): Promise<Stats | null> {
+	try {
+		return await fs.lstat(target);
+	} catch (statErr: unknown) {
+		if (errorCode(statErr) === "ENOENT") {
+			return null;
+		}
+		throw statErr;
+	}
+}
+
 /** D6 step 0 — `lstat` first; only a regular file is ever read. */
 async function classifyHookPath(
 	hookPath: string,
 	hookName: string,
 	entry: HookManifestEntry,
 ): Promise<HookState> {
-	let stat: Stats;
-	try {
-		stat = await fs.lstat(hookPath);
-	} catch (statErr: unknown) {
-		if (errorCode(statErr) === "ENOENT") {
-			return HOOK_STATE.ABSENT;
-		}
-		throw statErr;
+	const stat = await lstatOrNull(hookPath);
+	if (stat === null) {
+		return HOOK_STATE.ABSENT;
 	}
 	if (stat.isSymbolicLink()) {
 		return HOOK_STATE.SYMLINK;
@@ -1272,6 +1286,69 @@ async function refusalMessage(
 	return `${hookPath} ${reason}. Refusing to overwrite. Inspect it, then re-run 'javi-forge ci init --force' (the current file is saved as ${target}), or delete it.`;
 }
 
+/**
+ * Candidate backup targets, in order: `.bak`, `.bak.{epochMs}`, then
+ * `.bak.{epochMs}-{n}`. Bounded — a forced install never loops forever.
+ */
+function* backupCandidates(hookPath: string): Generator<string> {
+	yield `${hookPath}.bak`;
+	const stamp = Date.now();
+	yield `${hookPath}.bak.${stamp}`;
+	for (let n = 1; n <= BACKUP_RETRY_BUDGET; n += 1) {
+		yield `${hookPath}.bak.${stamp}-${n}`;
+	}
+}
+
+/**
+ * Copy the hook to a `.bak` sibling BEFORE a forced overwrite (D4).
+ *
+ * The backup path is a write target and gets the same protection as the hook
+ * path: every candidate is `lstat`ed and a symlink or non-regular file is
+ * refused EVEN WITH `--force`, otherwise a planted
+ * `pre-commit.bak -> ~/.ssh/authorized_keys` would turn `--force` into an
+ * arbitrary-write primitive. Creation goes through `COPYFILE_EXCL`, so
+ * "does it exist?" and "create it" are one atomic step: a backup can never
+ * clobber an earlier backup, same-millisecond collisions are impossible, and a
+ * symlink planted between the `lstat` and the copy loses the race. The copy is
+ * of the ORIGINAL BYTES — never a utf8 round-trip, which would corrupt a
+ * non-UTF8 hook — and the original mode is restored so a restored backup is
+ * still executable.
+ *
+ * Throwing here ABORTS the hook: the caller never reaches its write.
+ */
+async function backupHook(hookPath: string): Promise<string> {
+	const original = await fs.stat(hookPath);
+
+	for (const candidate of backupCandidates(hookPath)) {
+		const existing = await lstatOrNull(candidate);
+		if (existing !== null) {
+			if (existing.isSymbolicLink() || !existing.isFile()) {
+				throw new Error(
+					`refusing to write the backup ${candidate}: it exists and is not a regular file. The hook was left unchanged.`,
+				);
+			}
+			// An earlier backup — keep it, try the next name.
+			continue;
+		}
+		try {
+			await fs.copyFile(hookPath, candidate, constants.COPYFILE_EXCL);
+		} catch (copyErr: unknown) {
+			if (errorCode(copyErr) === "EEXIST") {
+				continue;
+			}
+			throw new Error(
+				`could not write the backup ${candidate} (${errorCode(copyErr) || "unknown error"}): ${copyErr instanceof Error ? copyErr.message : String(copyErr)}. The hook was left unchanged.`,
+			);
+		}
+		await fs.chmod(candidate, original.mode);
+		return candidate;
+	}
+
+	throw new Error(
+		`could not back up ${hookPath}: every candidate backup path is taken. The hook was left unchanged.`,
+	);
+}
+
 async function loadHookManifest(): Promise<Record<string, HookManifestEntry>> {
 	return (await fs.readJson(
 		path.join(HOOK_ASSETS_DIR, "manifest.json"),
@@ -1286,7 +1363,9 @@ const HOOK_BODIES: Record<string, string> = {
 
 export async function installCIHooks(
 	projectDir: string,
+	options: InstallHooksOptions = {},
 ): Promise<InstallHooksResult> {
+	const force = options.force === true;
 	const empty = { installed: [], upgraded: [], backups: [], states: [] };
 	const gitDir = path.join(projectDir, ".git");
 	if (!(await fs.pathExists(gitDir))) {
@@ -1316,22 +1395,32 @@ export async function installCIHooks(
 			if (state === HOOK_STATE.MANAGED_CURRENT) {
 				continue;
 			}
-			if (
-				state === HOOK_STATE.SYMLINK ||
-				state === HOOK_STATE.NOT_A_FILE ||
-				state === HOOK_STATE.MANAGED_EDITED ||
-				state === HOOK_STATE.FOREIGN
-			) {
+			// A symlink or a non-regular path is refused ALWAYS — `--force` is
+			// consent to lose YOUR file, not permission to write through a link.
+			if (state === HOOK_STATE.SYMLINK || state === HOOK_STATE.NOT_A_FILE) {
 				throw new Error(await refusalMessage(hookPath, state));
+			}
+			if (state === HOOK_STATE.MANAGED_EDITED || state === HOOK_STATE.FOREIGN) {
+				if (!force) {
+					throw new Error(await refusalMessage(hookPath, state));
+				}
+				// Backup FIRST. If it throws, the write below is never reached.
+				backups.push(await backupHook(hookPath));
 			}
 
 			await fs.writeFile(hookPath, renderHook(HOOK_BODIES[name], name, entry), {
 				mode: 0o755,
 			});
-			if (state === HOOK_STATE.ABSENT) {
-				installed.push(name);
-			} else {
+			// `upgraded` means "javi-forge content was replaced by newer
+			// javi-forge content". A forced overwrite of someone else's file is a
+			// fresh install, not an upgrade.
+			if (
+				state === HOOK_STATE.MANAGED_OUTDATED ||
+				state === HOOK_STATE.LEGACY_V0
+			) {
 				upgraded.push(name);
+			} else {
+				installed.push(name);
 			}
 		} catch (e) {
 			errors.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);

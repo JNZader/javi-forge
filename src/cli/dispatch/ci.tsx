@@ -13,9 +13,50 @@ import React from "react";
 import type { CIMode } from "../../commands/ci.js";
 import CI from "../../ui/CI.js";
 import { CIProvider as CIContextProvider } from "../../ui/CIContext.js";
+import { CI_HELP_TEXT } from "../help.js";
 import type { CLI, RendererCtx } from "./types.js";
 
 export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
+	// Per-command help: `javi-forge ci --help` shows ci-specific usage, not the
+	// global banner (autoHelp is disabled at the entrypoint).
+	if (cli.flags.help === true) {
+		console.log(CI_HELP_TEXT);
+		process.exit(0);
+	}
+
+	// Sub-command: javi-forge ci validate → dry config validation, no execution.
+	if (cli.input[1] === "validate") {
+		const { validateCIConfig } = await import("../../commands/ci-validate.js");
+		const result = await validateCIConfig(
+			process.cwd(),
+			cli.flags.config || undefined,
+		);
+		if (result.ok) {
+			if (cli.flags.json) {
+				console.log(
+					JSON.stringify({ ok: true, runners: result.runners }, null, 2),
+				);
+			} else {
+				console.log(`✓ CI config valid: ${result.configPath}`);
+				console.log(`  ${result.runners.length} runner(s):`);
+				for (const runner of result.runners) {
+					console.log(`    - ${runner.name} (${runner.stack})`);
+				}
+			}
+			process.exit(0);
+		}
+		if (cli.flags.json) {
+			console.log(
+				JSON.stringify({ ok: false, errors: result.errors }, null, 2),
+			);
+		} else {
+			for (const err of result.errors) {
+				console.error(`${err.path}: ${err.message}`);
+			}
+		}
+		process.exit(1);
+	}
+
 	// Sub-command: javi-forge ci init → install git hooks
 	if (cli.input[1] === "init") {
 		const { installCIHooks } = await import("../../commands/ci.js");
@@ -42,6 +83,13 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 			console.error(`✗ ${err}`);
 		}
 		process.exit(errors.length > 0 ? 1 : 0);
+	}
+
+	// Any other positional is an unknown subcommand — show ci usage, don't run
+	// the pipeline against a typo.
+	if (cli.input[1] !== undefined) {
+		console.log(CI_HELP_TEXT);
+		process.exit(1);
 	}
 
 	const ciMode: CIMode = cli.flags.detect

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FLAGS_SCHEMA, HELP_TEXT } from "./help.js";
+import { CI_HELP_TEXT, FLAGS_SCHEMA, HELP_TEXT } from "./help.js";
 
 // =============================================================================
 // CI flag plumbing for mixed-stack CI (plan tasks 2)
@@ -53,5 +53,51 @@ describe("help / FLAGS_SCHEMA — ci init --force", () => {
 	it("shows a ci init --force usage example", () => {
 		const examples = HELP_TEXT.split("Examples")[1] ?? "";
 		expect(examples).toContain("ci init --force");
+	});
+});
+
+// =============================================================================
+// ci validate (JF-DOCS-1)
+// =============================================================================
+
+describe("help / FLAGS_SCHEMA — ci validate + --help + --json", () => {
+	it("declares a --json boolean flag", () => {
+		expect(FLAGS_SCHEMA).toHaveProperty("json");
+		expect(FLAGS_SCHEMA.json.type).toBe("boolean");
+	});
+
+	it("declares a --help boolean flag (autoHelp is handled manually)", () => {
+		expect(FLAGS_SCHEMA).toHaveProperty("help");
+		expect(FLAGS_SCHEMA.help.type).toBe("boolean");
+	});
+
+	it("documents the ci validate subcommand in the global help", () => {
+		expect(HELP_TEXT).toContain("ci validate");
+	});
+});
+
+// =============================================================================
+// CI_HELP_TEXT — per-command help for `ci`
+// =============================================================================
+
+describe("CI_HELP_TEXT — per-command help", () => {
+	it("lists the init and validate subcommands", () => {
+		expect(CI_HELP_TEXT).toContain("init");
+		expect(CI_HELP_TEXT).toContain("validate");
+	});
+
+	it("documents the flags ci accepts", () => {
+		for (const flag of [
+			"--quick",
+			"--no-docker",
+			"--no-security",
+			"--no-ci-ghagga",
+			"--force",
+			"--config",
+			"--stack",
+			"--json",
+		]) {
+			expect(CI_HELP_TEXT).toContain(flag);
+		}
 	});
 });

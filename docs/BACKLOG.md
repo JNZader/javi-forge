@@ -78,16 +78,34 @@ test suite (`ci-local/hooks/commit-msg.test.sh`).
   markers that `ci-engine-unification` slice 3 ships.
 - Suggested fix: plan as its own change after `ci-engine-unification` lands.
 
-### JF-DOCS-1 — `javi-forge ci` has no command-specific `--help` and no `ci validate`
+### JF-DOCS-1 — `javi-forge ci` has no command-specific `--help` and no `ci validate` — CLOSED
 
-Config errors surface only by running the full pipeline; there is no cheap way to
-validate a CI config or discover `ci` flags.
+Config errors surfaced only by running the full pipeline; there was no cheap way
+to validate a CI config or discover `ci` flags.
 
-- Evidence: `src/index.tsx:29-32` — meow is built once with the global
-  `HELP_TEXT`, so there is no per-command help; `src/dispatch/ci.tsx` handles
-  only the `init` subcommand.
-- Suggested fix: add a `ci`-scoped help section and a `ci validate` subcommand
-  that resolves and type-checks the config without executing any step.
+- Evidence: `src/index.tsx:29-32` — meow was built once with the global
+  `HELP_TEXT`, so there was no per-command help; `src/cli/dispatch/ci.tsx`
+  handled only the `init` subcommand.
+- Shipped:
+  - `ci validate [--config <path>] [--json]` — new `src/commands/ci-validate.ts`
+    (`validateCIConfig`) resolves the config path with the same discovery `runCI`
+    uses, calls `loadCIConfig`, and reports. Valid → OK summary (config path + N
+    runners with names/stacks), exit 0; invalid → each `CIConfigError` entry as
+    `path: message` on stderr, exit 1; missing file → a named
+    "no .javi-forge/ci.yaml found at <path>" error (never a stack trace), exit 1.
+    `--json` emits `{ok:true,runners}` / `{ok:false,errors}`. Pure parse-and-report:
+    no image builds, no Docker, no phase execution. Dispatched in
+    `src/cli/dispatch/ci.tsx`.
+  - Per-command help: meow `autoHelp` disabled in `src/index.tsx` (global `--help`
+    handled manually there); `ci --help` and any unknown `ci` subcommand print the
+    new `CI_HELP_TEXT` (`src/cli/help.ts`) listing the `init`/`validate`
+    subcommands and the `ci` flags. Global `--help` unchanged.
+- Tests: `src/commands/ci-validate.test.ts` (valid, every error class, missing
+  file — real temp dirs), `src/cli/dispatch/ci-validate.test.ts` (human + `--json`
+  output and exit codes), `src/cli/dispatch/ci-help.test.ts` (`ci --help` + unknown
+  subcommand), plus `CI_HELP_TEXT`/flag assertions in `src/cli/help.test.ts`.
+- Not touched (per scope): config schema, `src/lib/docker.ts`/container layer,
+  hook installer.
 
 ## 2026-08-08 — from SDD `ci-engine-unification` slice 1 (measured coverage baseline)
 

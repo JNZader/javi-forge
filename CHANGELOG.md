@@ -1,3 +1,9 @@
+## [1.11.0](https://github.com/JNZader/javi-forge/compare/v1.10.1...v1.11.0) (2026-08-09)
+
+### Features
+
+* **ci:** gates-v2 schema (version:2) + gate validation + B1/B2 (slice 1/4) ([#8](https://github.com/JNZader/javi-forge/issues/8)) ([045bf86](https://github.com/JNZader/javi-forge/commit/045bf86b7808be911b569817f0e20eb5b0c0410e))
+
 ## [1.10.1](https://github.com/JNZader/javi-forge/compare/v1.10.0...v1.10.1) (2026-08-09)
 
 ### Bug Fixes

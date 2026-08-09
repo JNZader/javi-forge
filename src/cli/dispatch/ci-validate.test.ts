@@ -53,6 +53,7 @@ describe("ci validate dispatch", () => {
 	it("prints an OK summary with runner names+stacks and exits 0", async () => {
 		validateCIConfig.mockResolvedValue({
 			ok: true,
+			mode: "config",
 			configPath: "/repo/.javi-forge/ci.yaml",
 			runners: [
 				{ name: "api", stack: "go" },
@@ -74,6 +75,7 @@ describe("ci validate dispatch", () => {
 	it("emits {ok:true, runners} JSON on --json and exits 0", async () => {
 		validateCIConfig.mockResolvedValue({
 			ok: true,
+			mode: "config",
 			configPath: "/repo/.javi-forge/ci.yaml",
 			runners: [{ name: "api", stack: "go" }],
 		});
@@ -85,6 +87,35 @@ describe("ci validate dispatch", () => {
 			ok: true,
 			runners: [{ name: "api", stack: "go" }],
 		});
+		expect(exitCode).toBe(0);
+	});
+
+	it("reports a zero-config repo as valid auto-detect (exit 0), not a failure", async () => {
+		validateCIConfig.mockResolvedValue({
+			ok: true,
+			mode: "auto-detect",
+			configPath: null,
+			runners: [],
+		});
+
+		const { out, exitCode } = await runValidate();
+
+		expect(out.join("\n").toLowerCase()).toContain("auto-detect");
+		expect(exitCode).toBe(0);
+	});
+
+	it("emits {ok:true, mode:'auto-detect', runners:[]} JSON for a zero-config repo", async () => {
+		validateCIConfig.mockResolvedValue({
+			ok: true,
+			mode: "auto-detect",
+			configPath: null,
+			runners: [],
+		});
+
+		const { out, exitCode } = await runValidate({ json: true });
+
+		const parsed = JSON.parse(out.join("\n"));
+		expect(parsed).toEqual({ ok: true, mode: "auto-detect", runners: [] });
 		expect(exitCode).toBe(0);
 	});
 
@@ -109,8 +140,13 @@ describe("ci validate dispatch", () => {
 	it("emits {ok:false, errors} JSON on --json and exits 1", async () => {
 		validateCIConfig.mockResolvedValue({
 			ok: false,
-			configPath: null,
-			errors: [{ path: "x", message: "no .javi-forge/ci.yaml found at x" }],
+			configPath: "/nope/ci.yaml",
+			errors: [
+				{
+					path: "/nope/ci.yaml",
+					message: "no CI config found at /nope/ci.yaml",
+				},
+			],
 		});
 
 		const { out, exitCode } = await runValidate({ json: true });
@@ -118,7 +154,12 @@ describe("ci validate dispatch", () => {
 		const parsed = JSON.parse(out.join("\n"));
 		expect(parsed).toEqual({
 			ok: false,
-			errors: [{ path: "x", message: "no .javi-forge/ci.yaml found at x" }],
+			errors: [
+				{
+					path: "/nope/ci.yaml",
+					message: "no CI config found at /nope/ci.yaml",
+				},
+			],
 		});
 		expect(exitCode).toBe(1);
 	});
@@ -126,6 +167,7 @@ describe("ci validate dispatch", () => {
 	it("passes an explicit --config through to validateCIConfig", async () => {
 		validateCIConfig.mockResolvedValue({
 			ok: true,
+			mode: "config",
 			configPath: "/custom/ci.yaml",
 			runners: [{ name: "api", stack: "go" }],
 		});

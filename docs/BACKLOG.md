@@ -93,17 +93,24 @@ to validate a CI config or discover `ci` flags.
     runners with names/stacks), exit 0; invalid → each `CIConfigError` entry as
     `path: message` on stderr, exit 1; missing file → a named
     "no .javi-forge/ci.yaml found at <path>" error (never a stack trace), exit 1.
-    `--json` emits `{ok:true,runners}` / `{ok:false,errors}`. Pure parse-and-report:
-    no image builds, no Docker, no phase execution. Dispatched in
-    `src/cli/dispatch/ci.tsx`.
+    `--json` emits `{ok:true,runners}` / `{ok:false,errors}`. A zero-config repo
+    (no `.javi-forge/ci.yaml` found by discovery, no explicit `--config`) is
+    treated as VALID auto-detect — `runCI` runs fine in that state via its
+    zero-config path (ci.ts:396-406) — exit 0 with `{ok:true,mode:"auto-detect",
+    runners:[]}`; only an explicit `--config` pointing at a missing file is an
+    error. Pure parse-and-report: no image builds, no Docker, no phase execution.
+    Dispatched in `src/cli/dispatch/ci.tsx`.
   - Per-command help: meow `autoHelp` disabled in `src/index.tsx` (global `--help`
     handled manually there); `ci --help` and any unknown `ci` subcommand print the
     new `CI_HELP_TEXT` (`src/cli/help.ts`) listing the `init`/`validate`
     subcommands and the `ci` flags. Global `--help` unchanged.
-- Tests: `src/commands/ci-validate.test.ts` (valid, every error class, missing
-  file — real temp dirs), `src/cli/dispatch/ci-validate.test.ts` (human + `--json`
-  output and exit codes), `src/cli/dispatch/ci-help.test.ts` (`ci --help` + unknown
-  subcommand), plus `CI_HELP_TEXT`/flag assertions in `src/cli/help.test.ts`.
+- Tests: `src/commands/ci-validate.test.ts` (valid, every error class, zero-config
+  auto-detect, explicit-missing error — real temp dirs), `src/cli/dispatch/
+  ci-validate.test.ts` (human + `--json` output, auto-detect, exit codes),
+  `src/cli/dispatch/ci-help.test.ts` (`ci --help` + unknown subcommand),
+  `src/__integration__/cli-help.integration.test.ts` (subprocess: global `--help`
+  banner vs. `ci --help` usage are distinct, both exit 0), plus `CI_HELP_TEXT`/flag
+  assertions in `src/cli/help.test.ts`.
 - Not touched (per scope): config schema, `src/lib/docker.ts`/container layer,
   hook installer.
 

@@ -7,10 +7,8 @@
  * executes any phase — the CLI surface stops BEFORE execution.
  */
 
-import path from "node:path";
 import fs from "fs-extra";
 import {
-	CI_CONFIG_CANDIDATES,
 	CIConfigError,
 	type CIConfigValidationError,
 	findCIConfig,
@@ -25,7 +23,15 @@ export interface CIValidateRunnerSummary {
 
 export interface CIValidateOk {
 	ok: true;
-	configPath: string;
+	/**
+	 * "config" — a config file was found and validated.
+	 * "auto-detect" — no config exists and none was explicitly requested, so
+	 * `runCI` would use its zero-config single-runner auto-detect path
+	 * (ci.ts:396-406). There is nothing to validate, and that is valid.
+	 */
+	mode: "config" | "auto-detect";
+	/** Resolved config path, or null in auto-detect mode. */
+	configPath: string | null;
 	runners: CIValidateRunnerSummary[];
 }
 
@@ -48,26 +54,35 @@ export async function validateCIConfig(
 	projectDir: string,
 	config?: string,
 ): Promise<CIValidateResult> {
-	const configPath = config ?? (await findCIConfig(projectDir));
-
-	// Missing file → a clear named error, never a stack trace. Covers both the
-	// zero-config case (discovery found nothing) and an explicit path that does
-	// not exist.
-	if (!configPath || !(await fs.pathExists(configPath))) {
-		const where = configPath ?? path.join(projectDir, CI_CONFIG_CANDIDATES[0]);
-		return {
-			ok: false,
-			configPath,
-			errors: [
-				{ path: where, message: `no .javi-forge/ci.yaml found at ${where}` },
-			],
-		};
+	// Discriminator: was a config path explicitly requested (`--config`)?
+	//   - explicit path that is missing → ERROR (the user asserted a file that
+	//     isn't there).
+	//   - discovery finds nothing → VALID auto-detect: `runCI` runs fine in this
+	//     exact state via its zero-config single-runner path (ci.ts:396-406), so
+	//     there is nothing to validate and that is not a failure.
+	let configPath: string;
+	if (config) {
+		if (!(await fs.pathExists(config))) {
+			return {
+				ok: false,
+				configPath: config,
+				errors: [{ path: config, message: `no CI config found at ${config}` }],
+			};
+		}
+		configPath = config;
+	} else {
+		const discovered = await findCIConfig(projectDir);
+		if (!discovered) {
+			return { ok: true, mode: "auto-detect", configPath: null, runners: [] };
+		}
+		configPath = discovered;
 	}
 
 	try {
 		const ciConfig = await loadCIConfig(configPath);
 		return {
 			ok: true,
+			mode: "config",
 			configPath,
 			runners: ciConfig.runners.map((r) => ({
 				name: r.name,

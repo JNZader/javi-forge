@@ -32,7 +32,21 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 			cli.flags.config || undefined,
 		);
 		if (result.ok) {
-			if (cli.flags.json) {
+			if (result.mode === "auto-detect") {
+				if (cli.flags.json) {
+					console.log(
+						JSON.stringify(
+							{ ok: true, mode: "auto-detect", runners: [] },
+							null,
+							2,
+						),
+					);
+				} else {
+					console.log(
+						"✓ No .javi-forge/ci.yaml — auto-detect mode (no config to validate)",
+					);
+				}
+			} else if (cli.flags.json) {
 				console.log(
 					JSON.stringify({ ok: true, runners: result.runners }, null, 2),
 				);

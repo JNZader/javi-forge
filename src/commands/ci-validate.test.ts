@@ -45,6 +45,7 @@ describe("validateCIConfig", () => {
 
 		expect(result.ok).toBe(true);
 		if (result.ok) {
+			expect(result.mode).toBe("config");
 			expect(result.configPath).toBe(configPath);
 			expect(result.runners).toEqual([
 				{ name: "api", stack: "go" },
@@ -151,28 +152,28 @@ describe("validateCIConfig", () => {
 		}
 	});
 
-	it("returns a named missing-file error (not a stack trace) when no config exists", async () => {
+	it("treats a zero-config repo (discovery finds nothing) as valid auto-detect, not a failure", async () => {
+		// runCI runs fine in this exact state via its zero-config auto-detect path
+		// (ci.ts:396-406), so `ci validate` must NOT report FAIL here.
 		const result = await validateCIConfig(tmpDir);
 
-		expect(result.ok).toBe(false);
-		if (!result.ok) {
-			expect(result.errors).toHaveLength(1);
-			expect(result.errors[0].message).toContain(
-				"no .javi-forge/ci.yaml found",
-			);
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.mode).toBe("auto-detect");
+			expect(result.configPath).toBeNull();
+			expect(result.runners).toEqual([]);
 		}
 	});
 
-	it("returns a named missing-file error for an explicit path that does not exist", async () => {
+	it("returns a named error for an explicit --config path that does not exist", async () => {
 		const missing = path.join(tmpDir, ".javi-forge", "ci.yaml");
 
 		const result = await validateCIConfig(tmpDir, missing);
 
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
-			expect(result.errors[0].message).toContain(
-				"no .javi-forge/ci.yaml found",
-			);
+			expect(result.errors).toHaveLength(1);
+			expect(result.errors[0].message).toContain("no CI config found at");
 			expect(result.errors[0].message).toContain(missing);
 		}
 	});

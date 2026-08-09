@@ -72,10 +72,13 @@ container runner), which breaks local `vitest` with `EACCES` for uid 1000.
   `openShell` now default to `--user $(process.getuid):$(process.getgid)`
   (guarded — omitted on non-POSIX where they're `undefined`; an explicit
   `user` override still wins). Because uid 1000 maps to a real passwd user
-  with a writable home in every image (`node` on node bases, `runner`
-  elsewhere), pnpm/toolchains keep working and every artifact lands
-  **host-owned**. The compile phase dropped `--user root`, and all five
-  `chown -R runner:runner …` suffixes were removed (`src/commands/ci.ts`).
+  with a writable home in every shipped image — `node` (`/home/node`) on the
+  node base, the created `runner` (`/home/runner`) on python/go/rust, and the
+  distro default `ubuntu` (`/home/ubuntu`) on java/default noble bases, where
+  the created `runner` lands at 1001 instead — pnpm/toolchains keep working and
+  every artifact lands **host-owned**. The compile phase dropped `--user root`,
+  and all five `chown -R runner:runner …` suffixes were removed
+  (`src/commands/ci.ts`).
 - **Empirical evidence** (`javi-forge-ci-node`, host uid 1000):
   - OLD (no `--user`): container ran as `uid=1001(runner)`; a `pnpm run build`
     could not even write the host-owned `dist/` → exit 1; artifacts, when
@@ -83,12 +86,28 @@ container runner), which breaks local `vitest` with `EACCES` for uid 1000.
   - NEW (`--user 1000:1000`): container ran as `uid=1000(node)`, `pnpm run
     build` exit 0, `dist/out.txt` owned `1000:1000`, host reads/removes it
     freely.
-- **Known limitation** (documented, not the reported env): a host uid with no
-  matching passwd entry inside the image gets `HOME=/`, which can break
-  toolchains that cache under `$HOME` (go/cargo/gradle). uid 1000 — the
-  reported environment and the near-universal Linux dev uid — is unaffected.
-  A writable-`HOME` guard (`-e HOME=/tmp`) was deliberately NOT added to avoid
-  regressing custom build-context images that bake `~/.npmrc`/tool config.
+- **Known limitations** (documented, not the reported env — R4 review):
+  a host uid with no matching passwd entry inside the image gets `HOME=/`,
+  which can break toolchains that cache under `$HOME` (go/cargo/gradle). uid
+  1000 — the reported environment and the near-universal Linux dev uid — is
+  unaffected. There is NO runtime warning or per-runner escape hatch for these
+  two edges (no `user:` field exists in `ci.yaml`), so recovery today means not
+  hitting them:
+  - **R4-002** — host uid ≠ 1000 (second account, corporate provisioning) on
+    python/go/rust images (only `runner`=1000 exists) → `HOME=/`.
+  - **R4-001** — `build-context:` custom images always run as the host uid,
+    dropping their baked `USER`; if the host uid has no passwd entry there,
+    `HOME=/`. Note: forcing the host uid already moves `HOME` off the baked
+    user's home, so a baked `~/.npmrc` under `/home/<baked-user>` is bypassed
+    unless host uid == that user's uid.
+  A writable-`HOME` guard (`-e HOME=/tmp`) was deliberately NOT added — it would
+  regress build-context images that bake tool config under a real home.
+
+  **FOLLOW-UP (SEC/DX, own ticket)**: close both edges properly — either a
+  `user:` field in `ci.yaml` (per-runner opt out of the host-uid injection) or
+  a conditional `-e HOME` only when the host uid has no in-image passwd entry.
+  Design decision, not a batch fix. Also R4-003: the non-POSIX omit-branch of
+  the `--user` guard is only covered by a vacuous early-return test.
 
 ### HOOKS-1 — Adopt the richer `ci-local/hooks/*` variants fleet-wide (deferred change, not a bug)
 

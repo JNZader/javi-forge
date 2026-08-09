@@ -33,8 +33,21 @@ vi.mock("../lib/docker.js", async (importOriginal) => {
 		...actual,
 		isDockerAvailable: vi.fn(async () => true),
 		ensureImage: vi.fn(
-			async (options: { stack: Stack; imageTag?: string }) =>
-				options.imageTag ?? actual.getImageName(options.stack),
+			async (options: {
+				stack: Stack;
+				imageTag?: string;
+				buildContext?: string;
+			}) =>
+				// PRODUCTION-FAITHFUL: `imageTag` is honored ONLY on the
+				// build-context branch (docker.ts:173-174); without a build context
+				// production ignores it and returns the per-stack name
+				// (docker.ts:186). The previous, more permissive form honored
+				// `imageTag` unconditionally (JDB5-004) — tightening it cannot flip
+				// any existing assertion, because no test passes an `imageTag`
+				// without a `buildContext`.
+				options.buildContext !== undefined && options.imageTag !== undefined
+					? options.imageTag
+					: actual.getImageName(options.stack),
 		),
 		runInContainer: vi.fn(async () => ({
 			exitCode: 0,
@@ -1111,9 +1124,15 @@ describe("characterization: auto + docker", () => {
 		vi.mocked(runInContainer).mock.calls.map(([options]) => options);
 
 	beforeEach(async () => {
-		vi.mocked(isDockerAvailable).mockClear();
-		vi.mocked(ensureImage).mockClear();
-		vi.mocked(runInContainer).mockClear();
+		// mockReset, not mockClear: mockClear wipes call history but keeps a
+		// per-test `mockImplementation`/`mockResolvedValueOnce`, so a queued value
+		// leaks into whichever test runs next (JDA5-005 — observed the moment a
+		// failure-path row installed a throwing implementation). Vitest restores
+		// the implementation passed to `vi.fn(impl)` in the module factory, so the
+		// production-faithful defaults come back on every test.
+		vi.mocked(isDockerAvailable).mockReset();
+		vi.mocked(ensureImage).mockReset();
+		vi.mocked(runInContainer).mockReset();
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-char-"));
 		// Node repo with no .javi-forge/ci.yaml → resolved.source === "auto".
 		await fs.writeJson(path.join(tmpDir, "package.json"), {
@@ -1442,9 +1461,15 @@ ${extra}`,
 	];
 
 	beforeEach(async () => {
-		vi.mocked(isDockerAvailable).mockClear();
-		vi.mocked(ensureImage).mockClear();
-		vi.mocked(runInContainer).mockClear();
+		// mockReset, not mockClear: mockClear wipes call history but keeps a
+		// per-test `mockImplementation`/`mockResolvedValueOnce`, so a queued value
+		// leaks into whichever test runs next (JDA5-005 — observed the moment a
+		// failure-path row installed a throwing implementation). Vitest restores
+		// the implementation passed to `vi.fn(impl)` in the module factory, so the
+		// production-faithful defaults come back on every test.
+		vi.mocked(isDockerAvailable).mockReset();
+		vi.mocked(ensureImage).mockReset();
+		vi.mocked(runInContainer).mockReset();
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-naming-"));
 	});
 
@@ -1471,6 +1496,59 @@ ${extra}`,
 			[running, "running"],
 			[done, "done"],
 		]);
+	});
+
+	// JDB5-001: the FAILURE labels were pinned by zero tests repo-wide, so the
+	// `doneLabel` scoping was only correct by inspection on the error path. One
+	// error-driving row per mode, since bare and suffixed compose the subject
+	// differently and only an actual throw reaches that branch.
+	const FAILURE_ROWS = [
+		{
+			mode: "bare" as const,
+			stepId: "test",
+			failed: "Tests failed",
+			forbidden: "Test failed",
+		},
+		{
+			mode: "suffixed" as const,
+			stepId: "test:api",
+			failed: "Test [api] failed",
+			forbidden: "Tests [api] failed",
+		},
+	];
+
+	it.each(
+		FAILURE_ROWS,
+	)("$mode mode labels a failing test phase $failed", async ({
+		mode,
+		stepId,
+		failed,
+		forbidden,
+	}) => {
+		if (mode === "bare") {
+			await makeAutoRepo(tmpDir);
+		} else {
+			await makeSingleRunnerConfig(tmpDir);
+		}
+		// Fail ONLY the test phase: lint and compile run first and must stay
+		// green, so the error label is produced by the test phase itself.
+		vi.mocked(runInContainer).mockImplementation(async (options) =>
+			/test/.test(options.command)
+				? { exitCode: 1, stdout: "", stderr: "boom" }
+				: { exitCode: 0, stdout: "", stderr: "" },
+		);
+
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, ...DOCKER_FULL }, (s) =>
+				steps.push({ ...s }),
+			),
+		).rejects.toThrow();
+
+		const emitted = steps.filter((s) => s.id === stepId);
+		expect(emitted.at(-1)?.status).toBe("error");
+		expect(emitted.at(-1)?.label).toBe(failed);
+		expect(steps.map((s) => s.label)).not.toContain(forbidden);
 	});
 
 	it("never emits bare ids or bare done labels for a single-runner CONFIG", async () => {
@@ -1534,6 +1612,16 @@ ${extra}`,
 			ids.indexOf("test:api"),
 		);
 		expect(ids.indexOf("security:api")).toBeLessThan(ids.indexOf("security"));
+
+		// JDA5-004: the de-duplicated view above cannot see a DUPLICATE emission
+		// — the exact regression class JDA2-001 caught on the auto path. Assert
+		// the RAW stream too: every phase emits running→done exactly once, and
+		// the image is built once for the single configured runner.
+		const raw = steps.map((s) => s.id);
+		for (const id of ["docker-image:api", "lint:api", "compile:api"]) {
+			expect(raw.filter((emitted) => emitted === id)).toHaveLength(2);
+		}
+		expect(ensureImage).toHaveBeenCalledTimes(1);
 	});
 
 	it("skips the per-runner security phase under --no-security and outside full mode", async () => {

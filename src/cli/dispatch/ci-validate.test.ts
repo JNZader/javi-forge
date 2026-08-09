@@ -164,6 +164,43 @@ describe("ci validate dispatch", () => {
 		expect(exitCode).toBe(1);
 	});
 
+	it("prints declared gates in the human summary", async () => {
+		validateCIConfig.mockResolvedValue({
+			ok: true,
+			mode: "config",
+			configPath: "/repo/.javi-forge/ci.yaml",
+			runners: [],
+			gates: [{ id: "coverage", mode: "informative", scope: "all" }],
+		});
+
+		const { out, exitCode } = await runValidate();
+
+		const joined = out.join("\n");
+		expect(joined).toContain("coverage");
+		expect(joined).toContain("informative");
+		expect(exitCode).toBe(0);
+	});
+
+	it("emits gates in {ok:true} JSON when declared", async () => {
+		validateCIConfig.mockResolvedValue({
+			ok: true,
+			mode: "config",
+			configPath: "/repo/.javi-forge/ci.yaml",
+			runners: [],
+			gates: [{ id: "coverage", mode: "blocking", scope: "changed" }],
+		});
+
+		const { out, exitCode } = await runValidate({ json: true });
+
+		const parsed = JSON.parse(out.join("\n"));
+		expect(parsed).toEqual({
+			ok: true,
+			runners: [],
+			gates: [{ id: "coverage", mode: "blocking", scope: "changed" }],
+		});
+		expect(exitCode).toBe(0);
+	});
+
 	it("passes an explicit --config through to validateCIConfig", async () => {
 		validateCIConfig.mockResolvedValue({
 			ok: true,

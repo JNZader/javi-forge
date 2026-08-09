@@ -20,6 +20,23 @@ import type { Stack } from "../types/index.js";
 
 export const CI_CONFIG_VERSION = 1;
 
+/** Config schema versions this loader accepts. v2 is additive (unlocks gates). */
+export const CI_CONFIG_VERSIONS: readonly number[] = [1, 2];
+
+/** Gate outcome mode: a blocking gate fails the build, informative degrades. */
+export const GATE_MODE = {
+	BLOCKING: "blocking",
+	INFORMATIVE: "informative",
+} as const;
+export type GateMode = (typeof GATE_MODE)[keyof typeof GATE_MODE];
+
+/** Gate file scope: all files, or only the changed set (slice 4 wiring). */
+export const GATE_SCOPE = {
+	ALL: "all",
+	CHANGED: "changed",
+} as const;
+export type GateScope = (typeof GATE_SCOPE)[keyof typeof GATE_SCOPE];
+
 /** Default config locations, in discovery order, relative to the project root. */
 export const CI_CONFIG_CANDIDATES = [
 	".javi-forge/ci.yaml",
@@ -47,9 +64,27 @@ export interface CIRunnerConfig {
 	requires: string[];
 }
 
+/** A declarable named quality gate (version 2 only). Runs host-native. */
+export interface CIGateConfig {
+	/** Unique, tag-safe identifier (reuses RUNNER_NAME_RE). */
+	id: string;
+	/** Command(s) to run — string or list, normalized to a list. */
+	run: string[];
+	/** blocking (default) fails the build; informative degrades to a warning. */
+	mode: GateMode;
+	/** all (default) or changed — the file scope the gate cares about. */
+	scope: GateScope;
+	/** Optional baseline artifact path (slice 4). */
+	baseline?: string;
+	/** Optional env injected via the child-process env map (slice 4). */
+	env?: Record<string, string>;
+}
+
 export interface CIConfig {
 	version: number;
 	runners: CIRunnerConfig[];
+	/** Present only under version 2 when `gates:` is declared. */
+	gates?: CIGateConfig[];
 }
 
 export interface CIConfigValidationError {
@@ -272,6 +307,159 @@ function validateRunner(
 	};
 }
 
+const GATE_FIELDS = new Set(["id", "run", "mode", "scope", "baseline", "env"]);
+
+function validateGate(
+	raw: unknown,
+	index: number,
+	errors: CIConfigValidationError[],
+): CIGateConfig | null {
+	const base = `gates[${index}]`;
+	if (!isRecord(raw)) {
+		errors.push({ path: base, message: "gate must be an object" });
+		return null;
+	}
+
+	for (const key of Object.keys(raw)) {
+		if (!GATE_FIELDS.has(key)) {
+			errors.push({
+				path: `${base}.${key}`,
+				message: `unknown field "${key}"`,
+			});
+		}
+	}
+
+	const id = raw.id;
+	if (typeof id !== "string" || !id.trim()) {
+		errors.push({
+			path: `${base}.id`,
+			message: "id is required and must be a non-empty string",
+		});
+	} else if (!RUNNER_NAME_RE.test(id.trim())) {
+		errors.push({
+			path: `${base}.id`,
+			message:
+				"id must start with a letter, digit or underscore and contain only [a-zA-Z0-9._-] (it is used as a tag)",
+		});
+	}
+
+	const run = normalizeCommands(raw.run, `${base}.run`, errors);
+	if (raw.run === undefined) {
+		errors.push({
+			path: `${base}.run`,
+			message:
+				"run is required and must be a non-empty string or a list of non-empty strings",
+		});
+	} else if (
+		run.length === 0 &&
+		!errors.some((e) => e.path === `${base}.run`)
+	) {
+		errors.push({
+			path: `${base}.run`,
+			message: "run must be a non-empty string or a list of non-empty strings",
+		});
+	}
+
+	let mode: GateMode = GATE_MODE.BLOCKING;
+	if (raw.mode !== undefined) {
+		if (raw.mode === GATE_MODE.BLOCKING || raw.mode === GATE_MODE.INFORMATIVE) {
+			mode = raw.mode;
+		} else {
+			errors.push({
+				path: `${base}.mode`,
+				message: `mode must be one of: ${GATE_MODE.BLOCKING}, ${GATE_MODE.INFORMATIVE} (got "${String(raw.mode)}")`,
+			});
+		}
+	}
+
+	let scope: GateScope = GATE_SCOPE.ALL;
+	if (raw.scope !== undefined) {
+		if (raw.scope === GATE_SCOPE.ALL || raw.scope === GATE_SCOPE.CHANGED) {
+			scope = raw.scope;
+		} else {
+			errors.push({
+				path: `${base}.scope`,
+				message: `scope must be one of: ${GATE_SCOPE.ALL}, ${GATE_SCOPE.CHANGED} (got "${String(raw.scope)}")`,
+			});
+		}
+	}
+
+	let baseline: string | undefined;
+	if (raw.baseline !== undefined) {
+		if (typeof raw.baseline !== "string" || !raw.baseline.trim()) {
+			errors.push({
+				path: `${base}.baseline`,
+				message: "baseline must be a non-empty string (path)",
+			});
+		} else {
+			baseline = raw.baseline;
+		}
+	}
+
+	let env: Record<string, string> | undefined;
+	if (raw.env !== undefined) {
+		if (!isRecord(raw.env)) {
+			errors.push({
+				path: `${base}.env`,
+				message: "env must be a mapping of string keys to string values",
+			});
+		} else if (Object.values(raw.env).some((v) => typeof v !== "string")) {
+			errors.push({
+				path: `${base}.env`,
+				message: "env values must all be strings",
+			});
+		} else {
+			env = raw.env as Record<string, string>;
+		}
+	}
+
+	return {
+		id: typeof id === "string" ? id.trim() : "",
+		run,
+		mode,
+		scope,
+		baseline,
+		env,
+	};
+}
+
+/**
+ * Validate the `gates:` block (version 2 only). Every schema error names the
+ * offending field; a duplicate id is reported once. Returns the parsed gates
+ * (the caller discards them all if `errors` is non-empty — fail closed).
+ */
+export function validateGates(
+	raw: unknown,
+	errors: CIConfigValidationError[],
+): CIGateConfig[] {
+	if (!Array.isArray(raw)) {
+		errors.push({ path: "gates", message: "gates must be a non-empty list" });
+		return [];
+	}
+	if (raw.length === 0) {
+		errors.push({ path: "gates", message: "gates must be a non-empty list" });
+		return [];
+	}
+
+	const gates: CIGateConfig[] = [];
+	const seen = new Set<string>();
+	raw.forEach((item, index) => {
+		const gate = validateGate(item, index, errors);
+		if (!gate) return;
+		if (gate.id) {
+			if (seen.has(gate.id)) {
+				errors.push({
+					path: `gates[${index}].id`,
+					message: `duplicate gate id "${gate.id}"`,
+				});
+			}
+			seen.add(gate.id);
+		}
+		gates.push(gate);
+	});
+	return gates;
+}
+
 // =============================================================================
 // Public API
 // =============================================================================
@@ -305,25 +493,61 @@ export function parseCIConfig(rawYaml: string, source?: string): CIConfig {
 		);
 	}
 
-	for (const key of Object.keys(doc)) {
-		if (!TOP_LEVEL_FIELDS.has(key)) {
-			errors.push({ path: key, message: `unknown field "${key}"` });
-		}
-	}
-
-	if (doc.version !== CI_CONFIG_VERSION) {
+	// Read the version FIRST: the allowed-key set is a function of the accepted
+	// version, so `gates` under v1 reports the named "gates require version: 2"
+	// error, never the generic unknown-field error (JDA-006).
+	const version =
+		typeof doc.version === "number" && CI_CONFIG_VERSIONS.includes(doc.version)
+			? doc.version
+			: undefined;
+	if (version === undefined) {
 		errors.push({
 			path: "version",
-			message: `version is required and must be the number ${CI_CONFIG_VERSION}`,
+			message: `version is required and must be one of: ${CI_CONFIG_VERSIONS.join(", ")}`,
 		});
 	}
 
-	if (!Array.isArray(doc.runners) || doc.runners.length === 0) {
+	const isV2 = version === 2;
+	const hasGates = doc.gates !== undefined;
+
+	for (const key of Object.keys(doc)) {
+		if (TOP_LEVEL_FIELDS.has(key)) continue;
+		if (key === "gates") {
+			// `gates` is only a known key under v2; under any other version it is a
+			// named schema error that takes precedence over the generic path.
+			if (!isV2) {
+				errors.push({ path: "gates", message: "gates require version: 2" });
+			}
+			continue;
+		}
+		errors.push({ path: key, message: `unknown field "${key}"` });
+	}
+
+	if (isV2) {
+		// v2: runners OPTIONAL when gates present; NEITHER runners nor gates fails
+		// closed (nothing to run).
+		if (
+			!hasGates &&
+			(!Array.isArray(doc.runners) || doc.runners.length === 0)
+		) {
+			errors.push({
+				path: "runners",
+				message:
+					"a version 2 config must declare runners or gates (nothing to run otherwise)",
+			});
+		}
+	} else if (!Array.isArray(doc.runners) || doc.runners.length === 0) {
+		// v1 (and invalid-version) still hard-require a non-empty runners list.
 		errors.push({
 			path: "runners",
 			message: "runners is required and must be a non-empty list",
 		});
 	}
+
+	// Gates are validated ONLY under v2 — a v1+gates config is already rejected
+	// above and must not surface a second, confusing wave of gate-field errors.
+	const gates: CIGateConfig[] =
+		isV2 && hasGates ? validateGates(doc.gates, errors) : [];
 
 	const runners: CIRunnerConfig[] = [];
 	if (Array.isArray(doc.runners)) {
@@ -349,7 +573,11 @@ export function parseCIConfig(rawYaml: string, source?: string): CIConfig {
 		throw new CIConfigError(errors, source);
 	}
 
-	return { version: CI_CONFIG_VERSION, runners };
+	// `version` is defined here (an undefined version pushed an error above and
+	// would have thrown). A v1 config carries NO gates key — byte-identical shape.
+	const config: CIConfig = { version: version ?? CI_CONFIG_VERSION, runners };
+	if (gates.length > 0) config.gates = gates;
+	return config;
 }
 
 /**

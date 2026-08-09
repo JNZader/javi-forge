@@ -42,12 +42,12 @@ Each slice = one PR boundary, sequential, ≤400 production lines. Slice 4 has a
 
 ## Phase 2 — Slice 2: git-diff.ts (Low risk, UNWIRED)
 
-- [ ] 2.1 RED: new `src/lib/git-diff.test.ts` — pure table-driven `resolveBaseRef` env-precedence (fake env, NO git): GitLab MR `$CI_MERGE_REQUEST_DIFF_BASE_SHA` → GitLab push `$CI_COMMIT_BEFORE_SHA` (all-zeros `0000…` sentinel → skip) → GitHub `$GITHUB_BASE_REF` merge-base else `$GITHUB_SHA` → local merge-base `origin/main`,`origin/master`,`main`,`master` → null.
-- [ ] 2.2 GREEN: create `src/lib/git-diff.ts` with `resolveBaseRef(env,cwd):Promise<string|null>` per the precedence chain above.
-- [ ] 2.3 RED+GREEN: `changedFiles(base,cwd):Promise<string[]>` = union of `git diff --name-only --diff-filter=ACMR <base>...HEAD` ∪ `git diff --name-only` (unstaged) ∪ `git diff --name-only --cached` (staged); invoked as `execFileAsync("git",[...],{cwd})` argv array, never a shell string. Test via mocked `execFileAsync` (ci.test.ts docker-mock pattern).
-- [ ] 2.4 RED+GREEN: `changedFiles` MUST throw (not swallow) when the base sha is absent from local history (shallow clone / bad object). Test mocks `execFileAsync` reject and asserts the throw propagates (caller wires the loud-degrade in slice 4).
-- [ ] 2.5 Integration test: temp `git init -b main` (or explicit base sha) + 2 commits so it exercises the DIFF path, not the loud-degrade path — deterministic, independent of `init.defaultBranch` (JDB-009).
-- [ ] 2.6 Run `pnpm validate`. git-diff.ts ships UNWIRED (revert-clean). PR2.
+- [x] 2.1 RED: new `src/lib/git-diff.test.ts` — pure table-driven `resolveBaseRef` env-precedence (fake env, NO git): GitLab MR `$CI_MERGE_REQUEST_DIFF_BASE_SHA` → GitLab push `$CI_COMMIT_BEFORE_SHA` (all-zeros `0000…` sentinel → skip) → GitHub `$GITHUB_BASE_REF` merge-base else `$GITHUB_SHA` → local merge-base `origin/main`,`origin/master`,`main`,`master` → null.
+- [x] 2.2 GREEN: create `src/lib/git-diff.ts` with `resolveBaseRef(env,cwd):Promise<string|null>` per the precedence chain above.
+- [x] 2.3 RED+GREEN: `changedFiles(base,cwd):Promise<string[]>` = union of `git diff --name-only --diff-filter=ACMR <base>...HEAD` ∪ `git diff --name-only` (unstaged) ∪ `git diff --name-only --cached` (staged); invoked as `execFileAsync("git",[...],{cwd})` argv array, never a shell string. Test via mocked `execFileAsync` (ci.test.ts docker-mock pattern).
+- [x] 2.4 RED+GREEN: `changedFiles` MUST throw (not swallow) when the base sha is absent from local history (shallow clone / bad object). Test mocks `execFileAsync` reject and asserts the throw propagates (caller wires the loud-degrade in slice 4).
+- [x] 2.5 Integration test: temp `git init -b main` (or explicit base sha) + 2 commits so it exercises the DIFF path, not the loud-degrade path — deterministic, independent of `init.defaultBranch` (JDB-009).
+- [x] 2.6 Run `pnpm validate`. git-diff.ts ships UNWIRED (revert-clean). PR2.
 
 ## Phase 3 — Slice 3: Gate execution + status vocab + prologue guard (High risk, execution-only)
 

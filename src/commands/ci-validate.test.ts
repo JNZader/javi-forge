@@ -89,15 +89,59 @@ describe("validateCIConfig", () => {
 		}
 	});
 
-	it("reports a version other than 1", async () => {
-		await writeConfig("version: 2\nrunners:\n  - name: api\n    stack: go");
+	it("reports a version outside the accepted set {1,2}", async () => {
+		// version 2 is now valid (additive gates schema); version 3 is the genuine
+		// out-of-set case that must still fail closed.
+		await writeConfig("version: 3\nrunners:\n  - name: api\n    stack: go");
 
 		const result = await validateCIConfig(tmpDir);
 
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
 			const versionErr = result.errors.find((e) => e.path === "version");
-			expect(versionErr?.message).toContain("must be the number 1");
+			expect(versionErr?.message).toContain("must be one of: 1, 2");
+		}
+	});
+
+	it("surfaces gate schema errors (duplicate id + invalid mode) without executing", async () => {
+		await writeConfig(
+			[
+				"version: 2",
+				"gates:",
+				"  - id: dup",
+				"    run: echo a",
+				"    mode: warn",
+				"  - id: dup",
+				"    run: echo b",
+			].join("\n"),
+		);
+
+		const result = await validateCIConfig(tmpDir);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(
+				result.errors.some((e) => /blocking, informative/.test(e.message)),
+			).toBe(true);
+			expect(
+				result.errors.some((e) => /duplicate gate id "dup"/.test(e.message)),
+			).toBe(true);
+		}
+	});
+
+	it("reports a gates-only v2 config as valid with a gate summary", async () => {
+		await writeConfig(
+			"version: 2\ngates:\n  - id: coverage\n    run: echo cover\n    mode: informative",
+		);
+
+		const result = await validateCIConfig(tmpDir);
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.runners).toEqual([]);
+			expect(result.gates).toEqual([
+				{ id: "coverage", mode: "informative", scope: "all" },
+			]);
 		}
 	});
 

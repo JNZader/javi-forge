@@ -21,6 +21,13 @@ export interface CIValidateRunnerSummary {
 	stack: string;
 }
 
+/** One validated gate, reduced to what the report shows. */
+export interface CIValidateGateSummary {
+	id: string;
+	mode: string;
+	scope: string;
+}
+
 export interface CIValidateOk {
 	ok: true;
 	/**
@@ -33,6 +40,8 @@ export interface CIValidateOk {
 	/** Resolved config path, or null in auto-detect mode. */
 	configPath: string | null;
 	runners: CIValidateRunnerSummary[];
+	/** Declared gates (version 2). Empty when none are declared. */
+	gates: CIValidateGateSummary[];
 }
 
 export interface CIValidateErr {
@@ -73,7 +82,13 @@ export async function validateCIConfig(
 	} else {
 		const discovered = await findCIConfig(projectDir);
 		if (!discovered) {
-			return { ok: true, mode: "auto-detect", configPath: null, runners: [] };
+			return {
+				ok: true,
+				mode: "auto-detect",
+				configPath: null,
+				runners: [],
+				gates: [],
+			};
 		}
 		configPath = discovered;
 	}
@@ -87,6 +102,11 @@ export async function validateCIConfig(
 			runners: ciConfig.runners.map((r) => ({
 				name: r.name,
 				stack: r.stack,
+			})),
+			gates: (ciConfig.gates ?? []).map((g) => ({
+				id: g.id,
+				mode: g.mode,
+				scope: g.scope,
 			})),
 		};
 	} catch (e) {

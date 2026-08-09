@@ -47,14 +47,32 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 					);
 				}
 			} else if (cli.flags.json) {
+				const gates = result.gates ?? [];
 				console.log(
-					JSON.stringify({ ok: true, runners: result.runners }, null, 2),
+					JSON.stringify(
+						{
+							ok: true,
+							runners: result.runners,
+							...(gates.length > 0 ? { gates } : {}),
+						},
+						null,
+						2,
+					),
 				);
 			} else {
+				const gates = result.gates ?? [];
 				console.log(`✓ CI config valid: ${result.configPath}`);
 				console.log(`  ${result.runners.length} runner(s):`);
 				for (const runner of result.runners) {
 					console.log(`    - ${runner.name} (${runner.stack})`);
+				}
+				if (gates.length > 0) {
+					console.log(`  ${gates.length} gate(s):`);
+					for (const gate of gates) {
+						console.log(
+							`    - ${gate.id} (${gate.mode}, scope: ${gate.scope})`,
+						);
+					}
 				}
 			}
 			process.exit(0);

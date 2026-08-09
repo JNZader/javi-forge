@@ -16,6 +16,8 @@ export const HELP_TEXT = `
   Commands
     init              Bootstrap a new project (default)
     ci                Run CI simulation (lint + compile + test + security + ghagga)
+    ci validate       Validate .javi-forge/ci.yaml without running anything
+    ci init           Install git hooks that call javi-forge ci
     tdd init          Install TDD-enforcing pre-commit hook (auto-detects stack)
     tdd pipeline      Install TDD pipeline pre-push hook (--mode strict|warn)
     analyze           Run repoforge skills analysis
@@ -100,13 +102,54 @@ export const HELP_TEXT = `
     $ javi-forge ci --no-docker
     $ javi-forge ci --shell
     $ javi-forge ci --config .javi-forge/ci.yaml
+    $ javi-forge ci validate
+    $ javi-forge ci --help
     $ javi-forge analyze
     $ javi-forge doctor
     $ javi-forge plugin add mapbox/agent-skills
     $ javi-forge plugin list
 `;
 
+/**
+ * Per-command help for `ci`, shown by `javi-forge ci --help` (or when `ci` is
+ * given an unknown subcommand). Kept consistent with the global HELP_TEXT
+ * layout — whitespace is significant.
+ */
+export const CI_HELP_TEXT = `
+  Usage
+    $ javi-forge ci [subcommand] [options]
+
+    Run a local CI simulation (lint + compile + test + security + ghagga).
+    With no subcommand, the full pipeline runs.
+
+  Subcommands
+    init            Install git hooks that call javi-forge ci
+    validate        Validate .javi-forge/ci.yaml without running anything
+
+  Options
+    --quick         Lint + compile only (fast, for pre-commit)
+    --no-docker     Run commands natively (no Docker)
+    --no-security   Skip Semgrep security scan
+    --no-ci-ghagga  Skip GHAGGA review
+    --force         (ci init) Overwrite a foreign or modified hook (backs up first)
+    --config PATH   Load ordered CI runners from a versioned config file
+                    (default discovery: .javi-forge/ci.yaml)
+    --stack STACK   Force a single explicit stack (single-stack repos only)
+    --json          (ci validate) Emit the result as JSON
+    --help          Show this help
+
+  Examples
+    $ javi-forge ci
+    $ javi-forge ci --quick
+    $ javi-forge ci validate
+    $ javi-forge ci validate --json
+    $ javi-forge ci init --force
+`;
+
 export const FLAGS_SCHEMA = {
+	// `--help` is handled manually (autoHelp is disabled at the entrypoint so
+	// `ci --help` can show ci-specific usage instead of the global banner).
+	help: { type: "boolean", shortFlag: "h", default: false },
 	dryRun: { type: "boolean", default: false },
 	stack: { type: "string", default: "" },
 	ci: { type: "string", default: "" },

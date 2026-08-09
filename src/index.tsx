@@ -29,9 +29,19 @@ setupUpdateNotifier(pkg);
 const cli = meow(HELP_TEXT, {
 	importMeta: import.meta,
 	flags: FLAGS_SCHEMA,
+	// Handle --help manually so `ci --help` can show ci-specific usage instead
+	// of the global banner (meow's autoHelp would print + exit before dispatch).
+	autoHelp: false,
 });
 
 const subcommand = cli.input[0] ?? "init";
+
+// Global --help: every command except `ci` shows the global banner here. `ci`
+// owns its per-command help inside handleCi.
+if (cli.flags.help && subcommand !== "ci") {
+	console.log(HELP_TEXT);
+	process.exit(0);
+}
 
 const isCI = detectCI(cli.flags);
 const inkStdin = createInkStdin();

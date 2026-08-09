@@ -83,14 +83,14 @@ Three independent PRs, each revertible alone. Slice 1 is additive (tests only) �
 
 ## Success Criteria
 
-- [ ] Observable behavior identical: step ids, labels, phase order, exit codes, flag contract unchanged.
-- [ ] All pre-existing tests pass UNCHANGED; the only test-file edits are ADDED characterization tests.
-- [ ] Slice 2 production diff is net-negative.
-- [ ] Coverage does not regress: at each slice's verify, same-run delta — head >= merge-base on lines AND branches, identical command/machine/session; configured thresholds in `vitest.config.ts` never lowered. Absolute percentages are informative only, never the gate.
-- [ ] `runLegacySteps` no longer exists; `runStep` is the only execution leaf.
-- [ ] `ci init` on a repo with an old unmarked hook UPGRADES it; on a hand-edited or foreign hook it REFUSES and says why.
-- [ ] Generated hooks are executed by tests, not grepped.
-- [ ] Each slice under the 400-line review budget.
+- [x] Observable behavior identical: step ids, labels, phase order, exit codes, flag contract unchanged.
+- [x] All pre-existing tests pass UNCHANGED; the only test-file edits are ADDED characterization tests.
+- [x] Slice 2 production diff is net-negative.
+- [x] Coverage does not regress: at each slice's verify, same-run delta — head >= merge-base on lines AND branches, identical command/machine/session; configured thresholds in `vitest.config.ts` never lowered. Absolute percentages are informative only, never the gate.
+- [x] `runLegacySteps` no longer exists; `runStep` is the only execution leaf.
+- [x] `ci init` on a repo with an old unmarked hook UPGRADES it; on a hand-edited or foreign hook it REFUSES and says why.
+- [x] Generated hooks are executed by tests, not grepped.
+- [x] Each slice under the 400-line review budget.
 
 ## Proposal question round
 

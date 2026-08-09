@@ -1,3 +1,9 @@
+## [1.10.1](https://github.com/JNZader/javi-forge/compare/v1.10.0...v1.10.1) (2026-08-09)
+
+### Bug Fixes
+
+* **ci:** run CI containers as host uid to end the uid 1001 bind-mount war (ENV-1) ([#7](https://github.com/JNZader/javi-forge/issues/7)) ([1995501](https://github.com/JNZader/javi-forge/commit/199550131fab70751c8a287ad03ec8d707ed041d))
+
 ## [1.10.0](https://github.com/JNZader/javi-forge/compare/v1.9.1...v1.10.0) (2026-08-09)
 
 ### Features

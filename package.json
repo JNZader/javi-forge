@@ -1,94 +1,95 @@
 {
-  "name": "javi-forge",
-  "version": "1.8.0",
-  "description": "Project scaffolding and AI-ready CI bootstrap",
-  "type": "module",
-  "bin": {
-    "javi-forge": "dist/index.js"
-  },
-  "scripts": {
-    "build": "tsc",
-    "dev": "tsx watch src/index.tsx",
-    "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
-    "typecheck:test": "tsc --project tsconfig.test.json --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:mutation": "stryker run",
-    "test:hooks": "bash ci-local/hooks/commit-msg.test.sh",
-    "lint": "biome check src/",
-    "lint:fix": "biome check --write src/",
-    "format": "biome format --write src/",
-    "validate": "pnpm typecheck && pnpm typecheck:test && pnpm lint && pnpm test",
-    "package:check": "npm pack --dry-run --json --cache /tmp/javi-forge-npm-pack-cache > /tmp/javi-forge-pack.json && node scripts/verify-package-contents.mjs /tmp/javi-forge-pack.json"
-  },
-  "files": [
-    "dist/**/*.js",
-    "dist/**/*.d.ts",
-    "!dist/__integration__/**",
-    "!dist/e2e/**",
-    "ci-local/",
-    "modules/",
-    "templates/",
-    "workflows/",
-    "lib/",
-    "README.md",
-    "LICENSE*",
-    ".gitignore.template"
-  ],
-  "author": "JNZader",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/JNZader/javi-forge.git"
-  },
-  "engines": {
-    "node": ">=22"
-  },
-  "dependencies": {
-    "chalk": "^5.6.2",
-    "fs-extra": "^11.3.5",
-    "glob": "^13.0.6",
-    "ink": "^7.0.3",
-    "ink-spinner": "^5.0.0",
-    "meow": "^14.1.0",
-    "react": "^19.2.6",
-    "update-notifier": "^7.3.1",
-    "yaml": "^2.9.0"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.4.15",
-    "@semantic-release/changelog": "^6.0.3",
-    "@semantic-release/exec": "^7.1.0",
-    "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^12.0.8",
-    "@stryker-mutator/core": "^9.6.1",
-    "@stryker-mutator/typescript-checker": "^9.6.1",
-    "@stryker-mutator/vitest-runner": "^9.6.1",
-    "@types/fs-extra": "^11.0.4",
-    "@types/node": "^25.8.0",
-    "@types/react": "^19.2.14",
-    "@types/update-notifier": "^6.0.8",
-    "@vitest/coverage-v8": "^4.1.6",
-    "conventional-changelog-conventionalcommits": "^9.3.1",
-    "ink-testing-library": "^4.0.0",
-    "semantic-release": "^25.0.3",
-    "tsx": "^4.22.1",
-    "typescript": "^6.0.3",
-    "vite": "^8.0.13",
-    "vitest": "^4.1.6"
-  },
-  "pnpm": {
-    "overrides": {
-      "handlebars": "^4.7.9",
-      "picomatch": "^4.0.4",
-      "brace-expansion": "^5.0.5",
-      "lodash": "^4.18.0",
-      "lodash-es": "^4.18.0",
-      "fast-uri": "^3.1.2",
-      "postcss": "^8.5.10",
-      "vite": "^8.0.5"
-    }
-  }
+	"name": "javi-forge",
+	"version": "1.8.0",
+	"description": "Project scaffolding and AI-ready CI bootstrap",
+	"type": "module",
+	"bin": {
+		"javi-forge": "dist/index.js"
+	},
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsx watch src/index.tsx",
+		"start": "node dist/index.js",
+		"typecheck": "tsc --noEmit",
+		"typecheck:test": "tsc --project tsconfig.test.json --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage",
+		"test:mutation": "stryker run",
+		"test:hooks": "bash ci-local/hooks/commit-msg.test.sh",
+		"lint": "biome check src/",
+		"lint:fix": "biome check --write src/",
+		"format": "biome format --write src/",
+		"validate": "pnpm typecheck && pnpm typecheck:test && pnpm lint && pnpm test",
+		"package:check": "npm pack --dry-run --json --cache /tmp/javi-forge-npm-pack-cache > /tmp/javi-forge-pack.json && node scripts/verify-package-contents.mjs /tmp/javi-forge-pack.json"
+	},
+	"files": [
+		"dist/**/*.js",
+		"dist/**/*.d.ts",
+		"!dist/__integration__/**",
+		"!dist/e2e/**",
+		"assets/",
+		"ci-local/",
+		"modules/",
+		"templates/",
+		"workflows/",
+		"lib/",
+		"README.md",
+		"LICENSE*",
+		".gitignore.template"
+	],
+	"author": "JNZader",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/JNZader/javi-forge.git"
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"dependencies": {
+		"chalk": "^5.6.2",
+		"fs-extra": "^11.3.5",
+		"glob": "^13.0.6",
+		"ink": "^7.0.3",
+		"ink-spinner": "^5.0.0",
+		"meow": "^14.1.0",
+		"react": "^19.2.6",
+		"update-notifier": "^7.3.1",
+		"yaml": "^2.9.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.15",
+		"@semantic-release/changelog": "^6.0.3",
+		"@semantic-release/exec": "^7.1.0",
+		"@semantic-release/git": "^10.0.1",
+		"@semantic-release/github": "^12.0.8",
+		"@stryker-mutator/core": "^9.6.1",
+		"@stryker-mutator/typescript-checker": "^9.6.1",
+		"@stryker-mutator/vitest-runner": "^9.6.1",
+		"@types/fs-extra": "^11.0.4",
+		"@types/node": "^25.8.0",
+		"@types/react": "^19.2.14",
+		"@types/update-notifier": "^6.0.8",
+		"@vitest/coverage-v8": "^4.1.6",
+		"conventional-changelog-conventionalcommits": "^9.3.1",
+		"ink-testing-library": "^4.0.0",
+		"semantic-release": "^25.0.3",
+		"tsx": "^4.22.1",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.13",
+		"vitest": "^4.1.6"
+	},
+	"pnpm": {
+		"overrides": {
+			"handlebars": "^4.7.9",
+			"picomatch": "^4.0.4",
+			"brace-expansion": "^5.0.5",
+			"lodash": "^4.18.0",
+			"lodash-es": "^4.18.0",
+			"fast-uri": "^3.1.2",
+			"postcss": "^8.5.10",
+			"vite": "^8.0.5"
+		}
+	}
 }

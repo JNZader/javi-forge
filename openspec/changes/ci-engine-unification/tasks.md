@@ -178,19 +178,55 @@ guard tests) and changes zero runtime behavior.
 
 ### 3b — Classification, backup, force, packaging
 
-- [ ] 3.7 In `src/commands/ci.ts`, add `HOOK_STATE` (`absent`, `managed-current`, `managed-outdated`, `managed-edited`, `legacy-v0`, `foreign`, `symlink`, `not-a-file`) + `type HookState`, and the `InstallHooksOptions` / `InstallHooksResult` (`installed`, `upgraded`, `backups`, `errors`, `states`) interfaces from the design.
-- [ ] 3.8 Implement `classifyHook(path, hookName, manifest)` per D6 step 0: `lstat` first — symlink → `SYMLINK`; exists but not a regular file → `NOT_A_FILE`; `ENOENT` → `ABSENT`; only a regular file continues.
-- [ ] 3.9 Implement D6 steps 1-4: read as Buffer, decode utf8, split on `\n` WITHOUT stripping trailing `\r`; marker match requires line 0 `#!`, line 1 `^# javi-forge-hook: (?<name>[a-z-]+) v(?<version>\d+)$`, line 2 `^# javi-forge-hash: sha256:(?<hex>[0-9a-f]{64})$`; body = `[line0, ...lines.slice(3)].join("\n")`; `name !== hookName` → `foreign` (JD-014). Recompute the hash against the SHIPPED manifest; never trust the claimed `hex`.
-- [ ] 3.10 Implement D6 step 4 verdicts: `managed-current` iff version and body hash match the manifest; `managed-outdated` iff the body hash is in `historical[]` OR the hash matches with a stale version; otherwise `managed-edited`. Unmarked files (step 5): whole-file hash vs `historical[]` → `legacy-v0`, else `foreign`.
-- [ ] 3.11 Implement the marker injection at install time: write `body` unmodified with the two marker lines spliced after the shebang, so a re-install round-trip is byte-exact and re-classifies as `managed-current`.
-- [ ] 3.12 Implement the write policy in `installCIHooks`: `absent` → write, report in `installed`; `managed-outdated` / `legacy-v0` → write, report in `upgraded`; `managed-current` → NO-OP with ZERO writes; `managed-edited` / `foreign` → refuse unless `force`; `symlink` / `not-a-file` → refuse ALWAYS, `--force` does not apply. Per-hook failures stay isolated (scenario "Refusal does not block sibling hooks").
-- [ ] 3.13 Write the refusal messages naming the ABSOLUTE path and the remedy, using the exact `foreign` wording from D5 and a named reason for `not-a-file` (`… exists but is not a regular file`). Refusals go into `errors[]`.
-- [ ] 3.14 Implement `backupHook(hookPath)` per D4 + JDA-R2-002: (a) `lstat` each candidate target (`.bak`, `.bak.{epochMs}`, `.bak.{epochMs}-{n}` for `n = 1..N`) and REFUSE the hook — even with `--force` — if it is a symlink or any non-regular file; (b) create EXCLUSIVELY via `fs.open(target, "wx")` (or `fs.copyFile` with `fs.constants.COPYFILE_EXCL`) — never a bare `copyFile` and never `existsSync` + `writeFile`; (c) copy the ORIGINAL BYTES as a Buffer, never a utf8 round-trip; (d) `fs.chmod(bak, originalStat.mode)`.
-- [ ] 3.15 Enforce backup-fails-⇒-no-overwrite: on any backup throw (`ENOSPC`, `EACCES`, `EEXIST` after the retry budget), record a per-hook error, leave the hook BYTE-UNCHANGED, and continue with sibling hooks. The backup must complete before the install write; no path may race or precede it. (`ci-hook-install`:86, JD-004)
-- [ ] 3.16 Plumb `--force`: add `force: { type: "boolean", default: false }` to `FLAGS_SCHEMA` in `src/cli/help.ts:103`, document it under `ci init` in the help text, and pass `installCIHooks(process.cwd(), { force: cli.flags.force })` at `src/cli/dispatch/ci.tsx:22`.
-- [ ] 3.17 In `src/cli/dispatch/ci.tsx:23-30` (console-only, no Ink), print `backups` (`⚠ Backed up existing pre-commit → .git/hooks/pre-commit.bak`) and print `upgraded` DISTINCTLY from fresh installs (`↑ Upgraded pre-commit (was managed:v0)` vs `✓ Installed pre-commit`). Keep the existing `process.exit(errors.length > 0 ? 1 : 0)`.
-- [ ] 3.18 ADD the classification/write matrix tests in `src/commands/ci.test.ts` — one row each for all 8 states × {no-force, force}, plus the backup-target-is-a-symlink row and the backup-throws row. Every REFUSE row asserts BOTH the recorded error AND that on-disk bytes are identical to before.
-- [ ] 3.19 ADD hash-input semantics tests (D6): install → re-classify = `managed-current` with zero writes (bytes + mtime unchanged); body unchanged with a bumped marker version → `managed-outdated`, NOT `managed-edited`; one body byte changed → `managed-edited`; marker naming a DIFFERENT hook → `foreign`; CRLF-converted managed hook → `foreign`.
-- [ ] 3.20 Delete the three inline `*_HOOK` template constants from `src/commands/ci.ts` and read templates from `HOOK_ASSETS_DIR` instead. Leave the pre-existing substring greps at `ci.test.ts:262-298` UNTOUCHED — they must still pass against the installed file.
-- [ ] 3.21 Packaging: add `assets/` to the `files` array in `package.json`; in `scripts/verify-package-contents.mjs` add ALL FOUR paths (`assets/hooks/pre-commit`, `assets/hooks/pre-push`, `assets/hooks/commit-msg`, `assets/hooks/manifest.json`) to `REQUIRED_FILES` and `assets/` to `REQUIRED_PREFIXES`. Listing one asset is NOT sufficient — the prefix check passes on any single match (JD-008).
-- [ ] 3.22 Run `pnpm package:check`, `pnpm test:hooks` and `pnpm validate`; confirm the `ci-hooks-exec` integration tests from slice 1 still pass against marker-carrying hooks. For coverage, apply the SAME-RUN DELTA gate (as in 2.13): `npx vitest run --coverage` at the slice-2 head and at the slice-3 head, same machine and session, requiring `head >= base` on lines and branches AS PERCENTAGES (raw covered counts shrink legitimately on deletions; ±1-branch inter-run jitter counts as equal — measured in slices 1-2). `pnpm test:coverage` (the same command behind a named script, `package.json:17`) may be run as an EXPLICITLY NON-GATING informative invocation — a failing configured threshold does not fail this gate, and a passing one does not satisfy it. Measure the base from a NAMED BRANCH, never a detached HEAD (see the slice-2 readings section for why).
+- [x] 3.7 In `src/commands/ci.ts`, add `HOOK_STATE` (`absent`, `managed-current`, `managed-outdated`, `managed-edited`, `legacy-v0`, `foreign`, `symlink`, `not-a-file`) + `type HookState`, and the `InstallHooksOptions` / `InstallHooksResult` (`installed`, `upgraded`, `backups`, `errors`, `states`) interfaces from the design.
+- [x] 3.8 Implement `classifyHook(path, hookName, manifest)` per D6 step 0: `lstat` first — symlink → `SYMLINK`; exists but not a regular file → `NOT_A_FILE`; `ENOENT` → `ABSENT`; only a regular file continues.
+- [x] 3.9 Implement D6 steps 1-4: read as Buffer, decode utf8, split on `\n` WITHOUT stripping trailing `\r`; marker match requires line 0 `#!`, line 1 `^# javi-forge-hook: (?<name>[a-z-]+) v(?<version>\d+)$`, line 2 `^# javi-forge-hash: sha256:(?<hex>[0-9a-f]{64})$`; body = `[line0, ...lines.slice(3)].join("\n")`; `name !== hookName` → `foreign` (JD-014). Recompute the hash against the SHIPPED manifest; never trust the claimed `hex`.
+- [x] 3.10 Implement D6 step 4 verdicts: `managed-current` iff version and body hash match the manifest; `managed-outdated` iff the body hash is in `historical[]` OR the hash matches with a stale version; otherwise `managed-edited`. Unmarked files (step 5): whole-file hash vs `historical[]` → `legacy-v0`, else `foreign`.
+- [x] 3.11 Implement the marker injection at install time: write `body` unmodified with the two marker lines spliced after the shebang, so a re-install round-trip is byte-exact and re-classifies as `managed-current`.
+- [x] 3.12 Implement the write policy in `installCIHooks`: `absent` → write, report in `installed`; `managed-outdated` / `legacy-v0` → write, report in `upgraded`; `managed-current` → NO-OP with ZERO writes; `managed-edited` / `foreign` → refuse unless `force`; `symlink` / `not-a-file` → refuse ALWAYS, `--force` does not apply. Per-hook failures stay isolated (scenario "Refusal does not block sibling hooks").
+- [x] 3.13 Write the refusal messages naming the ABSOLUTE path and the remedy, using the exact `foreign` wording from D5 and a named reason for `not-a-file` (`… exists but is not a regular file`). Refusals go into `errors[]`.
+- [x] 3.14 Implement `backupHook(hookPath)` per D4 + JDA-R2-002: (a) `lstat` each candidate target (`.bak`, `.bak.{epochMs}`, `.bak.{epochMs}-{n}` for `n = 1..N`) and REFUSE the hook — even with `--force` — if it is a symlink or any non-regular file; (b) create EXCLUSIVELY via `fs.open(target, "wx")` (or `fs.copyFile` with `fs.constants.COPYFILE_EXCL`) — never a bare `copyFile` and never `existsSync` + `writeFile`; (c) copy the ORIGINAL BYTES as a Buffer, never a utf8 round-trip; (d) `fs.chmod(bak, originalStat.mode)`.
+- [x] 3.15 Enforce backup-fails-⇒-no-overwrite: on any backup throw (`ENOSPC`, `EACCES`, `EEXIST` after the retry budget), record a per-hook error, leave the hook BYTE-UNCHANGED, and continue with sibling hooks. The backup must complete before the install write; no path may race or precede it. (`ci-hook-install`:86, JD-004)
+- [x] 3.16 Plumb `--force`: add `force: { type: "boolean", default: false }` to `FLAGS_SCHEMA` in `src/cli/help.ts:103`, document it under `ci init` in the help text, and pass `installCIHooks(process.cwd(), { force: cli.flags.force })` at `src/cli/dispatch/ci.tsx:22`.
+- [x] 3.17 In `src/cli/dispatch/ci.tsx:23-30` (console-only, no Ink), print `backups` (`⚠ Backed up existing pre-commit → .git/hooks/pre-commit.bak`) and print `upgraded` DISTINCTLY from fresh installs (`↑ Upgraded pre-commit (was managed:v0)` vs `✓ Installed pre-commit`). Keep the existing `process.exit(errors.length > 0 ? 1 : 0)`.
+- [x] 3.18 ADD the classification/write matrix tests in `src/commands/ci.test.ts` — one row each for all 8 states × {no-force, force}, plus the backup-target-is-a-symlink row and the backup-throws row. Every REFUSE row asserts BOTH the recorded error AND that on-disk bytes are identical to before.
+- [x] 3.19 ADD hash-input semantics tests (D6): install → re-classify = `managed-current` with zero writes (bytes + mtime unchanged); body unchanged with a bumped marker version → `managed-outdated`, NOT `managed-edited`; one body byte changed → `managed-edited`; marker naming a DIFFERENT hook → `foreign`; CRLF-converted managed hook → `foreign`.
+- [x] 3.20 Delete the three inline `*_HOOK` template constants from `src/commands/ci.ts` and read templates from `HOOK_ASSETS_DIR` instead. Leave the pre-existing substring greps at `ci.test.ts:262-298` UNTOUCHED — they must still pass against the installed file.
+- [x] 3.21 Packaging: add `assets/` to the `files` array in `package.json`; in `scripts/verify-package-contents.mjs` add ALL FOUR paths (`assets/hooks/pre-commit`, `assets/hooks/pre-push`, `assets/hooks/commit-msg`, `assets/hooks/manifest.json`) to `REQUIRED_FILES` and `assets/` to `REQUIRED_PREFIXES`. Listing one asset is NOT sufficient — the prefix check passes on any single match (JD-008).
+- [x] 3.22 Run `pnpm package:check`, `pnpm test:hooks` and `pnpm validate`; confirm the `ci-hooks-exec` integration tests from slice 1 still pass against marker-carrying hooks. For coverage, apply the SAME-RUN DELTA gate (as in 2.13): `npx vitest run --coverage` at the slice-2 head and at the slice-3 head, same machine and session, requiring `head >= base` on lines and branches AS PERCENTAGES (raw covered counts shrink legitimately on deletions; ±1-branch inter-run jitter counts as equal — measured in slices 1-2). `pnpm test:coverage` (the same command behind a named script, `package.json:17`) may be run as an EXPLICITLY NON-GATING informative invocation — a failing configured threshold does not fail this gate, and a passing one does not satisfy it. Measure the base from a NAMED BRANCH, never a detached HEAD (see the slice-2 readings section for why).
+
+#### SLICE-3b COVERAGE READINGS — the gate, as a same-run delta
+
+Same machine, same session, same command (`npx vitest run --coverage`),
+developer box with Docker available, base measured from the NAMED branch `main`
+(never a detached HEAD). Percentages from the `All files` summary row:
+
+| Tree | Lines | Branches |
+|---|---|---|
+| base — `main` @ `0eb9ce6` (slice-3a merge) | 88.75% | 79.18% |
+| head — slice 3b @ `a861779` | 89.14% | 79.66% |
+
+Delta: lines +0.39pp, branches +0.48pp — `head >= base` on both AS PERCENTAGES,
+gate PASSED. Head clover project totals: 3374/3785 statements, 1971/2474
+conditionals. Both runs exit non-zero on the configured 80% branch threshold
+(COV-1, pre-existing on `main`), which is orthogonal to this gate and
+explicitly non-gating.
+
+Other 3.22 gates: `pnpm validate` exit 0 (79 files, 1358 passed, 4 skipped),
+`pnpm package:check` passed (362 files; all four asset paths packed and asserted
+by name), `pnpm test:hooks` 92/92, and the slice-1 `ci-hooks-exec` integration
+tests pass against marker-carrying hooks (they EXECUTE the hooks and assert the
+frozen flag string, so the two injected comment lines are invisible to them).
+
+#### 3b DEVIATION — one pre-existing assertion replaced, by spec mandate
+
+`src/__integration__/ci-init.integration.test.ts` carried an "overwrites
+existing hooks" case asserting that a pre-existing foreign hook is clobbered and
+reported as installed with zero errors. That is exactly the behavior the
+`ci-hook-install` requirement "No-clobber policy for foreign and edited hooks"
+DELETES ("Foreign hook is preserved": file unchanged on disk, reason reported).
+It was replaced by the inverted contract asserted end to end, not weakened or
+removed. The "ADDED tests only" rule (`ci-execution`:110) governs the executor
+collapse; it cannot bind a test that encodes behavior a spec in this same change
+reverses. Every other pre-existing hook assertion — including the substring
+greps at `ci.test.ts:262-298` and the idempotence case — passes untouched.

@@ -100,3 +100,24 @@ Two blind judges, both **APPROVE** — zero BLOCKER/CRITICAL. Byte-fidelity veri
 | JDA6-003 | judgment-day | build-hook-history.mjs:147 | SUGGESTION | info | rev-list --all determinism depends on local refs (census narrative "259 commits" now reads 276 — ref growth); load-bearing figures reproduce. One-shot bootstrap, accepted. |
 | JDA6-005 | judgment-day | build-hook-history.mjs exports | SUGGESTION | info | renderTemplateLiteral/extractHooks exported but never imported by tests — renderer has zero direct coverage; outside lint scope. Accepted for a one-shot script. |
 | JDB6-005 | judgment-day | tasks.md coverage label | SUGGESTION | info | Readings recorded against c6ddeaa while branch head was 3dae961 (immaterial: file outside coverage/lint/tsconfig scope; numbers reproduce). Label hygiene only. |
+
+## Apply slice 3b — inherited items closed at apply time
+
+No new judgment-day round yet (the gate runs after this apply). Items carried
+into this slice by earlier rounds, and their disposition:
+
+| id | source | status | evidence |
+|---|---|---|---|
+| JDA6-002 / JDB6-004 | slice 3a | fixed | The live byte-equivalence assertion landed as the FIRST commit of 3b (`35eb5d0`), while the inline constants were still the write source — the only window in which it is falsifiable. Mutation probe: appending one byte to `assets/hooks/pre-commit` failed it. It then passed UNCHANGED across `b8f3800` (write source switched to the assets), which is the continuity proof that no byte moved. |
+| JD-008 | design round 1 | fixed | All four asset paths are in `REQUIRED_FILES` by name. Probe: deleting `assets/hooks/commit-msg` from the packed manifest fails the check with `missing required file`, while `REQUIRED_PREFIXES` alone still passes on the three survivors. |
+| JD-004 | design round 1 | fixed | Backup-throws row: `fs.copyFile` stubbed to reject with `ENOSPC` → the hook is byte-unchanged, no `.bak` exists, `backups` is empty, the error names ENOSPC, and both sibling hooks still install. |
+| JD-002 / JDA-R2-002 | design round 1/2 | fixed | Every backup candidate is `lstat`ed; a symlinked or directory `.bak` refuses the hook even WITH `--force`, leaving the pointed-at file intact. Creation uses `copyFile` + `COPYFILE_EXCL` (never bare `copyFile`, never `existsSync` + `writeFile`), copies original BYTES (asserted with a deliberately non-UTF8 hook) and restores the mode. |
+| JD-014 | design round 1 | fixed | Marker name bound to the slot: a valid `pre-push` marker sitting in the `pre-commit` slot classifies `foreign` and is refused. |
+| JDB5-001 | slice 2 | fixed | Bare and suffixed FAILURE labels now pinned by one error-driving row each ("Tests failed" / "Test [api] failed"), each asserting the other spelling is absent. |
+| JDA5-004 | slice 2 | fixed | Duplicate-sensitive RAW-stream assertion added alongside the Set-based config-path ordering assertions (each phase exactly 2 emissions, `ensureImage` exactly once). |
+| JDA5-005 | slice 2 | fixed | `mockClear` → `mockReset` in both `beforeEach` blocks. Not theoretical: the new failure-path rows install a `mockImplementation` and immediately poisoned three sibling tests under `mockClear`. No pre-existing assertion was edited — only mock setup. |
+| JDB5-004 | slice 2 | fixed | `ensureImage` mock tightened to honor `imageTag` ONLY with `buildContext`, matching docker.ts:173-174/186. Verified it cannot flip any outcome: the single test passing `imageTag` also passes `buildContext`. |
+
+New deviation recorded for the judges: one pre-existing integration assertion
+("overwrites existing hooks") was REPLACED because the `ci-hook-install` spec in
+this same change reverses that behavior. See the 3b deviation note in tasks.md.

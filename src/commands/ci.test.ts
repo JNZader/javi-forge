@@ -458,6 +458,10 @@ describe("installCIHooks byte-equivalence with assets/hooks", () => {
 
 		expect(written.length).toBeGreaterThan(0);
 		expect(stripMarkerBlock(written)).toBe(asset.toString("utf8"));
+		// Exact-equality is umask-INDEPENDENT: `writeFile({mode})` is masked on
+		// creation, but installCIHooks chmods unconditionally afterwards and
+		// `chmod` ignores the umask. Verified red under `umask 077` before that
+		// chmod existed, green after.
 		expect(stat.mode & 0o777).toBe(0o755);
 	});
 });

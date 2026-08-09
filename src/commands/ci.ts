@@ -1188,13 +1188,24 @@ function renderHook(
 }
 
 /**
- * The backup path a forced overwrite would actually use, for the refusal
- * message. Naming `.bak` unconditionally would be a lie whenever `.bak` is
- * already taken by an earlier backup.
+ * What `--force` would ACTUALLY do with the backup, for the refusal message.
+ *
+ * Naming `.bak` unconditionally would be a lie whenever `.bak` is already taken
+ * by an earlier backup — and promising a backup at all would be a lie whenever
+ * the `.bak` path is a symlink or a directory, because `backupHook` refuses
+ * those EVEN WITH `--force`. The probe is `lstat`, never `pathExists`: the
+ * latter follows symlinks, so it reports `true` for a symlink to an existing
+ * file and `false` for a dangling one — both readings promise a backup that
+ * will never happen.
  */
-async function describeBackupTarget(hookPath: string): Promise<string> {
+async function describeBackupPlan(hookPath: string): Promise<string> {
 	const plain = `${hookPath}.bak`;
-	return (await fs.pathExists(plain)) ? `${plain}.<timestamp>` : plain;
+	const existing = await lstatOrNull(plain);
+	if (existing !== null && (existing.isSymbolicLink() || !existing.isFile())) {
+		return `note that --force will REFUSE this hook until ${plain} is removed: it exists and is not a regular file, and javi-forge never writes a backup through it`;
+	}
+	const target = existing === null ? plain : `${plain}.<timestamp>`;
+	return `the current file is saved as ${target}`;
 }
 
 async function refusalMessage(
@@ -1207,12 +1218,12 @@ async function refusalMessage(
 	if (state === HOOK_STATE.NOT_A_FILE) {
 		return `${hookPath} exists but is not a regular file. Refusing to overwrite; --force does not apply.`;
 	}
-	const target = await describeBackupTarget(hookPath);
+	const plan = await describeBackupPlan(hookPath);
 	const reason =
 		state === HOOK_STATE.MANAGED_EDITED
 			? "carries a javi-forge marker but its contents were modified locally"
 			: "exists and is not a javi-forge hook (no marker, and its contents match no released javi-forge template)";
-	return `${hookPath} ${reason}. Refusing to overwrite. Inspect it, then re-run 'javi-forge ci init --force' (the current file is saved as ${target}), or delete it.`;
+	return `${hookPath} ${reason}. Refusing to overwrite. Inspect it, then re-run 'javi-forge ci init --force' (${plan}), or delete it.`;
 }
 
 /**
@@ -1278,10 +1289,61 @@ async function backupHook(hookPath: string): Promise<string> {
 	);
 }
 
+const MANIFEST_PATH = path.join(HOOK_ASSETS_DIR, "manifest.json");
+
+/** The mode every installed hook ends up with — git ignores a non-executable hook. */
+const HOOK_MODE = 0o755;
+
+const REINSTALL_REMEDY =
+	"reinstall javi-forge (npm i -g javi-forge) or repack it from source";
+
 async function loadHookManifest(): Promise<Record<string, HookManifestEntry>> {
-	return (await fs.readJson(
-		path.join(HOOK_ASSETS_DIR, "manifest.json"),
-	)) as Record<string, HookManifestEntry>;
+	return (await fs.readJson(MANIFEST_PATH)) as Record<
+		string,
+		HookManifestEntry
+	>;
+}
+
+/**
+ * A broken INSTALL of javi-forge (missing, unreadable or truncated manifest) is
+ * an operator-actionable condition, not a stack trace: it surfaces as a named
+ * `errors[]` entry naming the path, the reason and the remedy. Without this the
+ * rejection escapes `installCIHooks` entirely and takes `handleCi` down with an
+ * unhandled promise rejection.
+ */
+function assertHookManifestEntry(
+	entry: HookManifestEntry | undefined,
+	hookName: string,
+): asserts entry is HookManifestEntry {
+	const problem =
+		entry === undefined || entry === null
+			? `has no "${hookName}" entry`
+			: typeof entry.sha256 !== "string" ||
+					typeof entry.version !== "number" ||
+					!Array.isArray(entry.historical)
+				? `has a malformed "${hookName}" entry (expected version:number, sha256:string, historical:array)`
+				: "";
+	if (problem !== "") {
+		throw new Error(
+			`${MANIFEST_PATH} ${problem}. The javi-forge install is incomplete; ${REINSTALL_REMEDY}.`,
+		);
+	}
+}
+
+/**
+ * Bring an already-current hook back to mode 0755 WITHOUT writing bytes.
+ *
+ * The chmod is skipped when the mode already matches, so the common path does
+ * no syscall beyond the `lstat`; when it does run, `chmod` changes `ctime` only
+ * — `mtime` and the contents are untouched, so the zero-write idempotence
+ * contract survives. The path was classified as a regular file moments earlier;
+ * the residual TOCTOU window is the one documented for the write path itself.
+ */
+async function repairHookMode(hookPath: string): Promise<void> {
+	const stat = await lstatOrNull(hookPath);
+	if (stat !== null && (stat.mode & 0o777) !== HOOK_MODE) {
+		await fs.chmod(hookPath, HOOK_MODE);
+	}
 }
 
 /**
@@ -1308,8 +1370,27 @@ export async function installCIHooks(
 	}
 
 	const hooksDir = path.join(gitDir, "hooks");
-	await fs.ensureDir(hooksDir);
-	const manifest = await loadHookManifest();
+	let manifest: Record<string, HookManifestEntry>;
+	try {
+		await fs.ensureDir(hooksDir);
+	} catch (e) {
+		return {
+			...empty,
+			errors: [
+				`could not create ${hooksDir} (${errorCode(e) || "unknown error"}): ${e instanceof Error ? e.message : String(e)}. No hook was installed.`,
+			],
+		};
+	}
+	try {
+		manifest = await loadHookManifest();
+	} catch (e) {
+		return {
+			...empty,
+			errors: [
+				`could not read ${MANIFEST_PATH} (${errorCode(e) || "unknown error"}): ${e instanceof Error ? e.message : String(e)}. The javi-forge install is incomplete; ${REINSTALL_REMEDY}.`,
+			],
+		};
+	}
 
 	const installed: string[] = [];
 	const upgraded: string[] = [];
@@ -1321,10 +1402,16 @@ export async function installCIHooks(
 		const hookPath = path.join(hooksDir, name);
 		const entry = manifest[name];
 		try {
+			assertHookManifestEntry(entry, name);
 			const state = await classifyHookPath(hookPath, name, entry);
 			states.push({ name, state });
 
 			if (state === HOOK_STATE.MANAGED_CURRENT) {
+				// Content is already correct, so nothing is REWRITTEN — but a hook
+				// stripped of its exec bit is dead weight (git skips it silently),
+				// so the mode is repaired in place. `chmod` leaves both the bytes
+				// and the mtime untouched, so idempotence still holds.
+				await repairHookMode(hookPath);
 				continue;
 			}
 			// A symlink or a non-regular path is refused ALWAYS — `--force` is
@@ -1341,9 +1428,14 @@ export async function installCIHooks(
 			}
 
 			const body = await readHookBody(name);
+			// The `mode` option applies ONLY when the file is CREATED: overwriting
+			// an existing 0644 hook would leave it non-executable and git would
+			// silently skip it. The chmod is therefore unconditional, on every
+			// write path, which also makes the mode independent of the umask.
 			await fs.writeFile(hookPath, renderHook(body, name, entry), {
-				mode: 0o755,
+				mode: HOOK_MODE,
 			});
+			await fs.chmod(hookPath, HOOK_MODE);
 			// `upgraded` means "javi-forge content was replaced by newer
 			// javi-forge content". A forced overwrite of someone else's file is a
 			// fresh install, not an upgrade.

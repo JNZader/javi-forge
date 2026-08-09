@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
@@ -145,6 +146,21 @@ describe("classifyHookContent", () => {
 	it.each(cases)("$name", ({ content, expected }) => {
 		expect(classifyHookContent(content, "pre-commit", entry)).toBe(expected);
 	});
+
+	// The synthetic bodies above prove the STATE table; this pair proves the
+	// matcher is byte-exact (not fuzzy) against the SHIPPED asset: the released
+	// bytes are legacy-v0, the same bytes plus ONE space are foreign.
+	it("classifies the shipped asset body as legacy-v0 and one byte of drift as foreign", () => {
+		const asset = readAsset("pre-commit");
+		const shipped = readManifestEntry("pre-commit");
+
+		expect(classifyHookContent(asset, "pre-commit", shipped)).toBe(
+			HOOK_STATE.LEGACY_V0,
+		);
+		expect(classifyHookContent(`${asset} `, "pre-commit", shipped)).toBe(
+			HOOK_STATE.FOREIGN,
+		);
+	});
 });
 
 // =============================================================================
@@ -231,6 +247,38 @@ describe("installCIHooks classification and write policy", () => {
 		);
 	});
 
+	it("repairs the mode of a managed-current hook without writing a single byte", async () => {
+		// A hook stripped of its exec bit is DEAD — git skips it silently. The
+		// repair is a chmod, never a rewrite: bytes and mtime must both survive.
+		await installCIHooks(tmpDir);
+		const before = await fs.readFile(hookPathFor("pre-commit"));
+		await fs.chmod(hookPathFor("pre-commit"), 0o644);
+		const statBefore = await fs.stat(hookPathFor("pre-commit"));
+
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		const result = await installCIHooks(tmpDir);
+
+		const statAfter = await fs.stat(hookPathFor("pre-commit"));
+		expect(stateOf(result, "pre-commit")).toBe(HOOK_STATE.MANAGED_CURRENT);
+		expect(result.installed).toEqual([]);
+		expect(result.upgraded).toEqual([]);
+		expect(result.errors).toEqual([]);
+		expect(statAfter.mode & 0o777).toBe(0o755);
+		expect(await fs.readFile(hookPathFor("pre-commit"))).toEqual(before);
+		expect(statAfter.mtimeMs).toBe(statBefore.mtimeMs);
+	});
+
+	it("gives a legacy-v0 upgrade the exec bit even when the historical file was 0644", async () => {
+		await fs.writeFile(hookPathFor("pre-commit"), readAsset("pre-commit"));
+		await fs.chmod(hookPathFor("pre-commit"), 0o644);
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(stateOf(result, "pre-commit")).toBe(HOOK_STATE.LEGACY_V0);
+		expect(result.upgraded).toContain("pre-commit");
+		expect((await fs.stat(hookPathFor("pre-commit"))).mode & 0o777).toBe(0o755);
+	});
+
 	it("upgrades a managed hook carrying a stale marker version without touching the body", async () => {
 		const asset = readAsset("pre-commit");
 		await fs.writeFile(
@@ -291,6 +339,39 @@ describe("installCIHooks classification and write policy", () => {
 		const error = result.errors.find((e) => e.startsWith("pre-commit:")) ?? "";
 		expect(error).toContain(`${hookPathFor("pre-commit")}.bak.`);
 		expect(error).not.toContain(`saved as ${hookPathFor("pre-commit")}.bak)`);
+	});
+
+	it("says --force will REFUSE when a symlink is parked at the backup path", async () => {
+		// Promising "the current file is saved as <path>.bak" here would be a
+		// lie: backupHook refuses a non-regular backup target even WITH --force.
+		const sensitive = path.join(tmpDir, "authorized_keys");
+		await fs.writeFile(sensitive, "SSH KEYS");
+		await fs.writeFile(
+			hookPathFor("pre-commit"),
+			"#!/bin/bash\necho foreign\n",
+		);
+		await fs.symlink(sensitive, `${hookPathFor("pre-commit")}.bak`);
+
+		const result = await installCIHooks(tmpDir);
+
+		const error = result.errors.find((e) => e.startsWith("pre-commit:")) ?? "";
+		expect(error).toContain(`${hookPathFor("pre-commit")}.bak`);
+		expect(error).toContain("REFUSE");
+		expect(error).not.toContain("saved as");
+	});
+
+	it("says --force will REFUSE when a directory occupies the backup path", async () => {
+		await fs.writeFile(
+			hookPathFor("pre-commit"),
+			"#!/bin/bash\necho foreign\n",
+		);
+		await fs.ensureDir(`${hookPathFor("pre-commit")}.bak`);
+
+		const result = await installCIHooks(tmpDir);
+
+		const error = result.errors.find((e) => e.startsWith("pre-commit:")) ?? "";
+		expect(error).toContain("REFUSE");
+		expect(error).not.toContain("saved as");
 	});
 
 	it("does not let one refusal block sibling hooks", async () => {
@@ -505,6 +586,74 @@ describe("installCIHooks --force and the backup protocol", () => {
 		expect((await fs.lstat(preCommit)).isDirectory()).toBe(true);
 	});
 
+	it("creates the backup with COPYFILE_EXCL so it can never clobber an existing file", async () => {
+		await fs.writeFile(preCommit, "#!/bin/bash\necho foreign\n");
+		const copyFile = vi.spyOn(fs, "copyFile");
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(result.errors).toEqual([]);
+		const call = copyFile.mock.calls.find(
+			(args) => String(args[1]) === `${preCommit}.bak`,
+		);
+		expect(call).toBeDefined();
+		expect(call?.[2]).toBe(constants.COPYFILE_EXCL);
+	});
+
+	it("restores the exec bit when forcing over a 0644 foreign hook", async () => {
+		await fs.writeFile(preCommit, "#!/bin/bash\necho foreign\n");
+		await fs.chmod(preCommit, 0o644);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(result.errors).toEqual([]);
+		expect(result.installed).toContain("pre-commit");
+		expect(await fs.readFile(preCommit, "utf8")).toContain(
+			"# javi-forge-hook: pre-commit v1",
+		);
+		expect((await fs.stat(preCommit)).mode & 0o777).toBe(0o755);
+		// The BACKUP keeps the original mode — only the hook is normalized.
+		expect((await fs.stat(`${preCommit}.bak`)).mode & 0o777).toBe(0o644);
+	});
+
+	it("is a NO-OP on a managed-current hook even WITH --force (zero writes, no backup)", async () => {
+		// The managed-current guard precedes the force branch: --force is consent
+		// to lose YOUR file, not an instruction to rewrite an identical one.
+		await installCIHooks(tmpDir);
+		const before = await fs.readFile(preCommit);
+		const statBefore = await fs.stat(preCommit);
+
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		const statAfter = await fs.stat(preCommit);
+		expect(result.installed).toEqual([]);
+		expect(result.upgraded).toEqual([]);
+		expect(result.backups).toEqual([]);
+		expect(result.errors).toEqual([]);
+		expect(await fs.readFile(preCommit)).toEqual(before);
+		expect(statAfter.mtimeMs).toBe(statBefore.mtimeMs);
+		expect(await fs.pathExists(`${preCommit}.bak`)).toBe(false);
+	});
+
+	it("upgrades a managed-outdated hook with --force exactly as without one", async () => {
+		const asset = readAsset("pre-commit");
+		await fs.writeFile(
+			preCommit,
+			withMarker(asset, "pre-commit", 0, sha256(asset)),
+		);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(result.upgraded).toContain("pre-commit");
+		expect(result.installed).not.toContain("pre-commit");
+		expect(result.backups).toEqual([]);
+		expect(await fs.pathExists(`${preCommit}.bak`)).toBe(false);
+		expect(await fs.readFile(preCommit, "utf8")).toContain(
+			"# javi-forge-hook: pre-commit v1",
+		);
+	});
+
 	it("does not back up hooks it would write anyway (absent, legacy-v0)", async () => {
 		await fs.writeFile(
 			path.join(hooksDir, "pre-push"),
@@ -518,5 +667,83 @@ describe("installCIHooks --force and the backup protocol", () => {
 		expect(await fs.pathExists(path.join(hooksDir, "pre-push.bak"))).toBe(
 			false,
 		);
+	});
+});
+
+// =============================================================================
+// installCIHooks — a broken install surfaces as a named error, never a crash
+// =============================================================================
+
+describe("installCIHooks manifest failures", () => {
+	let tmpDir: string;
+	const manifestPath = path.join(HOOK_ASSETS_DIR, "manifest.json");
+
+	const realManifest = (): Record<string, HookManifestEntry> =>
+		JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<
+			string,
+			HookManifestEntry
+		>;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookman-"));
+		await fs.ensureDir(path.join(tmpDir, ".git", "hooks"));
+	});
+
+	afterEach(async () => {
+		vi.restoreAllMocks();
+		await fs.remove(tmpDir);
+	});
+
+	it("reports a named error instead of rejecting when the manifest is unreadable", async () => {
+		vi.spyOn(fs, "readJson").mockRejectedValue(
+			Object.assign(new Error("no such file or directory"), {
+				code: "ENOENT",
+			}),
+		);
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual([]);
+		expect(result.states).toEqual([]);
+		expect(result.errors).toHaveLength(1);
+		const [error] = result.errors;
+		expect(error).toContain(manifestPath);
+		expect(error).toContain("ENOENT");
+		expect(error).toContain("reinstall javi-forge");
+	});
+
+	it("reports a per-hook named error when the manifest is missing a hook entry", async () => {
+		const { "commit-msg": _dropped, ...partial } = realManifest();
+		vi.spyOn(fs, "readJson").mockResolvedValue(partial);
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-commit", "pre-push"]),
+		);
+		const error = result.errors.find((e) => e.startsWith("commit-msg:"));
+		expect(error).toContain(manifestPath);
+		expect(error).toContain("commit-msg");
+		expect(error).toContain("reinstall javi-forge");
+	});
+
+	it("reports a per-hook named error when a manifest entry is malformed", async () => {
+		const manifest = realManifest();
+		vi.spyOn(fs, "readJson").mockResolvedValue({
+			...manifest,
+			"pre-push": { ...manifest["pre-push"], historical: "not-an-array" },
+		});
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-commit", "commit-msg"]),
+		);
+		const error = result.errors.find((e) => e.startsWith("pre-push:"));
+		expect(error).toContain(manifestPath);
+		expect(error).toContain("reinstall javi-forge");
+		expect(
+			await fs.pathExists(path.join(tmpDir, ".git", "hooks", "pre-push")),
+		).toBe(false);
 	});
 });

@@ -1,3 +1,9 @@
+## [1.10.0](https://github.com/JNZader/javi-forge/compare/v1.9.1...v1.10.0) (2026-08-09)
+
+### Features
+
+* **cli:** ci validate + per-command ci --help (JF-DOCS-1) ([#6](https://github.com/JNZader/javi-forge/issues/6)) ([94468d3](https://github.com/JNZader/javi-forge/commit/94468d3501a1d610eb9c8dc111a2751e63f033a1))
+
 ## [1.9.1](https://github.com/JNZader/javi-forge/compare/v1.9.0...v1.9.1) (2026-08-09)
 
 ### Bug Fixes

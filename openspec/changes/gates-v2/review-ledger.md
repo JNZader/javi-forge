@@ -44,3 +44,12 @@ All 3 REJECT CRITICALs (JDA-001 execution backend, JDA-002 gates-only crash, JDA
 | GATES-NEW-01 | judgment-day | ci-gates/spec.md:7 | fixed | Purpose line still said "reusing runStep" — contradicted the native-only requirement. Rewritten to "host-native (modeled on security/ghagga — NOT runStep)". |
 | GATES-NEW-02 | judgment-day | ci-execution/spec.md MODIFIED req | fixed | The MODIFIED requirement (whole-req replacement) dropped the live spec's orthogonal "Detect mode emits only the detect step" scenario → silent contract loss on promotion. Re-included. |
 | GATES-NEW-03 | judgment-day | design.md:37 vs ci-gates:15 | fixed | Divergence on runners-optional-under-v2. Reconciled: under v2 runners optional when gates present; a v2 config with NEITHER runners nor gates fails closed. Applied to both specs. |
+
+## Apply slice 1 — judgment-day (schema + B1 + B2) — APPROVED
+
+Two blind judges, both APPROVE, zero BLOCKER/CRITICAL, no fix round. Judge B verified EMPIRICALLY (1422 tests green, tsc clean, direct parseCIConfig probe vs 16 hostile configs). Load-bearing named-error ordering (JDA-006) confirmed by probe: v1+gates → "gates require version: 2", never the generic unknown-field. v1 byte-identity, B1 atomic test-edit + R3 guard intact, B2 three-branch shell resolution, zero slice-2/3/4 leakage — all verified against code.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JDA-A-001 / JDB-S1-001 (convergent) | judgment-day | ci-config.ts:493-521 / ci.ts:521-542 | WARNING | info | Theoretical fail-closed edges: empty `gates: []` beside real runners hard-fails (defensible, named); shell mode picks primary runner's image in a multi-runner v2 config. Both in-scope-correct for slice 1, recorded as forward-looking. |
+| JDA-A-002 | judgment-day | coverage | WARNING | info | Judge A (read-only sandbox) could not re-run coverage; judge B confirmed empirically on a real branch (crash-recovery detached-HEAD caveat addressed). |

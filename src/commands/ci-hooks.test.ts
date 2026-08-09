@@ -746,4 +746,44 @@ describe("installCIHooks manifest failures", () => {
 			await fs.pathExists(path.join(tmpDir, ".git", "hooks", "pre-push")),
 		).toBe(false);
 	});
+
+	it("reports a per-hook named error when a historical element is null", async () => {
+		const manifest = realManifest();
+		vi.spyOn(fs, "readJson").mockResolvedValue({
+			...manifest,
+			"pre-push": { ...manifest["pre-push"], historical: [null] },
+		});
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-commit", "commit-msg"]),
+		);
+		const error = result.errors.find((e) => e.startsWith("pre-push:"));
+		expect(error).toContain(manifestPath);
+		expect(error).toContain("reinstall javi-forge");
+		expect(
+			await fs.pathExists(path.join(tmpDir, ".git", "hooks", "pre-push")),
+		).toBe(false);
+	});
+
+	it("reports a per-hook named error when a historical element is a raw string", async () => {
+		const manifest = realManifest();
+		vi.spyOn(fs, "readJson").mockResolvedValue({
+			...manifest,
+			"pre-push": { ...manifest["pre-push"], historical: ["raw-string"] },
+		});
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-commit", "commit-msg"]),
+		);
+		const error = result.errors.find((e) => e.startsWith("pre-push:"));
+		expect(error).toContain(manifestPath);
+		expect(error).toContain("reinstall javi-forge");
+		expect(
+			await fs.pathExists(path.join(tmpDir, ".git", "hooks", "pre-push")),
+		).toBe(false);
+	});
 });

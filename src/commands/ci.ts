@@ -1320,8 +1320,9 @@ function assertHookManifestEntry(
 			? `has no "${hookName}" entry`
 			: typeof entry.sha256 !== "string" ||
 					typeof entry.version !== "number" ||
-					!Array.isArray(entry.historical)
-				? `has a malformed "${hookName}" entry (expected version:number, sha256:string, historical:array)`
+					!Array.isArray(entry.historical) ||
+					!entry.historical.every((h) => typeof h?.sha256 === "string")
+				? `has a malformed "${hookName}" entry (expected version:number, sha256:string, historical:array of {sha256:string})`
 				: "";
 	if (problem !== "") {
 		throw new Error(

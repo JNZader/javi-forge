@@ -1295,19 +1295,23 @@ describe("characterization: auto + docker", () => {
 		expect(test[0]?.user).toBeUndefined();
 	});
 
-	it("emits --stack node step ids exactly as they are today (B1 frozen)", async () => {
+	it("emits BARE --stack node step ids (B1: implicit name → bare)", async () => {
 		const steps = await runAuto(tmpDir, { stack: "node" });
 
-		// Suffixed ids and a per-runner image step AFTER context-refresh: this is
-		// the current stack-override shape, deliberately frozen, not fixed here.
+		// B1 (sanctioned spec-reversal of the ci-engine-unification characterization
+		// freeze): `--stack` sets `resolved.source === "stack-override"`, an IMPLICIT
+		// name (the user never named the runner), so ids are BARE — matching the
+		// zero-config auto shape, not the suffixed CONFIG shape. The per-runner image
+		// step still lands AFTER context-refresh (stack-override resolves its own
+		// image in the runner loop, unlike auto's prologue build).
 		expect(uniqueIds(steps)).toEqual([
 			"detect",
 			"docker-check",
 			"context-refresh",
-			"docker-image:node",
-			"lint:node",
-			"compile:node",
-			"test:node",
+			"docker-image",
+			"lint",
+			"compile",
+			"test",
 		]);
 	});
 

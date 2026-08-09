@@ -618,11 +618,17 @@ export async function runCI(
 	}
 
 	// ── Runner execution ─────────────────────────────────────────────────────────
-	// ONE executor for every resolution source. Naming is a function of
-	// `resolved.source` alone — never of `resolved.runners.length`, which would
-	// silently rename a single-runner CONFIG.
-	const naming: NamingMode =
-		resolved.source === "auto" ? NAMING_MODE.BARE : NAMING_MODE.SUFFIXED;
+	// ONE executor for every resolution source. Naming is a function of whether
+	// the runner NAME is IMPLICIT or EXPLICIT — never of `resolved.runners.length`,
+	// which would silently rename a single-runner CONFIG (B1):
+	//   - IMPLICIT name → BARE ids: `auto` (zero-config) OR `stack-override`
+	//     (`--stack`, the user never named the runner).
+	//   - EXPLICIT name → SUFFIXED ids: `config` (a runner named in ci.yaml).
+	const implicitName =
+		resolved.source === "auto" || resolved.source === "stack-override";
+	const naming: NamingMode = implicitName
+		? NAMING_MODE.BARE
+		: NAMING_MODE.SUFFIXED;
 	for (const runner of resolved.runners) {
 		await runRunner(runner, {
 			projectDir,
@@ -768,7 +774,10 @@ async function runRunner(
 			// and the global step order is unchanged.
 			imageName = ctx.preresolvedImage;
 		} else {
-			const stepImage = `docker-image:${runner.name}`;
+			// Under an IMPLICIT name (bare) the image step id is unsuffixed too, so a
+			// `--stack` run reads identically to zero-config auto. A CONFIG runner
+			// (suffixed) keeps `docker-image:<name>` (the R3 guard).
+			const stepImage = bare ? "docker-image" : `docker-image:${runner.name}`;
 			try {
 				if (runner.buildContext) {
 					report(

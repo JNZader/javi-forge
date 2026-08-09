@@ -16,6 +16,7 @@ const STATUS_ICON: Record<CIStep["status"], string> = {
 	done: "✓",
 	error: "✗",
 	skipped: "–",
+	warning: "⚠",
 };
 
 const STATUS_COLOR: Record<CIStep["status"], string> = {
@@ -24,6 +25,7 @@ const STATUS_COLOR: Record<CIStep["status"], string> = {
 	done: theme.success,
 	error: theme.error,
 	skipped: theme.muted,
+	warning: theme.warning,
 };
 
 // =============================================================================

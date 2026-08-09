@@ -17,6 +17,7 @@ import {
 	installCIHooks,
 	resolveCIRunners,
 	runCI,
+	runGateNative,
 } from "./ci.js";
 
 // Docker is mocked for this whole file. No pre-existing test in it reaches a
@@ -920,6 +921,262 @@ runners:
 			true,
 		);
 		expect(steps.some((s) => s.id.startsWith("lint:"))).toBe(false);
+	});
+});
+
+// =============================================================================
+// runGateNative — host-native gate executor (returns the child exit code)
+// =============================================================================
+
+describe("runGateNative", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-gatenat-"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	// The child inherits PATH so `bash` resolves; the caller (runGates) always
+	// passes a PATH-bearing env, so this mirrors real usage.
+	const envWithPath = () => ({ PATH: process.env.PATH ?? "" });
+
+	it("resolves the child exit code (0) without throwing on success", async () => {
+		await expect(runGateNative("exit 0", tmpDir, envWithPath())).resolves.toBe(
+			0,
+		);
+	});
+
+	it("resolves a non-zero exit code instead of throwing", async () => {
+		await expect(runGateNative("exit 3", tmpDir, envWithPath())).resolves.toBe(
+			3,
+		);
+	});
+
+	it("delivers env via the process env map, never string-spliced into the command", async () => {
+		// The value lives ONLY in the env map — a passing `test` builtin proves the
+		// child received it through the environment, not via the `run` string.
+		await expect(
+			runGateNative('[ "$GATE_TOKEN" = "s3-secret" ]', tmpDir, {
+				...envWithPath(),
+				GATE_TOKEN: "s3-secret",
+			}),
+		).resolves.toBe(0);
+	});
+});
+
+// =============================================================================
+// runCI — gates (native, version 2)
+// =============================================================================
+
+describe("runCI — gates (native, version 2)", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-gates-"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	const writeConfig = async (yaml: string) => {
+		await fs.outputFile(path.join(tmpDir, ".javi-forge", "ci.yaml"), yaml);
+	};
+
+	const QUICK = {
+		mode: "quick" as const,
+		noDocker: true,
+		noGhagga: true,
+		noSecurity: true,
+	};
+
+	it("fails the build when a blocking gate exits non-zero", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: blocker
+    run: exit 1
+`);
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s })),
+		).rejects.toThrow(/blocking gate\(s\) failed: blocker/);
+
+		expect(
+			steps.some((s) => s.id === "gate:blocker" && s.status === "error"),
+		).toBe(true);
+	});
+
+	it("informative gate exit non-zero → warning, exit 0, later gates still run", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: soft
+    run: exit 1
+    mode: informative
+  - id: after
+    run: echo ran >> marker.txt
+`);
+		const steps: CIStep[] = [];
+		// No throw — informative failures never fail the build.
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		expect(
+			steps.some((s) => s.id === "gate:soft" && s.status === "warning"),
+		).toBe(true);
+		// The gate AFTER the informative failure still executed.
+		expect(
+			await fs.readFile(path.join(tmpDir, "marker.txt"), "utf-8"),
+		).toContain("ran");
+		expect(
+			steps.some((s) => s.id === "gate:after" && s.status === "done"),
+		).toBe(true);
+	});
+
+	it("multi-command gate is fail-fast: first non-zero wins, later commands skipped", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: multi
+    run:
+      - echo a >> steps.txt
+      - exit 2
+      - echo c >> steps.txt
+`);
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s })),
+		).rejects.toThrow(/blocking gate\(s\) failed: multi/);
+
+		const trace = await fs.readFile(path.join(tmpDir, "steps.txt"), "utf-8");
+		expect(trace).toContain("a");
+		// The command after the first non-zero exit must NOT run.
+		expect(trace).not.toContain("c");
+		const errStep = steps.filter((s) => s.id === "gate:multi").at(-1);
+		expect(errStep?.status).toBe("error");
+		expect(errStep?.detail).toContain("exit 2");
+	});
+
+	it("gates-only v2 repo (zero runners) runs the gate phase without crashing", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: only
+    run: echo gate-ran >> marker.txt
+`);
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		expect(
+			await fs.readFile(path.join(tmpDir, "marker.txt"), "utf-8"),
+		).toContain("gate-ran");
+		expect(steps.some((s) => s.id === "gate:only" && s.status === "done")).toBe(
+			true,
+		);
+	});
+
+	it("gates-only v2 repo in detect mode reports a named error and runs no gate", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: g
+    run: echo should-not-run >> ran.txt
+`);
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, mode: "detect" }, (s) =>
+				steps.push({ ...s }),
+			),
+		).rejects.toThrow(/no runners resolved/);
+		expect(await fs.pathExists(path.join(tmpDir, "ran.txt"))).toBe(false);
+	});
+
+	it("runs gates under full mode (not just quick)", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: full-gate
+    run: echo full-ran >> marker.txt
+`);
+		const steps: CIStep[] = [];
+		await runCI(
+			{
+				projectDir: tmpDir,
+				mode: "full",
+				noDocker: true,
+				noGhagga: true,
+				noSecurity: true,
+			},
+			(s) => steps.push({ ...s }),
+		);
+		expect(
+			await fs.readFile(path.join(tmpDir, "marker.txt"), "utf-8"),
+		).toContain("full-ran");
+		expect(
+			steps.some((s) => s.id === "gate:full-gate" && s.status === "done"),
+		).toBe(true);
+	});
+
+	it("skips the gate phase in detect mode when runners are present", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), { scripts: {} });
+		await writeConfig(`
+version: 2
+runners:
+  - name: r
+    stack: node
+    lint: "true"
+gates:
+  - id: g
+    run: echo should-not-run >> ran.txt
+`);
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, mode: "detect" }, (s) =>
+			steps.push({ ...s }),
+		);
+		// detect returns before the gate phase — the gate command never executes.
+		expect(await fs.pathExists(path.join(tmpDir, "ran.txt"))).toBe(false);
+		expect(steps.some((s) => s.id.startsWith("gate:"))).toBe(false);
+	});
+
+	it("injects CI=true into the gate environment", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: envcheck
+    run: '[ "$CI" = "true" ]'
+`);
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+		expect(
+			steps.some((s) => s.id === "gate:envcheck" && s.status === "done"),
+		).toBe(true);
+	});
+
+	it("runs both the runner loop AND the gate phase, gates after runners", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), { scripts: {} });
+		await writeConfig(`
+version: 2
+runners:
+  - name: r
+    stack: node
+    lint: echo lint-ran >> order.txt
+gates:
+  - id: g
+    run: echo gate-ran >> order.txt
+`);
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		const order = (await fs.readFile(path.join(tmpDir, "order.txt"), "utf-8"))
+			.trim()
+			.split("\n");
+		expect(order).toEqual(["lint-ran", "gate-ran"]);
+		expect(steps.some((s) => s.id === "gate:g" && s.status === "done")).toBe(
+			true,
+		);
 	});
 });
 

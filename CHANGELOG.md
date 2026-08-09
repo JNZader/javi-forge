@@ -1,3 +1,9 @@
+## [1.9.1](https://github.com/JNZader/javi-forge/compare/v1.9.0...v1.9.1) (2026-08-09)
+
+### Bug Fixes
+
+* **ci:** close JDA7-012, remove dead defaults (B3), harden hook write (SEC-1) ([#5](https://github.com/JNZader/javi-forge/issues/5)) ([8e381f5](https://github.com/JNZader/javi-forge/commit/8e381f57c4254dab8776418a67b5cd06edcc884b))
+
 ## [1.9.0](https://github.com/JNZader/javi-forge/compare/v1.8.0...v1.9.0) (2026-08-09)
 
 ### Features

@@ -110,3 +110,9 @@ therefore invisible until someone runs the command by hand.
   `test:coverage`.
 - Suggested fix: decide whether to wire `test:coverage` into `validate`/CI ONCE
   COV-1 lands. Wiring it before COV-1 would close every PR with a red gate.
+
+### SEC-1 — Hook write path: O_NOFOLLOW + fchmod (design-level hardening)
+- **Source**: judgment-day slice 3b, JDA7-003/JDA7-005/JDB7-008 (convergent, parked by decision).
+- **What**: the classify→write window on the HOOK path uses plain `fs.writeFile` (no O_NOFOLLOW) and the backup `chmod` is path-based (follows symlinks). A concurrent local attacker with write access to `.git/hooks` could plant a symlink inside the window. The backup CREATE is already atomic (COPYFILE_EXCL); this extends the property to the final write and the mode fix.
+- **Fix shape**: `fs.open(hookPath, O_WRONLY|O_TRUNC|O_NOFOLLOW)` + write on the fd + `fchmod(fd, 0o755)`; same fd-based pattern for the backup chmod. Also consider `nlink > 1` refusal (hardlink truncation, mitigated by fs.protected_hardlinks=1 on modern Linux).
+- **Threat model**: local attacker who ALREADY has write access to the repo's .git — low priority, defense in depth. Pre-existing class (the old clobber path had the same exposure with a smaller window).

@@ -448,13 +448,21 @@ function report(
 	onStep({ id, label, status, detail });
 }
 
-/** Detect-step label: legacy format for auto, explicit otherwise. */
+/**
+ * Detect-step label: legacy format for auto, explicit otherwise.
+ *
+ * INVARIANT (holds for every `ResolvedRunners` value): `runners` is never
+ * empty. The config path rejects an empty list before resolving
+ * (`src/lib/ci-config.ts` — "runners is required and must be a non-empty
+ * list"), and the `auto` and `stack-override` paths each yield exactly one
+ * runner. `runners[0]` therefore needs no fallback.
+ */
 function describeRunners(resolved: ResolvedRunners): string {
 	const first = resolved.runners[0];
-	if (resolved.source === "auto" && first) {
+	if (resolved.source === "auto") {
 		return `Stack: ${first.stack} (${first.buildTool})`;
 	}
-	if (resolved.source === "stack-override" && first) {
+	if (resolved.source === "stack-override") {
 		return `Stack: ${first.stack} (${first.buildTool}, --stack override)`;
 	}
 	const summary = resolved.runners
@@ -493,14 +501,16 @@ export async function runCI(
 
 	// Legacy single-runner view for the zero-config auto path. Keeping this
 	// shape guarantees single-stack repositories behave exactly as before.
+	// `runners[0]` is always present — see the invariant on `describeRunners`.
+	// The command lists CAN be empty, so those keep their `?? null`.
 	const primary = resolved.runners[0];
 	const stackInfo: CIStackInfo = {
-		stackType: primary?.stack ?? "node",
-		buildTool: primary?.buildTool ?? "npm",
-		javaVersion: primary?.javaVersion ?? "21",
-		lintCmd: primary?.lintCmds[0] ?? null,
-		compileCmd: primary?.compileCmds[0] ?? null,
-		testCmd: primary?.testCmds[0] ?? null,
+		stackType: primary.stack,
+		buildTool: primary.buildTool,
+		javaVersion: primary.javaVersion,
+		lintCmd: primary.lintCmds[0] ?? null,
+		compileCmd: primary.compileCmds[0] ?? null,
+		testCmd: primary.testCmds[0] ?? null,
 	};
 
 	// ── Detect mode ─────────────────────────────────────────────────────────────

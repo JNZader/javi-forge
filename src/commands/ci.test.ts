@@ -7,6 +7,7 @@ import {
 	ensureImage,
 	getImageName,
 	isDockerAvailable,
+	openShell,
 	runInContainer,
 } from "../lib/docker.js";
 import type { Stack } from "../types/index.js";
@@ -54,6 +55,7 @@ vi.mock("../lib/docker.js", async (importOriginal) => {
 			stdout: "",
 			stderr: "",
 		})),
+		openShell: vi.fn(async () => {}),
 	};
 });
 
@@ -1730,5 +1732,79 @@ runners:
 		expect(image?.status).toBe("error");
 		expect(image?.detail).toContain("docker build boom");
 		expect(runInContainer).not.toHaveBeenCalled();
+	});
+});
+
+// =============================================================================
+// Shell mode honors runner image / build context (B2)
+// =============================================================================
+
+describe("shell mode honors runner image/build context (B2)", () => {
+	let tmpDir: string;
+
+	const openShellCalls = () =>
+		vi.mocked(openShell).mock.calls.map(([, image]) => image);
+
+	beforeEach(async () => {
+		vi.mocked(isDockerAvailable).mockReset();
+		vi.mocked(ensureImage).mockReset();
+		vi.mocked(openShell).mockReset();
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-shell-"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	const runShell = async (): Promise<void> => {
+		await runCI(
+			{ projectDir: tmpDir, mode: "shell", noDocker: false, noGhagga: true },
+			() => {},
+		);
+	};
+
+	it("opens the shell with a runner's pinned image, not the stack default", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), { scripts: {} });
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			"version: 1\nrunners:\n  - name: web\n    stack: node\n    image: registry.example/custom-node:99\n",
+		);
+
+		await runShell();
+
+		// The pinned image passes through verbatim; no stack-default image is built.
+		expect(openShellCalls()).toEqual(["registry.example/custom-node:99"]);
+		expect(ensureImage).not.toHaveBeenCalled();
+	});
+
+	it("opens the shell with a runner's build-context image", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), { scripts: {} });
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			"version: 1\nrunners:\n  - name: web\n    stack: node\n    build-context: ./ci/docker\n",
+		);
+
+		await runShell();
+
+		// PRODUCTION-FAITHFUL mock returns the imageTag for a build-context build.
+		expect(openShellCalls()).toEqual(["javi-forge-ci-web"]);
+		expect(ensureImage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				buildContext: path.resolve(tmpDir, "./ci/docker"),
+				imageTag: "javi-forge-ci-web",
+			}),
+		);
+	});
+
+	it("falls back to the stack-default image when the runner pins nothing", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			scripts: { lint: "eslint .", build: "tsc", test: "vitest run" },
+		});
+		await fs.writeFile(path.join(tmpDir, "pnpm-lock.yaml"), "");
+
+		await runShell();
+
+		// Auto repo, no pinned image → the per-stack default (getImageName("node")).
+		expect(openShellCalls()).toEqual([getImageName("node")]);
 	});
 });

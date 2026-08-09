@@ -521,10 +521,24 @@ export async function runCI(
 		report(onStep, "docker-image", "Building Docker image", "running");
 		let shellImage: string;
 		try {
-			shellImage = await ensureImage({
-				stack: stackInfo.stackType,
-				javaVersion: stackInfo.javaVersion,
-			});
+			// B2: honor a per-runner pinned image / build context the same way the
+			// runner loop does, instead of always deriving the stack default. An
+			// explicit image passes through verbatim; a build context is built with
+			// the deterministic per-runner tag; otherwise fall back to the stack image.
+			if (primary.image) {
+				shellImage = primary.image;
+			} else if (primary.buildContext) {
+				shellImage = await ensureImage({
+					stack: primary.stack,
+					buildContext: path.resolve(projectDir, primary.buildContext),
+					imageTag: `javi-forge-ci-${primary.name}`,
+				});
+			} else {
+				shellImage = await ensureImage({
+					stack: stackInfo.stackType,
+					javaVersion: stackInfo.javaVersion,
+				});
+			}
 			report(onStep, "docker-image", "Docker image ready", "done");
 		} catch (e) {
 			report(

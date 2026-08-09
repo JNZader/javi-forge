@@ -1,3 +1,9 @@
+## [1.9.0](https://github.com/JNZader/javi-forge/compare/v1.8.0...v1.9.0) (2026-08-09)
+
+### Features
+
+* **ci:** classify-before-write hook install with backup and --force (slice 3b/4) ([#4](https://github.com/JNZader/javi-forge/issues/4)) ([d58cdbb](https://github.com/JNZader/javi-forge/commit/d58cdbb45e2db236c8007234dd5430aa94aadeda))
+
 ## [1.8.0](https://github.com/JNZader/javi-forge/compare/v1.7.1...v1.8.0) (2026-08-08)
 
 ### Features

@@ -452,6 +452,30 @@ describe("runInContainer", () => {
 		expect(args).toContain("root");
 	});
 
+	it("defaults to the host uid:gid so bind-mounted artifacts stay host-owned (ENV-1)", async () => {
+		// Without an explicit user, the container must run as the HOST user so
+		// files written to the bind mount (dist/, node_modules/.vite-temp,
+		// build output) are owned by the host uid — not the image's baked
+		// `runner` (uid 1001 on node:22-slim, where uid 1000 is `node`). That
+		// ownership split is exactly what breaks the host's local vitest.
+		const uid = process.getuid?.();
+		const gid = process.getgid?.();
+		// Guarded: on non-POSIX platforms getuid/getgid are undefined and the
+		// flag is intentionally omitted, preserving the image default.
+		if (uid === undefined || gid === undefined) return;
+
+		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
+		await runInContainer({
+			projectDir,
+			image: "javi-forge-ci-node",
+			command: "pnpm run build",
+			stream: false,
+		});
+		const args = spawnMock.mock.calls[0]?.[1] as string[];
+		expect(args).toContain("--user");
+		expect(args).toContain(`${uid}:${gid}`);
+	});
+
 	it("captures stdout/stderr when stream=false", async () => {
 		spawnMock.mockReturnValue(
 			fakeProc({

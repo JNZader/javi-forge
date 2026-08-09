@@ -146,7 +146,8 @@ describe("detectCIStack", () => {
 		expect(info.lintCmd).toContain("golangci-lint");
 		expect(info.compileCmd).toContain("go build ./...");
 		expect(info.compileCmd).toContain("go clean -cache");
-		expect(info.compileCmd).toContain("chown");
+		// ENV-1: the container runs as the host uid, so no chown-back dance.
+		expect(info.compileCmd).not.toContain("chown");
 		expect(info.testCmd).toBe("go test ./...");
 	});
 
@@ -158,7 +159,8 @@ describe("detectCIStack", () => {
 		expect(info.lintCmd).toContain("clippy");
 		expect(info.compileCmd).toContain("cargo build");
 		expect(info.compileCmd).toContain("cargo clean");
-		expect(info.compileCmd).toContain("chown");
+		// ENV-1: the container runs as the host uid, so no chown-back dance.
+		expect(info.compileCmd).not.toContain("chown");
 		expect(info.testCmd).toBe("cargo test");
 	});
 
@@ -1221,11 +1223,7 @@ describe("characterization: auto + docker", () => {
 			["context-refresh", "Refresh .context/ directory", "skipped"],
 			["lint", "Lint: pnpm run lint", "running"],
 			["lint", "Lint passed", "done"],
-			[
-				"compile",
-				"Compile: rm -rf dist/ && pnpm run build && chown -R runner:runner dist/ 2>/dev/null || true",
-				"running",
-			],
+			["compile", "Compile: rm -rf dist/ && pnpm run build", "running"],
 			["compile", "Compile passed", "done"],
 			["test", "Test: pnpm run test", "running"],
 			["test", "Tests passed", "done"],
@@ -1274,7 +1272,7 @@ describe("characterization: auto + docker", () => {
 		}
 	});
 
-	it("runs ONLY the compile step as --user root", async () => {
+	it("passes no explicit user for any phase — the container defaults to the host uid (ENV-1)", async () => {
 		await runAuto(tmpDir);
 
 		const calls = containerCalls();
@@ -1289,7 +1287,10 @@ describe("characterization: auto + docker", () => {
 		expect(compile).toHaveLength(1);
 		expect(test).toHaveLength(1);
 
-		expect(compile[0]?.user).toBe("root");
+		// No phase forces a user anymore: compile no longer runs as root, so
+		// runInContainer applies the host uid:gid uniformly and artifacts land
+		// host-owned. This is the fix for the uid 1001 bind-mount war.
+		expect(compile[0]?.user).toBeUndefined();
 		expect(lint[0]?.user).toBeUndefined();
 		expect(test[0]?.user).toBeUndefined();
 	});
@@ -1426,8 +1427,7 @@ ${extra}`,
 			mode: "bare",
 			phase: "compile",
 			stepId: "compile",
-			running:
-				"Compile: rm -rf dist/ && pnpm run build && chown -R runner:runner dist/ 2>/dev/null || true",
+			running: "Compile: rm -rf dist/ && pnpm run build",
 			done: "Compile passed",
 		},
 		{

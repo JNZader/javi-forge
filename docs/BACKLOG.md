@@ -53,7 +53,7 @@ and auto-detection yields exactly one runner. The `??` fallbacks are unreachable
 
 > **Scope precision (R1 review, 2026-08-09)**: SEC-1's closure covers the WRITE path (`writeHookFile`, O_NOFOLLOW + fchmod) and the backup DESTINATION (COPYFILE_EXCL + fchmod-on-fd). Still parked, same local-attacker threat model, defense-in-depth only: (a) `repairHookMode`'s path-based chmod on the managed-current branch (R1-001), (b) `backupHook`'s source-side `stat`/`copyFile` follow symlinks — a post-classification swap can copy the link target into the backup before the write correctly aborts with ELOOP (R1-002), (c) the `nlink > 1` check. All three are strictly weaker than the code execution this attacker already holds.
 
-### ENV-1 — Containerized CI runs leave `node_modules/.vite-temp` root-owned
+### ENV-1 — Containerized CI runs leave `node_modules/.vite-temp` root-owned — CLOSED
 
 Containerized CI runs leave `node_modules/.vite-temp` owned by uid 1001 (the
 container runner), which breaks local `vitest` with `EACCES` for uid 1000.
@@ -61,9 +61,34 @@ container runner), which breaks local `vitest` with `EACCES` for uid 1000.
 - Evidence: commit `d21fe49` (moving `cacheDir` to `/tmp`) was an incomplete
   fix — vite still writes the config-bundle timestamp file under
   `node_modules/.vite-temp`, outside `cacheDir`.
-- Suggested fix: a real fix, not another cache redirect — either `chown` the
-  workspace back to the host uid in the container teardown, or configure vitest
-  so the config-bundle temp dir lands outside `node_modules`.
+- **Root cause**: `getDockerfileContent` bakes `USER runner` into every image.
+  On `node:22-slim` the base already owns uid 1000 (`node`), so `useradd -m
+  runner` lands `runner` at **1001**. `runInContainer` bind-mounted the
+  workspace with no `--user`, so the container wrote artifacts as 1001 while
+  the host is 1000 → `EACCES`. The compile phase's `--user root` + `chown -R
+  runner:runner` dance was a symptom of this same split, and left artifacts
+  owned by 1001 anyway.
+- **CLOSED 2026-08-09** (Option A, host-uid match): `runInContainer` /
+  `openShell` now default to `--user $(process.getuid):$(process.getgid)`
+  (guarded — omitted on non-POSIX where they're `undefined`; an explicit
+  `user` override still wins). Because uid 1000 maps to a real passwd user
+  with a writable home in every image (`node` on node bases, `runner`
+  elsewhere), pnpm/toolchains keep working and every artifact lands
+  **host-owned**. The compile phase dropped `--user root`, and all five
+  `chown -R runner:runner …` suffixes were removed (`src/commands/ci.ts`).
+- **Empirical evidence** (`javi-forge-ci-node`, host uid 1000):
+  - OLD (no `--user`): container ran as `uid=1001(runner)`; a `pnpm run build`
+    could not even write the host-owned `dist/` → exit 1; artifacts, when
+    written, were owned by 1001 → host `vitest` `EACCES`.
+  - NEW (`--user 1000:1000`): container ran as `uid=1000(node)`, `pnpm run
+    build` exit 0, `dist/out.txt` owned `1000:1000`, host reads/removes it
+    freely.
+- **Known limitation** (documented, not the reported env): a host uid with no
+  matching passwd entry inside the image gets `HOME=/`, which can break
+  toolchains that cache under `$HOME` (go/cargo/gradle). uid 1000 — the
+  reported environment and the near-universal Linux dev uid — is unaffected.
+  A writable-`HOME` guard (`-e HOME=/tmp`) was deliberately NOT added to avoid
+  regressing custom build-context images that bake `~/.npmrc`/tool config.
 
 ### HOOKS-1 — Adopt the richer `ci-local/hooks/*` variants fleet-wide (deferred change, not a bug)
 

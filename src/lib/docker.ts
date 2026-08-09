@@ -281,6 +281,21 @@ export async function runInContainer(
 	const imageName = image;
 
 	const isInteractive = process.stdin.isTTY && stream;
+	// ENV-1: match the container process to the HOST user. The images bake a
+	// `runner` user whose uid depends on the base (1001 on node:22-slim, where
+	// uid 1000 is already `node`). When that uid differs from the host uid,
+	// everything the container writes to the bind-mounted workspace (dist/,
+	// node_modules/.vite-temp, build output) lands owned by the wrong user,
+	// and the host's local vitest then fails with EACCES. Running as the host
+	// uid:gid makes artifacts host-owned — no chown dance, ever. An explicit
+	// `user` override still wins (e.g. a caller that needs root). getuid/getgid
+	// are undefined on non-POSIX platforms (Windows); there we omit the flag
+	// and keep the image default.
+	const uid = process.getuid?.();
+	const gid = process.getgid?.();
+	const runAsUser =
+		user ??
+		(uid !== undefined && gid !== undefined ? `${uid}:${gid}` : undefined);
 	// Use --mount instead of -v: the -v form parses the value as a single
 	// "src:dst[:opt]" colon-separated string, which breaks (and could be
 	// hijacked) when projectDir itself contains a colon. --mount takes
@@ -293,7 +308,7 @@ export async function runInContainer(
 		"30",
 		"--entrypoint",
 		"",
-		...(user ? ["--user", user] : []),
+		...(runAsUser ? ["--user", runAsUser] : []),
 		"--mount",
 		`type=bind,source=${projectDir},target=/home/runner/work`,
 		"-e",
@@ -340,6 +355,13 @@ export async function openShell(
 ): Promise<void> {
 	const imageName = image;
 
+	// ENV-1: run the interactive shell as the host user too, so anything
+	// written from the debug shell stays host-owned. See runInContainer.
+	const uid = process.getuid?.();
+	const gid = process.getgid?.();
+	const runAsUser =
+		uid !== undefined && gid !== undefined ? `${uid}:${gid}` : undefined;
+
 	await new Promise<void>((resolve, reject) => {
 		const proc = spawn(
 			"docker",
@@ -349,6 +371,7 @@ export async function openShell(
 				"-it",
 				"--entrypoint",
 				"",
+				...(runAsUser ? ["--user", runAsUser] : []),
 				// --mount is colon-safe; see runInContainer for the rationale.
 				"--mount",
 				`type=bind,source=${projectDir},target=/home/runner/work`,

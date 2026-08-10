@@ -1,3 +1,9 @@
+## [1.22.2](https://github.com/JNZader/javi-forge/compare/v1.22.1...v1.22.2) (2026-08-10)
+
+### Bug Fixes
+
+* audit quick-wins — fileURLToPath (Windows), LICENSE, CONTAINER_WORKDIR ([#31](https://github.com/JNZader/javi-forge/issues/31)) ([29eaebb](https://github.com/JNZader/javi-forge/commit/29eaebb32b01c2a7df098421f8e1ecd23f652b36))
+
 ## [1.22.1](https://github.com/JNZader/javi-forge/compare/v1.22.0...v1.22.1) (2026-08-10)
 
 ### Bug Fixes

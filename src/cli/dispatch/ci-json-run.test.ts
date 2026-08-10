@@ -109,6 +109,7 @@ describe("ci --json run-path (headless gate JSON)", () => {
 		const parsed = JSON.parse(out.join("\n"));
 		expect(parsed).toEqual({
 			ok: true,
+			exitCode: 0,
 			gates: [
 				{
 					id: "soft",
@@ -120,6 +121,29 @@ describe("ci --json run-path (headless gate JSON)", () => {
 			],
 		});
 		expect(exitCode).toBe(0);
+	});
+
+	// JDA-A-002 / JDB-101: a blocking RUNNER (not gate) failure makes runCI throw,
+	// so collectGateOutcomes returns { ok:true, gates:[], exitCode:1 } — `ok` stays
+	// true (the spec ties it to blocking GATES), but the run FAILED. A consumer
+	// keying on the object alone must still see the failure: the JSON MUST carry a
+	// top-level `exitCode` so `ok:true` is not misread as run-success.
+	it("surfaces a top-level exitCode so a runner failure is visible despite ok:true", async () => {
+		collectGateOutcomes.mockResolvedValue({
+			ok: true,
+			exitCode: 1,
+			gates: [],
+		});
+
+		const { out, exitCode } = await runJson({ json: true });
+
+		expect(render).not.toHaveBeenCalled();
+		const parsed = JSON.parse(out.join("\n"));
+		// ok stays true per the blocking-gate contract, but the object exposes the
+		// real run result so a JSON consumer is not fooled.
+		expect(parsed.ok).toBe(true);
+		expect(parsed.exitCode).toBe(1);
+		expect(exitCode).toBe(1);
 	});
 
 	it("drives collectGateOutcomes with the resolved run mode (quick)", async () => {

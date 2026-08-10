@@ -138,6 +138,12 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 	// outcomes, prints `{ ok, gates }`, and sets the process exit code EXPLICITLY
 	// (CI.tsx's error boundary is unreachable without a render, so this branch
 	// owns its exit code). `ok` is false iff a BLOCKING gate errored.
+	//
+	// JDA-A-002 / JDB-101: `ok` is deliberately scoped to blocking GATES (spec
+	// contract), so a blocking RUNNER/phase failure makes runCI throw yet leaves
+	// `ok:true`. A consumer keying on the object alone would misread that as
+	// success. Surfacing the top-level `exitCode` (non-zero on ANY run failure,
+	// including a crash) closes that gap without reinterpreting `ok`.
 	if (cli.flags.json) {
 		const { collectGateOutcomes } = await import("../../commands/ci.js");
 		const result = await collectGateOutcomes({
@@ -151,7 +157,11 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 			stack: cli.flags.stack || undefined,
 		});
 		console.log(
-			JSON.stringify({ ok: result.ok, gates: result.gates }, null, 2),
+			JSON.stringify(
+				{ ok: result.ok, exitCode: result.exitCode, gates: result.gates },
+				null,
+				2,
+			),
 		);
 		process.exit(result.exitCode);
 	}

@@ -1528,6 +1528,54 @@ gates:
 		expect(result.exitCode).toBe(0);
 		expect(result.gates.map((g) => g.status)).toEqual(["done", "done"]);
 	});
+
+	// JDA-A-001: a scope:changed gate that degrades (changedFiles throws under a
+	// shallow clone) must surface the REASON in the JSON outcome — otherwise the
+	// headless consumer sees a bare `status:"skipped"` and cannot tell a degrade
+	// from an intentional empty-set skip. The degrade must be LOUD for JSON too.
+	it("carries the degrade reason on a scope:changed skip when changedFiles THROWS", async () => {
+		vi.mocked(resolveBaseRef).mockReset();
+		vi.mocked(changedFiles).mockReset();
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockRejectedValue(
+			new Error("fatal: bad object BASE...HEAD"),
+		);
+		await writeConfig(`
+version: 2
+gates:
+  - id: changed
+    scope: changed
+    run: echo ran >> ran.txt
+`);
+		const result = await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		const gate = result.gates.find((g) => g.id === "changed");
+		expect(gate?.status).toBe("skipped");
+		expect(gate?.reason).toMatch(
+			/shallow clone|missing ref|changed-file diff/i,
+		);
+	});
+
+	// JDA-A-001 (companion): the empty-changed-set skip also carries a reason so a
+	// consumer can distinguish "nothing changed" from a degrade.
+	it("carries a reason on a scope:changed skip when the changed set is EMPTY", async () => {
+		vi.mocked(resolveBaseRef).mockReset();
+		vi.mocked(changedFiles).mockReset();
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockResolvedValue([]);
+		await writeConfig(`
+version: 2
+gates:
+  - id: changed
+    scope: changed
+    run: echo ran >> ran.txt
+`);
+		const result = await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		const gate = result.gates.find((g) => g.id === "changed");
+		expect(gate?.status).toBe("skipped");
+		expect(gate?.reason).toMatch(/no changed files/i);
+	});
 });
 
 // =============================================================================

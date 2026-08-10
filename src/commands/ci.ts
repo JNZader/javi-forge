@@ -1141,7 +1141,16 @@ export async function runGateNative(
 	});
 }
 
-/** Env var carrying a scope:changed gate's newline-joined, root-relative paths. */
+/**
+ * Env var carrying a scope:changed gate's newline-joined, root-relative paths.
+ *
+ * KNOWN LIMITATION (JDB-103): the list is newline-joined, so a path that itself
+ * contains a literal `\n` (git can emit such a path when `core.quotePath` is off)
+ * would corrupt line-based parsing on the gate side. This is a low-likelihood
+ * edge — repo paths with embedded newlines are pathological — and is accepted as
+ * a documented caveat rather than switched to NUL-joining, which would force
+ * every gate consumer to change its parser.
+ */
 const CHANGED_FILES_ENV = "JAVI_FORGE_CHANGED_FILES";
 /** Env var carrying a gate's optional baseline artifact path. */
 const BASELINE_ENV = "JAVI_FORGE_BASELINE";
@@ -1162,6 +1171,13 @@ export interface GateOutcome {
 	changedFiles?: string[];
 	/** First non-zero command code for a failed gate. */
 	exitCode?: number;
+	/**
+	 * Human-readable cause of a degrade/skip, surfaced so the headless JSON
+	 * consumer sees the degrade LOUDLY — not just in the Ink stream. Populated for
+	 * the scope:changed skip variants: base ref null, changed-file resolution
+	 * failure (shallow clone / missing ref), and the empty changed-set skip.
+	 */
+	reason?: string;
 }
 
 /**
@@ -1271,18 +1287,15 @@ async function runGates(
 			const scope = await resolveChangedScope();
 			if (scope.kind === "skip") {
 				report(onStep, stepId, `${label} skipped`, "skipped", scope.reason);
-				emit("skipped");
+				// Loud-degrade: carry the named reason into the JSON outcome too, not
+				// only the Ink `onStep` stream (which is a no-op under --json).
+				emit("skipped", { reason: scope.reason });
 				continue;
 			}
 			if (scope.files.length === 0) {
-				report(
-					onStep,
-					stepId,
-					`${label} skipped`,
-					"skipped",
-					"no changed files",
-				);
-				emit("skipped", { changedFiles: [] });
+				const noChanges = "no changed files";
+				report(onStep, stepId, `${label} skipped`, "skipped", noChanges);
+				emit("skipped", { changedFiles: [], reason: noChanges });
 				continue;
 			}
 			gateChangedFiles = scope.files;

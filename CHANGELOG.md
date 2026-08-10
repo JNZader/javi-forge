@@ -1,3 +1,9 @@
+## [1.21.1](https://github.com/JNZader/javi-forge/compare/v1.21.0...v1.21.1) (2026-08-10)
+
+### Bug Fixes
+
+* **ci:** shared validateImageRef helper — trim-on-store + runner leading-dash guard (IMG-1) ([#23](https://github.com/JNZader/javi-forge/issues/23)) ([ad46b72](https://github.com/JNZader/javi-forge/commit/ad46b72ae6721ad8f8e24a2728e33b4e23929a57))
+
 ## [1.21.0](https://github.com/JNZader/javi-forge/compare/v1.20.0...v1.21.0) (2026-08-10)
 
 ### Features

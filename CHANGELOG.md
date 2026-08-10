@@ -1,3 +1,9 @@
+## [1.15.0](https://github.com/JNZader/javi-forge/compare/v1.14.0...v1.15.0) (2026-08-10)
+
+### Features
+
+* **ci:** per-gate timeout + end-to-end JSON seam test (GATE-2, GATE-3) ([#13](https://github.com/JNZader/javi-forge/issues/13)) ([41f4bd5](https://github.com/JNZader/javi-forge/commit/41f4bd5b56341efd182429955e82a249f4d6ae63))
+
 ## [1.14.0](https://github.com/JNZader/javi-forge/compare/v1.13.0...v1.14.0) (2026-08-10)
 
 ### Features

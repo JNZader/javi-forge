@@ -991,6 +991,23 @@ describe("runGateNative", () => {
 			runGateNative("kill -SEGV $$", tmpDir, envWithPath()),
 		).resolves.toBe(128 + os.constants.signals.SIGSEGV);
 	});
+
+	it("kills a command that exceeds its timeout and resolves NON-ZERO (never a false-green 0)", async () => {
+		// A hung command (sleep 10) with timeout: 1 must be SIGTERM-killed. The kill
+		// makes close report code=null → the signal-death path maps it to 128+SIGTERM
+		// (143). It MUST NOT resolve 0 — a timed-out gate is a FAILURE.
+		const code = await runGateNative("sleep 10", tmpDir, envWithPath(), 1);
+		expect(code).not.toBe(0);
+		expect(code).toBe(128 + os.constants.signals.SIGTERM);
+	}, 10000);
+
+	it("does NOT kill a command that finishes under its timeout (timer cleared, no hang)", async () => {
+		// Finishes well under the 5s budget; the timer must be cleared so the test
+		// process is not held open by a dangling handle.
+		await expect(
+			runGateNative("exit 0", tmpDir, envWithPath(), 5),
+		).resolves.toBe(0);
+	});
 });
 
 // =============================================================================
@@ -1054,6 +1071,69 @@ gates:
 		expect(
 			steps.some((s) => s.id === "gate:signalled" && s.status === "error"),
 		).toBe(true);
+	});
+
+	it("fails the build when a blocking gate exceeds its timeout (no false-green)", async () => {
+		// A blocking gate that hangs must be killed on timeout expiry and fail the
+		// build — the timeout-kill rides the signal-death path (null code → 143),
+		// never resolving 0. Keep the sleep SHORT via timeout: 1.
+		await writeConfig(`
+version: 2
+gates:
+  - id: hang
+    run: sleep 10
+    timeout: 1
+`);
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s })),
+		).rejects.toThrow(/blocking gate\(s\) failed: hang/);
+
+		expect(
+			steps.some((s) => s.id === "gate:hang" && s.status === "error"),
+		).toBe(true);
+	}, 10000);
+
+	it("informative gate timeout → warning, exit 0, later gates still run", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: soft-hang
+    run: sleep 10
+    timeout: 1
+    mode: informative
+  - id: after
+    run: echo ran >> marker.txt
+`);
+		const steps: CIStep[] = [];
+		// No throw — an informative timed-out gate degrades to a warning.
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		expect(
+			steps.some((s) => s.id === "gate:soft-hang" && s.status === "warning"),
+		).toBe(true);
+		expect(
+			await fs.readFile(path.join(tmpDir, "marker.txt"), "utf-8"),
+		).toContain("ran");
+	}, 10000);
+
+	it("a gate that finishes under its timeout reports done normally", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: quick-gate
+    run: echo fast >> marker.txt
+    timeout: 30
+`);
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		expect(
+			steps.some((s) => s.id === "gate:quick-gate" && s.status === "done"),
+		).toBe(true);
+		expect(
+			await fs.readFile(path.join(tmpDir, "marker.txt"), "utf-8"),
+		).toContain("fast");
 	});
 
 	it("defers the blocking throw until AFTER later gates report (ordering guarantee)", async () => {

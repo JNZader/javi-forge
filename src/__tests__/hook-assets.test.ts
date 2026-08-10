@@ -54,9 +54,10 @@ const RELEASED_SNAPSHOT: Record<
 		],
 	},
 	"pre-push": {
-		sha256: "7de58640aeef33085a49f31f1d9d0c8bacde0069d6d3265ae41aa8d3cd14d7a5",
+		sha256: "3dad58303d81fc513a35339083438a78aa483fcd28e3377f006bd26e8ce76a6d",
 		historical: [
 			"7de58640aeef33085a49f31f1d9d0c8bacde0069d6d3265ae41aa8d3cd14d7a5",
+			"3dad58303d81fc513a35339083438a78aa483fcd28e3377f006bd26e8ce76a6d",
 		],
 	},
 	"commit-msg": {
@@ -70,12 +71,12 @@ const RELEASED_SNAPSHOT: Record<
 
 /**
  * Expected shipped `version` per hook. Bumped in lockstep with a body change:
- * commit-msg is at v2 (hooks-ricos Slice A); the others remain v1 until their
- * own slice bumps them.
+ * commit-msg is at v2 (hooks-ricos Slice A) and pre-push is at v2 (hooks-ricos
+ * Slice B); pre-commit remains v1 until its own slice bumps it.
  */
 const EXPECTED_VERSION: Record<HookName, number> = {
 	"pre-commit": 1,
-	"pre-push": 1,
+	"pre-push": 2,
 	"commit-msg": 2,
 };
 

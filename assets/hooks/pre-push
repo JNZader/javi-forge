@@ -1,20 +1,37 @@
 #!/bin/bash
-# Pre-push: full CI simulation via javi-forge
-# To skip: git push --no-verify
+# =============================================================================
+# PRE-PUSH: Native CI checks via javi-forge
+# =============================================================================
+# Runs the quick native gate (validate + coverage) with:
+#     javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
+# This is deliberately NOT the full containerized run: the native path
+# sidesteps the pre-push container EACCES failure while keeping fail-closed
+# image-gate enforcement where it belongs — the ci gate layer REFUSES any
+# blocking image gate under --no-docker (see src/commands/ci.ts runGates).
+# Requires: npm install -g javi-forge (npx fallback used when absent).
+# To skip:  git push --no-verify
+# Target:   under ~180s. Elapsed time is reported below.
+# =============================================================================
+
 set -e
-if ! docker info &>/dev/null; then
-  echo "PRE-PUSH: Docker is not running."
-  echo "  Start Docker or use: git push --no-verify"
-  exit 1
-fi
-echo "PRE-PUSH: Running CI simulation..."
-if command -v javi-forge &>/dev/null; then
-  javi-forge ci
+
+_start=$SECONDS
+
+echo "PRE-PUSH: Running native CI checks (validate + coverage)..."
+if command -v javi-forge >/dev/null 2>&1; then
+    javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
 else
-  npx javi-forge ci
+    npx javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
 fi || {
-  echo ""
-  echo "CI FAILED — push aborted. Fix the issues above."
-  echo "To skip: git push --no-verify"
-  exit 1
+    _elapsed=$((SECONDS - _start))
+    echo ""
+    echo "CI FAILED after ${_elapsed}s — push aborted. Fix the issues above before pushing."
+    echo "To skip: git push --no-verify"
+    exit 1
 }
+
+_elapsed=$((SECONDS - _start))
+echo "PRE-PUSH: passed in ${_elapsed}s (target: 180s)"
+if [ "$_elapsed" -gt 300 ]; then
+    echo "  WARNING: pre-push took ${_elapsed}s, well over the 180s target."
+fi

@@ -27,9 +27,13 @@ jobs:
       # ci-mixed.integration.test.ts exercises the real ci pipeline, whose
       # backend runner requires ruff from PATH. GitHub's ubuntu-latest image
       # does not include it, so install it before running the suite.
+      # Install from PyPI (checksummed, pinned) via preinstalled pipx instead
+      # of `curl | sh` (semgrep gha-curl-pipe-shell): piping a remote script
+      # to a shell runs arbitrary code if astral.sh is compromised/hijacked.
+      # pipx drops the ruff shim in ~/.local/bin, already added to PATH below.
       - name: Install ruff (required tool for integration tests)
         run: |
-          curl -LsSf https://astral.sh/ruff/install.sh | sh
+          pipx install ruff==0.15.6
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: pnpm build
       - run: pnpm test

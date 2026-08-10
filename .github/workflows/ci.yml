@@ -27,9 +27,13 @@ jobs:
       # ci-mixed-integration.test.ts expects the real ruff from PATH (the
       # backend runner declares it in requires). Before the mixed-stack
       # integration tests, previous green runs predated that test.
+      # Install from PyPI (checksummed, pinned) via preinstalled pipx instead
+      # of `curl | sh` (semgrep gha-curl-pipe-shell): piping a remote script
+      # to a shell runs arbitrary code if astral.sh is compromised/hijacked.
+      # pipx drops the ruff shim in ~/.local/bin, already added to PATH below.
       - name: Install ruff (from integration tests)
         run: |
-          curl -LsSf https://astral.sh/ruff/install.sh | sh
+          pipx install ruff==0.15.6
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - run: pnpm build

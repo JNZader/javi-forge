@@ -26,6 +26,8 @@ export interface CIValidateGateSummary {
 	id: string;
 	mode: string;
 	scope: string;
+	/** Container image ref, present ONLY when the gate declares one. */
+	image?: string;
 }
 
 export interface CIValidateOk {
@@ -107,6 +109,9 @@ export async function validateCIConfig(
 				id: g.id,
 				mode: g.mode,
 				scope: g.scope,
+				// Surface `image` ONLY when declared, so an image-less gate summary
+				// stays byte-identical to today (no `image` key).
+				...(g.image !== undefined ? { image: g.image } : {}),
 			})),
 		};
 	} catch (e) {

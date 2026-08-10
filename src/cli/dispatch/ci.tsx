@@ -69,8 +69,10 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 				if (gates.length > 0) {
 					console.log(`  ${gates.length} gate(s):`);
 					for (const gate of gates) {
+						const image =
+							gate.image !== undefined ? `, image: ${gate.image}` : "";
 						console.log(
-							`    - ${gate.id} (${gate.mode}, scope: ${gate.scope})`,
+							`    - ${gate.id} (${gate.mode}, scope: ${gate.scope}${image})`,
 						);
 					}
 				}

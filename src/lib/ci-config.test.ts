@@ -497,6 +497,52 @@ describe("parseCIConfig — gates schema", () => {
 		const tErr = errors.find((x) => x.path === "gates[0].timeout");
 		expect(tErr?.message).toMatch(/positive/);
 	});
+
+	// -------------------------------------------------------------------------
+	// gate.image (containerized-gates slice 1 — schema only)
+	// -------------------------------------------------------------------------
+
+	it("accepts an optional non-empty image and marks the gate containerized", () => {
+		const config = parseCIConfig(
+			V2(
+				"gates:\n  - id: audit\n    run: echo a\n    image: ghcr.io/acme/tool@sha256:abc",
+			),
+		);
+		expect(config.gates?.[0]?.image).toBe("ghcr.io/acme/tool@sha256:abc");
+	});
+
+	it("defaults image to undefined when omitted (native gate)", () => {
+		const config = parseCIConfig(V2("gates:\n  - id: g\n    run: echo a"));
+		expect(config.gates?.[0]?.image).toBeUndefined();
+	});
+
+	it("rejects an empty image with a named gates[N].image error", () => {
+		const errors: CIConfigValidationError[] = [];
+		validateGates([{ id: "g", run: "echo a", image: "   " }], errors);
+		const imgErr = errors.find((x) => x.path === "gates[0].image");
+		expect(imgErr?.message).toMatch(/non-empty string/);
+	});
+
+	it("rejects a non-string image with a named gates[N].image error", () => {
+		const errors: CIConfigValidationError[] = [];
+		validateGates([{ id: "g", run: "echo a", image: 42 }], errors);
+		const imgErr = errors.find((x) => x.path === "gates[0].image");
+		expect(imgErr?.message).toMatch(/non-empty string/);
+	});
+
+	it("rejects a leading-dash image (docker-flag injection, JDB-004)", () => {
+		const errors: CIConfigValidationError[] = [];
+		validateGates([{ id: "g", run: "echo a", image: "--privileged" }], errors);
+		const imgErr = errors.find((x) => x.path === "gates[0].image");
+		expect(imgErr?.message).toMatch(/docker flag|start with '-'/);
+	});
+
+	it("rejects a leading-dash image after trimming surrounding whitespace", () => {
+		const errors: CIConfigValidationError[] = [];
+		validateGates([{ id: "g", run: "echo a", image: "  -v /:/host" }], errors);
+		const imgErr = errors.find((x) => x.path === "gates[0].image");
+		expect(imgErr?.message).toMatch(/docker flag|start with '-'/);
+	});
 });
 
 // =============================================================================

@@ -336,3 +336,9 @@ therefore invisible until someone runs the command by hand.
 > reinstall remedy) instead of an unnamed `TypeError` raised later inside
 > `isReleasedBody`. Two RED-first tests added in `src/commands/ci-hooks.test.ts`
 > ("installCIHooks manifest failures"); sibling hooks still install.
+
+### IMG-1 — Image-ref hardening: trim + leading-dash guard on the RUNNER path too
+- **Source**: containerized-gates slice-1 judgment-day (JDA-001/JDB-B01, JDB-B02).
+- **What**: (a) `gate.image` (and `runner.image`) are validated on the trimmed value but STORED untrimmed — a whitespace-surrounded ref reaches docker argv untrimmed → "invalid reference format" at run time instead of a clean validation error. Store `.trim()`ed for early/clear failure. (b) The RUNNER `image` validation (ci-config.ts:259-269) has NO leading-dash guard — a runner `image: "--privileged"` / `-v /:/host` would be injected as a docker run FLAG (the exact flag-injection vector the gate path now guards at ci-config.ts:437). Apply the same leading-dash guard to `runner.image`.
+- **Threat model**: trust-bounded (the ci.yaml author already has host code-exec), so defense-in-depth / consistency, not an escalation. Do gate + runner together so the two paths stay consistent.
+- **Suggested fix**: one shared `validateImageRef(value, path)` helper used by both runner and gate validation (trim + non-empty + leading-dash reject), returning the trimmed value to store.

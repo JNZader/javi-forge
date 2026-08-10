@@ -145,6 +145,44 @@ describe("validateCIConfig", () => {
 		}
 	});
 
+	it("surfaces a gate's image in the summary when declared", async () => {
+		await writeConfig(
+			"version: 2\ngates:\n  - id: audit\n    run: echo a\n    image: ghcr.io/acme/tool@sha256:abc",
+		);
+
+		const result = await validateCIConfig(tmpDir);
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.gates).toEqual([
+				{
+					id: "audit",
+					mode: "blocking",
+					scope: "all",
+					image: "ghcr.io/acme/tool@sha256:abc",
+				},
+			]);
+		}
+	});
+
+	it("omits image from the summary for a v2 gate without image (byte-identical)", async () => {
+		await writeConfig(
+			"version: 2\ngates:\n  - id: coverage\n    run: echo cover\n    mode: informative",
+		);
+
+		const result = await validateCIConfig(tmpDir);
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.gates[0]).not.toHaveProperty("image");
+			expect(result.gates[0]).toEqual({
+				id: "coverage",
+				mode: "informative",
+				scope: "all",
+			});
+		}
+	});
+
 	it("reports an empty runners list", async () => {
 		await writeConfig("version: 1\nrunners: []");
 

@@ -97,6 +97,10 @@ export function getDockerfileContent(stack: Stack): string {
 	switch (stack) {
 		case "java-gradle":
 		case "java-maven":
+			// Java is intentionally NOT digest-pinned: the JAVA_VERSION build
+			// arg lets the user pick a JDK version, so a per-version digest
+			// can't be hardcoded. The ci-local.sh/.ps1 heredocs leave it
+			// floating too, keeping the dockerfile-hash cache consistent.
 			return [
 				"ARG JAVA_VERSION=21",
 				"FROM eclipse-temurin:${JAVA_VERSION}-jdk-noble",
@@ -109,7 +113,7 @@ export function getDockerfileContent(stack: Stack): string {
 
 		case "node":
 			return [
-				"FROM node:22-slim",
+				"FROM node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb",
 				"RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*",
 				// Pin pnpm to major 10 to match ci.yml (pnpm/action-setup version:
 				// 10) and the lockfileVersion 9.0 lockfile. Unpinned drifts to
@@ -123,7 +127,7 @@ export function getDockerfileContent(stack: Stack): string {
 
 		case "python":
 			return [
-				"FROM python:3.12-slim",
+				"FROM python:3.12-slim@sha256:401f6e1a67dad31a1bd78e9ad22d0ee0a3b52154e6bd30e90be696bb6a3d7461",
 				"RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*",
 				"RUN pip install --no-cache-dir pytest ruff pylint poetry",
 				"RUN useradd -m -s /bin/bash runner",
@@ -134,7 +138,7 @@ export function getDockerfileContent(stack: Stack): string {
 
 		case "go":
 			return [
-				"FROM golang:1.23-bookworm",
+				"FROM golang:1.23-bookworm@sha256:167053a2bb901972bf2c1611f8f52c44d5fe7e762e5cab213708d82c421614db",
 				"RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*",
 				"RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0 && mv /root/go/bin/golangci-lint /usr/local/bin/",
 				"RUN useradd -m -s /bin/bash runner",
@@ -145,7 +149,7 @@ export function getDockerfileContent(stack: Stack): string {
 
 		case "rust":
 			return [
-				"FROM rust:1.83-slim",
+				"FROM rust:1.83-slim@sha256:540c902e99c384163b688bbd8b5b8520e94e7731b27f7bd0eaa56ae1960627ab",
 				"RUN apt-get update && apt-get install -y git pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*",
 				"RUN rustup component add clippy rustfmt",
 				"RUN useradd -m -s /bin/bash runner",
@@ -156,7 +160,7 @@ export function getDockerfileContent(stack: Stack): string {
 
 		default:
 			return [
-				"FROM ubuntu:24.04",
+				"FROM ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b",
 				"RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*",
 				"RUN useradd -m -s /bin/bash runner",
 				"USER runner",

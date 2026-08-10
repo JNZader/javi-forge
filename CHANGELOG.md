@@ -1,3 +1,9 @@
+## [1.22.3](https://github.com/JNZader/javi-forge/compare/v1.22.2...v1.22.3) (2026-08-10)
+
+### Bug Fixes
+
+* **security:** harden consumer templates + engram installer (audit Phase 3) ([#33](https://github.com/JNZader/javi-forge/issues/33)) ([c052156](https://github.com/JNZader/javi-forge/commit/c05215666e6beff7ab00e18e60bf83bbdb68903c))
+
 ## [1.22.2](https://github.com/JNZader/javi-forge/compare/v1.22.1...v1.22.2) (2026-08-10)
 
 ### Bug Fixes

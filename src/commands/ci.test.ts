@@ -955,48 +955,46 @@ describe("runGateNative", () => {
 	const envWithPath = () => ({ PATH: process.env.PATH ?? "" });
 
 	it("resolves the child exit code (0) without throwing on success", async () => {
-		await expect(runGateNative("exit 0", tmpDir, envWithPath())).resolves.toBe(
-			0,
-		);
+		expect((await runGateNative("exit 0", tmpDir, envWithPath())).code).toBe(0);
 	});
 
 	it("resolves a non-zero exit code instead of throwing", async () => {
-		await expect(runGateNative("exit 3", tmpDir, envWithPath())).resolves.toBe(
-			3,
-		);
+		expect((await runGateNative("exit 3", tmpDir, envWithPath())).code).toBe(3);
 	});
 
 	it("delivers env via the process env map, never string-spliced into the command", async () => {
 		// The value lives ONLY in the env map — a passing `test` builtin proves the
 		// child received it through the environment, not via the `run` string.
-		await expect(
-			runGateNative('[ "$GATE_TOKEN" = "s3-secret" ]', tmpDir, {
-				...envWithPath(),
-				GATE_TOKEN: "s3-secret",
-			}),
-		).resolves.toBe(0);
+		expect(
+			(
+				await runGateNative('[ "$GATE_TOKEN" = "s3-secret" ]', tmpDir, {
+					...envWithPath(),
+					GATE_TOKEN: "s3-secret",
+				})
+			).code,
+		).toBe(0);
 	});
 
 	it("maps signal death to a non-zero code (never a false-green 0)", async () => {
 		// The child terminates by SIGTERM → close reports code=null. A null code
 		// MUST NOT be resolved as 0 (success); the shell convention 128+signum
 		// yields 143 for SIGTERM. Against the old `code ?? 0` this returned 0.
-		await expect(
-			runGateNative("kill -TERM $$", tmpDir, envWithPath()),
-		).resolves.toBe(128 + os.constants.signals.SIGTERM);
+		expect(
+			(await runGateNative("kill -TERM $$", tmpDir, envWithPath())).code,
+		).toBe(128 + os.constants.signals.SIGTERM);
 	});
 
 	it("maps a fatal SIGSEGV to a non-zero code", async () => {
-		await expect(
-			runGateNative("kill -SEGV $$", tmpDir, envWithPath()),
-		).resolves.toBe(128 + os.constants.signals.SIGSEGV);
+		expect(
+			(await runGateNative("kill -SEGV $$", tmpDir, envWithPath())).code,
+		).toBe(128 + os.constants.signals.SIGSEGV);
 	});
 
 	it("kills a command that exceeds its timeout and resolves NON-ZERO (the timeout sentinel 124)", async () => {
 		// A hung command (sleep 10) with timeout: 1 must be SIGTERM-killed. The
 		// `timedOut` flag overrides the child's reported code with the timeout
 		// sentinel 124 — it MUST NOT resolve 0 — a timed-out gate is a FAILURE.
-		const code = await runGateNative("sleep 10", tmpDir, envWithPath(), 1);
+		const { code } = await runGateNative("sleep 10", tmpDir, envWithPath(), 1);
 		expect(code).not.toBe(0);
 		expect(code).toBe(124);
 	}, 10000);
@@ -1004,9 +1002,9 @@ describe("runGateNative", () => {
 	it("does NOT kill a command that finishes under its timeout (timer cleared, no hang)", async () => {
 		// Finishes well under the 5s budget; the timer must be cleared so the test
 		// process is not held open by a dangling handle.
-		await expect(
-			runGateNative("exit 0", tmpDir, envWithPath(), 5),
-		).resolves.toBe(0);
+		expect((await runGateNative("exit 0", tmpDir, envWithPath(), 5)).code).toBe(
+			0,
+		);
 	});
 
 	it("resolves NON-ZERO (124) when a timed-out gate traps SIGTERM and exits 0 gracefully", async () => {
@@ -1019,7 +1017,7 @@ describe("runGateNative", () => {
 		// interruptible `wait` and the trap actually FIRES → the child exits 0 before
 		// the SIGKILL escalation. A foreground `sleep` would defer the trap and get
 		// SIGKILLed instead, which never exercises the false-green.
-		const code = await runGateNative(
+		const { code } = await runGateNative(
 			"trap 'exit 0' TERM; sleep 10 & wait",
 			tmpDir,
 			envWithPath(),
@@ -1035,7 +1033,7 @@ describe("runGateNative", () => {
 		// process cannot trap. The child is force-killed (it does not leak) and the
 		// executor resolves the timeout sentinel 124 (timedOut supersedes the
 		// 137=128+SIGKILL signal code). Allow ~4s for the 1s timeout + 2s grace.
-		const code = await runGateNative(
+		const { code } = await runGateNative(
 			"trap '' TERM; sleep 10",
 			tmpDir,
 			envWithPath(),
@@ -1044,6 +1042,29 @@ describe("runGateNative", () => {
 		expect(code).not.toBe(0);
 		expect(code).toBe(124);
 	}, 6000);
+
+	// R3-004 (OBSERVABILITY): the result must carry a REAL `timedOut` signal so a
+	// wall-clock timeout is distinguishable from a child that itself exits 124.
+	it("reports timedOut:true (with code 124) when the wall-clock timeout fires", async () => {
+		const result = await runGateNative("sleep 10", tmpDir, envWithPath(), 1);
+		expect(result.timedOut).toBe(true);
+		expect(result.code).toBe(124);
+	}, 10000);
+
+	it("reports timedOut:false when the child genuinely exits 124 (no timeout)", async () => {
+		// A child that returns 124 on its own (curl op-timeout, nested timeout(1), a
+		// script returning 124) is NOT a wall-clock timeout — timedOut MUST be false
+		// so the two 124s stay distinguishable.
+		const result = await runGateNative("exit 124", tmpDir, envWithPath());
+		expect(result.code).toBe(124);
+		expect(result.timedOut).toBe(false);
+	});
+
+	it("reports timedOut:false for a normal non-zero exit under a generous timeout", async () => {
+		const result = await runGateNative("exit 124", tmpDir, envWithPath(), 30);
+		expect(result.code).toBe(124);
+		expect(result.timedOut).toBe(false);
+	});
 });
 
 // =============================================================================
@@ -1714,6 +1735,65 @@ gates:
 		expect(gate?.status).toBe("skipped");
 		expect(gate?.reason).toMatch(/no changed files/i);
 	});
+
+	// R3-004 (OBSERVABILITY): a wall-clock timeout and a child that itself exits
+	// 124 both yield exitCode 124 (correctness is fine — both are non-zero, both
+	// fail a blocking gate) but the JSON consumer must be able to tell them apart:
+	// a timed-out gate carries a `reason` naming the timeout; a genuine 124 does
+	// NOT. Otherwise "bump the timeout" vs "fix the command" is unknowable.
+	it("blocking timeout carries a `timed out` reason alongside exitCode 124", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: hang
+    run: sleep 10
+    timeout: 1
+`);
+		const result = await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		expect(result.ok).toBe(false);
+		expect(result.exitCode).toBe(1);
+		const gate = result.gates.find((g) => g.id === "hang");
+		expect(gate?.status).toBe("error");
+		expect(gate?.exitCode).toBe(124);
+		expect(gate?.reason).toMatch(/timed out/i);
+	}, 10000);
+
+	it("a child that genuinely exits 124 has NO timeout reason (the two 124s are distinguishable)", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: real124
+    run: exit 124
+    timeout: 30
+`);
+		const result = await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		const gate = result.gates.find((g) => g.id === "real124");
+		expect(gate?.status).toBe("error");
+		expect(gate?.exitCode).toBe(124);
+		// Same status + exitCode as the timeout case, but NO timeout reason.
+		expect(gate?.reason).toBeUndefined();
+	});
+
+	it("informative timeout carries the reason too (warning, exitCode 124, build stays green)", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: soft-hang
+    run: sleep 10
+    timeout: 1
+    mode: informative
+`);
+		const result = await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		expect(result.ok).toBe(true);
+		expect(result.exitCode).toBe(0);
+		const gate = result.gates.find((g) => g.id === "soft-hang");
+		expect(gate?.status).toBe("warning");
+		expect(gate?.exitCode).toBe(124);
+		expect(gate?.reason).toMatch(/timed out/i);
+	}, 10000);
 });
 
 // =============================================================================

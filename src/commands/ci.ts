@@ -1101,6 +1101,19 @@ function filterDefinedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 }
 
 /**
+ * Result of a single host-native gate command. `code` is the resolved exit code
+ * (a timed-out command resolves the `timeout(1)` sentinel 124); `timedOut` is
+ * `true` IFF the internal wall-clock `killTimer` fired. The flag exists so a
+ * caller can tell a wall-clock timeout apart from a child that itself exits 124
+ * (a `curl` op-timeout, a nested `timeout(1)`, a script returning 124) — both
+ * carry `code: 124`, but only a real timeout carries `timedOut: true` (R3-004).
+ */
+export interface GateRunResult {
+	code: number;
+	timedOut: boolean;
+}
+
+/**
  * Execute a single gate command HOST-NATIVE via `bash -c`, at the repo root,
  * with the provided env MAP. Modeled on `runSemgrep`/`runGhagga` (a spawned
  * process, NOT `runStep`'s Docker branch — gates have no runner or image).
@@ -1137,8 +1150,8 @@ export async function runGateNative(
 	cwd: string,
 	env: Record<string, string>,
 	timeoutSec?: number,
-): Promise<number> {
-	return await new Promise<number>((resolve, reject) => {
+): Promise<GateRunResult> {
+	return await new Promise<GateRunResult>((resolve, reject) => {
 		const proc = spawn("bash", ["-c", cmd], { cwd, env, stdio: "inherit" });
 		let killTimer: NodeJS.Timeout | undefined;
 		let graceTimer: NodeJS.Timeout | undefined;
@@ -1168,19 +1181,25 @@ export async function runGateNative(
 				// INVARIANT: timedOut ⇒ non-zero, ALWAYS. Even a child that trapped the
 				// SIGTERM and exited 0 before the SIGKILL escalation is a timeout, not a
 				// pass. Resolve the GNU `timeout(1)` sentinel 124 ("command timed out"),
-				// semantically distinct from a signal-death 143/137.
-				resolve(GATE_TIMEOUT_EXIT_CODE);
+				// semantically distinct from a signal-death 143/137. The `timedOut` flag
+				// travels with the code so the caller can tell a wall-clock timeout apart
+				// from a child that itself exits 124 (both are 124, but only one is a
+				// timeout — R3-004 observability).
+				resolve({ code: GATE_TIMEOUT_EXIT_CODE, timedOut: true });
 				return;
 			}
 			if (code !== null) {
-				resolve(code);
+				resolve({ code, timedOut: false });
 				return;
 			}
 			// Signal death: map to a non-zero code so the collector records a
 			// blocking failure. `128 + signum` mirrors the shell; fall back to 1
 			// when the signal name is not resolvable.
 			const signum = signal ? os.constants.signals[signal] : undefined;
-			resolve(signum !== undefined ? 128 + signum : 1);
+			resolve({
+				code: signum !== undefined ? 128 + signum : 1,
+				timedOut: false,
+			});
 		});
 		proc.on("error", (e) => {
 			clearTimers();
@@ -1231,10 +1250,12 @@ export interface GateOutcome {
 	/** First non-zero command code for a failed gate. */
 	exitCode?: number;
 	/**
-	 * Human-readable cause of a degrade/skip, surfaced so the headless JSON
-	 * consumer sees the degrade LOUDLY — not just in the Ink stream. Populated for
-	 * the scope:changed skip variants: base ref null, changed-file resolution
-	 * failure (shallow clone / missing ref), and the empty changed-set skip.
+	 * Human-readable cause of a degrade/skip/timeout, surfaced so the headless
+	 * JSON consumer sees it LOUDLY — not just in the Ink stream. Populated for the
+	 * scope:changed skip variants (base ref null, changed-file resolution failure
+	 * under a shallow clone / missing ref, empty changed-set skip) AND for a gate
+	 * that timed out (so a 124 wall-clock kill is distinguishable from a command
+	 * that itself exits 124).
 	 */
 	reason?: string;
 }
@@ -1373,13 +1394,21 @@ async function runGates(
 		}
 
 		let exitCode = 0;
+		let timedOut = false;
 		let spawnError: unknown;
 		try {
 			for (const cmd of gate.run) {
 				// timeout is per-command (matches the fail-fast model): each command
 				// gets its own wall-clock budget. A timed-out command is killed and
 				// resolves non-zero, so fail-fast stops the gate here.
-				exitCode = await runGateNative(cmd, projectDir, gateEnv, gate.timeout);
+				const result = await runGateNative(
+					cmd,
+					projectDir,
+					gateEnv,
+					gate.timeout,
+				);
+				exitCode = result.code;
+				timedOut = result.timedOut;
 				if (exitCode !== 0) break; // fail-fast: skip the remaining commands
 			}
 		} catch (e) {
@@ -1392,12 +1421,24 @@ async function runGates(
 			continue;
 		}
 
+		// R3-004: a timed-out gate carries a `reason` naming the timeout so the
+		// JSON/dashboard consumer can distinguish "this gate timed out (bump the
+		// timeout)" from "the command failed with 124 (fix the command)". A
+		// non-timeout failure leaves `reason` undefined. Never key on the 124 value
+		// itself — that IS the ambiguity; only the real `timedOut` signal disambiguates.
+		const timeoutReason = timedOut
+			? `timed out after ${gate.timeout}s`
+			: undefined;
 		const detail =
 			spawnError !== undefined ? String(spawnError) : `exit ${exitCode}`;
 		if (blocking) {
 			blockingFailures.push(gate.id);
 			report(onStep, stepId, `${label} failed`, "error", detail);
-			emit("error", { changedFiles: gateChangedFiles, exitCode });
+			emit("error", {
+				changedFiles: gateChangedFiles,
+				exitCode,
+				reason: timeoutReason,
+			});
 		} else {
 			report(
 				onStep,
@@ -1406,7 +1447,11 @@ async function runGates(
 				"warning",
 				detail,
 			);
-			emit("warning", { changedFiles: gateChangedFiles, exitCode });
+			emit("warning", {
+				changedFiles: gateChangedFiles,
+				exitCode,
+				reason: timeoutReason,
+			});
 		}
 	}
 

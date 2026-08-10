@@ -192,6 +192,12 @@ gates use `runGateNative`. `DockerRunOptions.env`/`-e` plumbing was intentionall
 - Status: explicitly OUT OF SCOPE for v2 (spec: ci-gates "Gate execution phase and outcome semantics").
 - Suggested fix: design gate-image resolution (per-gate `image`/`build-context` + env plumbing into
   the container layer) as its own change if a Dockerized gate is ever needed.
+- **CLOSED 2026-08-10** — shipped as the full `containerized-gates` SDD (PRs #15 schema / #16
+  routing+env-allowlist+host-timeout / #17 fail-closed matrix, archived
+  `openspec/changes/archive/2026-08-10-containerized-gates/`). Optional `gate.image` runs a gate in a
+  pinned container via the host-uid runner path; env reaches it through an explicit allowlist (host
+  secrets excluded); timeout enforced host-side (`docker stop`, no false-green); fail-closed when
+  Docker is unavailable. Reframed from "exotic toolchain" to reproducibility/discipline (M8).
 
 ### GATE-2 — No per-gate timeout (JDB-002) — CLOSED
 
@@ -243,6 +249,13 @@ subdirectory in a monorepo must relativize the paths itself; the engine does NOT
 - Status: documented in `tasks.md` Notes, not solved.
 - Suggested fix: decide whether to inject a per-gate cwd-relative variant, or document the caveat as
   permanent.
+- **CLOSED 2026-08-10** (PR #22) — added `$JAVI_FORGE_CHANGED_FILES_ABS` (absolute-path variant), so a
+  gate resolves changed files from any working directory. A literal "cwd-relative" variant is
+  impossible for the engine (a gate picks its cwd at runtime); the cwd-INDEPENDENT form is absolute
+  paths. The base is context-dependent: native gates get `<projectDir>/<relpath>`, containerized gates
+  get `/home/runner/work/<relpath>` (the bind-mount target, sourced from a shared `CONTAINER_WORKDIR`
+  constant so it can't drift). Judgment-day caught + fixed the container-base bug. Follow-up still open:
+  a per-gate `workdir` field (deferred design).
 
 ### GATE-5 — Newline-in-path corruption in changed-file injection (JDB-103)
 
@@ -252,6 +265,13 @@ line-based parsing by the gate.
 - Status: documented KNOWN LIMITATION (spec ci-gates "Gate-run JSON output" + code comment
   `src/commands/ci.ts`). Low-likelihood edge, accepted caveat.
 - Suggested fix: switch to NUL-joining (`$JAVI_FORGE_CHANGED_FILES_Z`) if a real repo ever hits it.
+- **CLOSED 2026-08-10** (PR #22) — the suggested NUL-joining fix is **IMPOSSIBLE**: a NUL byte in an
+  env value is undeliverable — Node throws `ERR_INVALID_ARG_VALUE: "must be a string without null
+  bytes"` for a NUL in both a spawn env-map value AND a `-e KEY=VALUE` argv element (execve `environ`
+  entries are NUL-terminated C strings). Injecting `_Z` would crash every `scope: changed` gate at
+  spawn. Documented as impossible in code + spec; NOT shipped. The only viable path is a temp-file
+  variant, deferred as over-engineering for this pathological, never-observed edge. The newline-in-path
+  limitation remains a documented known caveat.
 
 ### GATE-6 — Timed-out gate indistinguishable from a genuine 124 (R3-004) — CLOSED
 
@@ -359,6 +379,13 @@ therefore invisible until someone runs the command by hand.
 - **What**: (a) `gate.image` (and `runner.image`) are validated on the trimmed value but STORED untrimmed — a whitespace-surrounded ref reaches docker argv untrimmed → "invalid reference format" at run time instead of a clean validation error. Store `.trim()`ed for early/clear failure. (b) The RUNNER `image` validation (ci-config.ts:259-269) has NO leading-dash guard — a runner `image: "--privileged"` / `-v /:/host` would be injected as a docker run FLAG (the exact flag-injection vector the gate path now guards at ci-config.ts:437). Apply the same leading-dash guard to `runner.image`.
 - **Threat model**: trust-bounded (the ci.yaml author already has host code-exec), so defense-in-depth / consistency, not an escalation. Do gate + runner together so the two paths stay consistent.
 - **Suggested fix**: one shared `validateImageRef(value, path)` helper used by both runner and gate validation (trim + non-empty + leading-dash reject), returning the trimmed value to store.
+- **CLOSED 2026-08-10** (PR #23) — shipped exactly the suggested fix: a shared
+  `validateImageRef(value, fieldPath, errors)` in `src/lib/ci-config.ts` used by BOTH `runner.image`
+  and `gate.image` — rejects non-string / empty-after-trim, rejects leading-dash-after-trim
+  (docker-flag-injection guard the runner path lacked), and stores the trimmed value. Risk-lens review
+  clean (the image reaches `spawn` as a single argv element, no shell re-split → leading-dash is the
+  only flag vector, blocked). RED-first tests: runner `--privileged` now rejected; whitespace-padded
+  refs stored trimmed.
 
 ### PREPUSH-EACCES — RESOLVED (real root cause: unpinned pnpm in the runner image)
 - **Status**: CLOSED 2026-08-10 (branch `fix/pin-pnpm-runner-image`). The original
@@ -422,7 +449,7 @@ therefore invisible until someone runs the command by hand.
   package (no postinstall needed), so build+tests run fine. No action required.
 
 ### STALE-GLOBAL-CLI — the local pre-push runs an OLD globally-installed `javi-forge`
-- **Status**: ROOT-CAUSED 2026-08-10, evidence-confirmed. This is the REAL reason
+- **Status**: RESOLVED 2026-08-10 (root-caused + fixed + validated). This was the REAL reason
   every push this session used `--no-verify`, and it retracts a wrong intermediate
   hypothesis ("`ensureImage` doesn't rebuild on Dockerfile change" — FALSE; ensureImage
   correctly rebuilds when the Dockerfile `dockerfile-hash` label differs, docker.ts:241-260).
@@ -452,3 +479,11 @@ therefore invisible until someone runs the command by hand.
   (`node dist/index.js ci` / the workspace binary) over a possibly-stale global install, so a
   repo's own committed runner assets always win. Design decision — a global CLI is also a
   legitimate choice; don't change the hook contract without intent.
+- **RESOLUTION 2026-08-10**: (1) user ran `npm i -g javi-forge@latest` → global now 1.21.2+;
+  validated by running `javi-forge ci` (containerized) to full green — ensureImage rebuilt a pnpm@10
+  image, all phases passed. Subsequent pushes went through with the pre-push ENABLED (no `--no-verify`,
+  ~70s each). (2) Code-side hardening shipped in **PR #27**: `javi-forge ci` now prefers the repo-local
+  `ci-local/docker/${stack}.Dockerfile` over the CLI's bundled copy (per-stack, no write-through), so a
+  stale global's bundled Dockerfiles no longer override a repo's committed runner assets. The "prefer
+  repo-local BINARY" variant above stays deferred (it's a hook-contract change; the Dockerfile-level
+  fix covered the class that actually bit us).

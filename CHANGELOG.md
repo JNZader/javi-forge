@@ -1,3 +1,9 @@
+## [1.21.2](https://github.com/JNZader/javi-forge/compare/v1.21.1...v1.21.2) (2026-08-10)
+
+### Bug Fixes
+
+* **ci:** pin pnpm@10 in all node-runner images (PREPUSH-EACCES real root cause) ([#24](https://github.com/JNZader/javi-forge/issues/24)) ([72a96be](https://github.com/JNZader/javi-forge/commit/72a96bec6ea11a6cc69138afb82117f2a3c8bad1))
+
 ## [1.21.1](https://github.com/JNZader/javi-forge/compare/v1.21.0...v1.21.1) (2026-08-10)
 
 ### Bug Fixes

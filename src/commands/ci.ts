@@ -1118,11 +1118,16 @@ function filterDefinedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
  *
  * TIMEOUT (GATE-2): when `timeoutSec` is set, a command still running after that
  * many wall-clock seconds is killed — SIGTERM first, escalated to SIGKILL after a
- * short grace if it ignores SIGTERM. The kill lands the child on the signal-death
- * path above, so a timed-out gate ALWAYS resolves NON-ZERO (143 for SIGTERM, 137
- * for SIGKILL) and NEVER a false-green 0. Timers are cleared on `close`/`error`
- * so no dangling handle keeps the process alive. Omitting `timeoutSec` preserves
- * the pre-GATE-2 behavior exactly (no timer, runs to completion).
+ * short grace if it ignores SIGTERM. A `timedOut` flag is set BEFORE the SIGTERM
+ * lands, and on `close` it OVERRIDES the child's reported code with the timeout
+ * sentinel 124 — REGARDLESS of what the child reported. This closes the false-green
+ * where a child that TRAPS SIGTERM and exits 0 gracefully (dev servers, watchers,
+ * SIGTERM-handling CLIs) would otherwise resolve 0 and PASS a timed-out blocking
+ * gate. INVARIANT: `timedOut ⇒ non-zero, ALWAYS` (124, the GNU `timeout(1)`
+ * convention — distinct from a signal-death 143/137). Timers are cleared on
+ * `close`/`error` so no dangling handle keeps the process alive. Omitting
+ * `timeoutSec` preserves the pre-GATE-2 behavior exactly (no timer, runs to
+ * completion).
  *
  * Env values arrive as discrete map entries — never string-spliced into the
  * `bash -c` command — so metacharacters in a value cannot break out of the shell.
@@ -1137,15 +1142,20 @@ export async function runGateNative(
 		const proc = spawn("bash", ["-c", cmd], { cwd, env, stdio: "inherit" });
 		let killTimer: NodeJS.Timeout | undefined;
 		let graceTimer: NodeJS.Timeout | undefined;
+		let timedOut = false;
 		const clearTimers = () => {
 			if (killTimer !== undefined) clearTimeout(killTimer);
 			if (graceTimer !== undefined) clearTimeout(graceTimer);
 		};
 		if (timeoutSec !== undefined) {
 			killTimer = setTimeout(() => {
+				// The wall-clock budget expired: mark the run as timed out BEFORE the
+				// SIGTERM lands. A child that traps SIGTERM and exits 0 gracefully would
+				// otherwise report code=0 → a false-green; the `timedOut` flag overrides
+				// that below so a timed-out gate is ALWAYS a FAILURE.
+				timedOut = true;
 				// Ask politely, then force: SIGKILL if the child is still alive after
-				// the grace window. The kill rides the null-code signal-death path so
-				// a timed-out gate is a FAILURE, never a false-green.
+				// the grace window.
 				proc.kill("SIGTERM");
 				graceTimer = setTimeout(() => {
 					proc.kill("SIGKILL");
@@ -1154,6 +1164,14 @@ export async function runGateNative(
 		}
 		proc.on("close", (code, signal) => {
 			clearTimers();
+			if (timedOut) {
+				// INVARIANT: timedOut ⇒ non-zero, ALWAYS. Even a child that trapped the
+				// SIGTERM and exited 0 before the SIGKILL escalation is a timeout, not a
+				// pass. Resolve the GNU `timeout(1)` sentinel 124 ("command timed out"),
+				// semantically distinct from a signal-death 143/137.
+				resolve(GATE_TIMEOUT_EXIT_CODE);
+				return;
+			}
 			if (code !== null) {
 				resolve(code);
 				return;
@@ -1173,6 +1191,14 @@ export async function runGateNative(
 
 /** Grace between the timeout SIGTERM and the escalated SIGKILL. */
 const GATE_TIMEOUT_GRACE_MS = 2000;
+
+/**
+ * Exit code resolved for a timed-out gate, regardless of how the child died.
+ * 124 is the GNU `timeout(1)` convention for "command timed out" — semantically
+ * distinct from a signal-death 143 (SIGTERM) / 137 (SIGKILL), and it CANNOT be a
+ * false-green because it is non-zero. Enforces `timedOut ⇒ non-zero, always`.
+ */
+const GATE_TIMEOUT_EXIT_CODE = 124;
 
 /**
  * Env var carrying a scope:changed gate's newline-joined, root-relative paths.

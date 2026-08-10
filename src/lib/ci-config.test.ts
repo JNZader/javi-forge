@@ -4,9 +4,11 @@ import fs from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	CIConfigError,
+	type CIConfigValidationError,
 	findCIConfig,
 	loadCIConfig,
 	parseCIConfig,
+	validateGates,
 } from "./ci-config.js";
 
 // =============================================================================
@@ -474,6 +476,26 @@ describe("parseCIConfig — gates schema", () => {
 			const tErr = err.errors.find((x) => x.path === "gates[0].timeout");
 			expect(tErr?.message).toMatch(/positive/);
 		}
+	});
+
+	// The `!Number.isFinite` guard rejects Infinity/NaN, which cannot be expressed
+	// in YAML source but CAN arrive as a parsed JS number. Construct the gate object
+	// directly (post-YAML-parse) to exercise the finite boundary.
+	it("rejects timeout: Infinity with a named error (finite boundary)", () => {
+		const errors: CIConfigValidationError[] = [];
+		validateGates(
+			[{ id: "g", run: "echo a", timeout: Number.POSITIVE_INFINITY }],
+			errors,
+		);
+		const tErr = errors.find((x) => x.path === "gates[0].timeout");
+		expect(tErr?.message).toMatch(/positive/);
+	});
+
+	it("rejects timeout: NaN with a named error (finite boundary)", () => {
+		const errors: CIConfigValidationError[] = [];
+		validateGates([{ id: "g", run: "echo a", timeout: Number.NaN }], errors);
+		const tErr = errors.find((x) => x.path === "gates[0].timeout");
+		expect(tErr?.message).toMatch(/positive/);
 	});
 });
 

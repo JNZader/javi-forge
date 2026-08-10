@@ -186,15 +186,22 @@ spawned `bash -c` process.
   schema (`CIGateConfig.timeout`, `src/lib/ci-config.ts`), validated in `validateGate` with a named
   `gates[N].timeout` error for `0`/negative/non-number (added to `GATE_FIELDS`). `runGateNative`
   gained a `timeoutSec?` param: on expiry it kills the child SIGTERM-then-SIGKILL after a 2s grace,
-  and clears both timers on `close`/`error` so no handle leaks. The kill lands the child on the
-  EXISTING slice-3 signal-death path (null code → `128 + signal`), so a timed-out BLOCKING gate
-  resolves NON-ZERO (143 SIGTERM / 137 SIGKILL) and FAILS the build — verified never a false-green
-  0; an INFORMATIVE timeout degrades to `warning`, exit 0. Timeout is PER COMMAND (matches
-  fail-fast). A gate with no `timeout` is byte-for-byte unchanged (no timer). Reflected in
-  `openspec/specs/ci-gates/spec.md` (schema requirement + validation scenario + 3 execution
-  scenarios). Tests: `src/lib/ci-config.test.ts` (accept/omit/0/-5/"x"), `src/commands/ci.test.ts`
-  (`runGateNative` timeout-kill → 143 + finishes-under-timeout; `runGates` blocking-timeout fails,
-  informative-timeout warns, under-timeout done).
+  and clears both timers on `close`/`error` so no handle leaks. Timeout is PER COMMAND (matches
+  fail-fast). A gate with no `timeout` is byte-for-byte unchanged (no timer).
+- **FALSE-GREEN FIX (R3-001, reliability review 2026-08-09)**: the original close-handler relied on
+  the signal-death path (`code ?? 128+signal`), but a child that TRAPS SIGTERM and exits 0 gracefully
+  BEFORE the SIGKILL escalation reports `code=0, signal=null` → resolved 0 → a timed-out BLOCKING gate
+  FALSE-GREENED the build (exactly the command class most likely to carry a timeout: dev servers /
+  watchers / SIGTERM-handling CLIs). Fix: a `timedOut` flag set BEFORE the SIGTERM lands; on `close`
+  it OVERRIDES the child's reported code with the `timeout(1)` sentinel `124` regardless of what the
+  child reported. INVARIANT now enforced: `timed-out ⇒ non-zero, ALWAYS` (`124`, distinct from a
+  signal-death 143/137). Docstring at `ci.ts` corrected (previously over-promised). An INFORMATIVE
+  timeout still degrades to `warning`, exit 0. Reflected in `openspec/specs/ci-gates/spec.md` (updated
+  narrative + new trap-exit-0 no-false-green scenario). Tests: `src/lib/ci-config.test.ts`
+  (accept/omit/0/-5/"x" + Infinity/NaN finite-boundary), `src/commands/ci.test.ts` (`runGateNative`
+  timeout-kill → 124, trap-exit-0-`& wait` → 124 [was the false-green], IGNORES-SIGTERM SIGKILL
+  escalation → 124, finishes-under-timeout; `runGates` blocking-timeout fails, blocking trap-exit-0
+  fails, informative-timeout warns, under-timeout done).
 
 ### GATE-3 — Missing end-to-end dispatch→collector→process.exit seam test (JDB-102) — CLOSED
 

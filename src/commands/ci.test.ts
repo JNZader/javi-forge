@@ -992,13 +992,13 @@ describe("runGateNative", () => {
 		).resolves.toBe(128 + os.constants.signals.SIGSEGV);
 	});
 
-	it("kills a command that exceeds its timeout and resolves NON-ZERO (never a false-green 0)", async () => {
-		// A hung command (sleep 10) with timeout: 1 must be SIGTERM-killed. The kill
-		// makes close report code=null → the signal-death path maps it to 128+SIGTERM
-		// (143). It MUST NOT resolve 0 — a timed-out gate is a FAILURE.
+	it("kills a command that exceeds its timeout and resolves NON-ZERO (the timeout sentinel 124)", async () => {
+		// A hung command (sleep 10) with timeout: 1 must be SIGTERM-killed. The
+		// `timedOut` flag overrides the child's reported code with the timeout
+		// sentinel 124 — it MUST NOT resolve 0 — a timed-out gate is a FAILURE.
 		const code = await runGateNative("sleep 10", tmpDir, envWithPath(), 1);
 		expect(code).not.toBe(0);
-		expect(code).toBe(128 + os.constants.signals.SIGTERM);
+		expect(code).toBe(124);
 	}, 10000);
 
 	it("does NOT kill a command that finishes under its timeout (timer cleared, no hang)", async () => {
@@ -1008,6 +1008,42 @@ describe("runGateNative", () => {
 			runGateNative("exit 0", tmpDir, envWithPath(), 5),
 		).resolves.toBe(0);
 	});
+
+	it("resolves NON-ZERO (124) when a timed-out gate traps SIGTERM and exits 0 gracefully", async () => {
+		// R3-001 (CRITICAL false-green): a command that traps SIGTERM and exits 0
+		// BEFORE the SIGKILL escalation reports close code=0, signal=null. Without a
+		// timedOut override that resolves 0 → a timed-out BLOCKING gate PASSES the
+		// build — the exact false-green GATE-2 exists to prevent. The timedOut flag
+		// MUST override the child's reported 0 with the timeout sentinel 124.
+		// `sleep 10 & wait` (not a foreground `sleep`) so the SIGTERM interrupts the
+		// interruptible `wait` and the trap actually FIRES → the child exits 0 before
+		// the SIGKILL escalation. A foreground `sleep` would defer the trap and get
+		// SIGKILLed instead, which never exercises the false-green.
+		const code = await runGateNative(
+			"trap 'exit 0' TERM; sleep 10 & wait",
+			tmpDir,
+			envWithPath(),
+			1,
+		);
+		expect(code).not.toBe(0);
+		expect(code).toBe(124);
+	}, 10000);
+
+	it("force-kills (SIGKILL) a command that IGNORES SIGTERM and still resolves NON-ZERO", async () => {
+		// R3-002 (escalation path): a command that IGNORES SIGTERM survives the
+		// SIGTERM at ~1s; the 2s grace timer then escalates to SIGKILL, which the
+		// process cannot trap. The child is force-killed (it does not leak) and the
+		// executor resolves the timeout sentinel 124 (timedOut supersedes the
+		// 137=128+SIGKILL signal code). Allow ~4s for the 1s timeout + 2s grace.
+		const code = await runGateNative(
+			"trap '' TERM; sleep 10",
+			tmpDir,
+			envWithPath(),
+			1,
+		);
+		expect(code).not.toBe(0);
+		expect(code).toBe(124);
+	}, 6000);
 });
 
 // =============================================================================
@@ -1091,6 +1127,28 @@ gates:
 
 		expect(
 			steps.some((s) => s.id === "gate:hang" && s.status === "error"),
+		).toBe(true);
+	}, 10000);
+
+	it("fails the build when a blocking gate traps SIGTERM and exits 0 on timeout (no false-green)", async () => {
+		// R3-001 (CRITICAL): a blocking gate whose command traps SIGTERM and exits 0
+		// gracefully on the timeout kill MUST still fail the build. Without the
+		// timedOut override the child's reported 0 marks the gate `done` and the
+		// build FALSE-GREENS. Keep the sleep SHORT via timeout: 1.
+		await writeConfig(`
+version: 2
+gates:
+  - id: graceful-hang
+    run: "trap 'exit 0' TERM; sleep 10 & wait"
+    timeout: 1
+`);
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s })),
+		).rejects.toThrow(/blocking gate\(s\) failed: graceful-hang/);
+
+		expect(
+			steps.some((s) => s.id === "gate:graceful-hang" && s.status === "error"),
 		).toBe(true);
 	}, 10000);
 

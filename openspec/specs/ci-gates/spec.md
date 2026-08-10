@@ -102,11 +102,13 @@ precedent); that first non-zero code is the gate's reported `exitCode`.
 
 When a gate declares an optional `timeout` (seconds), the timeout applies PER COMMAND (wall-clock,
 matching the fail-fast model). A command still running after its timeout MUST be killed (SIGTERM,
-escalated to SIGKILL after a short grace if the child ignores SIGTERM). A killed command reports a
-NULL exit code, which the executor maps to a NON-ZERO code (`128 + signal`); a timed-out gate
-therefore MUST resolve non-zero and MUST NOT be reported as passing. A timed-out BLOCKING gate MUST
-fail the build; a timed-out INFORMATIVE gate MUST degrade to a `warning` and MUST NOT fail the build.
-A gate without `timeout` MUST run to completion with no timer (backward-compatible).
+escalated to SIGKILL after a short grace if the child ignores SIGTERM). Once the timeout has fired,
+the executor MUST resolve a NON-ZERO exit code REGARDLESS of what the child reports — INCLUDING a
+child that traps SIGTERM and exits 0 gracefully before the SIGKILL escalation. The invariant is
+`timed-out ⇒ non-zero, ALWAYS`; the executor resolves the `timeout(1)` sentinel `124`. A timed-out
+gate therefore MUST NOT be reported as passing. A timed-out BLOCKING gate MUST fail the build; a
+timed-out INFORMATIVE gate MUST degrade to a `warning` and MUST NOT fail the build. A gate without
+`timeout` MUST run to completion with no timer (backward-compatible).
 
 The gate phase MUST run on every real CI run — both full mode and `--quick` mode — and MUST be
 skipped ONLY in `detect` and `shell` modes. A blocking gate MUST NOT be silently skipped under
@@ -141,6 +143,12 @@ skipped ONLY in `detect` and `shell` modes. A blocking gate MUST NOT be silently
 - GIVEN a `blocking` gate with `timeout: 1` whose command hangs (e.g. `sleep 10`)
 - WHEN the gate phase runs
 - THEN the command is killed on expiry, the gate resolves NON-ZERO (never 0), and the build FAILS
+
+#### Scenario: timed-out gate that traps SIGTERM and exits 0 still fails (no false-green)
+
+- GIVEN a `blocking` gate with `timeout: 1` whose command traps SIGTERM and exits 0 before SIGKILL
+- WHEN the gate phase runs
+- THEN the timeout override resolves NON-ZERO (never the child's 0) and the build FAILS
 
 #### Scenario: informative gate timeout degrades to a warning
 

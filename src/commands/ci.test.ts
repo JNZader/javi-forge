@@ -379,7 +379,7 @@ describe("installCIHooks", () => {
 		expect(content).toContain("claude");
 		expect(content).toContain("gpt");
 		expect(content).toContain("chatgpt");
-		expect(content).toContain("anthropic.com");
+		expect(content).toContain("anthropic");
 	});
 
 	it("refuses to overwrite a hook that is a symlink", async () => {

@@ -1,3 +1,9 @@
+## [1.18.0](https://github.com/JNZader/javi-forge/compare/v1.17.0...v1.18.0) (2026-08-10)
+
+### Features
+
+* **ci:** fail-closed containerized gate matrix + docker-availability threading (containerized-gates slice 3/3) ([#17](https://github.com/JNZader/javi-forge/issues/17)) ([d594b54](https://github.com/JNZader/javi-forge/commit/d594b54f9be73fdeda7e83f1892ba956dfbc2922))
+
 ## [1.17.0](https://github.com/JNZader/javi-forge/compare/v1.16.0...v1.17.0) (2026-08-10)
 
 ### Features

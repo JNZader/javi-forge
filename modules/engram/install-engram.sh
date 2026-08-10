@@ -153,20 +153,31 @@ fi
 CHECKSUM_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
 if curl -fsSL -o "${TMP_DIR}/checksums.txt" "$CHECKSUM_URL" 2>/dev/null; then
     echo -e "${CYAN}Verifying checksum...${NC}"
+    CHECKSUM_RAN=false
     pushd "$TMP_DIR" > /dev/null
     if command -v sha256sum &>/dev/null; then
         sha256sum -c checksums.txt --ignore-missing || {
             echo -e "${RED}Checksum verification failed!${NC}"
             exit 1
         }
+        CHECKSUM_RAN=true
     elif command -v shasum &>/dev/null; then
         shasum -a 256 -c checksums.txt --ignore-missing || {
             echo -e "${RED}Checksum verification failed!${NC}"
             exit 1
         }
+        CHECKSUM_RAN=true
     fi
     popd > /dev/null
-    echo -e "${GREEN}Checksum verified${NC}"
+    if [[ "$CHECKSUM_RAN" == "true" ]]; then
+        echo -e "${GREEN}Checksum verified${NC}"
+    elif [[ "$NO_VERIFY" == "true" ]]; then
+        echo -e "${YELLOW}WARNING: neither sha256sum nor shasum found; skipping checksum verification (--no-verify)${NC}"
+    else
+        echo -e "${RED}Error: neither sha256sum nor shasum is available. Cannot verify download integrity.${NC}"
+        echo -e "${YELLOW}Install coreutils (sha256sum) or perl (shasum), or use --no-verify to skip verification (NOT RECOMMENDED).${NC}"
+        exit 1
+    fi
 else
     if [[ "$NO_VERIFY" == "true" ]]; then
         echo -e "${YELLOW}WARNING: Skipping checksum verification (--no-verify)${NC}"

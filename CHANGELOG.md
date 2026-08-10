@@ -1,3 +1,9 @@
+## [1.17.0](https://github.com/JNZader/javi-forge/compare/v1.16.0...v1.17.0) (2026-08-10)
+
+### Features
+
+* **ci:** containerized gate execution routing + env-allowlist (containerized-gates slice 2/3) ([#16](https://github.com/JNZader/javi-forge/issues/16)) ([5e21a04](https://github.com/JNZader/javi-forge/commit/5e21a0485126b8eb9329ac2e7ccf61167460b1fb))
+
 ## [1.16.0](https://github.com/JNZader/javi-forge/compare/v1.15.1...v1.16.0) (2026-08-10)
 
 ### Features

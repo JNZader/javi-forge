@@ -19,6 +19,15 @@ path emits bare ids (`lint`) for the same repository and the same commands.
 - Status: undocumented, untested, likely unintended.
 - Suggested fix: decide the desired behavior (bare ids for a single runner, or
   always suffixed), then pin it with a test so the two paths cannot drift again.
+- **CLOSED — shipped in PR #8** (`045bf86`, gates-v2 slice 1, "+ B1/B2"), confirmed on `main`
+  @ 2a00e451; this backlog entry was stale (line-refs predate the ci-engine-unification collapse).
+  The decision was made and is keyed on the PROVENANCE of the name, not runner count: **bare** ids
+  (`lint`) when the name is IMPLICIT (`auto` or `--stack`, `resolved.source` ∈ {auto, stack-override}),
+  **suffixed** (`lint:api`) when EXPLICIT (a `name:` in `ci.yaml`, `source === "config"`). Decided once
+  at `ci.ts:740-744`, applied at `ci.ts:1028`. A single-runner CONFIG correctly stays suffixed (the R3
+  guard — never rename on `runners.length`). Speced: `openspec/specs/ci-execution/spec.md` "Step-id and
+  label naming keyed on resolution source". Tested: `ci.test.ts` bare-`--stack` case + single-runner-
+  config counter-case + a table-driven bare/suffixed matrix.
 
 ### B2 — `ci --shell` ignores configured runners
 
@@ -31,6 +40,14 @@ Shell mode builds its image from the detected `stackInfo`, never from
 - Suggested fix: resolve the shell image from the selected runner's
   `image`/`buildContext` when present, falling back to detection only when the
   runner pins nothing; add a test for a repo with a pinned image.
+- **CLOSED — shipped in PR #8** (`045bf86`, gates-v2 slice 1, "+ B1/B2"), confirmed on `main`
+  @ 2a00e451; this entry was stale. Shell mode now mirrors the runner-loop image precedence
+  (`ci.ts:610-632`): explicit `runner.image` passed through verbatim → else `buildContext` →
+  `ensureImage` → else detected stack default. A repo pinning `image: python:3.12-slim` gets exactly
+  that in `--shell`, not the node default; `--stack python` in shell mode also picks the right stack.
+  Speced: `openspec/specs/ci-execution/spec.md` "Shell mode honors runner image and build context (B2)".
+  The "zero test coverage" claim is now false — `ci.test.ts` has a dedicated 3-case block (pinned image
+  verbatim / build-context built / no-pin stack-default fallback).
 
 ### B3 — Dead defensive defaults in the legacy single-runner view
 

@@ -233,6 +233,12 @@ Source: `openspec/changes/ci-engine-unification/design.md` (Coverage Guard) and
   a floor: the SDD's own gate is a same-run delta, not an absolute number.
 - Suggested fix: close the ~1.1pp gap as its own effort — target the least-covered
   branch clusters rather than blanket-adding tests. Do NOT lower the threshold.
+- **CLOSED 2026-08-09** — resolved incidentally by the test work in ci-validate,
+  ENV-1, and the four gates-v2 slices. Measured on `main` @ 44a9c53:
+  branches 2183/2709 = **80.58%** (≥ 80 floor), lines 3655/4074 = 89.71% (≥ 85);
+  `npx vitest run --coverage` now exits 0. Threshold NOT lowered — the gap closed
+  from above. (Ladder step, per biogas M3: raise the floor later when 80.58%
+  stops generating noise, not now.)
 
 ### COV-2 — `pnpm validate` does not run coverage, so the thresholds gate nothing
 
@@ -244,6 +250,13 @@ therefore invisible until someone runs the command by hand.
   `test:coverage`.
 - Suggested fix: decide whether to wire `test:coverage` into `validate`/CI ONCE
   COV-1 lands. Wiring it before COV-1 would close every PR with a red gate.
+- **CLOSED 2026-08-09** — wired into CI (`.github/workflows/ci.yml`: `pnpm test`
+  → `pnpm test:coverage`) now that COV-1 is met, so the 85/80 floor gates real
+  PRs. Deliberately NOT wired into local `pnpm validate`/git hooks: coverage
+  instrumentation on every pre-commit adds friction and the ±1-branch run jitter
+  (~0.04pp) against a 0.58pp margin could red-gate a clean local commit. The CI
+  gate has teeth; the local loop stays fast. This closes the "a floor no command
+  measures is a wish" gap flagged at the start of the quality-framework arc.
 
 ### SEC-1 — Hook write path: O_NOFOLLOW + fchmod (design-level hardening)
 - **Source**: judgment-day slice 3b, JDA7-003/JDA7-005/JDB7-008 (convergent, parked by decision).

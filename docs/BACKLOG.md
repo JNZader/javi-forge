@@ -158,6 +158,61 @@ to validate a CI config or discover `ci` flags.
 - Not touched (per scope): config schema, `src/lib/docker.ts`/container layer,
   hook installer.
 
+## 2026-08-09 — from SDD `gates-v2` (declarable named quality gates)
+
+Source: `openspec/changes/archive/2026-08-09-gates-v2/` (design.md, review-ledger.md,
+verify-report.md). All items are deferred follow-ups, NOT defects — the shipped v2 gate
+capability is complete and green. Promoted here for backlog visibility per the verify-report.
+
+### GATE-1 — Docker-per-gate execution (JDA-001)
+
+v2 gates run HOST-NATIVE only. Running a gate inside Docker needs gate-image resolution that a
+repo-level gate (no runner to inherit an image from) does not have. `runStep`'s Docker branch is
+structurally unusable for gates (needs runner+image, returns void — no exit code), which is WHY
+gates use `runGateNative`. `DockerRunOptions.env`/`-e` plumbing was intentionally dropped and
+`src/lib/docker.ts` was left untouched; `CIGateConfig` has no `image` field.
+
+- Status: explicitly OUT OF SCOPE for v2 (spec: ci-gates "Gate execution phase and outcome semantics").
+- Suggested fix: design gate-image resolution (per-gate `image`/`build-context` + env plumbing into
+  the container layer) as its own change if a Dockerized gate is ever needed.
+
+### GATE-2 — No per-gate timeout (JDB-002)
+
+A gate command that hangs blocks the whole run indefinitely; there is no timeout/kill on the spawned
+`bash -c` process.
+
+- Evidence: `runGateNative` in `src/commands/ci.ts` — no timeout wired.
+- Suggested fix: add an optional per-gate `timeout` field (seconds) and kill the child on expiry,
+  reporting a named `error` (blocking) / `warning` (informative).
+
+### GATE-3 — Missing end-to-end dispatch→collector→process.exit seam test (JDB-102)
+
+The headless `--json` gate-run path is unit-tested at the pieces (`collectGateOutcomes`, dispatch
+branch mocking the collector) but there is no single end-to-end test wiring the real dispatch →
+collector → `process.exit(result.exitCode)` seam.
+
+- Evidence: ledger slice-4 carry-forward; `src/cli/dispatch/ci.tsx:147-167`.
+- Suggested fix: add one integration test that runs the real headless branch and asserts the printed
+  object AND the process exit code together.
+
+### GATE-4 — Monorepo changed-files repo-root relativity
+
+`$JAVI_FORGE_CHANGED_FILES` paths are repo-root-relative (git native form). A gate running from a
+subdirectory in a monorepo must relativize the paths itself; the engine does NOT rewrite per-gate.
+
+- Status: documented in `tasks.md` Notes, not solved.
+- Suggested fix: decide whether to inject a per-gate cwd-relative variant, or document the caveat as
+  permanent.
+
+### GATE-5 — Newline-in-path corruption in changed-file injection (JDB-103)
+
+`$JAVI_FORGE_CHANGED_FILES` is newline-joined; a repo path containing a literal newline would corrupt
+line-based parsing by the gate.
+
+- Status: documented KNOWN LIMITATION (spec ci-gates "Gate-run JSON output" + code comment
+  `src/commands/ci.ts`). Low-likelihood edge, accepted caveat.
+- Suggested fix: switch to NUL-joining (`$JAVI_FORGE_CHANGED_FILES_Z`) if a real repo ever hits it.
+
 ## 2026-08-08 — from SDD `ci-engine-unification` slice 1 (measured coverage baseline)
 
 Source: `openspec/changes/ci-engine-unification/design.md` (Coverage Guard) and

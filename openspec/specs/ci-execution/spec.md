@@ -30,10 +30,16 @@ per-source executor MAY exist.
 
 ### Requirement: Step-id and label naming keyed on resolution source
 
-Naming MUST be a function of `resolved.source` ONLY. When `resolved.source === "auto"`, ids MUST be
+Naming MUST be a function of whether the runner NAME is IMPLICIT or EXPLICIT. The name is IMPLICIT
+when `resolved.source === "auto"` (zero-config detection) OR `resolved.source === "stack-override"`
+(`--stack`), because in both cases the user never named the runner. The name is EXPLICIT when
+`resolved.source === "config"` (a runner named in `ci.yaml`). When the name is IMPLICIT, ids MUST be
 bare (`lint`, `compile`, `test`) and labels MUST be unsuffixed (`Lint: <cmd>`, `Lint passed`,
-`Lint failed`). For any other source, ids MUST be `${phase}:${runner.name}` and labels MUST carry
-`[name]`. Naming MUST NOT be keyed on `runners.length` or any runner-count predicate.
+`Lint failed`). When the name is EXPLICIT, ids MUST be `${phase}:${runner.name}` and labels MUST
+carry `[name]`. Naming MUST NOT be keyed on `runners.length` or any runner-count predicate.
+(Previously: naming was keyed on `resolved.source` such that ONLY `auto` produced bare ids and
+`stack-override` produced suffixed ids; B1 flips `stack-override` to bare because its name is
+implicit.)
 
 #### Scenario: Auto emits bare ids
 
@@ -47,11 +53,11 @@ bare (`lint`, `compile`, `test`) and labels MUST be unsuffixed (`Lint: <cmd>`, `
 - WHEN `runCI` runs
 - THEN step ids are `lint:api`, `compile:api`, `test:api`
 
-#### Scenario: Stack override emits suffixed ids
+#### Scenario: Stack override emits bare ids (B1 fix)
 
 - GIVEN `--stack node` on a node repo (`resolved.source === "stack-override"`)
 - WHEN `runCI` runs
-- THEN ids are suffixed exactly as they are today (B1 is preserved, not fixed)
+- THEN step ids are bare `lint`, `compile`, `test` with no `:` suffix, because the name is implicit
 
 ### Requirement: Preserved step order
 
@@ -78,8 +84,13 @@ build MUST occur BEFORE the `.context/` refresh step (R5).
 
 The CLI contract MUST be unchanged: `--quick`, `--no-docker`, `--no-security`, `--no-ci-ghagga`,
 bare `javi-forge ci`, `detect` mode and `shell` mode keep their current names and semantics. Exit
-codes MUST be unchanged. No `ci.yaml` schema key MAY be added; schema version 1 stays locked and
-still rejects unknown keys.
+codes MUST be unchanged. Schema `version: 1` stays byte-locked and still rejects unknown keys.
+Schema `version: 2` is ADDITIVE (see the `ci-gates` capability): under `version: 2`, the `gates`
+key is permitted and `runners` is OPTIONAL when `gates` is present (a `version: 2` config with
+neither `runners` nor `gates` fails closed). The "no schema key MAY be added"
+rule applies to `version: 1` ONLY; it MUST NOT be read as forbidding the additive `version: 2`
+schema. (Previously: "No `ci.yaml` schema key MAY be added; schema version 1 stays locked and still
+rejects unknown keys." — that blanket lock is re-scoped here to v1, because v2 is additive.)
 
 #### Scenario: Hook-invoked flag set still works
 
@@ -87,6 +98,18 @@ still rejects unknown keys.
 - WHEN it runs
 - THEN docker-check, security and ghagga steps are suppressed exactly as before
 - AND a failing command yields the same non-zero exit code
+
+#### Scenario: version 1 stays locked
+
+- GIVEN a `version: 1` config with any unknown top-level key
+- WHEN it is parsed
+- THEN parsing fails closed exactly as before (v1 rejects unknown keys)
+
+#### Scenario: version 2 is additive
+
+- GIVEN a `version: 2` config that declares `gates` and no `runners`
+- WHEN it is parsed
+- THEN it is accepted (v2 permits `gates` and makes `runners` optional)
 
 #### Scenario: Detect mode emits only the detect step
 
@@ -147,3 +170,15 @@ it: the delta can pass while the configured threshold still fails.
 - GIVEN the legacy executor is deleted
 - WHEN `npx vitest run --coverage` is run on the merge-base tree and then on the slice head, same machine and same session
 - THEN head lines >= base lines AND head branches >= base branches, with the configured thresholds unchanged
+
+### Requirement: Shell mode honors runner image and build context (B2)
+
+When `ci --shell` targets a runner that pins an `image` or `build-context`, shell mode MUST use
+THAT image/build context, NOT the auto-detected stack default derived from the primary runner's
+stack type.
+
+#### Scenario: Shell uses the pinned runner image
+
+- GIVEN a runner with a pinned `image` (or `build-context`) distinct from the auto-detected stack default
+- WHEN `ci --shell` targets that runner
+- THEN the shell container is built from the pinned `image`/`build-context`, not the stack default

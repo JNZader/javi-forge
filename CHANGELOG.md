@@ -1,3 +1,9 @@
+## [1.20.0](https://github.com/JNZader/javi-forge/compare/v1.19.0...v1.20.0) (2026-08-10)
+
+### Features
+
+* **hooks:** native fail-closed pre-push — no docker probe, no degrade (hooks-ricos slice B) ([#20](https://github.com/JNZader/javi-forge/issues/20)) ([c673177](https://github.com/JNZader/javi-forge/commit/c67317796066d6a32c5206c71de0d552e05ff0e0))
+
 ## [1.19.0](https://github.com/JNZader/javi-forge/compare/v1.18.0...v1.19.0) (2026-08-10)
 
 ### Features

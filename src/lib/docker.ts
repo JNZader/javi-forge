@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import fs from "fs-extra";
 import type { Stack } from "../types/index.js";
 import { execFileAsync } from "./exec.js";
@@ -225,7 +226,7 @@ export async function ensureImage(
 		const dockerDir =
 			dockerfilesDir ??
 			path.join(
-				path.dirname(new URL(import.meta.url).pathname),
+				path.dirname(fileURLToPath(import.meta.url)),
 				"../../ci-local/docker",
 			);
 		dockerfilePath = path.join(dockerDir, `${stack}.Dockerfile`);

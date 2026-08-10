@@ -125,13 +125,6 @@ export async function isGitRepo(dir: string): Promise<boolean> {
 	return fs.pathExists(path.join(dir, ".git"));
 }
 
-/** Resolve the forge assets root (the package root directory) */
-export function getForgeRoot(): string {
-	// When running from dist/, go up one level
-	const thisDir = path.dirname(new URL(import.meta.url).pathname);
-	return path.resolve(thisDir, "..");
-}
-
 /** Stack display names */
 export const STACK_LABELS: Record<Stack, string> = {
 	node: "Node.js / TypeScript",

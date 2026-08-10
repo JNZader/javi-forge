@@ -1090,8 +1090,8 @@ async function runStep(options: RunStepOptions): Promise<void> {
 		}
 		const workdir =
 			runner.directory !== "."
-				? `/home/runner/work/${runner.directory}`
-				: "/home/runner/work";
+				? `${CONTAINER_WORKDIR}/${runner.directory}`
+				: CONTAINER_WORKDIR;
 		const result = await runInContainer({
 			projectDir,
 			image,

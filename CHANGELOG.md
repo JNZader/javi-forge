@@ -1,3 +1,9 @@
+## [1.22.1](https://github.com/JNZader/javi-forge/compare/v1.22.0...v1.22.1) (2026-08-10)
+
+### Bug Fixes
+
+* **ci:** install ruff via pinned pipx instead of curl-pipe-shell ([#28](https://github.com/JNZader/javi-forge/issues/28)) ([f2c9aa7](https://github.com/JNZader/javi-forge/commit/f2c9aa76528a8693a085551d141ab04fca4f140d)), closes [#25](https://github.com/JNZader/javi-forge/issues/25)
+
 ## [1.22.0](https://github.com/JNZader/javi-forge/compare/v1.21.2...v1.22.0) (2026-08-10)
 
 ### Features

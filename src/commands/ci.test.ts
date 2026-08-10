@@ -4,6 +4,7 @@ import fs from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOOK_ASSETS_DIR } from "../constants.js";
 import {
+	CONTAINER_WORKDIR,
 	ensureImage,
 	getImageName,
 	isDockerAvailable,
@@ -1993,9 +1994,13 @@ gates:
 		await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
 
 		const call = lastContainerCall();
+		// A containerized gate runs with the repo bind-mounted at CONTAINER_WORKDIR
+		// (docker.ts mount target + WORKDIR), NOT at the host projectDir. So the
+		// container _ABS base MUST be the mount target — `<CONTAINER_WORKDIR>/<relpath>`
+		// — otherwise the "absolute" path points at a non-existent host path in-container.
 		const expectedAbs = [
-			path.join(tmpDir, "src/a.ts"),
-			path.join(tmpDir, "src/b.ts"),
+			`${CONTAINER_WORKDIR}/src/a.ts`,
+			`${CONTAINER_WORKDIR}/src/b.ts`,
 		].join("\n");
 		expect(call?.env?.JAVI_FORGE_CHANGED_FILES_ABS).toBe(expectedAbs);
 		// The newline-joined variant is unchanged (backward compat).
@@ -2031,8 +2036,10 @@ gates:
 			const call = lastContainerCall();
 			expect(call?.env?.CI).toBe("true");
 			expect(call?.env?.JAVI_FORGE_CHANGED_FILES).toBe("src/a.ts");
+			// Container _ABS base is the mount target (CONTAINER_WORKDIR), NOT the host
+			// projectDir — cwd-independent resolution must hold INSIDE the container.
 			expect(call?.env?.JAVI_FORGE_CHANGED_FILES_ABS).toBe(
-				path.join(tmpDir, "src/a.ts"),
+				`${CONTAINER_WORKDIR}/src/a.ts`,
 			);
 			expect(call?.env?.JAVI_FORGE_BASELINE).toBe("base.json");
 			// _Z can never be delivered via -e (NUL) — absent from the allowlist.

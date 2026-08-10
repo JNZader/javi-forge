@@ -186,12 +186,18 @@ When a `scope: changed` gate runs, the engine MUST inject the changed-file set a
 variables, in the SAME order:
 - `JAVI_FORGE_CHANGED_FILES` — newline-joined, REPO-ROOT-RELATIVE paths (unchanged; backward
   compatible).
-- `JAVI_FORGE_CHANGED_FILES_ABS` — newline-joined ABSOLUTE paths (`<projectDir>/<relpath>`,
-  joined with the platform separator, no naive string concat). This is the cwd-INDEPENDENT form:
-  a gate that `cd`s into a subdirectory can still resolve every changed file. A "cwd-relative"
-  variant is intentionally NOT provided — at injection time the engine's cwd IS the repo root, so
-  it would merely duplicate the repo-root-relative variant, while a gate's own runtime cwd is
-  unknowable to the engine.
+- `JAVI_FORGE_CHANGED_FILES_ABS` — newline-joined ABSOLUTE paths, joined with the platform
+  separator (no naive string concat). This is the cwd-INDEPENDENT form: a gate that `cd`s into a
+  subdirectory can still resolve every changed file. A "cwd-relative" variant is intentionally NOT
+  provided — at injection time the engine's cwd IS the repo root, so it would merely duplicate the
+  repo-root-relative variant, while a gate's own runtime cwd is unknowable to the engine.
+  The absolute BASE is CONTEXT-DEPENDENT — the same var NAME resolves in the gate's own execution
+  context: on the NATIVE path the base is the host project dir (`<projectDir>/<relpath>`, native
+  cwd = repo root); on the CONTAINER path the base is the mount target `/home/runner/work`
+  (`/home/runner/work/<relpath>`), because a containerized gate runs with the repo bind-mounted
+  there — the host project dir does not exist inside the container. A single host-absolute value
+  does NOT resolve on both paths; the value differs by execution mode so it is valid wherever the
+  gate reads it.
 
 Neither variable is set for a gate whose `scope` is not `changed`. A NUL-joined variant
 (`JAVI_FORGE_CHANGED_FILES_Z`) is intentionally NOT provided on EITHER the native or the
@@ -206,8 +212,11 @@ newline corrupts line-based parsing — therefore stands; a gate needing absolut
 
 - GIVEN a `scope: changed` gate, a resolvable base ref, and a non-empty changed-file set
 - WHEN the gate command runs
-- THEN `JAVI_FORGE_CHANGED_FILES_ABS` is present with each file as an absolute path
-  (`<projectDir>/<relpath>`), newline-joined, in the SAME order as `JAVI_FORGE_CHANGED_FILES`
+- THEN `JAVI_FORGE_CHANGED_FILES_ABS` is present with each file as an absolute path, newline-joined,
+  in the SAME order as `JAVI_FORGE_CHANGED_FILES`
+- AND on a NATIVE gate the base is the host project dir (`<projectDir>/<relpath>`), while on a
+  CONTAINER gate the base is the mount target (`/home/runner/work/<relpath>`) — the same var name,
+  resolvable in each execution context
 
 #### Scenario: changed-file variants absent when scope is not changed
 
@@ -434,7 +443,8 @@ every `scope: changed` gate at spawn time, so it is omitted entirely rather than
   `JAVI_FORGE_BASELINE` are present in its environment, injected as env pairs and never spliced
   into the command
 - AND `JAVI_FORGE_CHANGED_FILES_ABS` holds the same files as `JAVI_FORGE_CHANGED_FILES`, in the
-  same order, each as an absolute path
+  same order, each as an absolute path whose base is the CONTAINER mount target
+  (`/home/runner/work/<relpath>`) — NOT the host project dir, which does not exist in-container
 - AND `JAVI_FORGE_CHANGED_FILES_Z` is ABSENT (a NUL value cannot be delivered via `-e`)
 
 #### Scenario: containerized gate does NOT receive an arbitrary host env var

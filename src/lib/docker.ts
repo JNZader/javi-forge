@@ -6,6 +6,19 @@ import type { Stack } from "../types/index.js";
 import { execFileAsync } from "./exec.js";
 
 // =============================================================================
+// Constants
+// =============================================================================
+
+/**
+ * The in-container path the repo is bind-mounted at (and the WORKDIR gates run
+ * from). This is the SINGLE source of truth for the mount target: the `--mount`
+ * bind target below and the container-side `JAVI_FORGE_CHANGED_FILES_ABS` base
+ * in ci.ts MUST reference this same constant so they can never drift — the
+ * container absolute-path invariant is "abs base === mount target".
+ */
+export const CONTAINER_WORKDIR = "/home/runner/work";
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -348,7 +361,7 @@ export async function runInContainer(
 		"",
 		...(runAsUser ? ["--user", runAsUser] : []),
 		"--mount",
-		`type=bind,source=${projectDir},target=/home/runner/work`,
+		`type=bind,source=${projectDir},target=${CONTAINER_WORKDIR}`,
 		...envArgs,
 		imageName,
 		"bash",
@@ -456,13 +469,13 @@ export async function openShell(
 				...(runAsUser ? ["--user", runAsUser] : []),
 				// --mount is colon-safe; see runInContainer for the rationale.
 				"--mount",
-				`type=bind,source=${projectDir},target=/home/runner/work`,
+				`type=bind,source=${projectDir},target=${CONTAINER_WORKDIR}`,
 				"-e",
 				"CI=true",
 				imageName,
 				"bash",
 				"-c",
-				"cd /home/runner/work && exec bash",
+				`cd ${CONTAINER_WORKDIR} && exec bash`,
 			],
 			{ stdio: "inherit" },
 		);

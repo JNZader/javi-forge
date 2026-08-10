@@ -1576,12 +1576,12 @@ async function runGates(
 		// SAME relpaths in the SAME order, newline-joined, only for scope:changed
 		// (gateChangedFiles defined). path.join for native normalizes a trailing
 		// slash; the container form is a POSIX join under a known-absolute root.
-		const nativeAbs =
-			gateChangedFiles &&
-			gateChangedFiles.map((rel) => path.join(projectDir, rel)).join("\n");
-		const containerAbs =
-			gateChangedFiles &&
-			gateChangedFiles.map((rel) => `${CONTAINER_WORKDIR}/${rel}`).join("\n");
+		const nativeAbs = gateChangedFiles
+			?.map((rel) => path.join(projectDir, rel))
+			.join("\n");
+		const containerAbs = gateChangedFiles
+			?.map((rel) => `${CONTAINER_WORKDIR}/${rel}`)
+			.join("\n");
 		const nativeEnv: Record<string, string> = {
 			...baseEnv,
 			...injected,

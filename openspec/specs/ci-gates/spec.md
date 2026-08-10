@@ -238,6 +238,16 @@ A degraded/skipped `scope: changed` gate MUST carry an optional per-gate `reason
 loud-degrade (base ref null, changed-file resolution failure under a shallow clone, or empty changed
 set) is visible to the JSON consumer and not only in the Ink stream.
 
+The same optional `reason` field MUST ALSO disambiguate a timed-out gate from a command that itself
+exits 124. A gate that fails because its wall-clock `timeout` fired MUST carry `reason` naming the
+timeout (e.g. `timed out after Ns`) on BOTH the blocking (`status: "error"`) and informative
+(`status: "warning"`) outcomes; its `exitCode` stays the `timeout(1)` sentinel `124`. A gate whose
+command genuinely exits 124 WITHOUT timing out MUST report the SAME `status`/`exitCode` but MUST NOT
+carry a timeout `reason`. The disambiguation MUST key on the executor's real `timedOut` signal, NEVER
+on the 124 value itself — that value is exactly the ambiguity. A consumer can therefore tell "bump the
+timeout" (timeout `reason` present) from "fix the command" (no timeout `reason`) even though both
+outcomes share `exitCode: 124`.
+
 KNOWN LIMITATION: the changed-file set injected to a gate via `$JAVI_FORGE_CHANGED_FILES` is
 newline-joined; a repo path containing a literal newline would corrupt line-based parsing. This is a
 low-likelihood edge and is accepted as a documented caveat rather than switching to NUL-joining.
@@ -260,6 +270,16 @@ low-likelihood edge and is accepted as a documented caveat rather than switching
 - GIVEN a `scope: changed` gate whose changed-file computation fails (shallow clone), `--json` set
 - WHEN the gate phase completes
 - THEN the gate entry has `status: "skipped"` AND a `reason` naming the degrade cause
+
+#### Scenario: timed-out gate is distinguishable from a genuine 124 in JSON
+
+- GIVEN two blocking gates, `--json` set: one hangs under `timeout: 1` (wall-clock timeout) and one
+  runs `exit 124` under a generous `timeout`
+- WHEN the gate phase completes
+- THEN both gate entries have `status: "error"` and `exitCode: 124`, BUT only the timed-out gate
+  carries a `reason` matching `timed out`; the genuine-124 gate carries NO timeout `reason`
+- AND an informative gate that times out carries the same `reason` with `status: "warning"` while the
+  build stays green
 
 #### Scenario: top-level exitCode exposes a runner failure despite ok:true
 

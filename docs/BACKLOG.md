@@ -236,6 +236,32 @@ line-based parsing by the gate.
   `src/commands/ci.ts`). Low-likelihood edge, accepted caveat.
 - Suggested fix: switch to NUL-joining (`$JAVI_FORGE_CHANGED_FILES_Z`) if a real repo ever hits it.
 
+### GATE-6 — Timed-out gate indistinguishable from a genuine 124 (R3-004) — CLOSED
+
+The GATE-2 timeout resolves the `timeout(1)` sentinel `124` for a timed-out gate (correctly
+non-zero), but `runGateNative` returned a BARE number, so `runGates`/the `--json` consumer saw
+`exitCode === 124` and could NOT tell a wall-clock timeout from a child that itself exits 124
+(a `curl` op-timeout, a nested `timeout(1)`, a script returning 124). Correctness was fine (both
+are non-zero, both fail a blocking gate) — this was an OBSERVABILITY gap: "bump the timeout" vs
+"fix the command" was unknowable from the outcome.
+
+- Evidence: `runGateNative`/`runGates` in `src/commands/ci.ts`; `GateOutcome` JSON contract.
+- **CLOSED 2026-08-09**: `runGateNative` now returns `GateRunResult { code: number; timedOut: boolean }`
+  instead of a bare number; `timedOut` is `true` IFF the internal `killTimer` fired. `runGates` reads
+  `.code`/`.timedOut` and, on a timeout, populates the existing optional `GateOutcome.reason`
+  (`timed out after Ns`) on BOTH the blocking (`error`) and informative (`warning`) emits; a
+  non-timeout failure leaves `reason` undefined. The disambiguation keys on the REAL `timedOut` signal,
+  NEVER on the 124 value (that IS the ambiguity). `reason` flows verbatim into the `--json`
+  `gates[]` entry, so a consumer now distinguishes a timed-out gate
+  (`{status, exitCode:124, reason:"timed out after Ns"}`) from a genuine-124 child (same status +
+  exitCode, NO timeout reason). Exit code stays `124`. Reflected in `openspec/specs/ci-gates/spec.md`
+  (outcome-shape narrative + new "timed-out gate is distinguishable from a genuine 124" scenario).
+  Tests: `src/commands/ci.test.ts` — `runGateNative` timedOut:true on wall-clock timeout, timedOut:false
+  on `exit 124` (with and without a generous timeout); `collectGateOutcomes` blocking-timeout carries
+  `timed out` reason + exitCode 124, genuine `exit 124` has NO reason (the two 124s distinguishable),
+  informative-timeout carries the reason (warning, exit 0). All prior `runGateNative` direct-return
+  tests updated to read `.code`.
+
 ## 2026-08-08 — from SDD `ci-engine-unification` slice 1 (measured coverage baseline)
 
 Source: `openspec/changes/ci-engine-unification/design.md` (Coverage Guard) and

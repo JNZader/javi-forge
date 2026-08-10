@@ -30,64 +30,71 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# ─── Normalización ──────────────────────────────────────────────────
-# Si perl falla (no instalado, módulo Unicode::Normalize ausente), el
-# normalize retorna el mensaje crudo. El loop de patrones igual matchea
-# contra RAW_MSG, así que perl roto degrada pero no abre todo.
+# ─── Normalization ──────────────────────────────────────────────────
+# If perl fails (not installed, Unicode::Normalize module absent), normalize
+# returns the raw message. The pattern loop still matches against RAW_MSG, so a
+# broken perl degrades gracefully but does not open everything up.
 normalize_msg() {
     if ! command -v perl >/dev/null 2>&1; then
         printf "%s" "$1"
         return
     fi
-    # 2>/dev/null suprime warnings de perl. Si el script falla por completo,
-    # || printf "%s" "$1" deja pasar el raw — el match contra RAW_MSG abajo
-    # sigue cubriendo los patrones literales.
+    # 2>/dev/null suppresses perl warnings. If the script fails outright,
+    # || printf "%s" "$1" lets the raw through — the match against RAW_MSG
+    # below still covers the literal patterns.
     printf "%s" "$1" | perl -CSAD -pe '
-        # 1. Reemplazar Unicode formatting/invisibles por ESPACIO (no borrarlos).
-        #    Borrarlos junta "by" + "Claude" → "byClaude" y la regex pierde el match.
+        # 1. Replace Unicode formatting/invisible chars with a SPACE (not delete).
+        #    Deleting them joins "by" + "Claude" -> "byClaude" and the regex loses the match.
         #    ZWSP/ZWNJ/ZWJ/LRM/RLM, NBSP, bidi controls, BOM, word-joiner.
         s/[\x{00A0}\x{200B}-\x{200F}\x{2028}-\x{202F}\x{2060}-\x{206F}\x{FEFF}]/ /g;
-        # 2. Strip combining diacritics. Esto folds "Ćlaude" (C + U+0301) a "Claude".
+        # 2. Strip combining diacritics. This folds "Ćlaude" (C + U+0301) to "Claude".
         s/[\x{0300}-\x{036F}]//g;
-        # 3. NFKC normaliza compatibility forms (full-width latin → ascii)
+        # 3. NFKC normalizes compatibility forms (full-width latin -> ascii)
         use Unicode::Normalize qw(NFKC);
         $_ = NFKC($_);
-        # 4. Markdown / puntuación / emoji → espacio
-        #    Markdown:   * _ ` ~
-        #    Puntuación: . , : ; ! ? ( ) [ ] { } < > / \ | " '\''
-        #    Emoji:      Misc Symbols (2600-27BF), Pictographs (1F300-1FAFF)
+        # 4. Markdown / punctuation / emoji -> space
+        #    Markdown:    * _ ` ~
+        #    Punctuation: . , : ; ! ? ( ) [ ] { } < > / \ | " '\''
+        #    Emoji:       Misc Symbols (2600-27BF), Pictographs (1F300-1FAFF)
         s/[*_`~.,:;!?()\[\]{}<>\\\/|"'\''\x{2600}-\x{27BF}\x{1F300}-\x{1FAFF}]/ /g;
-        # 5. Colapsar whitespace (incluye \n, \t, espacios múltiples)
+        # 5. Collapse whitespace (includes \n, \t, multiple spaces)
         s/\s+/ /g;
     ' 2>/dev/null || printf "%s" "$1"
 }
 
 NORMALIZED_MSG=$(normalize_msg "$RAW_MSG")
 
-# ─── Patrones (case insensitive, grep -iE) ──────────────────────────
+# ─── Patterns (case insensitive, grep -iE) ──────────────────────────
 #
-# Notas:
+# Notes:
 #   \b           = word boundary (GNU grep ext.)
-#   [[:space:]]+ = uno o más espacios (POSIX, portable)
-#   [-_ ]?       = separador opcional entre proveedor y modelo
+#   [[:space:]]+ = one or more spaces (POSIX, portable)
+#   [-_ ]?       = optional separator between provider and model
 #
-# Limitación conocida y aceptada: homoglifos Unicode (Cyrillic С en lugar
-# de Latin C) requieren transliteración (Text::Unidecode) que es módulo
-# no-core de perl. Documentado, no se intenta defender.
+# Known, accepted limitation: Unicode homoglyphs (Cyrillic С instead of
+# Latin C) require transliteration (Text::Unidecode), a non-core perl module.
+# Documented, not defended against.
 PROVIDER_PAT='(claude|gpt|chatgpt|openai|anthropic|gemini|copilot|llm|cursor|windsurf|codeium|cody|aider)'
 
 AI_PATTERNS=(
     # ── Co-authored-by trailer ────────────────────────────────────────
-    # Captura cualquier proveedor en el mismo trailer.
+    # Captures any provider in the same trailer.
     "co-authored-by:.*\b${PROVIDER_PAT}\b"
-    # AI en trailer: AI alone OR AIAssistant / AIBot / AIAgent compounds
+    # AI in trailer: AI alone OR AIAssistant / AIBot / AIAgent compounds
     "co-authored-by:.*\bai(assistant|bot|agent|helper)?\b"
-    # Standalone Copilot/Codeium/Cursor en trailer (sin prefix vendor)
+    # Standalone Copilot/Codeium/Cursor in trailer (no vendor prefix)
     "co-authored-by:.*\b(copilot|cursor|codeium|cody|aider|chatgpt)\b"
 
-    # ── Verbos de atribución + by/with + proveedor ───────────────────
-    # Ej: "made by Claude", "generated with GPT", "built with OpenAI"
-    # Verbos expandidos en audit-2 para cubrir "I used X", "X helped me",
+    # ── Claude-Session trailer (Claude Code harness auto-appends this) ─
+    # The canonical harness trailer key + its session URL host. Anchored to
+    # the trailer key "claude-session:" and the "claude.ai" host, so it does
+    # NOT fire on a person named Claude or a bare "session" word (zero FP).
+    "claude-session:"
+    "claude\\.ai"
+
+    # ── Attribution verbs + by/with + provider ───────────────────────
+    # e.g.: "made by Claude", "generated with GPT", "built with OpenAI"
+    # Verbs expanded in audit-2 to cover "I used X", "X helped me",
     # "wrote by AI", "prompted to write", "asked Claude to".
     "(made|generated|written|created|assisted|built|developed|authored|produced|coded|crafted|helped|used|wrote|prompted|asked|fixed|refactored)[[:space:]]+(by|with|using|via)[[:space:]]+${PROVIDER_PAT}"
     "(made|generated|written|created|assisted|built|developed|authored|produced|coded|crafted|helped|used|wrote|prompted|asked|fixed|refactored)[[:space:]]+(by|with|using|via)[[:space:]]+\bai(assistant|bot|agent|helper)?\b"
@@ -97,11 +104,17 @@ AI_PATTERNS=(
     "(with[[:space:]]+help[[:space:]]+from|thanks[[:space:]]+to|powered[[:space:]]+by|courtesy[[:space:]]+of)[[:space:]]+\bai(assistant|bot|agent|helper)?\b"
 
     # ── "X-assisted" / "X assisted" ──────────────────────────────────
-    # Cubre: anthropic-assisted, openai assisted, ai_assisted, etc.
+    # Covers: anthropic-assisted, openai assisted, ai_assisted, etc.
     "${PROVIDER_PAT}[-_ ]?assisted"
     "\bai[-_ ]?assisted"
 
     # ── Standalone branding / tooling ────────────────────────────────
+    # ACCEPTED TRADEOFF (JDA-002): "cursor" is homonymous with the DB/UI term.
+    # Because "-" is a grep word boundary, ANY bare-cursor match also fires on
+    # "cursor-based" / "DB cursor"; blocking "built with Cursor" (an AI-tool
+    # attribution we must catch) necessarily catches those. No tightening
+    # separates them without overfitting a blocklist, so the FP is documented,
+    # not chased. Domain/IDE/AI forms are the reliable signal.
     "claude[-_ ]?code"
     "(github|microsoft)[-_ ]?copilot"
     "\bchatgpt\b"
@@ -111,15 +124,15 @@ AI_PATTERNS=(
     "\bcody\b"
     "\baider\b"
 
-    # ── Claude + variante de modelo ──────────────────────────────────
-    # Cubre: "claude opus", "claude-sonnet", "Claude3", "claude4.5", "Claude 4.7"
+    # ── Claude + model variant ───────────────────────────────────────
+    # Covers: "claude opus", "claude-sonnet", "Claude3", "claude4.5", "Claude 4.7"
     "claude[-_ ]?(opus|sonnet|haiku|[0-9])"
 
-    # ── GPT + versión ────────────────────────────────────────────────
-    # Cubre: gpt-4, gpt 3, gpt_5, gpt4.5
+    # ── GPT + version ────────────────────────────────────────────────
+    # Covers: gpt-4, gpt 3, gpt_5, gpt4.5
     "gpt[-_ ]?[0-9]"
 
-    # ── Email domains de los proveedores ─────────────────────────────
+    # ── Provider email domains ───────────────────────────────────────
     "@(anthropic|openai|cursor|codeium)\\.(com|sh|ai)"
     "noreply@(anthropic|openai)"
 )

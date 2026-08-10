@@ -305,6 +305,24 @@ expect_block "valid subject with attribution trailer" "feat: add endpoint
 
 Co-authored-by: Claude <c@a.com>"
 
+# ─── Claude-Session trailer (Claude Code harness auto-appends this) ────
+# Canonical trailer injected by the Claude Code harness. This is the user's
+# #1 standing rule ("NUNCA trailer Claude-Session") and was the CRITICAL bug:
+# the trailer key + session URL passed BOTH guards and committed clean.
+expect_block "Claude-Session trailer" "feat: x
+
+Claude-Session: https://claude.ai/code/session_01NZExampleId"
+expect_block "claude.ai session URL in body" "feat: y
+
+See https://claude.ai/code/session_01ABC for context"
+expect_block "claude-session lowercase trailer" "fix: z
+
+claude-session: https://claude.ai/code/session_02def"
+
+# A subject that merely mentions the word "session" (no claude-session key,
+# no claude.ai host) must still PASS — no bare-name false positive.
+expect_pass "session word without claude trailer" "feat: persist user session in redis"
+
 # ─── Summary ──────────────────────────────────────────────────────────
 
 echo ""

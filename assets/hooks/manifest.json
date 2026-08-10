@@ -21,14 +21,14 @@
 	},
 	"commit-msg": {
 		"version": 2,
-		"sha256": "7354df8b35392f7266e0da1ff5dcc17fe0b01995729183454c0824d20a3da89f",
+		"sha256": "127fb8bfebd81d6b06e6f04bdf1be0036a3a224268ac54f11784043f55796a18",
 		"historical": [
 			{
 				"sha256": "1c23a60cd4ba7f6bc666da400b5d2971c4294782c8d9ce41543e7815de11a1d6",
 				"firstCommit": "5587b3b9b9ed3c86809c0a3d89a850dd2bce7e1a"
 			},
 			{
-				"sha256": "7354df8b35392f7266e0da1ff5dcc17fe0b01995729183454c0824d20a3da89f",
+				"sha256": "127fb8bfebd81d6b06e6f04bdf1be0036a3a224268ac54f11784043f55796a18",
 				"firstCommit": "65cb02e7efc5581303e2b20727acf07e3d88de65"
 			}
 		]

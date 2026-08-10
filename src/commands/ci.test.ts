@@ -1804,12 +1804,13 @@ gates:
 describe("gate container routing (slice 2b)", () => {
 	let tmpDir: string;
 
-	// noDocker only governs the RUNNER prologue; slice 2 gate routing keys ONLY on
-	// gate.image (fail-closed under --no-docker is slice 3). An image gate under
-	// this config still routes to the (mocked) container path.
+	// These assert the CONTAINER path is reached, so Docker must be AVAILABLE:
+	// slice 3 fail-closed refuses an image gate when Docker is unavailable, so
+	// `noDocker: false` + an available daemon is what routes an image gate to the
+	// (mocked) container. Fail-closed refusal has its own block below.
 	const QUICK = {
 		mode: "quick" as const,
-		noDocker: true,
+		noDocker: false,
 		noGhagga: true,
 		noSecurity: true,
 	};
@@ -1823,9 +1824,17 @@ describe("gate container routing (slice 2b)", () => {
 
 	beforeEach(async () => {
 		// mockReset restores the production-faithful module-factory impl (see the
-		// top-of-file note): runInContainer → {exitCode:0, timedOut:false}.
+		// top-of-file note): runInContainer → {exitCode:0, timedOut:false}. Docker
+		// is available here so image gates reach the container path.
 		vi.mocked(runInContainer).mockReset();
+		vi.mocked(runInContainer).mockResolvedValue({
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+			timedOut: false,
+		});
 		vi.mocked(isDockerAvailable).mockReset();
+		vi.mocked(isDockerAvailable).mockResolvedValue(true);
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-route-"));
 	});
 
@@ -1965,6 +1974,222 @@ gates:
 		expect(gate?.status).toBe("error");
 		expect(gate?.exitCode).toBe(124);
 		expect(gate?.reason).toBeUndefined();
+	});
+});
+
+// =============================================================================
+// Gate fail-closed matrix (containerized-gates slice 3)
+// =============================================================================
+
+describe("gate fail-closed matrix (slice 3)", () => {
+	let tmpDir: string;
+
+	const writeConfig = async (yaml: string) => {
+		await fs.outputFile(path.join(tmpDir, ".javi-forge", "ci.yaml"), yaml);
+	};
+
+	beforeEach(async () => {
+		vi.mocked(runInContainer).mockReset();
+		vi.mocked(runInContainer).mockResolvedValue({
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+			timedOut: false,
+		});
+		vi.mocked(isDockerAvailable).mockReset();
+		vi.mocked(isDockerAvailable).mockResolvedValue(true);
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-failclosed-"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	// gates-only call site (zero runners), --no-docker: an image gate is REFUSED,
+	// never run native/unpinned; a blocking refusal FAILS the build.
+	it("refuses a blocking image gate under --no-docker and fails the build (gates-only path)", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    run: "true"
+`);
+		const result = await collectGateOutcomes({
+			projectDir: tmpDir,
+			mode: "quick",
+			noDocker: true,
+			noGhagga: true,
+			noSecurity: true,
+		});
+
+		expect(result.ok).toBe(false);
+		expect(result.exitCode).toBe(1);
+		const gate = result.gates.find((g) => g.id === "img");
+		expect(gate?.status).toBe("error");
+		expect(gate?.reason).toMatch(/refus/i);
+		// NEVER falls through to native/unpinned execution.
+		expect(runInContainer).not.toHaveBeenCalled();
+	});
+
+	// gates-only call site, Docker daemon down (isDockerAvailable → false): same
+	// refusal, never native/unpinned, blocking fails the build.
+	it("refuses a blocking image gate when the Docker daemon is down and fails the build", async () => {
+		vi.mocked(isDockerAvailable).mockResolvedValue(false);
+		await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    run: "true"
+`);
+		const result = await collectGateOutcomes({
+			projectDir: tmpDir,
+			mode: "quick",
+			noDocker: false,
+			noGhagga: true,
+			noSecurity: true,
+		});
+
+		expect(result.ok).toBe(false);
+		expect(result.exitCode).toBe(1);
+		const gate = result.gates.find((g) => g.id === "img");
+		expect(gate?.status).toBe("error");
+		expect(gate?.reason).toMatch(/docker not available/i);
+		expect(runInContainer).not.toHaveBeenCalled();
+	});
+
+	// Informative image gate + no Docker → degrade to `warning` (never false-green,
+	// never native): build stays green but the gate is loudly not-run.
+	it("degrades an informative image gate to warning under --no-docker (no false-green)", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    mode: informative
+    run: "true"
+`);
+		const result = await collectGateOutcomes({
+			projectDir: tmpDir,
+			mode: "quick",
+			noDocker: true,
+			noGhagga: true,
+			noSecurity: true,
+		});
+
+		expect(result.ok).toBe(true);
+		expect(result.exitCode).toBe(0);
+		const gate = result.gates.find((g) => g.id === "img");
+		expect(gate?.status).toBe("warning");
+		expect(gate?.reason).toMatch(/refus/i);
+		expect(runInContainer).not.toHaveBeenCalled();
+	});
+
+	// Regression: a gate WITHOUT image runs host-native ALWAYS, even under
+	// --no-docker, and never touches Docker.
+	it("runs a non-image gate host-native under --no-docker (unchanged)", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: native
+    run: echo ran >> marker.txt
+`);
+		const result = await collectGateOutcomes({
+			projectDir: tmpDir,
+			mode: "quick",
+			noDocker: true,
+			noGhagga: true,
+			noSecurity: true,
+		});
+
+		expect(result.ok).toBe(true);
+		const gate = result.gates.find((g) => g.id === "native");
+		expect(gate?.status).toBe("done");
+		expect(
+			await fs.readFile(path.join(tmpDir, "marker.txt"), "utf-8"),
+		).toContain("ran");
+		expect(runInContainer).not.toHaveBeenCalled();
+		// A native-only gate set pays NO docker cost.
+		expect(isDockerAvailable).not.toHaveBeenCalled();
+	});
+
+	// full/quick call site (runners present): the SAME fail-closed seam applies at
+	// the second runGates call site, proving the context is threaded there too.
+	it("refuses an image gate on the full/quick path (with runners present)", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), { scripts: {} });
+		await writeConfig(`
+version: 2
+runners:
+  - name: r
+    stack: node
+    lint: "true"
+gates:
+  - id: img
+    image: alpine:3.21
+    run: "true"
+`);
+		const result = await collectGateOutcomes({
+			projectDir: tmpDir,
+			mode: "quick",
+			noDocker: true,
+			noGhagga: true,
+			noSecurity: true,
+		});
+
+		expect(result.ok).toBe(false);
+		expect(result.exitCode).toBe(1);
+		const gate = result.gates.find((g) => g.id === "img");
+		expect(gate?.status).toBe("error");
+		expect(gate?.reason).toMatch(/refus/i);
+		expect(runInContainer).not.toHaveBeenCalled();
+	});
+
+	// Lazy memoization: a native-only gate set NEVER computes docker availability.
+	it("never calls isDockerAvailable when no gate declares an image", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: a
+    run: "true"
+  - id: b
+    run: "true"
+`);
+		await collectGateOutcomes({
+			projectDir: tmpDir,
+			mode: "quick",
+			noDocker: false,
+			noGhagga: true,
+			noSecurity: true,
+		});
+
+		expect(isDockerAvailable).not.toHaveBeenCalled();
+	});
+
+	// Lazy memoization: two image gates + Docker available → availability is
+	// computed AT MOST ONCE, and both gates run containerized.
+	it("computes docker availability at most once across multiple image gates", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: img1
+    image: alpine:3.21
+    run: "true"
+  - id: img2
+    image: alpine:3.21
+    run: "true"
+`);
+		const result = await collectGateOutcomes({
+			projectDir: tmpDir,
+			mode: "quick",
+			noDocker: false,
+			noGhagga: true,
+			noSecurity: true,
+		});
+
+		expect(result.ok).toBe(true);
+		expect(vi.mocked(isDockerAvailable).mock.calls.length).toBe(1);
+		expect(vi.mocked(runInContainer).mock.calls.length).toBe(2);
 	});
 });
 

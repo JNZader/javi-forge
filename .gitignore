@@ -2,6 +2,9 @@ node_modules/
 dist/
 coverage/
 .stryker-tmp/
+# pnpm's content-addressable store; the containerized runner falls back to an
+# in-tree .pnpm-store when HOME is not writable for the host uid.
+.pnpm-store/
 reports/
 *.log
 .DS_Store

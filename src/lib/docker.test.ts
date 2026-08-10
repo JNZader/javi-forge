@@ -104,7 +104,11 @@ describe("getDockerfileContent", () => {
 	it("node Dockerfile uses node:22-slim and installs pnpm", () => {
 		const content = getDockerfileContent("node");
 		expect(content).toContain("node:22-slim");
-		expect(content).toContain("pnpm");
+		// pnpm is pinned to major 10 to match ci.yml (pnpm/action-setup version:
+		// 10) and the lockfileVersion 9.0 lockfile. An unpinned install drifts to
+		// pnpm 11 and breaks the frozen containerized install with
+		// ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+		expect(content).toContain("npm install -g pnpm@10");
 		expect(content).toContain("runner");
 		expect(content).toContain('ENTRYPOINT ["/bin/bash", "-c"]');
 	});

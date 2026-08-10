@@ -360,33 +360,59 @@ therefore invisible until someone runs the command by hand.
 - **Threat model**: trust-bounded (the ci.yaml author already has host code-exec), so defense-in-depth / consistency, not an escalation. Do gate + runner together so the two paths stay consistent.
 - **Suggested fix**: one shared `validateImageRef(value, path)` helper used by both runner and gate validation (trim + non-empty + leading-dash reject), returning the trimmed value to store.
 
-### PREPUSH-EACCES — Containerized full-CI pre-push fails at the runner's `pnpm install`
-- **Source**: containerized-gates slices 2/3 — the pre-push hook (`javi-forge ci` full, containerized) aborted the push; forced `--no-verify` on #16 and #17.
-- **What**: the containerized full-CI run fails in the RUNNER's install step with
-  `[EACCES] EACCES: permission denied, open '/home/runner/work/_tmp_<n>_<hash>'`
-  (`pnpm install` exit 243) → the run then reports `Lint failed` as a cascade. The
-  failure is upstream of any gate code (install phase), so it is orthogonal to the
-  reviewed diffs.
-- **NOT the old ENV-1 uid war**: the host tree is entirely uid 1000 (verified
-  `find . -not -user 1000` empty; `node_modules` owner 1000), and ENV-1's
-  `--user $(getuid):$(getgid)` fix is in place. The container runs as host
-  uid 1000, and the bind-mount root (`/home/runner/work` = projectDir) is
-  host-owned — yet pnpm cannot create its atomic-rename temp
-  (`_tmp_<pid>_<hash>`) at the modules/mount root inside the container.
-- **Hypothesis (unconfirmed — root-cause between SDDs)**: pnpm's install writes a
-  temp under the virtual-store / modules root that lands at the mount point; the
-  mount-root inode's perms or the in-image `/home/runner` ownership (created
-  `runner` user vs host uid 1000 mapping) block the write even though the
-  projectDir contents are host-owned. Candidate probes: run the runner container
-  interactively (`--entrypoint "" -it`) as `--user 1000:1000` and `touch
-  /home/runner/work/_tmp_probe`; inspect the mount-root perms inside the
-  container; try a pnpm `store-dir`/`--virtual-store-dir` under a container-writable
-  path (e.g. `/tmp`) via env.
-- **Impact**: local pre-push containerized verification is unusable (bypassed with
-  `--no-verify`); the substantive gate remains native `pnpm validate` + `vitest
-  run --coverage`. GitHub Actions `CI` is `disabled_manually` by design, so it does
-  NOT backstop this.
-- **Suggested fix**: reproduce with the interactive probe above, then either point
-  pnpm's temp/store at a container-writable dir for the runner install, or fix the
-  mount-root writability for the host-uid container user. Fix as its own ticket, not
-  in-flight.
+### PREPUSH-EACCES — RESOLVED (real root cause: unpinned pnpm in the runner image)
+- **Status**: CLOSED 2026-08-10 (branch `fix/pin-pnpm-runner-image`). The original
+  `_tmp_ EACCES` framing below was a **misdiagnosis**; the real blocker was an
+  UNPINNED pnpm in the runner image drifting to pnpm 11 against a pnpm-10-era
+  lockfile.
+- **Source**: containerized-gates slices 2/3 — the pre-push hook (`javi-forge ci` full,
+  containerized) aborted the push; forced `--no-verify` on #16 and #17.
+- **What actually broke it**: `ci-local/docker/node.Dockerfile` and the
+  `getDockerfileContent("node")` template in `src/lib/docker.ts` installed pnpm
+  UNPINNED (`RUN npm install -g pnpm`), so the image drifted to pnpm 11 while the
+  repo targets pnpm 10 (`.github/workflows/ci.yml` `pnpm/action-setup@v4 version: 10`;
+  `pnpm-lock.yaml` `lockfileVersion: '9.0'`). A pnpm-11 frozen install against that
+  lockfile fails with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`. That install-phase abort
+  is what killed the pre-push run — upstream of any gate code — and got mislabeled
+  as an `EACCES`/`Lint failed` cascade.
+- **Fix (M8 pin-everything)**: pinned pnpm to major 10 (`RUN npm install -g pnpm@10`)
+  in ALL FOUR node-runner install sites in lockstep: `ci-local/docker/node.Dockerfile`,
+  the `getDockerfileContent("node")` template in `src/lib/docker.ts`, AND the two
+  standalone-runner heredocs `ci-local/ci-local.sh` + `ci-local/ci-local.ps1`. The
+  last two matter because `ensureImage()` writes `getDockerfileContent()` only when
+  the committed Dockerfile is ABSENT, otherwise reads the committed file — and running
+  `ci-local.sh full` / `.ps1 full` REGENERATES that committed file from its heredoc,
+  so an unpinned heredoc would silently clobber the pin and reintroduce the pnpm-11
+  drift (resilience review R4-001). `package.json` `packageManager` was intentionally
+  NOT added — it would alter the local corepack flow; the Dockerfile/heredoc pins are
+  the minimal safe fix.
+- **Follow-up (noted, NOT fixed here)**: the four sites diverge on the BASE image —
+  the two `ci-local/*` heredocs pin `node:22-slim@sha256:689c…` (digest) while the
+  committed `node.Dockerfile` + the `getDockerfileContent` template use floating
+  `node:22-slim`. For full M8 consistency, standardize all four on the same digest
+  (a separate decision, since it changes the built image + the docker.ts content test).
+- **The `_tmp_ EACCES` was NOT a code bug for the standard host**: `runInContainer`
+  already runs `--user $(uid):$(gid)` (ENV-1), which grants owner+group write on the
+  0775 host tree, so pnpm's atomic-temp write at the mount root succeeds for the
+  uid-1000 owner. The only residual EACCES is the R4-002 edge (host uid ≠ 1000 with
+  no `/etc/passwd` entry), which is environment-unfixable and documented as such —
+  it is NOT what blocked the standard-host pre-push.
+- **Empirical verification (2026-08-10)**: rebuilt the node runner image (pnpm baked
+  = `10.34.5`). A containerized `pnpm install --frozen-lockfile` mounted at
+  `/home/runner/work` as `--user $(id -u):$(id -g)` (1000:1000) SUCCEEDS (exit 0) —
+  no `LOCKFILE_CONFIG_MISMATCH`, no EACCES. Containerized `pnpm build` (tsc) and
+  `pnpm test:coverage` (vitest/esbuild) both exercise cleanly.
+- **Residual, orthogonal to pnpm**: the containerized full test suite still has 3
+  ENVIRONMENTAL failures in the node-only image — `ci-mixed.integration.test.ts`
+  and `ci-hooks.e2e.test.ts` require a real python3/ruff toolchain the node image
+  does not carry (`Command failed: bash -c command -v python3`). These are NOT
+  caused by pnpm and NOT a regression; they are inherent to running a mixed
+  Node+Python integration suite inside a single-language runner. Track separately if
+  a fully green containerized full-CI is wanted (e.g. a multi-toolchain image or
+  gating those tests on toolchain presence).
+- **Push implication**: pushes no longer need `--no-verify` for the pnpm reason —
+  the runner's frozen install passes. Any remaining `--no-verify` would only be for
+  the orthogonal python-toolchain integration failures above, not this ticket.
+- **`ERR_PNPM_IGNORED_BUILDS: esbuild`**: appears as a soft WARNING only (install
+  exits 0); esbuild 0.28 ships its binary via the `@esbuild/linux-x64` optional
+  package (no postinstall needed), so build+tests run fine. No action required.

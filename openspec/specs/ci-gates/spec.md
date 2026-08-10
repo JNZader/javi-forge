@@ -169,7 +169,8 @@ skipped ONLY in `detect` and `shell` modes. A blocking gate MUST NOT be silently
 - THEN `FOO=bar` is present in the gate command's environment, injected via the child-process env
   map and NEVER string-interpolated into the `run` string
 - AND gate `env` entries spread LAST over the engine-injected keys (`CI`,
-  `JAVI_FORGE_CHANGED_FILES`), so a gate MAY override them (documented last-wins precedence)
+  `JAVI_FORGE_CHANGED_FILES`, `JAVI_FORGE_CHANGED_FILES_ABS`), so a gate MAY override them
+  (documented last-wins precedence)
 
 ### Requirement: scope:changed loud-degrade contract
 
@@ -180,6 +181,47 @@ widen to `scope: all`. When a base ref RESOLVES but the changed-file computation
 base sha is absent from local history under a CI shallow clone, so `git diff <base>...HEAD` errors),
 the gate MUST ALSO be SKIPPED with a named warning; it MUST NOT widen to `scope: all` and MUST NOT
 crash the gate phase.
+
+When a `scope: changed` gate runs, the engine MUST inject the changed-file set as two env
+variables, in the SAME order:
+- `JAVI_FORGE_CHANGED_FILES` — newline-joined, REPO-ROOT-RELATIVE paths (unchanged; backward
+  compatible).
+- `JAVI_FORGE_CHANGED_FILES_ABS` — newline-joined ABSOLUTE paths (`<projectDir>/<relpath>`,
+  joined with the platform separator, no naive string concat). This is the cwd-INDEPENDENT form:
+  a gate that `cd`s into a subdirectory can still resolve every changed file. A "cwd-relative"
+  variant is intentionally NOT provided — at injection time the engine's cwd IS the repo root, so
+  it would merely duplicate the repo-root-relative variant, while a gate's own runtime cwd is
+  unknowable to the engine.
+
+Neither variable is set for a gate whose `scope` is not `changed`. A NUL-joined variant
+(`JAVI_FORGE_CHANGED_FILES_Z`) is intentionally NOT provided on EITHER the native or the
+containerized path: a NUL byte cannot be carried in an environment variable (execve `environ`
+entries are NUL-terminated C strings; Node's `child_process` throws ERR_INVALID_ARG_VALUE for a
+NUL in an argv element OR a spawn env-map value), so injecting it would crash the gate at spawn
+time. The documented caveat on `JAVI_FORGE_CHANGED_FILES` — a repo path containing a literal
+newline corrupts line-based parsing — therefore stands; a gate needing absolute resolution uses
+`JAVI_FORGE_CHANGED_FILES_ABS`.
+
+#### Scenario: changed-file variants are absolute and same-order
+
+- GIVEN a `scope: changed` gate, a resolvable base ref, and a non-empty changed-file set
+- WHEN the gate command runs
+- THEN `JAVI_FORGE_CHANGED_FILES_ABS` is present with each file as an absolute path
+  (`<projectDir>/<relpath>`), newline-joined, in the SAME order as `JAVI_FORGE_CHANGED_FILES`
+
+#### Scenario: changed-file variants absent when scope is not changed
+
+- GIVEN a gate whose `scope` is not `changed`
+- WHEN the gate command runs
+- THEN neither `JAVI_FORGE_CHANGED_FILES` nor `JAVI_FORGE_CHANGED_FILES_ABS` is set in its
+  environment
+
+#### Scenario: NUL-joined variant is never injected
+
+- GIVEN a `scope: changed` gate and a non-empty changed-file set
+- WHEN the gate command runs (native or containerized)
+- THEN `JAVI_FORGE_CHANGED_FILES_Z` is NOT present in its environment, AND the gate does not
+  crash at spawn time
 
 #### Scenario: shallow-clone / missing base ref skips loudly, never widens or crashes
 
@@ -250,7 +292,10 @@ outcomes share `exitCode: 124`.
 
 KNOWN LIMITATION: the changed-file set injected to a gate via `$JAVI_FORGE_CHANGED_FILES` is
 newline-joined; a repo path containing a literal newline would corrupt line-based parsing. This is a
-low-likelihood edge and is accepted as a documented caveat rather than switching to NUL-joining.
+low-likelihood edge and is accepted as a documented caveat rather than switching to NUL-joining — a
+NUL-joined variant is not merely undesirable but IMPOSSIBLE to deliver, since an env var cannot
+carry a NUL byte (see the containerized-execution requirement). A gate needing unambiguous, cwd-
+independent resolution uses `$JAVI_FORGE_CHANGED_FILES_ABS` (absolute paths, same order).
 
 #### Scenario: JSON shape and ok on blocking failure
 
@@ -362,24 +407,35 @@ call sites (gates-only and full/quick).
 
 A containerized gate MUST preserve the full gate contract: blocking/informative outcome
 semantics, the aggregate blocking throw, `scope: changed` skipping, and env delivery.
-`$JAVI_FORGE_CHANGED_FILES`, `$JAVI_FORGE_BASELINE`, `CI`, and every `gate.env` entry MUST
-reach the containerized command via injected env pairs (gate.env last-wins), NEVER
-string-interpolated into the `run` string.
+`$JAVI_FORGE_CHANGED_FILES`, `$JAVI_FORGE_CHANGED_FILES_ABS`, `$JAVI_FORGE_BASELINE`, `CI`, and
+every `gate.env` entry MUST reach the containerized command via injected env pairs (gate.env
+last-wins), NEVER string-interpolated into the `run` string.
 
 The containerized gate's environment MUST be an EXPLICIT ALLOWLIST — `CI=true`,
-`JAVI_FORGE_CHANGED_FILES` (when `scope: changed`), `JAVI_FORGE_BASELINE` (when a baseline is
-set), and the declared `gate.env` entries — and MUST NOT include the host process environment.
-The ambient `process.env` MUST NOT be forwarded into the container (neither as `-e` argv pairs
-nor otherwise), so host secrets are neither exposed on the host process table nor injected into
-the (possibly third-party) image. The host-native path is unaffected and MAY still receive the
-full host environment via its spawn env map.
+`JAVI_FORGE_CHANGED_FILES` and `JAVI_FORGE_CHANGED_FILES_ABS` (both when `scope: changed`),
+`JAVI_FORGE_BASELINE` (when a baseline is set), and the declared `gate.env` entries — and MUST
+NOT include the host process environment. The ambient `process.env` MUST NOT be forwarded into
+the container (neither as `-e` argv pairs nor otherwise), so host secrets are neither exposed on
+the host process table nor injected into the (possibly third-party) image. The host-native path
+is unaffected and MAY still receive the full host environment via its spawn env map.
+
+`JAVI_FORGE_CHANGED_FILES_Z` (a NUL-joined variant) is NOT part of the allowlist and MUST NOT be
+injected into a containerized gate — nor a native one. A NUL byte cannot be carried in an
+environment variable: execve's `environ` is an array of NUL-terminated C strings, so a NUL inside
+a value truncates it, and Node's `child_process` refuses it outright (ERR_INVALID_ARG_VALUE) for
+a NUL in BOTH a `-e KEY=VALUE` argv element AND a spawn env-map value. Injecting it would crash
+every `scope: changed` gate at spawn time, so it is omitted entirely rather than shipped broken.
 
 #### Scenario: env, changed files, and baseline reach the container command
 
 - GIVEN a containerized `scope: changed` gate with `env: { FOO: "bar" }` and a baseline
 - WHEN the containerized command runs
-- THEN `FOO`, `CI`, `JAVI_FORGE_CHANGED_FILES`, and `JAVI_FORGE_BASELINE` are present in its
-  environment, injected as env pairs and never spliced into the command
+- THEN `FOO`, `CI`, `JAVI_FORGE_CHANGED_FILES`, `JAVI_FORGE_CHANGED_FILES_ABS`, and
+  `JAVI_FORGE_BASELINE` are present in its environment, injected as env pairs and never spliced
+  into the command
+- AND `JAVI_FORGE_CHANGED_FILES_ABS` holds the same files as `JAVI_FORGE_CHANGED_FILES`, in the
+  same order, each as an absolute path
+- AND `JAVI_FORGE_CHANGED_FILES_Z` is ABSENT (a NUL value cannot be delivered via `-e`)
 
 #### Scenario: containerized gate does NOT receive an arbitrary host env var
 

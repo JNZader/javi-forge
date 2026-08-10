@@ -1256,9 +1256,23 @@ const GATE_TIMEOUT_EXIT_CODE = 124;
  * would corrupt line-based parsing on the gate side. This is a low-likelihood
  * edge — repo paths with embedded newlines are pathological — and is accepted as
  * a documented caveat rather than switched to NUL-joining, which would force
- * every gate consumer to change its parser.
+ * every gate consumer to change its parser. A NUL-joined variant is also
+ * infeasible for a deeper reason (see {@link CHANGED_FILES_ABS_ENV}): a NUL byte
+ * cannot be carried in an environment variable at all.
  */
 const CHANGED_FILES_ENV = "JAVI_FORGE_CHANGED_FILES";
+/**
+ * Env var carrying the SAME changed-file set as {@link CHANGED_FILES_ENV}, but as
+ * ABSOLUTE paths (`<projectDir>/<relpath>`), newline-joined, in the SAME order.
+ *
+ * WHY absolute and not "cwd-relative": a literal cwd-relative variant is
+ * impossible for the engine to produce. A gate chooses its own working directory
+ * at runtime (its script may `cd` anywhere), while at injection time the engine's
+ * cwd is always the repo root — so a "cwd-relative" var would just equal the
+ * repo-root-relative {@link CHANGED_FILES_ENV}. The cwd-INDEPENDENT form that lets
+ * a gate resolve changed files from ANY working directory is absolute paths.
+ */
+const CHANGED_FILES_ABS_ENV = "JAVI_FORGE_CHANGED_FILES_ABS";
 /** Env var carrying a gate's optional baseline artifact path. */
 const BASELINE_ENV = "JAVI_FORGE_BASELINE";
 
@@ -1515,6 +1529,29 @@ async function runGates(
 			}
 			gateChangedFiles = scope.files;
 			injected[CHANGED_FILES_ENV] = scope.files.join("\n");
+			// ABSOLUTE-path variant (GATE-4): each relpath resolved against the
+			// engine's projectDir, SAME order as CHANGED_FILES_ENV. path.join is used
+			// (not string concat) so a projectDir with a trailing slash still yields a
+			// single, normalized separator. This lands in `injected` → it reaches
+			// BOTH nativeEnv (spawn env map) and containerEnv (the -e allowlist),
+			// exactly like CHANGED_FILES_ENV.
+			injected[CHANGED_FILES_ABS_ENV] = scope.files
+				.map((relpath) => path.join(projectDir, relpath))
+				.join("\n");
+			// NUL-joined variant (GATE-5) is DELIBERATELY NOT INJECTED. A `git -z`
+			// style NUL separator is unambiguous for paths containing a literal
+			// newline, BUT a NUL byte cannot live in an environment variable: execve's
+			// `environ` is an array of NUL-terminated C strings, so a NUL inside a
+			// value truncates it. Node's child_process refuses it outright — it throws
+			// ERR_INVALID_ARG_VALUE ("must be a string without null bytes") for a NUL
+			// in BOTH an argv element (container `-e KEY=VALUE`) AND a spawn env-map
+			// value (native gates). Empirically verified against Node + `docker run`.
+			// Injecting JAVI_FORGE_CHANGED_FILES_Z would therefore CRASH every
+			// scope:changed gate at spawn time (native and containerized alike), so it
+			// is omitted entirely rather than shipped broken. The documented caveat on
+			// CHANGED_FILES_ENV (paths with embedded newlines corrupt line parsing)
+			// stands; the cwd-independent alternative that IS deliverable is
+			// CHANGED_FILES_ABS_ENV above.
 		}
 
 		if (gate.baseline !== undefined) {

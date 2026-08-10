@@ -1,3 +1,9 @@
+## [1.14.0](https://github.com/JNZader/javi-forge/compare/v1.13.0...v1.14.0) (2026-08-10)
+
+### Features
+
+* **ci:** gates-v2 scope:changed wiring + baseline + env + headless JSON (slice 4/4) ([#11](https://github.com/JNZader/javi-forge/issues/11)) ([bbfd22f](https://github.com/JNZader/javi-forge/commit/bbfd22f6409cb99b1d35284e184f045bc3998218))
+
 ## [1.13.0](https://github.com/JNZader/javi-forge/compare/v1.12.0...v1.13.0) (2026-08-10)
 
 ### Features

@@ -79,6 +79,13 @@ export interface CIGateConfig {
 	/** Optional env injected via the child-process env map (slice 4). */
 	env?: Record<string, string>;
 	/**
+	 * Optional container image ref (containerized-gates). A plain,
+	 * digest-pinnable image ref; when present the gate runs inside this image
+	 * instead of host-native. Omitted → host-native (unchanged). Execution
+	 * routing lands in a later slice; this slice validates the schema only.
+	 */
+	image?: string;
+	/**
 	 * Optional per-command wall-clock timeout in seconds (GATE-2). When set, a
 	 * command exceeding it is killed and the gate FAILS (non-zero). Omitted →
 	 * no timeout (unchanged behavior).
@@ -320,6 +327,7 @@ const GATE_FIELDS = new Set([
 	"scope",
 	"baseline",
 	"env",
+	"image",
 	"timeout",
 ]);
 
@@ -427,6 +435,28 @@ function validateGate(
 		}
 	}
 
+	let image: string | undefined;
+	if (raw.image !== undefined) {
+		if (typeof raw.image !== "string" || !raw.image.trim()) {
+			errors.push({
+				path: `${base}.image`,
+				message: "image must be a non-empty string",
+			});
+		} else if (raw.image.trim().startsWith("-")) {
+			// Harden against docker-flag injection: an image ref like "--privileged"
+			// or "-v /:/host" would be parsed by `docker run` as a FLAG, not an
+			// image argument, if it reached argv. Reject leading-dash refs at
+			// validation with a named error (JDB-004).
+			errors.push({
+				path: `${base}.image`,
+				message:
+					"image must not start with '-' (would be parsed as a docker flag)",
+			});
+		} else {
+			image = raw.image;
+		}
+	}
+
 	let timeout: number | undefined;
 	if (raw.timeout !== undefined) {
 		if (
@@ -450,6 +480,7 @@ function validateGate(
 		scope,
 		baseline,
 		env,
+		image,
 		timeout,
 	};
 }

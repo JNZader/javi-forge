@@ -28,10 +28,10 @@ TDD: vitest RED→GREEN per task. Coverage floors 85/80 enforced same-run by `te
 
 ## Phase 1: Slice 1 — Schema (LOW)
 
-- [ ] 1.1 Commit untracked `openspec/changes/containerized-gates/` scaffolding (proposal, specs, design, review-ledger) before any code.
-- [ ] 1.2 RED: in `ci-config.test.ts` add cases — valid `image`, empty/non-string rejected (named `.image` error), leading-`-` rejected (JDB-004) [spec ci-gates scenarios 1–3].
-- [ ] 1.3 GREEN: `ci-config.ts` — add `image?: string` to `CIGateConfig` (68-87); add `"image"` to `GATE_FIELDS` (316-324); in `validateGate` add non-empty + leading-`-` guard + return `image` (mirror runner 252-262). version:2 unchanged.
-- [ ] 1.4 Extend `ci validate` output to surface the `image` field; test v2-gate-without-image parses byte-identically [scenario 4].
+- [x] 1.1 Commit untracked `openspec/changes/containerized-gates/` scaffolding (proposal, specs, design, review-ledger) before any code.
+- [x] 1.2 RED: in `ci-config.test.ts` add cases — valid `image`, empty/non-string rejected (named `.image` error), leading-`-` rejected (JDB-004) [spec ci-gates scenarios 1–3].
+- [x] 1.3 GREEN: `ci-config.ts` — add `image?: string` to `CIGateConfig` (68-87); add `"image"` to `GATE_FIELDS` (316-324); in `validateGate` add non-empty + leading-`-` guard + return `image` (mirror runner 252-262). version:2 unchanged.
+- [x] 1.4 Extend `ci validate` output to surface the `image` field; test v2-gate-without-image parses byte-identically [scenario 4].
 
 ## Phase 2: Slice 2a — docker.ts contract (HIGH, land FIRST)
 

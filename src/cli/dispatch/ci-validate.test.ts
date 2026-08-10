@@ -201,6 +201,57 @@ describe("ci validate dispatch", () => {
 		expect(exitCode).toBe(0);
 	});
 
+	it("prints a gate's image in the human summary when declared", async () => {
+		validateCIConfig.mockResolvedValue({
+			ok: true,
+			mode: "config",
+			configPath: "/repo/.javi-forge/ci.yaml",
+			runners: [],
+			gates: [
+				{
+					id: "audit",
+					mode: "blocking",
+					scope: "all",
+					image: "ghcr.io/acme/tool@sha256:abc",
+				},
+			],
+		});
+
+		const { out, exitCode } = await runValidate();
+
+		const joined = out.join("\n");
+		expect(joined).toContain("ghcr.io/acme/tool@sha256:abc");
+		expect(exitCode).toBe(0);
+	});
+
+	it("emits a gate's image in {ok:true} JSON when declared", async () => {
+		validateCIConfig.mockResolvedValue({
+			ok: true,
+			mode: "config",
+			configPath: "/repo/.javi-forge/ci.yaml",
+			runners: [],
+			gates: [
+				{
+					id: "audit",
+					mode: "blocking",
+					scope: "all",
+					image: "ghcr.io/acme/tool@sha256:abc",
+				},
+			],
+		});
+
+		const { out, exitCode } = await runValidate({ json: true });
+
+		const parsed = JSON.parse(out.join("\n"));
+		expect(parsed.gates[0]).toEqual({
+			id: "audit",
+			mode: "blocking",
+			scope: "all",
+			image: "ghcr.io/acme/tool@sha256:abc",
+		});
+		expect(exitCode).toBe(0);
+	});
+
 	it("passes an explicit --config through to validateCIConfig", async () => {
 		validateCIConfig.mockResolvedValue({
 			ok: true,

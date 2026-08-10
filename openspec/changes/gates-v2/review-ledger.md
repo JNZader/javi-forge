@@ -94,3 +94,34 @@ GREEN after the fix.
 | — | Prologue guard (gates-only zero-runner path) | SAFE — the prologue skips stackInfo/docker-check/image when `resolved.runners` is empty; the gate phase still runs; `describeRunners` config branch never derefs runners[0]. |
 | — | Mode-gating (blocking gate skipped under --quick) | SAFE — gate phase runs on `full` AND `quick`; skipped only in `detect`/`shell`. Pinned by `runs gates under full mode` + `skips the gate phase in detect mode` tests. |
 | — | `CIStepStatus += "warning"` ripple = 2 Records | SAFE — tsc clean; TypeScript forces both `Record<CIStep["status"],...>` to gain the key; no exhaustive switch → the two Records are the whole ripple. |
+
+## Apply slice 4 — judgment-day (final wiring) — APPROVE → polished
+
+Two blind judges. Both APPROVE with ZERO BLOCKER/CRITICAL — the diff is correct
+(no silent-widen, no JSON exit-code false-green, three carried-forward slice-4 requirements
+closed, GitHub-push base handled, env-map safety intact). The findings below are quality
+polish applied BEFORE closing the SDD, not defect fixes. Convergence: both judges independently
+flagged the `ok` footgun (JDA-A-002 ≡ JDB-101). STRICT TDD on the two behavior changes:
+reason-in-JSON and top-level-exitCode both went RED first, GREEN after the production edit.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JDA-A-001 | judgment-day | ci.ts:GateOutcome · runGates skip branches | WARNING | fixed | **DEGRADE SILENT FOR JSON CONSUMERS.** A `scope: changed` gate that degrades (base ref null, or `changedFiles` throws under a shallow clone) surfaced as `status:"skipped"` with the REASON discarded — the named warning went only through `onStep` (a no-op in `collectGateOutcomes`) and `GateOutcome` had no reason field. Contradicts the biogas M1 "degrade LOUDLY" doctrine for JSON consumers. FIX: added optional `reason?: string` to `GateOutcome` (and the JSON `gates[]` entry), populated for the three skip variants — base-null, changedFiles-throw, and empty-set ("no changed files"). Spec JSON shape updated to include `reason?`. TDD: RED test (scope:changed + throwing changedFiles in --json → `gate.reason` undefined) then GREEN after populating the emit. Companion empty-set test added. Canonical severity WARNING/status info; recorded fixed because the JSON degrade is now loud. |
+| JDA-A-002 / JDB-101 | judgment-day | ci.tsx:--json branch · ci.ts:collectGateOutcomes | WARNING | fixed | **CONVERGENT — the `ok` footgun.** In `ci --json` full mode a blocking RUNNER (not gate) failure makes runCI throw → JSON was `{ok:true, gates:[]}` while the process exited 1. NOT an exit-code false-green (exit code is correct), but a consumer keying on `ok` alone misreads a runner failure as success. The spec strictly defines `ok` over blocking GATES only ("if and only if a BLOCKING gate errored"), so per the fix contract we ADDED a top-level `exitCode` to the JSON object rather than reinterpret `ok`. A runner failure now prints `{ok:true, exitCode:1, gates:[]}` — the run failure is visible without the process exit code. Spec JSON shape + scenario updated. TDD: RED dispatch test (mock `{ok:true, exitCode:1}` → printed JSON had no `exitCode`) then GREEN after threading `exitCode` into the printed object; existing "only informative" exact-shape test updated for the additive field. |
+| JDB-103 | judgment-day | ci.ts:CHANGED_FILES_ENV | SUGGESTION | fixed | **NEWLINE IN CHANGED-FILE PATH.** `$JAVI_FORGE_CHANGED_FILES` is newline-joined; a path with a literal newline (git `core.quotePath` off) corrupts line-based parsing. Low likelihood. FIX: documented KNOWN LIMITATION caveat at the `CHANGED_FILES_ENV` constant and in the spec, accepting the caveat rather than switching to NUL-joining (which would force every gate consumer to change its parser). Doc-only, no behavior change. |
+
+### Carry-forward (NOT fixed — test-hardening follow-up)
+
+| id | severity | location | status | evidence |
+|---|---|---|---|---|
+| JDB-102 | judgment-day | ci.tsx:--json → collectGateOutcomes → process.exit seam | WARNING | info | **SEAM VERIFIED IN TWO HALVES, NOT END-TO-END.** The dispatch `--json` path (mocks `collectGateOutcomes`) and `collectGateOutcomes` itself (real runGates) are each tested, but no single test drives dispatch → real collector → real `process.exit` end-to-end. Non-blocking test-hardening follow-up; the two halves fully cover the contract. |
+
+### Verified-safe claims (slice 4 — NOT re-litigated)
+
+| id | claim | verdict |
+|----|-------|---------|
+| — | No silent-widen on scope:changed degrade | SAFE — base-null and changedFiles-throw both resolve to a `skip` ChangedScope; the gate is skipped, NEVER re-run as scope:all. Pinned by loud-degrade tests. |
+| — | No JSON exit-code false-green | SAFE — `collectGateOutcomes.exitCode` is 1 on a blocking-gate error OR any runCI throw; dispatch sets `process.exit(result.exitCode)`. A failed run never exits 0. |
+| — | Three carried-forward slice-4 requirements closed | SAFE — JDA-002 (scope branch wired), JDA-001-S2/JDB-S2-001 (GitHub-push base) and the changedFiles consumption are all implemented and tested in slice 4. |
+| — | GitHub-push base | SAFE — resolveBaseRef handled; scope:changed skips loudly on an unresolvable/absent base rather than widening. |
+| — | env-map safety | SAFE — gate env passed as a discrete child-process map (`filterDefinedEnv` + last-wins gate.env), NEVER string-interpolated into `bash -c`; metacharacters in a value cannot break out of the shell. |

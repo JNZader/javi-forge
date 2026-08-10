@@ -74,9 +74,36 @@ describe("resolveBaseRef — env precedence (no git)", () => {
 		expect(base).not.toBe(ALL_ZEROS);
 	});
 
-	it("falls back to $GITHUB_SHA on a GitHub push (no base ref)", async () => {
-		// A push event sets no GITHUB_BASE_REF; GITHUB_SHA is the pushed commit,
-		// used directly as the base per the design precedence chain.
+	it("uses $GITHUB_EVENT_BEFORE (the real push base) before $GITHUB_SHA", async () => {
+		// On a GitHub push, github.event.before is the commit the branch pointed at
+		// BEFORE the push — the correct diff base. GITHUB_SHA equals HEAD after
+		// actions/checkout, so using it would produce an empty diff. When the
+		// workflow exposes github.event.before as GITHUB_EVENT_BEFORE it MUST win.
+		const base = await resolveBaseRef(
+			{ GITHUB_EVENT_BEFORE: "pushbefore123", GITHUB_SHA: "ghpushsha" },
+			"/repo",
+		);
+
+		expect(base).toBe("pushbefore123");
+		// No merge-base needed — the before-sha is used directly.
+		expect(mockedExec).not.toHaveBeenCalled();
+	});
+
+	it("skips the all-zeros $GITHUB_EVENT_BEFORE sentinel and falls to $GITHUB_SHA", async () => {
+		// A brand-new branch push reports an all-zeros github.event.before — not a
+		// usable base — so resolution falls through to GITHUB_SHA.
+		const base = await resolveBaseRef(
+			{ GITHUB_EVENT_BEFORE: ALL_ZEROS, GITHUB_SHA: "ghpushsha" },
+			"/repo",
+		);
+
+		expect(base).toBe("ghpushsha");
+		expect(mockedExec).not.toHaveBeenCalled();
+	});
+
+	it("falls back to $GITHUB_SHA on a GitHub push (no base ref, no before-sha)", async () => {
+		// A push event sets no GITHUB_BASE_REF; with no github.event.before wired,
+		// GITHUB_SHA is used directly as the base per the design precedence chain.
 		const base = await resolveBaseRef({ GITHUB_SHA: "ghpushsha" }, "/repo");
 
 		expect(base).toBe("ghpushsha");

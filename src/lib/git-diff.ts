@@ -57,7 +57,10 @@ async function tryMergeBase(ref: string, cwd: string): Promise<string | null> {
  * 1. `$CI_MERGE_REQUEST_DIFF_BASE_SHA` (GitLab MR) when non-empty.
  * 2. `$CI_COMMIT_BEFORE_SHA` (GitLab push) when non-empty AND not the
  *    all-zeros new-branch sentinel.
- * 3. `$GITHUB_BASE_REF` (GitHub Actions PR) → `git merge-base origin/<ref> HEAD`.
+ * 3. `$GITHUB_BASE_REF` (GitHub Actions PR) → `git merge-base origin/<ref> HEAD`;
+ *    else on a push, `$GITHUB_EVENT_BEFORE` (github.event.before — the real push
+ *    base, unless the all-zeros new-branch sentinel) before falling to
+ *    `$GITHUB_SHA` (which equals HEAD after actions/checkout → empty diff).
  * 4. Local fallback: `git merge-base <candidate> HEAD` over
  *    `origin/main`, `origin/master`, `main`, `master` — first that resolves.
  * 5. Nothing resolves → `null` (caller loud-degrades).
@@ -80,10 +83,20 @@ export async function resolveBaseRef(
 	}
 
 	// 3. GitHub Actions — a PR sets GITHUB_BASE_REF (merge-base against the
-	//    target branch); a push has no base ref and falls back to GITHUB_SHA.
+	//    target branch). A push has no base ref: prefer github.event.before
+	//    (GITHUB_EVENT_BEFORE — the commit the branch pointed at before the push,
+	//    the real diff base), unless it is the all-zeros new-branch sentinel, and
+	//    only then fall back to GITHUB_SHA (which equals HEAD after
+	//    actions/checkout → an empty diff → scope:changed gates would silently
+	//    skip; a visible skip, not a false-green — the before-sha avoids it).
 	if (isNonEmpty(env.GITHUB_BASE_REF)) {
 		const base = await tryMergeBase(`origin/${env.GITHUB_BASE_REF}`, cwd);
 		if (base !== null) return base;
+	} else if (
+		isNonEmpty(env.GITHUB_EVENT_BEFORE) &&
+		env.GITHUB_EVENT_BEFORE !== NEW_BRANCH_SENTINEL
+	) {
+		return env.GITHUB_EVENT_BEFORE;
 	} else if (isNonEmpty(env.GITHUB_SHA)) {
 		return env.GITHUB_SHA;
 	}

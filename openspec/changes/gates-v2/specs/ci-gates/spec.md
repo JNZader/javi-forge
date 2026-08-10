@@ -179,13 +179,26 @@ any gate command.
 ### Requirement: Gate-run JSON output
 
 When `--json` is passed on the `ci` RUN path, gate-run output MUST be a single JSON object
-`{ ok, gates: [{ id, mode, scope, status, blocking, changedFiles?, exitCode? }] }`, with Ink/step
-chatter suppressed. This is a NEW headless run branch (the `--json` flag is today consumed only by
-`ci validate`, never by the Ink-rendered run path): it MUST bypass the Ink render, collect gate
-outcomes, print the object, and set the process exit code EXPLICITLY (the Ink error boundary is not
-reached without a render). `ok` MUST be `false` if and only if a BLOCKING gate errored; informative
-gate failures MUST keep `ok: true`. The `exitCode` for a failing gate is its first non-zero
-command's code.
+`{ ok, exitCode, gates: [{ id, mode, scope, status, blocking, changedFiles?, exitCode?, reason? }] }`,
+with Ink/step chatter suppressed. This is a NEW headless run branch (the `--json` flag is today
+consumed only by `ci validate`, never by the Ink-rendered run path): it MUST bypass the Ink render,
+collect gate outcomes, print the object, and set the process exit code EXPLICITLY (the Ink error
+boundary is not reached without a render). `ok` MUST be `false` if and only if a BLOCKING gate
+errored; informative gate failures MUST keep `ok: true`. Each gate entry's `exitCode` for a failing
+gate is its first non-zero command's code.
+
+Because `ok` is scoped to blocking GATES, a blocking RUNNER/phase failure (or any crash) can make the
+run fail while `ok` stays `true`. The object MUST therefore ALSO carry a TOP-LEVEL `exitCode` (the
+process exit code: non-zero on ANY run failure, including a runner failure or crash), so a consumer
+reading the object alone is never fooled by `ok: true` on a failed run.
+
+A degraded/skipped `scope: changed` gate MUST carry an optional per-gate `reason` string, so the
+loud-degrade (base ref null, changed-file resolution failure under a shallow clone, or empty changed
+set) is visible to the JSON consumer and not only in the Ink stream.
+
+KNOWN LIMITATION: the changed-file set injected to a gate via `$JAVI_FORGE_CHANGED_FILES` is
+newline-joined; a repo path containing a literal newline would corrupt line-based parsing. This is a
+low-likelihood edge and is accepted as a documented caveat rather than switching to NUL-joining.
 
 #### Scenario: JSON shape and ok on blocking failure
 
@@ -199,4 +212,17 @@ command's code.
 - GIVEN a run whose only failing gate is `informative`, `--json` set
 - WHEN the gate phase completes
 - THEN `ok: true` and the process exit code is 0
+
+#### Scenario: degraded scope:changed gate carries a reason in JSON
+
+- GIVEN a `scope: changed` gate whose changed-file computation fails (shallow clone), `--json` set
+- WHEN the gate phase completes
+- THEN the gate entry has `status: "skipped"` AND a `reason` naming the degrade cause
+
+#### Scenario: top-level exitCode exposes a runner failure despite ok:true
+
+- GIVEN a run where a blocking RUNNER/phase fails (not a gate), `--json` set
+- WHEN the headless run completes
+- THEN the JSON `ok` stays `true` (no blocking gate errored) BUT the top-level `exitCode` is non-zero,
+  so a consumer keying on the object sees the run failure
 ```

@@ -62,14 +62,19 @@ Each slice = one PR boundary, sequential, ≤400 production lines. Slice 4 has a
 
 ## Phase 4 — Slice 4: scope:changed + baseline + env + headless JSON (High risk; 4a/4b escape hatch)
 
-- [ ] 4.1 GREEN `src/commands/ci.ts`: wire `git-diff.ts` into the gate phase for `scope:changed` — resolve base ref; base RESOLVES + non-empty set → run gate with `$JAVI_FORGE_CHANGED_FILES` = newline-joined repo-root-relative paths in the env map; base resolves + EMPTY set → `report(…,"skipped","no changed files")`.
-- [ ] 4.2 GREEN `src/commands/ci.ts`: loud-degrade BOTH failure modes — base `null` → skip every scope:changed gate `report(…,"skipped","no base ref resolved — skipping scope:changed")`; `changedFiles` THROWS (shallow clone/missing ref) → CATCH and skip identically with `"changed-file diff failed (shallow clone / missing ref) — skipping scope:changed"`. NEVER widen to `all`, NEVER crash the phase. [ci-gates: scope:changed loud-degrade contract]
-- [ ] 4.3 Tests: changed scope runs on non-empty diff; empty set skips; no base ref skips loudly + never widens; shallow-clone throw caught, skips loudly, never widens, never crashes (JDA-005).
-- [ ] 4.4 GREEN `src/commands/ci.ts`: `baseline` injection — pass the optional gate `baseline` path to the gate command environment/args per gate contract.
-- [ ] 4.5 RED+GREEN `src/cli/dispatch/ci.tsx`: NEW headless gate-run branch — when `--json` is set on the `ci` RUN path (~:117-131, currently `--json` only wired to `ci validate` at :36-62), BYPASS the Ink render, drive `runCI` collecting gate outcomes into `{ok, gates:[{id,mode,scope,status,blocking,changedFiles?,exitCode?}]}`, print the object, and set the process exit code EXPLICITLY (CI.tsx's catch is unreachable without a render). `ok` is `false` iff a BLOCKING gate errored; `exitCode` = its first-failure code. This is a NEW non-Ink path, NOT flag reuse (JDA-004/JDB-005). [ci-gates: Gate-run JSON output]
-- [ ] 4.6 Tests: JSON shape + `ok:false` on blocking failure (blocking entry `status:"error"`,`blocking:true`; informative entry `status:"warning"`); `ok:true` + exit 0 when only informative fails.
-- [ ] 4.7 BUDGET GATE: if slice 4 diff >400 prod lines, SPLIT — 4a = scope:changed wiring (4.1-4.3) + headless JSON (4.5-4.6); 4b = baseline (4.4) + env polish. Re-check before opening the PR.
-- [ ] 4.8 Run `pnpm validate`. Final PR (4 or 4a→4b).
+- [x] 4.1 GREEN `src/commands/ci.ts`: wire `git-diff.ts` into the gate phase for `scope:changed` — resolve base ref; base RESOLVES + non-empty set → run gate with `$JAVI_FORGE_CHANGED_FILES` = newline-joined repo-root-relative paths in the env map; base resolves + EMPTY set → `report(…,"skipped","no changed files")`.
+- [x] 4.2 GREEN `src/commands/ci.ts`: loud-degrade BOTH failure modes — base `null` → skip every scope:changed gate `report(…,"skipped","no base ref resolved — skipping scope:changed")`; `changedFiles` THROWS (shallow clone/missing ref) → CATCH and skip identically with `"changed-file diff failed (shallow clone / missing ref) — skipping scope:changed"`. NEVER widen to `all`, NEVER crash the phase. [ci-gates: scope:changed loud-degrade contract]
+- [x] 4.3 Tests: changed scope runs on non-empty diff; empty set skips; no base ref skips loudly + never widens; shallow-clone throw caught, skips loudly, never widens, never crashes (JDA-005).
+- [x] 4.4 GREEN `src/commands/ci.ts`: `baseline` injection — pass the optional gate `baseline` path to the gate command environment/args per gate contract. (injected as `$JAVI_FORGE_BASELINE` in the gate env map; test pins it.)
+- [x] 4.5 RED+GREEN `src/cli/dispatch/ci.tsx`: NEW headless gate-run branch — when `--json` is set on the `ci` RUN path, BYPASS the Ink render, drive `runCI` (via `collectGateOutcomes`) collecting gate outcomes into `{ok, gates:[{id,mode,scope,status,blocking,changedFiles?,exitCode?}]}`, print the object, and set the process exit code EXPLICITLY (CI.tsx's catch is unreachable without a render). `ok` is `false` iff a BLOCKING gate errored; process `exitCode` = 1 on a blocking failure (or a non-gate crash), else 0. NEW non-Ink path, NOT flag reuse (JDA-004/JDB-005). [ci-gates: Gate-run JSON output]
+- [x] 4.6 Tests: JSON shape + `ok:false` on blocking failure (blocking entry `status:"error"`,`blocking:true`; informative entry `status:"warning"`); `ok:true` + exit 0 when only informative fails. (unit-tested via `collectGateOutcomes` + dispatch branch mocking `collectGateOutcomes`, asserting Ink render bypassed.)
+- [x] 4.7 BUDGET GATE: production diff = 216 added / 11 deleted (ci.ts +177/-9, ci.tsx +24, git-diff.ts +15/-2) — under 400. NO 4a/4b split needed; all four pieces landed in one slice.
+- [x] 4.8 Run `pnpm validate`. Final PR (4). EXIT=0, 1468 tests pass.
+
+### Slice-4 carry-forward requirements addressed
+
+- JDA-002 (scope:changed ran as scope:all) — CLOSED: `runGates` now branches on `gate.scope`; scope:changed resolves the base ref + consumes `changedFiles`, injecting `$JAVI_FORGE_CHANGED_FILES`.
+- JDA-001(S2)/JDB-S2-001 (GitHub-push base = `$GITHUB_SHA` → empty diff) — CLOSED via option (a): `resolveBaseRef` now reads `$GITHUB_EVENT_BEFORE` (the real push base, with all-zeros guard) BEFORE falling to `$GITHUB_SHA`. Test added in `git-diff.test.ts`.
 
 ## Notes (folded design decisions)
 

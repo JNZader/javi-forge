@@ -357,14 +357,14 @@ describe("installCIHooks", () => {
 		expect(content).toContain("--no-ci-ghagga");
 	});
 
-	it("pre-push hook requires docker", async () => {
+	it("pre-push hook runs the native quick CI checks (no docker probe)", async () => {
 		await fs.ensureDir(path.join(tmpDir, ".git"));
 		await installCIHooks(tmpDir);
 		const content = await fs.readFile(
 			path.join(tmpDir, ".git", "hooks", "pre-push"),
 			"utf-8",
 		);
-		expect(content).toContain("docker info");
+		expect(content).toContain("--no-docker");
 		expect(content).toContain("javi-forge ci");
 	});
 

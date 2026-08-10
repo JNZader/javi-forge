@@ -10,12 +10,16 @@
 		]
 	},
 	"pre-push": {
-		"version": 1,
-		"sha256": "7de58640aeef33085a49f31f1d9d0c8bacde0069d6d3265ae41aa8d3cd14d7a5",
+		"version": 2,
+		"sha256": "3dad58303d81fc513a35339083438a78aa483fcd28e3377f006bd26e8ce76a6d",
 		"historical": [
 			{
 				"sha256": "7de58640aeef33085a49f31f1d9d0c8bacde0069d6d3265ae41aa8d3cd14d7a5",
 				"firstCommit": "5587b3b9b9ed3c86809c0a3d89a850dd2bce7e1a"
+			},
+			{
+				"sha256": "3dad58303d81fc513a35339083438a78aa483fcd28e3377f006bd26e8ce76a6d",
+				"firstCommit": "a35e09d39a5394d6380499d1ed73fdf22f08c829"
 			}
 		]
 	},

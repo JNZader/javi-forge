@@ -181,13 +181,17 @@ describe("installed hooks — executed", () => {
 	});
 
 	// ── pre-push ──────────────────────────────────────────────────────────────
+	// The native pre-push body runs the SAME frozen flag set as pre-commit
+	// (`ci --quick --no-docker --no-security --no-ci-ghagga`): native validate +
+	// coverage, no Docker probe. The stub logs `$*` as ONE line, so a single
+	// invocation is a single-element argsLog. Fail-closed for blocking image
+	// gates now lives at the ci gate layer, not in the hook body.
 
-	it("pre-push runs the full CI simulation when Docker answers", async () => {
+	it("pre-push runs the native CI checks with the frozen flag set", async () => {
 		const result = await runHook("pre-push");
 
 		expect(result.exitCode).toBe(0);
-		// `docker info` first, then the bare `ci` run — no quick/no-docker flags.
-		expect(await readArgsLog()).toEqual(["info", "ci"]);
+		expect(await readArgsLog()).toEqual([FROZEN_PRE_COMMIT_FLAGS]);
 	});
 
 	it("pre-push aborts when the CLI exits non-zero", async () => {
@@ -195,16 +199,13 @@ describe("installed hooks — executed", () => {
 
 		expect(result.exitCode).toBe(1);
 		expect(result.stdout).toContain("CI FAILED");
-		// Docker answered and the CLI really ran before the abort.
-		expect(await readArgsLog()).toEqual(["info", "ci"]);
+		// The CLI really ran with the native flags before the propagated abort.
+		expect(await readArgsLog()).toEqual([FROZEN_PRE_COMMIT_FLAGS]);
 	});
 
-	it("pre-push refuses to run CI when Docker is unavailable", async () => {
-		const result = await runHook("pre-push", [], { STUB_EXIT_DOCKER: "1" });
-
-		expect(result.exitCode).toBe(1);
-		expect(result.stdout).toContain("Docker is not running");
-		// Fail closed: `docker info` was attempted, the CLI never was.
-		expect(await readArgsLog()).toEqual(["info"]);
-	});
+	// The pre-change "refuses to run CI when Docker is unavailable" case was
+	// DELETED here: the native pre-push body has no `docker info` probe, so a
+	// Docker-down refusal is meaningless at the hook layer. Fail-closed image-gate
+	// enforcement is re-homed to ci.ts runGates (a blocking image gate is REFUSED
+	// under --no-docker), covered by src/commands/ci.test.ts.
 });

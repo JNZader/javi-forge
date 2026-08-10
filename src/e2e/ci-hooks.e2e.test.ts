@@ -3,20 +3,16 @@
  *
  * The git hooks installed by `javi-forge ci init` delegate to these commands:
  *   pre-commit: javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
- *   pre-push:   javi-forge ci   (full, Docker)
- * The hook blocks the git operation when the command exits non-zero. These
- * tests prove exit-code propagation end to end by spawning the compiled CLI
- * in a hybrid repository: a failing configured runner must produce exit 1,
- * a passing run must produce exit 0.
+ *   pre-push:   javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
+ * Both hooks now invoke the SAME native flag set (hooks-ricos Slice B dropped
+ * the pre-push Docker path to sidestep the container EACCES failure). The hook
+ * blocks the git operation when the command exits non-zero. These tests prove
+ * exit-code propagation end to end by spawning the compiled CLI in a hybrid
+ * repository: a failing configured runner must produce exit 1, a passing run
+ * must produce exit 0.
  *
  * Notes:
- *   - The pre-push FAILURE case uses the exact bare hook command: the runner
- *     fails during lint, before the environment-gated semgrep/ghagga steps.
- *   - The pre-push SUCCESS case passes --no-security --no-ci-ghagga because
- *     semgrep/ghagga are global, environment-dependent gates orthogonal to
- *     runner plumbing (covered by their own unit tests).
- *   - Docker cases are skipped when Docker or the local bash:5 image is
- *     unavailable; args-level coverage lives in src/lib/docker.test.ts.
+ *   - args-level coverage lives in src/lib/docker.test.ts.
  *
  * Prerequisites: `pnpm build` must be run before these tests.
  */
@@ -27,24 +23,9 @@ import path from "node:path";
 import { promisify } from "node:util";
 import fs from "fs-extra";
 import { afterEach, describe, expect, it } from "vitest";
-import { isDockerAvailable } from "../lib/docker.js";
 
 const execFileAsync = promisify(execFile);
 const CLI_PATH = path.resolve(__dirname, "../../dist/index.js");
-
-const DOCKER_OK = await isDockerAvailable();
-const BASH_IMAGE_OK =
-	DOCKER_OK &&
-	(await (async () => {
-		try {
-			await execFileAsync("docker", ["image", "inspect", "bash:5"], {
-				timeout: 10_000,
-			});
-			return true;
-		} catch {
-			return false;
-		}
-	})());
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -199,56 +180,9 @@ runners:
 	});
 });
 
-// ── pre-push path (full, Docker) ─────────────────────────────────────────────
-
-describe("hook contract — pre-push (full, docker)", () => {
-	it.skipIf(!BASH_IMAGE_OK)(
-		"a failing configured runner exits 1 with the exact bare hook command — push is blocked",
-		async () => {
-			const repo = await createHybridRepo(`
-version: 1
-runners:
-  - name: pinned
-    stack: node
-    image: bash:5
-    lint: "exit 1"
-`);
-			// Exact command the pre-push hook runs. The runner fails during
-			// lint, before the environment-gated semgrep/ghagga steps.
-			const { exitCode, stdout } = await runCLI(["ci"], {
-				cwd: repo,
-				timeout: 120_000,
-			});
-
-			expect(exitCode).toBe(1);
-			expect(stdout).toContain("Lint [pinned] failed");
-		},
-		180_000,
-	);
-
-	it.skipIf(!BASH_IMAGE_OK)(
-		"passing configured runners exit 0 — push proceeds",
-		async () => {
-			const repo = await createHybridRepo(`
-version: 1
-runners:
-  - name: pinned
-    stack: node
-    image: bash:5
-    lint: "true"
-    requires: [bash]
-`);
-			// semgrep/ghagga are global, environment-gated steps orthogonal to
-			// runner plumbing; they are disabled here for determinism.
-			const { exitCode, stdout } = await runCLI(
-				["ci", "--no-security", "--no-ci-ghagga"],
-				{ cwd: repo, timeout: 120_000 },
-			);
-
-			expect(exitCode).toBe(0);
-			expect(stdout).toContain("Required tools OK [pinned]");
-			expect(stdout).toContain("Lint [pinned] passed");
-		},
-		180_000,
-	);
-});
+// The pre-push (full, docker) contract block was RETIRED in hooks-ricos Slice B:
+// the native pre-push arg vector is now identical to pre-commit's
+// (`ci --quick --no-docker --no-security --no-ci-ghagga`), so its exit-code
+// propagation is already proven by the pre-commit contract block above. Docker
+// image-gate behavior is covered by src/commands/ci.test.ts (runGates) and
+// src/lib/docker.test.ts; re-testing it here would be redundant.

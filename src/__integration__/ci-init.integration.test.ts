@@ -65,11 +65,11 @@ describe("installCIHooks() — integration", () => {
 		expect(content).toContain("--no-docker");
 	});
 
-	it("pre-push checks Docker before running", async () => {
+	it("pre-push runs native quick CI with npx fallback", async () => {
 		await installCIHooks(tmpDir);
 
 		const content = await readGenerated(tmpDir, ".git", "hooks", "pre-push");
-		expect(content).toContain("docker info");
+		expect(content).toContain("--no-docker");
 		expect(content).toContain("javi-forge ci");
 		expect(content).toContain("npx javi-forge ci");
 	});

@@ -33,7 +33,10 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - run: pnpm build
-      - run: pnpm test
+      # COV-2: run tests WITH coverage so the configured 85/80 floor
+      # (vitest.config.ts) actually gates on CI. Local `pnpm validate` keeps
+      # running plain `pnpm test` (no per-commit coverage friction / jitter).
+      - run: pnpm test:coverage
       - run: pnpm package:check
 
       # ─── Dogfooding: javi-forge must use its own tools on itself ──────

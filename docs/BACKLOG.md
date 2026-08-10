@@ -342,3 +342,34 @@ therefore invisible until someone runs the command by hand.
 - **What**: (a) `gate.image` (and `runner.image`) are validated on the trimmed value but STORED untrimmed — a whitespace-surrounded ref reaches docker argv untrimmed → "invalid reference format" at run time instead of a clean validation error. Store `.trim()`ed for early/clear failure. (b) The RUNNER `image` validation (ci-config.ts:259-269) has NO leading-dash guard — a runner `image: "--privileged"` / `-v /:/host` would be injected as a docker run FLAG (the exact flag-injection vector the gate path now guards at ci-config.ts:437). Apply the same leading-dash guard to `runner.image`.
 - **Threat model**: trust-bounded (the ci.yaml author already has host code-exec), so defense-in-depth / consistency, not an escalation. Do gate + runner together so the two paths stay consistent.
 - **Suggested fix**: one shared `validateImageRef(value, path)` helper used by both runner and gate validation (trim + non-empty + leading-dash reject), returning the trimmed value to store.
+
+### PREPUSH-EACCES — Containerized full-CI pre-push fails at the runner's `pnpm install`
+- **Source**: containerized-gates slices 2/3 — the pre-push hook (`javi-forge ci` full, containerized) aborted the push; forced `--no-verify` on #16 and #17.
+- **What**: the containerized full-CI run fails in the RUNNER's install step with
+  `[EACCES] EACCES: permission denied, open '/home/runner/work/_tmp_<n>_<hash>'`
+  (`pnpm install` exit 243) → the run then reports `Lint failed` as a cascade. The
+  failure is upstream of any gate code (install phase), so it is orthogonal to the
+  reviewed diffs.
+- **NOT the old ENV-1 uid war**: the host tree is entirely uid 1000 (verified
+  `find . -not -user 1000` empty; `node_modules` owner 1000), and ENV-1's
+  `--user $(getuid):$(getgid)` fix is in place. The container runs as host
+  uid 1000, and the bind-mount root (`/home/runner/work` = projectDir) is
+  host-owned — yet pnpm cannot create its atomic-rename temp
+  (`_tmp_<pid>_<hash>`) at the modules/mount root inside the container.
+- **Hypothesis (unconfirmed — root-cause between SDDs)**: pnpm's install writes a
+  temp under the virtual-store / modules root that lands at the mount point; the
+  mount-root inode's perms or the in-image `/home/runner` ownership (created
+  `runner` user vs host uid 1000 mapping) block the write even though the
+  projectDir contents are host-owned. Candidate probes: run the runner container
+  interactively (`--entrypoint "" -it`) as `--user 1000:1000` and `touch
+  /home/runner/work/_tmp_probe`; inspect the mount-root perms inside the
+  container; try a pnpm `store-dir`/`--virtual-store-dir` under a container-writable
+  path (e.g. `/tmp`) via env.
+- **Impact**: local pre-push containerized verification is unusable (bypassed with
+  `--no-verify`); the substantive gate remains native `pnpm validate` + `vitest
+  run --coverage`. GitHub Actions `CI` is `disabled_manually` by design, so it does
+  NOT backstop this.
+- **Suggested fix**: reproduce with the interactive probe above, then either point
+  pnpm's temp/store at a container-writable dir for the runner install, or fix the
+  mount-root writability for the host-uid container user. Fix as its own ticket, not
+  in-flight.

@@ -59,4 +59,4 @@ TDD: vitest RED→GREEN per task. Coverage floors 85/80 enforced same-run by `te
 
 ## Phase 5: Docs
 
-- [ ] 5.1 Document image contract: must ship `bash`; timeout budget = total wall-clock incl. image pull (pre-pull / generous timeout guidance, JDA-002); no in-container `timeout` binary needed.
+- [~] 5.1 DEFERRED to backlog (orchestrator decision at archive time — NOT done, NOT claimed complete). Document image contract in user-facing docs: must ship `bash`; timeout budget = total wall-clock incl. image pull (pre-pull / generous timeout guidance, JDA-002); no in-container `timeout` binary needed. Rationale: the normative behavior is already captured in the promoted specs (specs/ci-gates "Containerized gate timeout disambiguation" + specs/ci-execution "Container image portability constraint"); only the user-facing docs write-up remains and is deferred as a backlog ticket.

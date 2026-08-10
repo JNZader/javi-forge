@@ -12,6 +12,9 @@ import {
 	type CIRunnerConfig,
 	findCIConfig,
 	GATE_MODE,
+	GATE_SCOPE,
+	type GateMode,
+	type GateScope,
 	loadCIConfig,
 } from "../lib/ci-config.js";
 import { refreshContextDir } from "../lib/context.js";
@@ -22,6 +25,7 @@ import {
 	runInContainer,
 } from "../lib/docker.js";
 import { execFileAsync } from "../lib/exec.js";
+import { changedFiles, resolveBaseRef } from "../lib/git-diff.js";
 import type { Stack } from "../types/index.js";
 
 // =============================================================================
@@ -488,6 +492,7 @@ function describeRunners(resolved: ResolvedRunners): string {
 export async function runCI(
 	options: CIOptions,
 	onStep: CIStepCallback,
+	onGateOutcome?: (outcome: GateOutcome) => void,
 ): Promise<void> {
 	const {
 		projectDir = process.cwd(),
@@ -527,7 +532,7 @@ export async function runCI(
 				`no runners resolved — ${mode} mode requires at least one runner`,
 			);
 		}
-		await runGates(resolved.gates, projectDir, onStep);
+		await runGates(resolved.gates, projectDir, onStep, onGateOutcome);
 		return;
 	}
 
@@ -752,7 +757,7 @@ export async function runCI(
 	// already `full` or `quick` here; the guard makes the contract explicit.
 	// `runGates` no-ops on an empty gate list (a v1 repo carries none).
 	if (mode === "full" || mode === "quick") {
-		await runGates(resolved.gates, projectDir, onStep);
+		await runGates(resolved.gates, projectDir, onStep, onGateOutcome);
 	}
 }
 
@@ -1136,6 +1141,41 @@ export async function runGateNative(
 	});
 }
 
+/** Env var carrying a scope:changed gate's newline-joined, root-relative paths. */
+const CHANGED_FILES_ENV = "JAVI_FORGE_CHANGED_FILES";
+/** Env var carrying a gate's optional baseline artifact path. */
+const BASELINE_ENV = "JAVI_FORGE_BASELINE";
+
+/**
+ * A single gate's structured result, collected for the headless JSON run path.
+ * Mirrors the `{ id, mode, scope, status, blocking, changedFiles?, exitCode? }`
+ * JSON shape.
+ */
+export interface GateOutcome {
+	id: string;
+	mode: GateMode;
+	scope: GateScope;
+	status: CIStepStatus;
+	/** `true` when `mode === blocking` — an errored blocking gate drives `ok:false`. */
+	blocking: boolean;
+	/** The changed-file set a scope:changed gate saw (present only when resolved). */
+	changedFiles?: string[];
+	/** First non-zero command code for a failed gate. */
+	exitCode?: number;
+}
+
+/**
+ * Shared resolution of the scope:changed diff, computed at most ONCE per gate
+ * phase (the base ref and changed set are identical for every scope:changed
+ * gate). Loud-degrade is encoded as a `skip` variant carrying the named reason:
+ * a null base ref OR a `changedFiles` throw (shallow clone / missing ref) both
+ * skip every scope:changed gate with a named warning — NEVER widen to `all`,
+ * NEVER crash the phase.
+ */
+type ChangedScope =
+	| { kind: "files"; files: string[] }
+	| { kind: "skip"; reason: string };
+
 /**
  * Repo-level gate phase. Each gate runs host-native via `runGateNative` at the
  * repo root. Outcome semantics:
@@ -1152,35 +1192,116 @@ export async function runGateNative(
  * Multi-command gates run in order and STOP at the first non-zero exit
  * (fail-fast, matching the runner precedent); that first code is reported.
  *
- * Slice 3 wires `mode` and `scope: all` gates with the engine-injected env
- * (`CI=true`). `scope: changed` wiring, `baseline`, and gate `env` injection
- * land in slice 4.
+ * `scope: changed` consumes the injectable `git-diff.ts` engine: the base ref is
+ * resolved and the changed set computed ONCE, then shared. A non-empty set runs
+ * the gate with `$JAVI_FORGE_CHANGED_FILES` (newline-joined, root-relative); an
+ * empty set skips the gate; a null base OR a `changedFiles` throw skips every
+ * scope:changed gate with a named warning (loud-degrade, never widens, never
+ * crashes). `baseline` is injected as `$JAVI_FORGE_BASELINE`. Gate `env` spreads
+ * LAST (documented last-wins over the engine-injected keys).
+ *
+ * `onOutcome` (optional) receives each gate's structured result for the headless
+ * JSON run path.
  */
 async function runGates(
 	gates: readonly CIGateConfig[],
 	projectDir: string,
 	onStep: CIStepCallback,
+	onOutcome?: (outcome: GateOutcome) => void,
 ): Promise<void> {
 	if (gates.length === 0) return;
 
 	const blockingFailures: string[] = [];
-	// Engine-injected keys only in slice 3; gate `env` + JAVI_FORGE_CHANGED_FILES
-	// are added in slice 4.
 	const baseEnv: Record<string, string> = {
 		...filterDefinedEnv(process.env),
 		CI: "true",
 	};
 
+	// Lazily resolved and memoized — computed only when a scope:changed gate
+	// exists, and only once (shared across all scope:changed gates).
+	let changedScope: ChangedScope | null = null;
+	const resolveChangedScope = async (): Promise<ChangedScope> => {
+		if (changedScope !== null) return changedScope;
+		const base = await resolveBaseRef(process.env, projectDir);
+		if (base === null) {
+			changedScope = {
+				kind: "skip",
+				reason: "no base ref resolved — skipping scope:changed",
+			};
+			return changedScope;
+		}
+		try {
+			changedScope = {
+				kind: "files",
+				files: await changedFiles(base, projectDir),
+			};
+		} catch {
+			// Shallow clone / base sha absent from local history: caught here so the
+			// throw never aborts the phase and the gate never widens to scope:all.
+			changedScope = {
+				kind: "skip",
+				reason:
+					"changed-file diff failed (shallow clone / missing ref) — skipping scope:changed",
+			};
+		}
+		return changedScope;
+	};
+
 	for (const gate of gates) {
 		const stepId = `gate:${gate.id}`;
 		const label = `Gate: ${gate.id}`;
+		const blocking = gate.mode === GATE_MODE.BLOCKING;
+		const emit = (status: CIStepStatus, extra?: Partial<GateOutcome>) =>
+			onOutcome?.({
+				id: gate.id,
+				mode: gate.mode,
+				scope: gate.scope,
+				status,
+				blocking,
+				...extra,
+			});
+
 		report(onStep, stepId, label, "running");
+
+		// Per-gate env map: engine keys, then baseline, then gate.env LAST (last-wins).
+		const gateEnv: Record<string, string> = { ...baseEnv };
+		let gateChangedFiles: string[] | undefined;
+
+		if (gate.scope === GATE_SCOPE.CHANGED) {
+			const scope = await resolveChangedScope();
+			if (scope.kind === "skip") {
+				report(onStep, stepId, `${label} skipped`, "skipped", scope.reason);
+				emit("skipped");
+				continue;
+			}
+			if (scope.files.length === 0) {
+				report(
+					onStep,
+					stepId,
+					`${label} skipped`,
+					"skipped",
+					"no changed files",
+				);
+				emit("skipped", { changedFiles: [] });
+				continue;
+			}
+			gateChangedFiles = scope.files;
+			gateEnv[CHANGED_FILES_ENV] = scope.files.join("\n");
+		}
+
+		if (gate.baseline !== undefined) {
+			gateEnv[BASELINE_ENV] = gate.baseline;
+		}
+		if (gate.env !== undefined) {
+			// Gate env spreads LAST — a gate MAY override CI / CHANGED_FILES / BASELINE.
+			Object.assign(gateEnv, gate.env);
+		}
 
 		let exitCode = 0;
 		let spawnError: unknown;
 		try {
 			for (const cmd of gate.run) {
-				exitCode = await runGateNative(cmd, projectDir, baseEnv);
+				exitCode = await runGateNative(cmd, projectDir, gateEnv);
 				if (exitCode !== 0) break; // fail-fast: skip the remaining commands
 			}
 		} catch (e) {
@@ -1189,14 +1310,16 @@ async function runGates(
 
 		if (spawnError === undefined && exitCode === 0) {
 			report(onStep, stepId, `${label} passed`, "done");
+			emit("done", { changedFiles: gateChangedFiles });
 			continue;
 		}
 
 		const detail =
 			spawnError !== undefined ? String(spawnError) : `exit ${exitCode}`;
-		if (gate.mode === GATE_MODE.BLOCKING) {
+		if (blocking) {
 			blockingFailures.push(gate.id);
 			report(onStep, stepId, `${label} failed`, "error", detail);
+			emit("error", { changedFiles: gateChangedFiles, exitCode });
 		} else {
 			report(
 				onStep,
@@ -1205,12 +1328,57 @@ async function runGates(
 				"warning",
 				detail,
 			);
+			emit("warning", { changedFiles: gateChangedFiles, exitCode });
 		}
 	}
 
 	if (blockingFailures.length > 0) {
 		throw new Error(`blocking gate(s) failed: ${blockingFailures.join(", ")}`);
 	}
+}
+
+/** Structured result of a headless (`--json`) gate run. */
+export interface HeadlessGateResult {
+	/** `false` iff a BLOCKING gate errored; informative failures keep it `true`. */
+	ok: boolean;
+	gates: GateOutcome[];
+	/** The process exit code to set explicitly (1 on a blocking failure or crash). */
+	exitCode: number;
+}
+
+/**
+ * Drive `runCI` headlessly (no Ink render), collecting each gate's structured
+ * outcome for the `--json` run path. `runCI` throws on a blocking gate failure
+ * (and on any non-gate error); the outcomes are captured regardless via the
+ * `onOutcome` callback, so the JSON is always complete.
+ *
+ * `ok` is `false` iff a BLOCKING gate errored (spec contract); informative
+ * failures keep `ok:true`. `exitCode` is `1` when a blocking gate errored OR
+ * `runCI` threw for any other reason (a real crash still exits non-zero), else
+ * `0`. The caller (dispatch) prints `{ ok, gates }` and sets `process.exitCode`.
+ */
+export async function collectGateOutcomes(
+	options: CIOptions,
+): Promise<HeadlessGateResult> {
+	const gates: GateOutcome[] = [];
+	let threw = false;
+	try {
+		await runCI(
+			options,
+			() => {},
+			(outcome) => gates.push(outcome),
+		);
+	} catch {
+		// Blocking failure (aggregate throw) or a non-gate error — outcomes are
+		// already captured; the headless path never propagates the throw.
+		threw = true;
+	}
+	const blockingErrored = gates.some((g) => g.blocking && g.status === "error");
+	return {
+		ok: !blockingErrored,
+		gates,
+		exitCode: blockingErrored || threw ? 1 : 0,
+	};
 }
 
 // =============================================================================

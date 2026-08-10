@@ -10,9 +10,11 @@ import {
 	openShell,
 	runInContainer,
 } from "../lib/docker.js";
+import { changedFiles, resolveBaseRef } from "../lib/git-diff.js";
 import type { Stack } from "../types/index.js";
 import type { CIStep } from "./ci.js";
 import {
+	collectGateOutcomes,
 	detectCIStack,
 	installCIHooks,
 	resolveCIRunners,
@@ -59,6 +61,15 @@ vi.mock("../lib/docker.js", async (importOriginal) => {
 		openShell: vi.fn(async () => {}),
 	};
 });
+
+// The changed-file diff ENGINE (git-diff.ts) is exercised by its own unit +
+// integration suites. Here we test the gate-phase WIRING that CONSUMES it, so the
+// engine is mocked to make the scope:changed branches (non-empty / empty / null
+// base / throw) fully deterministic and hermetic — no real git, no env pollution.
+vi.mock("../lib/git-diff.js", () => ({
+	resolveBaseRef: vi.fn(),
+	changedFiles: vi.fn(),
+}));
 
 // The `semgrep`/`ghagga` availability probes shell out through this helper, so
 // whether their steps run is a property of the DEVELOPER'S PATH, not of the
@@ -1244,6 +1255,278 @@ gates:
 		expect(steps.some((s) => s.id === "gate:g" && s.status === "done")).toBe(
 			true,
 		);
+	});
+});
+
+// =============================================================================
+// runCI — scope:changed wiring + baseline + env injection (slice 4)
+// =============================================================================
+
+describe("runCI — scope:changed wiring (slice 4)", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-scope-"));
+		vi.mocked(resolveBaseRef).mockReset();
+		vi.mocked(changedFiles).mockReset();
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	const QUICK = {
+		mode: "quick" as const,
+		noDocker: true,
+		noGhagga: true,
+		noSecurity: true,
+	};
+
+	const writeConfig = async (yaml: string) => {
+		await fs.outputFile(path.join(tmpDir, ".javi-forge", "ci.yaml"), yaml);
+	};
+
+	it("runs a scope:changed gate on a non-empty diff with $JAVI_FORGE_CHANGED_FILES injected", async () => {
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockResolvedValue(["src/a.ts", "src/b.ts"]);
+		await writeConfig(`
+version: 2
+gates:
+  - id: changed
+    scope: changed
+    run: printf '%s' "$JAVI_FORGE_CHANGED_FILES" > changed.txt
+`);
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		// The changed set reached the child as a newline-joined, root-relative list.
+		expect(await fs.readFile(path.join(tmpDir, "changed.txt"), "utf-8")).toBe(
+			"src/a.ts\nsrc/b.ts",
+		);
+		expect(
+			steps.some((s) => s.id === "gate:changed" && s.status === "done"),
+		).toBe(true);
+	});
+
+	it("skips a scope:changed gate when the changed set is EMPTY", async () => {
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockResolvedValue([]);
+		await writeConfig(`
+version: 2
+gates:
+  - id: changed
+    scope: changed
+    run: echo ran >> ran.txt
+`);
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		// Nothing changed → the gate command NEVER runs.
+		expect(await fs.pathExists(path.join(tmpDir, "ran.txt"))).toBe(false);
+		const step = steps.filter((s) => s.id === "gate:changed").at(-1);
+		expect(step?.status).toBe("skipped");
+		expect(step?.detail).toContain("no changed files");
+	});
+
+	it("loud-degrades (skips, never widens) when NO base ref resolves", async () => {
+		vi.mocked(resolveBaseRef).mockResolvedValue(null);
+		await writeConfig(`
+version: 2
+gates:
+  - id: changed
+    scope: changed
+    run: echo ran >> ran.txt
+`);
+		const steps: CIStep[] = [];
+		// A null base must NOT crash the phase and must NOT run the gate as scope:all.
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		expect(vi.mocked(changedFiles)).not.toHaveBeenCalled();
+		expect(await fs.pathExists(path.join(tmpDir, "ran.txt"))).toBe(false);
+		const step = steps.filter((s) => s.id === "gate:changed").at(-1);
+		expect(step?.status).toBe("skipped");
+		expect(step?.detail).toMatch(/no base ref/i);
+	});
+
+	it("loud-degrades (catches, skips, never widens, never crashes) when changedFiles THROWS", async () => {
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockRejectedValue(
+			new Error("fatal: bad object BASE...HEAD"),
+		);
+		await writeConfig(`
+version: 2
+gates:
+  - id: changed
+    scope: changed
+    run: echo ran >> ran.txt
+`);
+		const steps: CIStep[] = [];
+		// The shallow-clone throw is caught: the phase does not crash, the gate is
+		// skipped with a named warning, and it does NOT run as scope:all.
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		expect(await fs.pathExists(path.join(tmpDir, "ran.txt"))).toBe(false);
+		const step = steps.filter((s) => s.id === "gate:changed").at(-1);
+		expect(step?.status).toBe("skipped");
+		expect(step?.detail).toMatch(
+			/shallow clone|missing ref|changed-file diff/i,
+		);
+	});
+
+	it("resolves the base ref only ONCE and reuses it across scope:changed gates", async () => {
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockResolvedValue(["src/a.ts"]);
+		await writeConfig(`
+version: 2
+gates:
+  - id: c1
+    scope: changed
+    run: "true"
+  - id: c2
+    scope: changed
+    run: "true"
+`);
+		await runCI({ projectDir: tmpDir, ...QUICK }, () => {});
+
+		// Shared resolution — not recomputed per gate.
+		expect(vi.mocked(resolveBaseRef)).toHaveBeenCalledTimes(1);
+		expect(vi.mocked(changedFiles)).toHaveBeenCalledTimes(1);
+	});
+
+	it("does NOT resolve a base ref when no gate is scope:changed", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: allgate
+    run: "true"
+`);
+		await runCI({ projectDir: tmpDir, ...QUICK }, () => {});
+
+		// scope:all gates never touch the diff engine.
+		expect(vi.mocked(resolveBaseRef)).not.toHaveBeenCalled();
+	});
+
+	it("injects gate baseline as $JAVI_FORGE_BASELINE", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: base
+    baseline: security-baseline.json
+    run: '[ "$JAVI_FORGE_BASELINE" = "security-baseline.json" ]'
+`);
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		expect(steps.some((s) => s.id === "gate:base" && s.status === "done")).toBe(
+			true,
+		);
+	});
+
+	it("injects gate env LAST (last-wins over engine-injected CI)", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: envgate
+    env:
+      CI: overridden
+      FOO: bar
+    run: '[ "$CI" = "overridden" ] && [ "$FOO" = "bar" ]'
+`);
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		// gate.env spreads AFTER {CI:"true"} → the override wins (documented last-wins).
+		expect(
+			steps.some((s) => s.id === "gate:envgate" && s.status === "done"),
+		).toBe(true);
+	});
+});
+
+// =============================================================================
+// collectGateOutcomes — headless JSON gate-run collector (slice 4)
+// =============================================================================
+
+describe("collectGateOutcomes — headless JSON (slice 4)", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-json-"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	const QUICK = {
+		mode: "quick" as const,
+		noDocker: true,
+		noGhagga: true,
+		noSecurity: true,
+	};
+
+	const writeConfig = async (yaml: string) => {
+		await fs.outputFile(path.join(tmpDir, ".javi-forge", "ci.yaml"), yaml);
+	};
+
+	it("ok:false with the blocking entry errored and the informative entry warned", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: blocker
+    run: exit 3
+  - id: soft
+    mode: informative
+    run: exit 1
+`);
+		const result = await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		expect(result.ok).toBe(false);
+		expect(result.exitCode).toBe(1);
+		const blocker = result.gates.find((g) => g.id === "blocker");
+		expect(blocker).toMatchObject({
+			id: "blocker",
+			mode: "blocking",
+			scope: "all",
+			status: "error",
+			blocking: true,
+			exitCode: 3,
+		});
+		const soft = result.gates.find((g) => g.id === "soft");
+		expect(soft).toMatchObject({
+			status: "warning",
+			blocking: false,
+		});
+	});
+
+	it("ok:true and exit 0 when only an informative gate fails", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: soft
+    mode: informative
+    run: exit 1
+`);
+		const result = await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		expect(result.ok).toBe(true);
+		expect(result.exitCode).toBe(0);
+		expect(result.gates.find((g) => g.id === "soft")?.status).toBe("warning");
+	});
+
+	it("ok:true, exit 0, all gates done on a clean run", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: g1
+    run: "true"
+  - id: g2
+    run: "true"
+`);
+		const result = await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		expect(result.ok).toBe(true);
+		expect(result.exitCode).toBe(0);
+		expect(result.gates.map((g) => g.status)).toEqual(["done", "done"]);
 	});
 });
 

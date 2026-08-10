@@ -18,7 +18,9 @@ services:
     container_name: ollama
     restart: unless-stopped
     ports:
-      - "${OLLAMA_PORT:-11434}:11434"
+      # Bound to loopback by default — this is a LOCAL dev stack. To expose on
+      # your LAN, change 127.0.0.1 to your interface IP (opt-in, not default).
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama_data:/root/.ollama
     environment:
@@ -45,12 +47,14 @@ services:
     profiles: ["ui", "auto", "full"]
     restart: unless-stopped
     ports:
-      - "${WEBUI_PORT:-3000}:8080"
+      - "127.0.0.1:${WEBUI_PORT:-3000}:8080"
     volumes:
       - open_webui_data:/app/backend/data
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
-      - WEBUI_AUTH=${WEBUI_AUTH:-false}
+      # Auth ON by default. Set WEBUI_AUTH=false in .env only if you accept an
+      # unauthenticated UI (loopback-only mitigates, but any local process can reach it).
+      - WEBUI_AUTH=${WEBUI_AUTH:-true}
     depends_on:
       ollama:
         condition: service_healthy
@@ -62,7 +66,7 @@ services:
     profiles: ["auto", "full"]
     restart: unless-stopped
     ports:
-      - "${N8N_PORT:-5678}:5678"
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
     volumes:
       - n8n_data:/home/node/.n8n
     environment:
@@ -76,11 +80,15 @@ services:
     profiles: ["full"]
     restart: unless-stopped
     ports:
-      - "${SUPABASE_DB_PORT:-5432}:5432"
+      - "127.0.0.1:${SUPABASE_DB_PORT:-5432}:5432"
     volumes:
       - supabase_db_data:/var/lib/postgresql/data
     environment:
-      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      # No insecure default — REQUIRED. If unset/empty, Postgres refuses to
+      # initialize ("superuser password is not specified"): set it in .env.
+      # Note: a compose-level `:?` guard would also break the core (ollama-only)
+      # profile at parse time, so the check is delegated to the postgres image.
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD}
       POSTGRES_DB: ${SUPABASE_DB_NAME:-app}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]

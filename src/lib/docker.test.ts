@@ -354,6 +354,7 @@ describe("runInContainer", () => {
 		});
 
 		expect(result.exitCode).toBe(0);
+		expect(result.timedOut).toBe(false);
 		const args = spawnMock.mock.calls[0]?.[1] as string[];
 		expect(args[0]).toBe("run");
 		expect(args).toContain("--rm");
@@ -367,8 +368,16 @@ describe("runInContainer", () => {
 		expect(args).toContain("-e");
 		expect(args).toContain("CI=true");
 		expect(args).toContain("javi-forge-ci-node");
-		expect(args).toContain("timeout");
-		expect(args).toContain("600");
+		// SANCTIONED CONTRACT CHANGE (containerized-gates design gate 1): the
+		// in-container `timeout <N>` wrapper is REMOVED — the timeout is now
+		// enforced host-side (host wall-clock timer → `docker stop`). So neither
+		// the `timeout` binary nor the `600` default appears in the argv anymore.
+		expect(args).not.toContain("timeout");
+		expect(args).not.toContain("600");
+		// A unique --name is required so the host can `docker stop <cid>`.
+		const nameIdx = args.indexOf("--name");
+		expect(nameIdx).toBeGreaterThan(-1);
+		expect(args[nameIdx + 1]).toMatch(/^javi-forge-ci-[0-9a-f]{12}$/);
 		expect(args).toContain("bash");
 		expect(args).toContain("-c");
 		expect(args[args.length - 1]).toBe("pnpm test");
@@ -425,9 +434,9 @@ describe("runInContainer", () => {
 		expect(args).not.toContain("-v");
 	});
 
-	it("respects custom timeout", async () => {
+	it("keeps the timeout OUT of the argv — it is enforced host-side now", async () => {
 		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
-		await runInContainer({
+		const result = await runInContainer({
 			projectDir,
 			image: "javi-forge-ci-node",
 			command: "pnpm test",
@@ -435,7 +444,12 @@ describe("runInContainer", () => {
 			stream: false,
 		});
 		const args = spawnMock.mock.calls[0]?.[1] as string[];
-		expect(args).toContain("120");
+		// The timeout is a HOST wall-clock timer (design gate 1), never an
+		// in-container `timeout 120` wrapper. The value must not leak into argv.
+		expect(args).not.toContain("120");
+		expect(args).not.toContain("timeout");
+		// A command that closes on its own before the timer fires is not timed out.
+		expect(result.timedOut).toBe(false);
 	});
 
 	it("applies user override", async () => {
@@ -525,6 +539,131 @@ describe("runInContainer", () => {
 				stream: false,
 			}),
 		).rejects.toThrow(/docker missing/);
+	});
+
+	// ─── env injection (containerized-gates gate 2) ──────────────────────
+
+	it("injects an env map as discrete -e KEY=VALUE argv pairs (never shell-spliced)", async () => {
+		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
+		await runInContainer({
+			projectDir,
+			image: "javi-forge-ci-node",
+			command: "run.sh",
+			env: { FOO: "a b", BAR: "x;y" },
+			stream: false,
+		});
+		const args = spawnMock.mock.calls[0]?.[1] as string[];
+		// CI=true is emitted FIRST, preceded by its own -e.
+		const ciIdx = args.indexOf("CI=true");
+		expect(args[ciIdx - 1]).toBe("-e");
+		// Each entry becomes ONE argv element `KEY=VALUE` — values with spaces or
+		// `;` survive verbatim because these are argv, not a shell string.
+		expect(args).toContain("FOO=a b");
+		expect(args).toContain("BAR=x;y");
+		expect(args[args.indexOf("FOO=a b") - 1]).toBe("-e");
+		expect(args[args.indexOf("BAR=x;y") - 1]).toBe("-e");
+		// The command is untouched — env is never interpolated into it.
+		expect(args[args.length - 1]).toBe("run.sh");
+	});
+
+	it("leaves the argv unchanged (only -e CI=true) when no env map is passed", async () => {
+		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
+		await runInContainer({
+			projectDir,
+			image: "javi-forge-ci-node",
+			command: "pnpm test",
+			stream: false,
+		});
+		const args = spawnMock.mock.calls[0]?.[1] as string[];
+		// Exactly one CI=true and no other -e pair (the runStep caller passes none).
+		expect(args.filter((a) => a === "CI=true")).toHaveLength(1);
+		const dashE = args.filter((a) => a === "-e");
+		expect(dashE).toHaveLength(1);
+	});
+
+	// ─── timedOut: host-side wall-clock timer (design gate 1) ────────────
+
+	/** A docker-run client that never closes on its own; its `kill` emits close. */
+	function hangingProc() {
+		const proc = new EventEmitter() as EventEmitter & {
+			stdout: EventEmitter;
+			stderr: EventEmitter;
+			kill: (signal?: string) => void;
+		};
+		proc.stdout = new EventEmitter();
+		proc.stderr = new EventEmitter();
+		proc.kill = vi.fn((_signal?: string) => {
+			proc.emit("close", 137);
+		});
+		return proc;
+	}
+
+	it("sets timedOut=true when the host timer fires and docker stop is issued", async () => {
+		vi.useFakeTimers();
+		try {
+			const runProc = hangingProc();
+			// First spawn = `docker run` (hangs); second = `docker stop` (fire-and-forget).
+			spawnMock
+				.mockReturnValueOnce(runProc)
+				.mockReturnValueOnce(fakeProc({ exit: 0 }));
+
+			const p = runInContainer({
+				projectDir,
+				image: "javi-forge-ci-node",
+				command: "sleep 999",
+				timeout: 1,
+				stream: false,
+			});
+
+			// Fire the 1s host wall-clock timer → timedOut set + `docker stop`.
+			await vi.advanceTimersByTimeAsync(1000);
+			const stopCall = spawnMock.mock.calls.find(
+				(c) => (c[1] as string[])[0] === "stop",
+			);
+			expect(stopCall).toBeDefined();
+			const stopArgs = stopCall?.[1] as string[];
+			// docker stop -t <grace> <cid>: targets the same --name the run used.
+			expect(stopArgs).toContain("stop");
+			expect(stopArgs).toContain("-t");
+			const runArgs = spawnMock.mock.calls[0]?.[1] as string[];
+			const cid = runArgs[runArgs.indexOf("--name") + 1];
+			expect(stopArgs).toContain(cid);
+
+			// The container never dies from docker stop (mocked) → the backstop
+			// SIGKILLs the docker-run client so the promise ALWAYS resolves.
+			await vi.advanceTimersByTimeAsync(60_000);
+			const result = await p;
+			expect(result.timedOut).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("a container that exits 124 WITHOUT the timer firing is NOT timedOut", async () => {
+		spawnMock.mockReturnValue(fakeProc({ exit: 124 }));
+		const result = await runInContainer({
+			projectDir,
+			image: "javi-forge-ci-node",
+			command: "exit 124",
+			timeout: 30,
+			stream: false,
+		});
+		// Genuine 124: the host timer never fired → distinguishable from a timeout.
+		expect(result.exitCode).toBe(124);
+		expect(result.timedOut).toBe(false);
+	});
+
+	it("runs UNBOUNDED (arms no timer) when no timeout is given", async () => {
+		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
+		const result = await runInContainer({
+			projectDir,
+			image: "javi-forge-ci-node",
+			command: "long-running",
+			stream: false,
+		});
+		expect(result.timedOut).toBe(false);
+		const args = spawnMock.mock.calls[0]?.[1] as string[];
+		expect(args).not.toContain("timeout");
 	});
 });
 

@@ -57,6 +57,7 @@ vi.mock("../lib/docker.js", async (importOriginal) => {
 			exitCode: 0,
 			stdout: "",
 			stderr: "",
+			timedOut: false,
 		})),
 		openShell: vi.fn(async () => {}),
 	};
@@ -2417,8 +2418,8 @@ ${extra}`,
 		// green, so the error label is produced by the test phase itself.
 		vi.mocked(runInContainer).mockImplementation(async (options) =>
 			/test/.test(options.command)
-				? { exitCode: 1, stdout: "", stderr: "boom" }
-				: { exitCode: 0, stdout: "", stderr: "" },
+				? { exitCode: 1, stdout: "", stderr: "boom", timedOut: false }
+				: { exitCode: 0, stdout: "", stderr: "", timedOut: false },
 		);
 
 		const steps: CIStep[] = [];

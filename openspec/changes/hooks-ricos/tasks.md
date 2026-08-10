@@ -31,34 +31,34 @@ Sequential PRs to main, matching this session's pattern. Slices share no code. N
 
 ### Phase A1: RED (failing tests first)
 
-- [ ] A1.1 In `assets/hooks/commit-msg.test.sh` (after the MOVE in A2.1) add `expect_block` cases for non-conforming subjects (`wip`, `random text`) and `expect_pass` cases for each conforming type + each exemption (`Merge `, `fixup! `, `squash! `, `amend! `, `reword! `, `Revert `). Run `bash assets/hooks/commit-msg.test.sh` → RED.
-- [ ] A1.2 Add vitest wrapper `src/__tests__/commit-msg-hook.test.ts` that `execFileSync("bash", [path.join(HOOK_ASSETS_DIR, "commit-msg.test.sh")])` and asserts exit 0. Confirm it FAILS before the body swap.
+- [x] A1.1 In `assets/hooks/commit-msg.test.sh` (after the MOVE in A2.1) add `expect_block` cases for non-conforming subjects (`wip`, `random text`) and `expect_pass` cases for each conforming type + each exemption (`Merge `, `fixup! `, `squash! `, `amend! `, `reword! `, `Revert `). Run `bash assets/hooks/commit-msg.test.sh` → RED.
+- [x] A1.2 Add vitest wrapper `src/__tests__/commit-msg-hook.test.ts` that `execFileSync("bash", [path.join(HOOK_ASSETS_DIR, "commit-msg.test.sh")])` and asserts exit 0. Confirm it FAILS before the body swap.
 
 ### Phase A2: GREEN — asset + body
 
-- [ ] A2.1 MOVE `ci-local/hooks/commit-msg.test.sh` → `assets/hooks/commit-msg.test.sh` (single source of truth; `.sh` hardcodes `HOOK="$SCRIPT_DIR/commit-msg"` so it tests the real sibling body).
-- [ ] A2.2 Replace `assets/hooks/commit-msg` body with the rich variant: best-effort NFKC via `perl -CSAD` + `Unicode::Normalize::NFKC` (degrade-to-raw when perl absent), ~30 attribution pattern families, RAW+normalized double-match loop. Must start `#!/bin/bash\n`, end one trailing `\n`. Enforcement is PURE SHELL — no `ci.ts` change.
-- [ ] A2.3 Append (before `exit 0`, `set -e`-safe) the conv-commit block: derive SUBJECT = first line non-blank AND not `^#`. EXEMPT (skip): `^Merge `, `^(fixup|squash)! `, `^(amend|reword)! `, `^Revert `. Else REQUIRE `^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._-]+\))?!?: .+`. Run attribution guard FIRST, then subject check; distinct non-zero exits with named messages (`COMMIT BLOCKED: subject must be Conventional Commit`).
-- [ ] A2.4 Run `bash assets/hooks/commit-msg.test.sh` and the vitest wrapper → GREEN.
+- [x] A2.1 MOVE `ci-local/hooks/commit-msg.test.sh` → `assets/hooks/commit-msg.test.sh` (single source of truth; `.sh` hardcodes `HOOK="$SCRIPT_DIR/commit-msg"` so it tests the real sibling body).
+- [x] A2.2 Replace `assets/hooks/commit-msg` body with the rich variant: best-effort NFKC via `perl -CSAD` + `Unicode::Normalize::NFKC` (degrade-to-raw when perl absent), ~30 attribution pattern families, RAW+normalized double-match loop. Must start `#!/bin/bash\n`, end one trailing `\n`. Enforcement is PURE SHELL — no `ci.ts` change.
+- [x] A2.3 Append (before `exit 0`, `set -e`-safe) the conv-commit block: derive SUBJECT = first line non-blank AND not `^#`. EXEMPT (skip): `^Merge `, `^(fixup|squash)! `, `^(amend|reword)! `, `^Revert `. Else REQUIRE `^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._-]+\))?!?: .+`. Run attribution guard FIRST, then subject check; distinct non-zero exits with named messages (`COMMIT BLOCKED: subject must be Conventional Commit`).
+- [x] A2.4 Run `bash assets/hooks/commit-msg.test.sh` and the vitest wrapper → GREEN.
 
 ### Phase A3: manifest + guard tests
 
-- [ ] A3.1 `assets/hooks/manifest.json`: set `commit-msg.version` 1→2; `commit-msg.sha256` → v2hash (`sha256` of new raw asset bytes, computed at apply); APPEND `{sha256: v2hash, firstCommit: <hex>}` to `commit-msg.historical[]` keeping v1 `1c23a60c…` at index 0. Do NOT re-append v1.
-- [ ] A3.2 `src/__tests__/hook-assets.test.ts`: append v2hash to `RELEASED_SNAPSHOT["commit-msg"].historical` → `[v1hash, v2hash]`, set its `sha256` → v2hash (append-only guard).
-- [ ] A3.3 `hook-assets.test.ts:141-149`: refactor blanket `version===1` + `sha256===historical[0]` → per-hook EXPECTED_VERSION map (commit-msg→2, pre-push→1, pre-commit→1) + assert `sha256===historical.at(-1).sha256`.
+- [x] A3.1 `assets/hooks/manifest.json`: set `commit-msg.version` 1→2; `commit-msg.sha256` → v2hash (`sha256` of new raw asset bytes, computed at apply); APPEND `{sha256: v2hash, firstCommit: <hex>}` to `commit-msg.historical[]` keeping v1 `1c23a60c…` at index 0. Do NOT re-append v1.
+- [x] A3.2 `src/__tests__/hook-assets.test.ts`: append v2hash to `RELEASED_SNAPSHOT["commit-msg"].historical` → `[v1hash, v2hash]`, set its `sha256` → v2hash (append-only guard).
+- [x] A3.3 `hook-assets.test.ts:141-149`: refactor blanket `version===1` + `sha256===historical[0]` → per-hook EXPECTED_VERSION map (commit-msg→2, pre-push→1, pre-commit→1) + assert `sha256===historical.at(-1).sha256`.
 
 ### Phase A4: coupled-test fixes
 
-- [ ] A4.1 `ci.test.ts:382`: `toContain("anthropic.com")` → `toContain("anthropic")` (grouped `\.(com|sh|ai)`). Lines 378-381 stay.
-- [ ] A4.2 `ci-init.integration.test.ts:81`: `toContain("co-authored-by:.*claude")` → two assertions `toContain("co-authored-by")` + `toContain("claude")` (PROVIDER_PAT is a shell var). `:82-83` stay.
-- [ ] A4.3 `package.json:19`: `test:hooks` path `ci-local/hooks/commit-msg.test.sh` → `assets/hooks/commit-msg.test.sh` (lockstep with A2.1 MOVE).
-- [ ] A4.4 Exclude the corpus from the tarball: add `*.test.sh` to `.npmignore` AND to `FORBIDDEN_PATTERNS` in `scripts/verify-package-contents.mjs`.
+- [x] A4.1 `ci.test.ts:382`: `toContain("anthropic.com")` → `toContain("anthropic")` (grouped `\.(com|sh|ai)`). Lines 378-381 stay.
+- [x] A4.2 `ci-init.integration.test.ts:81`: `toContain("co-authored-by:.*claude")` → two assertions `toContain("co-authored-by")` + `toContain("claude")` (PROVIDER_PAT is a shell var). `:82-83` stay.
+- [x] A4.3 `package.json:19`: `test:hooks` path `ci-local/hooks/commit-msg.test.sh` → `assets/hooks/commit-msg.test.sh` (lockstep with A2.1 MOVE).
+- [x] A4.4 Exclude the corpus from the tarball: add `*.test.sh` to `.npmignore` AND to `FORBIDDEN_PATTERNS` in `scripts/verify-package-contents.mjs`.
 
 ### Phase A5: verification (GATE FIRST)
 
-- [ ] A5.1 **MANDATORY APPLY-TIME GATE** — re-grep the FULL test tree (`src/**/*.test.ts`, `src/__integration__/**`, `src/e2e/**`) for: hook-body substrings, version literals, `sha256` literals, `docker info`, `npx`, `co-authored-by`, `anthropic`, and the pre-push arg vector. Reconcile ANY hit not already in this checklist before proceeding. Hard gate.
-- [ ] A5.2 `pnpm validate` exit 0.
-- [ ] A5.3 `npx vitest run --coverage` exit 0 (floors 85 lines / 80 branches).
+- [x] A5.1 **MANDATORY APPLY-TIME GATE** — re-grep the FULL test tree (`src/**/*.test.ts`, `src/__integration__/**`, `src/e2e/**`) for: hook-body substrings, version literals, `sha256` literals, `docker info`, `npx`, `co-authored-by`, `anthropic`, and the pre-push arg vector. Reconcile ANY hit not already in this checklist before proceeding. Hard gate.
+- [x] A5.2 `pnpm validate` exit 0.
+- [x] A5.3 `npx vitest run --coverage` exit 0 (floors 85 lines / 80 branches).
 
 ---
 

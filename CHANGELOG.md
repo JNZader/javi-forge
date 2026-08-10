@@ -1,3 +1,9 @@
+## [1.15.1](https://github.com/JNZader/javi-forge/compare/v1.15.0...v1.15.1) (2026-08-10)
+
+### Bug Fixes
+
+* **ci:** distinguish a timed-out gate from a genuine exit 124 in JSON (GATE-6) ([#14](https://github.com/JNZader/javi-forge/issues/14)) ([dd56382](https://github.com/JNZader/javi-forge/commit/dd56382becf11f6ef1855e2a97b908e36c84cd07))
+
 ## [1.15.0](https://github.com/JNZader/javi-forge/compare/v1.14.0...v1.15.0) (2026-08-10)
 
 ### Features

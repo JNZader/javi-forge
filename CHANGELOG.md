@@ -1,3 +1,9 @@
+## [1.23.0](https://github.com/JNZader/javi-forge/compare/v1.22.3...v1.23.0) (2026-08-10)
+
+### Features
+
+* **hooks:** hooks dispatcher + hooks: config schema (hook-consolidation S1a) ([#34](https://github.com/JNZader/javi-forge/issues/34)) ([cd4c4f0](https://github.com/JNZader/javi-forge/commit/cd4c4f0a7906295998b936918ef629942970e020))
+
 ## [1.22.3](https://github.com/JNZader/javi-forge/compare/v1.22.2...v1.22.3) (2026-08-10)
 
 ### Bug Fixes

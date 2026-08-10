@@ -35,18 +35,18 @@ TDD: vitest RED→GREEN per task. Coverage floors 85/80 enforced same-run by `te
 
 ## Phase 2: Slice 2a — docker.ts contract (HIGH, land FIRST)
 
-- [ ] 2.1 RED: `docker.test.ts` — new argv asserts: NO `timeout`/600/120 (DELIBERATE non-additive churn, sanctioned); `--name javi-forge-ci-<hex>`; `-e CI=true` first then `-e K=V` pairs from `env`; no-env caller argv unchanged [ci-execution env scenarios].
-- [ ] 2.2 RED: `docker.test.ts` result asserts add `timedOut` (required field): timeout→true, genuine 124→false [ci-execution timedOut scenarios].
-- [ ] 2.3 GREEN: `docker.ts` — `DockerRunOptions.env?` → `-e KEY=VALUE` argv (never shell-spliced); remove in-container `timeout` wrapper + `timeout=600` default (gate 7); add `--name <cid>` via `crypto.randomBytes(6)`.
-- [ ] 2.4 GREEN: `docker.ts` — host wall-clock `killTimer`: set `timedOut=true` BEFORE `docker stop -t <grace> <cid>`; `backstopTimer`→`proc.kill("SIGKILL")` on client after grace (JDA-001); clearTimers on close/error; add `timedOut` to `DockerRunResult`.
-- [ ] 2.5 Verify `runStep` Docker caller (ci.ts:1026-1036) unaffected — reads `exitCode`, throws non-zero; new field inert [ci-execution runStep-unaffected scenario].
+- [x] 2.1 RED: `docker.test.ts` — new argv asserts: NO `timeout`/600/120 (DELIBERATE non-additive churn, sanctioned); `--name javi-forge-ci-<hex>`; `-e CI=true` first then `-e K=V` pairs from `env`; no-env caller argv unchanged [ci-execution env scenarios].
+- [x] 2.2 RED: `docker.test.ts` result asserts add `timedOut` (required field): timeout→true, genuine 124→false [ci-execution timedOut scenarios].
+- [x] 2.3 GREEN: `docker.ts` — `DockerRunOptions.env?` → `-e KEY=VALUE` argv (never shell-spliced); remove in-container `timeout` wrapper + `timeout=600` default (gate 7); add `--name <cid>` via `crypto.randomBytes(6)`.
+- [x] 2.4 GREEN: `docker.ts` — host wall-clock `killTimer`: set `timedOut=true` BEFORE `docker stop -t <grace> <cid>`; `backstopTimer`→`proc.kill("SIGKILL")` on client after grace (JDA-001); clearTimers on close/error; add `timedOut` to `DockerRunResult`. (grace=10s; behaviorally verified with a REAL node:22-slim run: timeout 2s → timedOut=true, exitCode 137 after grace, no orphan container.)
+- [x] 2.5 Verify `runStep` Docker caller (ci.ts:1026-1036) unaffected — reads `exitCode`, throws non-zero; new field inert [ci-execution runStep-unaffected scenario].
 
 ## Phase 3: Slice 2b — ci.ts routing (HIGH)
 
-- [ ] 3.1 RED (LOAD-BEARING, must-have): `ci.test.ts` — a host secret in `process.env` (e.g. `AWS_SECRET_ACCESS_KEY`) is NOT in the container `-e` argv (JDB-001) [ci-gates env-allowlist scenario].
-- [ ] 3.2 RED: `ci.test.ts` — `CI`/`JAVI_FORGE_CHANGED_FILES`/`JAVI_FORGE_BASELINE`/`gate.env` reach container as `-e` pairs; update `runInContainer` mock to return `timedOut`.
-- [ ] 3.3 GREEN: `ci.ts` — add `runGateCommand` adapter: `image===undefined`→`runGateNative(nativeEnv)`; else `runInContainer({env: containerEnv})`; return `{code: timedOut?124:exitCode, timedOut}`. Split env: `nativeEnv={...process.env,CI,...injected,...gate.env}`, `containerEnv={CI,...injected,...gate.env}` (NEVER process.env).
-- [ ] 3.4 GREEN: repoint loop call (ci.ts:1400-1413) to `runGateCommand`; collector body (exitCode/timedOut/timeoutReason/blockingFailures/emit) untouched.
+- [x] 3.1 RED (LOAD-BEARING, must-have): `ci.test.ts` — a host secret in `process.env` (e.g. `AWS_SECRET_ACCESS_KEY`) is NOT in the container `-e` argv (JDB-001) [ci-gates env-allowlist scenario].
+- [x] 3.2 RED: `ci.test.ts` — `CI`/`JAVI_FORGE_CHANGED_FILES`/`JAVI_FORGE_BASELINE`/`gate.env` reach container as `-e` pairs; update `runInContainer` mock to return `timedOut`.
+- [x] 3.3 GREEN: `ci.ts` — add `runGateCommand` adapter: `image===undefined`→`runGateNative(nativeEnv)`; else `runInContainer({env: containerEnv})`; return `{code: timedOut?124:exitCode, timedOut}`. Split env: `nativeEnv={...process.env,CI,...injected,...gate.env}`, `containerEnv={CI,...injected,...gate.env}` (NEVER process.env). NOTE: slice-2 `runGateCommand` takes no DockerGateContext yet (fail-closed is slice 3).
+- [x] 3.4 GREEN: repoint loop call (ci.ts:1400-1413) to `runGateCommand`; collector body (exitCode/timedOut/timeoutReason/blockingFailures/emit) untouched.
 
 ## Phase 4: Slice 3 — Fail-closed + timeout (MED)
 

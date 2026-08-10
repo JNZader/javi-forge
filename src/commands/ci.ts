@@ -1302,6 +1302,51 @@ type ChangedScope =
  * `onOutcome` (optional) receives each gate's structured result for the headless
  * JSON run path.
  */
+/**
+ * Route a single gate command to its execution path and normalize the result to
+ * the EXACT `GateRunResult` shape the collector consumes, so the JSON/reason
+ * semantics are byte-identical for native and containerized gates.
+ *
+ *   - `gate.image === undefined` → `runGateNative` (UNCHANGED), fed the full host
+ *     env MAP (`nativeEnv`). A spawn env map never lands in argv, so the host env
+ *     is safe there.
+ *   - `gate.image !== undefined` → `runInContainer`, fed ONLY `containerEnv` — the
+ *     EXPLICIT ALLOWLIST (`CI` + injected JAVI_FORGE_* + gate.env), NEVER
+ *     `process.env` (JDB-001: no host secret in the `-e` argv / `ps aux`).
+ *
+ * The container's `timedOut` flag is normalized to `GATE_TIMEOUT_EXIT_CODE` (124)
+ * HERE — the one place gate semantics live — so `docker.ts` stays gate-agnostic
+ * and the collector's existing `timeoutReason` branch fires identically.
+ *
+ * NOTE: fail-closed (image gate + no Docker → refuse) is slice 3. In slice 2 an
+ * image gate always routes to the container when reached.
+ */
+async function runGateCommand(
+	gate: CIGateConfig,
+	cmd: string,
+	projectDir: string,
+	nativeEnv: Record<string, string>,
+	containerEnv: Record<string, string>,
+): Promise<GateRunResult> {
+	if (gate.image === undefined) {
+		return await runGateNative(cmd, projectDir, nativeEnv, gate.timeout);
+	}
+	const result = await runInContainer({
+		projectDir,
+		image: gate.image,
+		// Gates run at the mount root (native gates run at the repo root).
+		command: `cd /home/runner/work && ${cmd}`,
+		timeout: gate.timeout, // undefined ⇒ unbounded (docker.ts gate 7)
+		env: containerEnv,
+		stream: true,
+	});
+	// Enforce the native invariant in ONE place: timedOut ⇒ 124.
+	return {
+		code: result.timedOut ? GATE_TIMEOUT_EXIT_CODE : result.exitCode,
+		timedOut: result.timedOut,
+	};
+}
+
 async function runGates(
 	gates: readonly CIGateConfig[],
 	projectDir: string,
@@ -1362,8 +1407,17 @@ async function runGates(
 
 		report(onStep, stepId, label, "running");
 
-		// Per-gate env map: engine keys, then baseline, then gate.env LAST (last-wins).
-		const gateEnv: Record<string, string> = { ...baseEnv };
+		// Per-gate env: build the INJECTED allowlist (engine keys + baseline) once,
+		// then split into two maps (JDB-001):
+		//   - nativeEnv: full host env + injected + gate.env — a spawn env MAP (never
+		//     argv), so the host env is safe there.
+		//   - containerEnv: EXPLICIT ALLOWLIST ONLY (CI + injected + gate.env), NEVER
+		//     process.env — every entry becomes a `-e KEY=VALUE` argv element, so
+		//     forwarding process.env would leak host secrets to `ps aux` and defeat
+		//     the container's isolation.
+		// Gate env spreads LAST in BOTH — a gate MAY override CI / CHANGED_FILES /
+		// BASELINE (documented last-wins).
+		const injected: Record<string, string> = {};
 		let gateChangedFiles: string[] | undefined;
 
 		if (gate.scope === GATE_SCOPE.CHANGED) {
@@ -1382,16 +1436,23 @@ async function runGates(
 				continue;
 			}
 			gateChangedFiles = scope.files;
-			gateEnv[CHANGED_FILES_ENV] = scope.files.join("\n");
+			injected[CHANGED_FILES_ENV] = scope.files.join("\n");
 		}
 
 		if (gate.baseline !== undefined) {
-			gateEnv[BASELINE_ENV] = gate.baseline;
+			injected[BASELINE_ENV] = gate.baseline;
 		}
-		if (gate.env !== undefined) {
-			// Gate env spreads LAST — a gate MAY override CI / CHANGED_FILES / BASELINE.
-			Object.assign(gateEnv, gate.env);
-		}
+		const gateOverrides = gate.env ?? {};
+		const nativeEnv: Record<string, string> = {
+			...baseEnv,
+			...injected,
+			...gateOverrides,
+		};
+		const containerEnv: Record<string, string> = {
+			CI: "true",
+			...injected,
+			...gateOverrides,
+		};
 
 		let exitCode = 0;
 		let timedOut = false;
@@ -1401,11 +1462,12 @@ async function runGates(
 				// timeout is per-command (matches the fail-fast model): each command
 				// gets its own wall-clock budget. A timed-out command is killed and
 				// resolves non-zero, so fail-fast stops the gate here.
-				const result = await runGateNative(
+				const result = await runGateCommand(
+					gate,
 					cmd,
 					projectDir,
-					gateEnv,
-					gate.timeout,
+					nativeEnv,
+					containerEnv,
 				);
 				exitCode = result.code;
 				timedOut = result.timedOut;

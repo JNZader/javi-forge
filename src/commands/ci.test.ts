@@ -57,6 +57,7 @@ vi.mock("../lib/docker.js", async (importOriginal) => {
 			exitCode: 0,
 			stdout: "",
 			stderr: "",
+			timedOut: false,
 		})),
 		openShell: vi.fn(async () => {}),
 	};
@@ -1797,6 +1798,177 @@ gates:
 });
 
 // =============================================================================
+// Gate container routing (containerized-gates slice 2b)
+// =============================================================================
+
+describe("gate container routing (slice 2b)", () => {
+	let tmpDir: string;
+
+	// noDocker only governs the RUNNER prologue; slice 2 gate routing keys ONLY on
+	// gate.image (fail-closed under --no-docker is slice 3). An image gate under
+	// this config still routes to the (mocked) container path.
+	const QUICK = {
+		mode: "quick" as const,
+		noDocker: true,
+		noGhagga: true,
+		noSecurity: true,
+	};
+
+	const writeConfig = async (yaml: string) => {
+		await fs.outputFile(path.join(tmpDir, ".javi-forge", "ci.yaml"), yaml);
+	};
+
+	const lastContainerCall = () =>
+		vi.mocked(runInContainer).mock.calls.at(-1)?.[0];
+
+	beforeEach(async () => {
+		// mockReset restores the production-faithful module-factory impl (see the
+		// top-of-file note): runInContainer → {exitCode:0, timedOut:false}.
+		vi.mocked(runInContainer).mockReset();
+		vi.mocked(isDockerAvailable).mockReset();
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-route-"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	// LOAD-BEARING (JDB-001, task 3.1): a host secret sitting in process.env MUST
+	// NOT reach the container env — the container path forwards an EXPLICIT
+	// ALLOWLIST, never the ambient process.env, so no secret lands in the -e argv
+	// (nor in `ps aux`). This is the CRITICAL env-leak fix the design locked.
+	it("does NOT forward a host secret from process.env into the container env", async () => {
+		process.env.AWS_SECRET_ACCESS_KEY = "leak-me";
+		try {
+			await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    run: "true"
+`);
+			await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+			const call = lastContainerCall();
+			expect(call).toBeDefined();
+			expect(call?.env).toBeDefined();
+			// The secret is NOT a key and NOT a value in the container env map.
+			expect(call?.env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY");
+			expect(Object.values(call?.env ?? {})).not.toContain("leak-me");
+			// The allowlist DID carry CI=true.
+			expect(call?.env?.CI).toBe("true");
+		} finally {
+			delete process.env.AWS_SECRET_ACCESS_KEY;
+		}
+	});
+
+	it("forwards CI, gate.env and the image/command into the container (allowlist)", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    env:
+      FOO: bar
+    run: "true"
+`);
+		await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		const call = lastContainerCall();
+		expect(call?.image).toBe("alpine:3.21");
+		expect(call?.command).toContain("cd /home/runner/work");
+		expect(call?.env?.CI).toBe("true");
+		expect(call?.env?.FOO).toBe("bar");
+	});
+
+	it("forwards JAVI_FORGE_CHANGED_FILES into the container allowlist for scope:changed", async () => {
+		vi.mocked(resolveBaseRef).mockReset();
+		vi.mocked(changedFiles).mockReset();
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockResolvedValue(["src/a.ts"]);
+		await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    scope: changed
+    run: "true"
+`);
+		await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		const call = lastContainerCall();
+		expect(call?.env?.JAVI_FORGE_CHANGED_FILES).toBe("src/a.ts");
+		// Still no ambient host env — allowlist only.
+		expect(call?.env).not.toHaveProperty("PATH");
+	});
+
+	it("a gate WITHOUT image runs native and never touches the container", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: native
+    run: "true"
+`);
+		await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+		expect(runInContainer).not.toHaveBeenCalled();
+	});
+
+	// LOAD-BEARING (task 4.1 seam, no false-green): a timed-out BLOCKING container
+	// gate MUST fail the build. Even if the container reports exitCode 0 (a child
+	// that trapped SIGTERM and exited cleanly), timedOut=true normalizes to 124 →
+	// blocking error → build fails. This is the false-green class the arc guards.
+	it("a timed-out containerized BLOCKING gate fails the build (no false-green)", async () => {
+		vi.mocked(runInContainer).mockResolvedValue({
+			exitCode: 0,
+			stdout: "",
+			stderr: "",
+			timedOut: true,
+		});
+		await writeConfig(`
+version: 2
+gates:
+  - id: hang
+    image: alpine:3.21
+    timeout: 1
+    run: "sleep 999"
+`);
+		const result = await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		expect(result.ok).toBe(false);
+		expect(result.exitCode).toBe(1);
+		const gate = result.gates.find((g) => g.id === "hang");
+		expect(gate?.status).toBe("error");
+		expect(gate?.exitCode).toBe(124);
+		expect(gate?.reason).toMatch(/timed out/i);
+	});
+
+	// A container command that GENUINELY exits 124 (no timer fired) is NOT a
+	// timeout: timedOut=false → exitCode stays 124 → NO timeout reason.
+	it("a genuine container exit 124 is not a timeout (no reason)", async () => {
+		vi.mocked(runInContainer).mockResolvedValue({
+			exitCode: 124,
+			stdout: "",
+			stderr: "",
+			timedOut: false,
+		});
+		await writeConfig(`
+version: 2
+gates:
+  - id: real124
+    image: alpine:3.21
+    timeout: 30
+    run: "exit 124"
+`);
+		const result = await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		const gate = result.gates.find((g) => g.id === "real124");
+		expect(gate?.status).toBe("error");
+		expect(gate?.exitCode).toBe(124);
+		expect(gate?.reason).toBeUndefined();
+	});
+});
+
+// =============================================================================
 // runCI — required-tool fail-closed checks (task 5)
 // =============================================================================
 
@@ -2417,8 +2589,8 @@ ${extra}`,
 		// green, so the error label is produced by the test phase itself.
 		vi.mocked(runInContainer).mockImplementation(async (options) =>
 			/test/.test(options.command)
-				? { exitCode: 1, stdout: "", stderr: "boom" }
-				: { exitCode: 0, stdout: "", stderr: "" },
+				? { exitCode: 1, stdout: "", stderr: "boom", timedOut: false }
+				: { exitCode: 0, stdout: "", stderr: "", timedOut: false },
 		);
 
 		const steps: CIStep[] = [];

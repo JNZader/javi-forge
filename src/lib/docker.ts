@@ -20,18 +20,36 @@ export interface DockerRunOptions {
 	image: string;
 	/** Command to run inside the container */
 	command: string;
-	/** Timeout in seconds (default: 600) */
+	/**
+	 * Wall-clock timeout in seconds, enforced HOST-SIDE (a host timer → `docker
+	 * stop`), NOT by an in-container `timeout` binary. Omitted → the container
+	 * runs UNBOUNDED (no timer armed) — there is no silent default cap.
+	 */
 	timeout?: number;
 	/** Stream output to stdout/stderr (default: true) */
 	stream?: boolean;
 	/** Override the user to run as inside the container (default: runner) */
 	user?: string;
+	/**
+	 * Extra env vars injected as discrete `-e KEY=VALUE` argv elements (one per
+	 * entry), NEVER shell-spliced. Values with spaces/`=`/newlines survive
+	 * verbatim (argv, not a shell string); Docker splits only on the first `=`.
+	 * A caller passing no map yields the same argv as today (only `-e CI=true`).
+	 */
+	env?: Record<string, string>;
 }
 
 export interface DockerRunResult {
 	exitCode: number;
 	stdout: string;
 	stderr: string;
+	/**
+	 * `true` IFF the host wall-clock timer fired and terminated the container —
+	 * set DETERMINISTICALLY by the host BEFORE the kill, never inferred from a
+	 * raw 124 exit code. Lets a caller tell a real timeout apart from a command
+	 * that itself exits 124 (both surface non-zero, only one is a timeout).
+	 */
+	timedOut: boolean;
 }
 
 export interface DockerImageOptions {
@@ -271,9 +289,10 @@ export async function runInContainer(
 		projectDir,
 		image,
 		command,
-		timeout = 600,
+		timeout,
 		stream = true,
 		user,
+		env,
 	} = options;
 	// The image is always pre-resolved by the caller (resolveCIRunners →
 	// ensureImage or an explicit/digest-pinned config image). No marker
@@ -296,14 +315,33 @@ export async function runInContainer(
 	const runAsUser =
 		user ??
 		(uid !== undefined && gid !== undefined ? `${uid}:${gid}` : undefined);
+	// Env injection (containerized-gates gate 2): CI=true FIRST, then one
+	// discrete `-e KEY=VALUE` argv pair per caller entry. These are argv
+	// elements handed to spawn (no shell), so values with spaces/`=`/newlines
+	// survive verbatim — Docker splits only on the first `=`. A caller passing
+	// no map yields the same argv as before (only `-e CI=true`).
+	const envArgs: string[] = ["-e", "CI=true"];
+	for (const [k, v] of Object.entries(env ?? {})) {
+		envArgs.push("-e", `${k}=${v}`);
+	}
+	// A unique container name so the HOST-SIDE timeout can `docker stop <cid>`
+	// a concrete target (design gate 1) rather than guessing.
+	const cid = `javi-forge-ci-${crypto.randomBytes(6).toString("hex")}`;
 	// Use --mount instead of -v: the -v form parses the value as a single
 	// "src:dst[:opt]" colon-separated string, which breaks (and could be
 	// hijacked) when projectDir itself contains a colon. --mount takes
 	// comma-separated key=value pairs and is colon-safe.
+	//
+	// NOTE (containerized-gates gate 1): the in-container `timeout <N>` wrapper
+	// is REMOVED. The timeout is enforced host-side below (host wall-clock timer
+	// → `docker stop`), so the container command is just `bash -c <cmd>`. This
+	// mirrors runGateNative (ci.ts) one level up, at the docker-run process.
 	const dockerArgs = [
 		"run",
 		"--rm",
 		...(isInteractive ? ["-it"] : []),
+		"--name",
+		cid,
 		"--stop-timeout",
 		"30",
 		"--entrypoint",
@@ -311,11 +349,8 @@ export async function runInContainer(
 		...(runAsUser ? ["--user", runAsUser] : []),
 		"--mount",
 		`type=bind,source=${projectDir},target=/home/runner/work`,
-		"-e",
-		"CI=true",
+		...envArgs,
 		imageName,
-		"timeout",
-		String(timeout),
 		"bash",
 		"-c",
 		command,
@@ -329,6 +364,42 @@ export async function runInContainer(
 		let stdout = "";
 		let stderr = "";
 
+		// HOST-SIDE timeout (design gate 1): arm a host wall-clock timer ONLY when
+		// a timeout is provided. When it fires, set `timedOut = true` BEFORE the
+		// kill (authoritative — never inferred from the exit code), then
+		// `docker stop -t <grace> <cid>` (SIGTERM → SIGKILL after grace) to tear
+		// the CONTAINER down by name — NOT `proc.kill()` on the client, which would
+		// orphan the container. A `backstopTimer` SIGKILLs the docker-run CLIENT
+		// only as a LAST RESORT: if `docker stop` itself wedges (dead daemon) the
+		// client would never `close` and the gate would hang forever. `--rm` +
+		// `--name <cid>` keep any orphan bounded and identifiable. No timeout →
+		// no timer → the container runs UNBOUNDED (no silent cap).
+		let killTimer: NodeJS.Timeout | undefined;
+		let backstopTimer: NodeJS.Timeout | undefined;
+		let timedOut = false;
+		const clearTimers = () => {
+			if (killTimer !== undefined) clearTimeout(killTimer);
+			if (backstopTimer !== undefined) clearTimeout(backstopTimer);
+		};
+		if (timeout !== undefined) {
+			killTimer = setTimeout(() => {
+				timedOut = true;
+				// Fire-and-forget teardown: swallow spawn errors (e.g. the docker
+				// binary vanished mid-run) so an unhandled 'error' event can't crash
+				// the process. The armed backstopTimer still guarantees the run
+				// promise resolves via the client SIGKILL. (jd A+B convergent finding)
+				spawn("docker", ["stop", "-t", String(DOCKER_STOP_GRACE_SEC), cid], {
+					stdio: "ignore",
+				}).on("error", () => {});
+				backstopTimer = setTimeout(
+					() => {
+						proc.kill("SIGKILL");
+					},
+					(DOCKER_STOP_GRACE_SEC + 1) * 1000,
+				);
+			}, timeout * 1000);
+		}
+
 		if (!stream) {
 			proc.stdout?.on("data", (d: Buffer) => {
 				stdout += d.toString();
@@ -338,12 +409,23 @@ export async function runInContainer(
 			});
 		}
 
-		proc.on("close", (code) =>
-			resolve({ exitCode: code ?? 1, stdout, stderr }),
-		);
-		proc.on("error", reject);
+		proc.on("close", (code) => {
+			clearTimers();
+			resolve({ exitCode: code ?? 1, stdout, stderr, timedOut });
+		});
+		proc.on("error", (e) => {
+			clearTimers();
+			reject(e);
+		});
 	});
 }
+
+/**
+ * Grace (seconds) passed to `docker stop -t` between the container SIGTERM and
+ * the daemon's escalated SIGKILL. The client-side backstop fires one second
+ * after this window to guarantee the run promise always resolves.
+ */
+const DOCKER_STOP_GRACE_SEC = 10;
 
 /**
  * Open an interactive shell inside the CI container.

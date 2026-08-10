@@ -4,6 +4,7 @@ import fs from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOOK_ASSETS_DIR } from "../constants.js";
 import {
+	CONTAINER_WORKDIR,
 	ensureImage,
 	getImageName,
 	isDockerAvailable,
@@ -1468,6 +1469,72 @@ gates:
 		).toBe(true);
 	});
 
+	it("injects $JAVI_FORGE_CHANGED_FILES_ABS as absolute paths, same order as the relative list", async () => {
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockResolvedValue(["src/a.ts", "src/b.ts"]);
+		await writeConfig(`
+version: 2
+gates:
+  - id: changed
+    scope: changed
+    run: printf '%s' "$JAVI_FORGE_CHANGED_FILES_ABS" > abs.txt
+`);
+		await runCI({ projectDir: tmpDir, ...QUICK }, () => {});
+
+		// Each changed file as <projectDir>/<relpath>, newline-joined, in the SAME
+		// order as JAVI_FORGE_CHANGED_FILES (so a gate can zip the two lists).
+		const expected = [
+			path.join(tmpDir, "src/a.ts"),
+			path.join(tmpDir, "src/b.ts"),
+		].join("\n");
+		expect(await fs.readFile(path.join(tmpDir, "abs.txt"), "utf-8")).toBe(
+			expected,
+		);
+	});
+
+	it("does NOT inject changed-files variants for a non-scope:changed gate", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: allgate
+    run: printf '[%s][%s][%s]' "$JAVI_FORGE_CHANGED_FILES" "$JAVI_FORGE_CHANGED_FILES_ABS" "$JAVI_FORGE_CHANGED_FILES_Z" > vars.txt
+`);
+		await runCI({ projectDir: tmpDir, ...QUICK }, () => {});
+
+		// scope:all → neither the relative list nor either new variant is set.
+		expect(await fs.readFile(path.join(tmpDir, "vars.txt"), "utf-8")).toBe(
+			"[][][]",
+		);
+	});
+
+	// EMPIRICAL FINDING (GATE-5): a NUL-joined value cannot be delivered as an
+	// environment variable at all — execve's `environ` is an array of
+	// NUL-terminated C strings, and Node's child_process throws
+	// ERR_INVALID_ARG_VALUE ("must be a string without null bytes") for a NUL in
+	// BOTH an argv element (container -e) AND a spawn env-map value (native).
+	// So JAVI_FORGE_CHANGED_FILES_Z is deliberately NEVER injected: setting it
+	// would crash EVERY scope:changed gate at spawn time. The gate must still run.
+	it("never injects a NUL-joined _Z var (env cannot carry NUL); the scope:changed gate still runs", async () => {
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockResolvedValue(["src/a.ts"]);
+		await writeConfig(`
+version: 2
+gates:
+  - id: changed
+    scope: changed
+    run: printf 'Z=[%s]' "$JAVI_FORGE_CHANGED_FILES_Z" > z.txt
+`);
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s }));
+
+		// _Z is unset → the gate reads it as empty (not a crash, not a NUL string).
+		expect(await fs.readFile(path.join(tmpDir, "z.txt"), "utf-8")).toBe("Z=[]");
+		// And the scope:changed gate ran to completion (proving no NUL reached spawn).
+		expect(
+			steps.some((s) => s.id === "gate:changed" && s.status === "done"),
+		).toBe(true);
+	});
+
 	it("skips a scope:changed gate when the changed set is EMPTY", async () => {
 		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
 		vi.mocked(changedFiles).mockResolvedValue([]);
@@ -1909,6 +1976,80 @@ gates:
 		expect(call?.env?.JAVI_FORGE_CHANGED_FILES).toBe("src/a.ts");
 		// Still no ambient host env — allowlist only.
 		expect(call?.env).not.toHaveProperty("PATH");
+	});
+
+	it("forwards JAVI_FORGE_CHANGED_FILES_ABS (absolute paths) into the container allowlist for scope:changed", async () => {
+		vi.mocked(resolveBaseRef).mockReset();
+		vi.mocked(changedFiles).mockReset();
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockResolvedValue(["src/a.ts", "src/b.ts"]);
+		await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    scope: changed
+    run: "true"
+`);
+		await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		const call = lastContainerCall();
+		// A containerized gate runs with the repo bind-mounted at CONTAINER_WORKDIR
+		// (docker.ts mount target + WORKDIR), NOT at the host projectDir. So the
+		// container _ABS base MUST be the mount target — `<CONTAINER_WORKDIR>/<relpath>`
+		// — otherwise the "absolute" path points at a non-existent host path in-container.
+		const expectedAbs = [
+			`${CONTAINER_WORKDIR}/src/a.ts`,
+			`${CONTAINER_WORKDIR}/src/b.ts`,
+		].join("\n");
+		expect(call?.env?.JAVI_FORGE_CHANGED_FILES_ABS).toBe(expectedAbs);
+		// The newline-joined variant is unchanged (backward compat).
+		expect(call?.env?.JAVI_FORGE_CHANGED_FILES).toBe("src/a.ts\nsrc/b.ts");
+		// _Z is NEVER forwarded: a NUL value cannot be a `-e` argv element (Node
+		// throws ERR_INVALID_ARG_VALUE), so it is never added to the allowlist.
+		expect(call?.env).not.toHaveProperty("JAVI_FORGE_CHANGED_FILES_Z");
+		// Still allowlist-only — no ambient host env.
+		expect(call?.env).not.toHaveProperty("PATH");
+	});
+
+	// The full allowlist invariant for a scope:changed containerized gate: CI +
+	// CHANGED_FILES + _ABS + BASELINE reach the container, _Z does NOT, and a host
+	// secret sitting in process.env is STILL absent from the -e argv (JDB-001).
+	it("scope:changed container gate carries CHANGED_FILES + _ABS + BASELINE, never _Z nor a host secret", async () => {
+		vi.mocked(resolveBaseRef).mockReset();
+		vi.mocked(changedFiles).mockReset();
+		vi.mocked(resolveBaseRef).mockResolvedValue("BASE");
+		vi.mocked(changedFiles).mockResolvedValue(["src/a.ts"]);
+		process.env.AWS_SECRET_ACCESS_KEY = "leak-me";
+		try {
+			await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    scope: changed
+    baseline: base.json
+    run: "true"
+`);
+			await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+			const call = lastContainerCall();
+			expect(call?.env?.CI).toBe("true");
+			expect(call?.env?.JAVI_FORGE_CHANGED_FILES).toBe("src/a.ts");
+			// Container _ABS base is the mount target (CONTAINER_WORKDIR), NOT the host
+			// projectDir — cwd-independent resolution must hold INSIDE the container.
+			expect(call?.env?.JAVI_FORGE_CHANGED_FILES_ABS).toBe(
+				`${CONTAINER_WORKDIR}/src/a.ts`,
+			);
+			expect(call?.env?.JAVI_FORGE_BASELINE).toBe("base.json");
+			// _Z can never be delivered via -e (NUL) — absent from the allowlist.
+			expect(call?.env).not.toHaveProperty("JAVI_FORGE_CHANGED_FILES_Z");
+			// The JDB-001 invariant must NOT regress: no host secret in the -e argv.
+			expect(call?.env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY");
+			expect(Object.values(call?.env ?? {})).not.toContain("leak-me");
+		} finally {
+			delete process.env.AWS_SECRET_ACCESS_KEY;
+		}
 	});
 
 	it("a gate WITHOUT image runs native and never touches the container", async () => {

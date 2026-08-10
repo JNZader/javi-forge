@@ -19,6 +19,7 @@ import {
 } from "../lib/ci-config.js";
 import { refreshContextDir } from "../lib/context.js";
 import {
+	CONTAINER_WORKDIR,
 	ensureImage,
 	isDockerAvailable,
 	openShell,
@@ -1256,9 +1257,32 @@ const GATE_TIMEOUT_EXIT_CODE = 124;
  * would corrupt line-based parsing on the gate side. This is a low-likelihood
  * edge — repo paths with embedded newlines are pathological — and is accepted as
  * a documented caveat rather than switched to NUL-joining, which would force
- * every gate consumer to change its parser.
+ * every gate consumer to change its parser. A NUL-joined variant is also
+ * infeasible for a deeper reason (see {@link CHANGED_FILES_ABS_ENV}): a NUL byte
+ * cannot be carried in an environment variable at all.
  */
 const CHANGED_FILES_ENV = "JAVI_FORGE_CHANGED_FILES";
+/**
+ * Env var carrying the SAME changed-file set as {@link CHANGED_FILES_ENV}, but as
+ * ABSOLUTE paths, newline-joined, in the SAME order.
+ *
+ * WHY absolute and not "cwd-relative": a literal cwd-relative variant is
+ * impossible for the engine to produce. A gate chooses its own working directory
+ * at runtime (its script may `cd` anywhere), while at injection time the engine's
+ * cwd is always the repo root — so a "cwd-relative" var would just equal the
+ * repo-root-relative {@link CHANGED_FILES_ENV}. The cwd-INDEPENDENT form that lets
+ * a gate resolve changed files from ANY working directory is absolute paths.
+ *
+ * CONTEXT-DEPENDENT base (JDA-001): this is the ONE injected var whose VALUE must
+ * differ between execution modes, so it is NOT placed in the shared `injected`
+ * map. A NATIVE gate runs at the host repo root, so its base is the HOST
+ * `<projectDir>/<relpath>`. A CONTAINER gate runs with the repo bind-mounted at
+ * `CONTAINER_WORKDIR` (docker.ts mount target + WORKDIR), so its base is
+ * `<CONTAINER_WORKDIR>/<relpath>` — the HOST projectDir does not exist inside the
+ * container. Same var NAME in both; each gate sees the value valid for its own
+ * execution context.
+ */
+const CHANGED_FILES_ABS_ENV = "JAVI_FORGE_CHANGED_FILES_ABS";
 /** Env var carrying a gate's optional baseline artifact path. */
 const BASELINE_ENV = "JAVI_FORGE_BASELINE";
 
@@ -1364,7 +1388,7 @@ async function runGateCommand(
 		projectDir,
 		image: gate.image,
 		// Gates run at the mount root (native gates run at the repo root).
-		command: `cd /home/runner/work && ${cmd}`,
+		command: `cd ${CONTAINER_WORKDIR} && ${cmd}`,
 		timeout: gate.timeout, // undefined ⇒ unbounded (docker.ts gate 7)
 		env: containerEnv,
 		stream: true,
@@ -1515,20 +1539,61 @@ async function runGates(
 			}
 			gateChangedFiles = scope.files;
 			injected[CHANGED_FILES_ENV] = scope.files.join("\n");
+			// ABSOLUTE-path variant (GATE-4 / JDA-001) is DELIBERATELY NOT put in the
+			// shared `injected` map: it is the ONE var whose value MUST differ between
+			// native and container execution. A native gate runs at the host repo root
+			// (cwd = projectDir), so its base is the HOST projectDir. A containerized
+			// gate runs with the repo bind-mounted at CONTAINER_WORKDIR (docker.ts mount
+			// target + WORKDIR), so `<projectDir>/<relpath>` would point at a
+			// non-existent HOST path inside the container. Instead it is computed twice
+			// below — once per execution context — and added to nativeEnv / containerEnv
+			// separately. See the nativeEnv / containerEnv construction.
+			// NUL-joined variant (GATE-5) is DELIBERATELY NOT INJECTED. A `git -z`
+			// style NUL separator is unambiguous for paths containing a literal
+			// newline, BUT a NUL byte cannot live in an environment variable: execve's
+			// `environ` is an array of NUL-terminated C strings, so a NUL inside a
+			// value truncates it. Node's child_process refuses it outright — it throws
+			// ERR_INVALID_ARG_VALUE ("must be a string without null bytes") for a NUL
+			// in BOTH an argv element (container `-e KEY=VALUE`) AND a spawn env-map
+			// value (native gates). Empirically verified against Node + `docker run`.
+			// Injecting JAVI_FORGE_CHANGED_FILES_Z would therefore CRASH every
+			// scope:changed gate at spawn time (native and containerized alike), so it
+			// is omitted entirely rather than shipped broken. The documented caveat on
+			// CHANGED_FILES_ENV (paths with embedded newlines corrupt line parsing)
+			// stands; the cwd-independent alternative that IS deliverable is
+			// CHANGED_FILES_ABS_ENV above.
 		}
 
 		if (gate.baseline !== undefined) {
 			injected[BASELINE_ENV] = gate.baseline;
 		}
 		const gateOverrides = gate.env ?? {};
+		// Context-dependent ABSOLUTE-path variant (JDA-001): the SAME env var NAME,
+		// but a DIFFERENT base per execution mode. Native gates resolve against the
+		// HOST projectDir (cwd = repo root); container gates resolve against
+		// CONTAINER_WORKDIR — the exact mount target from docker.ts (single source of
+		// truth), so the "absolute" path is valid INSIDE the container. Both use the
+		// SAME relpaths in the SAME order, newline-joined, only for scope:changed
+		// (gateChangedFiles defined). path.join for native normalizes a trailing
+		// slash; the container form is a POSIX join under a known-absolute root.
+		const nativeAbs =
+			gateChangedFiles &&
+			gateChangedFiles.map((rel) => path.join(projectDir, rel)).join("\n");
+		const containerAbs =
+			gateChangedFiles &&
+			gateChangedFiles.map((rel) => `${CONTAINER_WORKDIR}/${rel}`).join("\n");
 		const nativeEnv: Record<string, string> = {
 			...baseEnv,
 			...injected,
+			...(nativeAbs !== undefined && { [CHANGED_FILES_ABS_ENV]: nativeAbs }),
 			...gateOverrides,
 		};
 		const containerEnv: Record<string, string> = {
 			CI: "true",
 			...injected,
+			...(containerAbs !== undefined && {
+				[CHANGED_FILES_ABS_ENV]: containerAbs,
+			}),
 			...gateOverrides,
 		};
 

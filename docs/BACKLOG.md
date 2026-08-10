@@ -121,6 +121,23 @@ test suite (`ci-local/hooks/commit-msg.test.sh`).
 - Status: this is a behavior change, not a defect. It is gated behind the hook
   markers that `ci-engine-unification` slice 3 ships.
 - Suggested fix: plan as its own change after `ci-engine-unification` lands.
+- **CLOSED 2026-08-10** — shipped as SDD `hooks-ricos` (archived
+  `openspec/changes/archive/2026-08-10-hooks-ricos/`), PRs #19 (commit-msg) +
+  #20 (pre-push), release 1.19.0. NOTE: the exploration CORRECTED this ticket's
+  premise — the shipped `pre-push` was ALREADY fail-closed on Docker; it was the
+  `ci-local` variant that DEGRADED, which inverts the `containerized-gates`
+  fail-closed policy. So the adopted pre-push is a NATIVE substantive gate
+  (`ci --quick --no-docker --no-security --no-ci-ghagga`, npx fallback, no degrade),
+  fail-closed at the gate layer, which also sidesteps PREPUSH-EACCES. commit-msg
+  adopted the rich body (best-effort NFKC + raw-always-on anti-attribution) PLUS a
+  new conventional-commit subject guard, and — a judgment-day CRITICAL caught by
+  both blind judges — a `Claude-Session:` trailer pattern the ci-local body was
+  missing (the harness auto-appends it; it is the user's #1 rule). Both hook bodies
+  are versioned assets (v2) that auto-upgrade silently; `commit-msg.test.sh` is
+  promoted + tarball-excluded. The `ci-local/hooks/*` source files remain as the
+  authoring copies. Cosmetic residuals: the promoted `.test.sh` keeps Spanish
+  header comments (does not ship); `cursor` provider matching blocks legit
+  "cursor-based pagination" (documented tradeoff, no clean tightening).
 
 ### JF-DOCS-1 — `javi-forge ci` has no command-specific `--help` and no `ci validate` — CLOSED
 

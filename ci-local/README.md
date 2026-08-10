@@ -174,7 +174,7 @@ Developer workflow:
 │   ├── commit-msg    # Valida mensaje sin AI attribution
 │   └── pre-push      # CI simulation en Docker
 └── docker/
-    └── *.Dockerfile  # Se generan automáticamente
+    └── *.Dockerfile  # Incluidos para cada stack (fallback: se regeneran si faltan)
 
 lib/                  # Dependencia requerida (copiar junto con .ci-local/)
 ├── common.sh         # Funciones compartidas (Bash)
@@ -193,7 +193,7 @@ Editar `lib/common.sh` (detección de stack) o `setup_ci_commands()` en `ci-loca
 
 ### Docker image custom
 
-Editar los Dockerfiles en `.ci-local/docker/` después de la primera ejecución.
+Editar los Dockerfiles en `.ci-local/docker/` (incluidos por stack).
 
 ## FAQ
 

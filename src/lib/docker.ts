@@ -109,6 +109,10 @@ export function getDockerfileContent(stack: Stack): string {
 				"RUN useradd -m -s /bin/bash runner",
 				"USER runner",
 				"WORKDIR /home/runner/work",
+				// Explicit Gradle cache dir: same value $HOME/.gradle resolves to
+				// for the baked `runner` user, but stable even when the container
+				// runs as the host uid (ENV-1), where HOME falls back to "/".
+				"ENV GRADLE_USER_HOME=/home/runner/.gradle",
 				'ENTRYPOINT ["/bin/bash", "-c"]',
 			].join("\n");
 

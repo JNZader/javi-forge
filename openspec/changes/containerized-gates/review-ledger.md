@@ -34,3 +34,13 @@ JDB-001 (CRITICAL env leak) VERIFIED FIXED end-to-end (allowlist container env, 
 | JDB-006 | judgment-day | design.md:125 | SUGGESTION | fixed | Prose "we never SIGKILL the client" contradicted the new backstopTimer (which does, as last resort). Reconciled: normal path doesn't; backstop SIGKILLs the client only on wedged-daemon, bounded orphan via --rm+--name. |
 
 Verified-safe (both judges): timeout false-green defeated (host timer sets timedOut before kill, clearTimers race-safe), docker stop has --name target, removing 600 default inert to runStep (only concrete-timeout caller), env argv-safe from shell-splicing, fail-closed threading correct at both seams, backstop guarantees promise resolution.
+
+## Apply slice 1 — judgment-day (gate.image schema) — APPROVED
+
+Two blind judges, both APPROVE, zero BLOCKER/CRITICAL. Judge B verified EMPIRICALLY (all flag-injection forms tried): `--privileged`/`-v/:/host`/single-dash/tab-newline-prefixed → REJECTED on the trimmed value; Unicode en-dash → accepted by guard but docker never parses it as a flag (not exploitable); normal digest ref accepted. v1/v2-no-image byte-identical, ci validate surfacing backward-compatible, no slice-2/3 leakage, 1504 tests + coverage exit 0.
+
+Two convergent WARNING/info items → BACKLOG (not slice-1 fixes):
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JDA-001 / JDB-B01 (convergent) | judgment-day | ci-config.ts:435-458 | WARNING | info→backlog | Guard checks `image.trim()` but stores untrimmed (mirrors runner path). Non-exploitable (trim can't introduce a dash; whitespace-prefixed ref → docker "invalid reference" loud fail, not injection). Fixing gate-only would break gate/runner consistency → backlog IMG-1 (trim both). |
+| JDB-B02 | judgment-day | ci-config.ts:259-269 (runner path, pre-existing) | WARNING | info→backlog | The runner `image` validation has NO leading-dash guard — a runner `image: "--privileged"` WOULD inject a docker flag. Same hole this slice guarded for gates. Pre-existing, trust-bounded, out of scope here → backlog IMG-1 (apply the guard to runner.image too). |

@@ -62,3 +62,35 @@ Two blind judges, both APPROVE, zero BLOCKER/CRITICAL, no fix round. Judge B ver
 |---|---|---|---|---|---|
 | JDA-001 / JDB-S2-001 (convergent) | judgment-day | git-diff.ts:87-88 | WARNING | info | **SLICE-4 REQUIREMENT**: GitHub-push fallback uses `GITHUB_SHA` as diff base, but on actions/checkout HEAD===GITHUB_SHA → empty diff → scope:changed gates skip on GitHub pushes (visible skip, NOT a false-green, per B). The correct push base is `github.event.before` (not a default env var). Faithfully implements design.md:108 — a design-level semantic weakness, inert while unwired. Slice-4 wiring author MUST reconsider the GitHub-push base (e.g. accept an explicit base override, or document that scope:changed on GitHub push needs github.event.before wired via CI config) before consuming changedFiles. |
 | JDB-S2-002 | judgment-day | git-diff.ts:84-86 | SUGGESTION | info | GITHUB_BASE_REF set but origin/<ref> unfetched (shallow) → falls through to local candidates correctly. Intentional/safe. |
+
+## Apply slice 3 — judgment-day (runGates execution) — APPROVE-WITH-FIXES → fixed
+
+Two blind judges. Judge A: APPROVE-WITH-FIXES. Judge B: APPROVE-WITH-FIXES with ONE CRITICAL
+(a real false-green). Convergence: both judges independently flagged `runGateNative`'s exit-code
+mapping and the unpinned ordering guarantee. The JDB-001 CRITICAL (signal-death false-green) was
+fixed in production + RED-then-GREEN test; JDA-001 ordering pinned by a test (production already
+correct). STRICT TDD followed: the signal-death test went RED against `code ?? 0` (returned 0),
+GREEN after the fix.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JDB-001 | judgment-day | ci.ts:runGateNative close handler | CRITICAL | fixed | **SIGNAL-DEATH FALSE-GREEN.** `close` did `resolve(code ?? 0)` → a NULL code (process killed by a signal: OOM kill, SIGSEGV/SIGABRT, external SIGTERM) mapped to exit 0 = SUCCESS. A signal-killed BLOCKING gate would report `done` and the build would PASS — the exact false-green this slice exists to eliminate. The three sibling spawners (runStep native, runSemgrep, runGhagga) all treat signal death as failure. FIX: `close` handler now receives `(code, signal)`; when `code === null` it resolves to a NON-ZERO code (`128 + os.constants.signals[signal]` when resolvable, else 1), so the collector records a blocking failure and runGates throws. Spawn `error` already rejects → caught by runGates as a failure (consistent, not 0). TEST: BLOCKING gate `kill -TERM $$` → runGateNative returns 143, collector records error, runGates throws (`ci.test.ts` runGateNative + runCI signal-death tests). RED confirmed against `code ?? 0` (returned 0/undefined). |
+| JDA-001 | judgment-day | design.md:19 · ci.ts:runGates loop | WARNING | fixed | **ORDERING GUARANTEE UNPINNED (TEST-ONLY).** The core decision (a blocking failure DEFERS the aggregate throw until AFTER later gates report) had no test that would catch a regression to throw-on-first-blocking. FIX (test only, no production change): added `[first-blocker(fail), second-runs]` test asserting (a) the SECOND gate still reported `done` after the first blocking failure AND (b) runGates threw naming the blocker. Goes RED against a throw-on-first-blocking implementation. Canonical severity WARNING/status info; recorded fixed because the guarantee is now pinned. |
+| JDA-003 | judgment-day | ci.ts:describeRunners JSDoc | SUGGESTION | fixed | **STALE JSDOC.** The JSDoc claimed the invariant "`runners` is never empty" — now false for gates-only v2 configs which reach `describeRunners` with zero runners (the `config` branch reads `runners.length` and maps the possibly-empty list, never derefs `runners[0]`, so harmless). Comment corrected to note gates-only v2 reaches it with zero runners and the config branch handles it. |
+
+### Slice-4 requirements / carry-forward (NOT fixed here)
+
+| id | severity | location | status | evidence |
+|---|---|---|---|---|
+| JDA-002 | judgment-day | ci.ts:runGates | WARNING | info | **SLICE-4 REQUIREMENT.** `runGates` never reads `gate.scope` — a `scope: changed` gate runs as `scope: all` in slice 3 (FAIL-SAFE: over-runs, never a false-green). Slice-4 wiring MUST branch on `gate.scope` (feeding `JAVI_FORGE_CHANGED_FILES` from the slice-2 git-diff engine) before this is user-visible. |
+| JDB-002 | judgment-day | ci.ts:runGateNative | WARNING | info | Gates have NO execution timeout (consistent with runSemgrep/runGhagga, which are also untimed). Candidate follow-up, not a defect; note for a future hardening slice. |
+| JDA-001 (S2) / JDB-S2-001 | judgment-day | git-diff.ts:87-88 | WARNING | info | **SLICE-4 REQUIREMENT (carried from slice 2).** GitHub-push fallback uses `GITHUB_SHA` as diff base → on actions/checkout HEAD===GITHUB_SHA → empty diff → scope:changed gates skip on GitHub pushes (visible skip, NOT a false-green). Slice-4 author MUST reconsider the push base (`github.event.before` / explicit override) before consuming changedFiles. |
+
+### Verified-safe claims (slice 3 — NOT re-litigated)
+
+| id | claim | verdict |
+|----|-------|---------|
+| — | Clean-exit false-green (non-zero blocking gate reports done) | SAFE — code 0 → done; any non-zero (now including signal death) → blockingFailures[]; informative never enters the accumulator; aggregate throw after the loop yields exit 1. NO false-green. |
+| — | Prologue guard (gates-only zero-runner path) | SAFE — the prologue skips stackInfo/docker-check/image when `resolved.runners` is empty; the gate phase still runs; `describeRunners` config branch never derefs runners[0]. |
+| — | Mode-gating (blocking gate skipped under --quick) | SAFE — gate phase runs on `full` AND `quick`; skipped only in `detect`/`shell`. Pinned by `runs gates under full mode` + `skips the gate phase in detect mode` tests. |
+| — | `CIStepStatus += "warning"` ripple = 2 Records | SAFE — tsc clean; TypeScript forces both `Record<CIStep["status"],...>` to gain the key; no exhaustive switch → the two Records are the whole ripple. |

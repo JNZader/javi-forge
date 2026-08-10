@@ -965,6 +965,21 @@ describe("runGateNative", () => {
 			}),
 		).resolves.toBe(0);
 	});
+
+	it("maps signal death to a non-zero code (never a false-green 0)", async () => {
+		// The child terminates by SIGTERM → close reports code=null. A null code
+		// MUST NOT be resolved as 0 (success); the shell convention 128+signum
+		// yields 143 for SIGTERM. Against the old `code ?? 0` this returned 0.
+		await expect(
+			runGateNative("kill -TERM $$", tmpDir, envWithPath()),
+		).resolves.toBe(128 + os.constants.signals.SIGTERM);
+	});
+
+	it("maps a fatal SIGSEGV to a non-zero code", async () => {
+		await expect(
+			runGateNative("kill -SEGV $$", tmpDir, envWithPath()),
+		).resolves.toBe(128 + os.constants.signals.SIGSEGV);
+	});
 });
 
 // =============================================================================
@@ -1007,6 +1022,58 @@ gates:
 
 		expect(
 			steps.some((s) => s.id === "gate:blocker" && s.status === "error"),
+		).toBe(true);
+	});
+
+	it("fails the build when a blocking gate is killed by a signal (no false-green)", async () => {
+		// A blocking gate whose process dies by signal (OOM kill, SIGSEGV, external
+		// SIGTERM) reports close code=null. That MUST be a blocking failure, not a
+		// success. Against the old `code ?? 0` the null mapped to 0 → false-green.
+		await writeConfig(`
+version: 2
+gates:
+  - id: signalled
+    run: kill -TERM $$
+`);
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s })),
+		).rejects.toThrow(/blocking gate\(s\) failed: signalled/);
+
+		expect(
+			steps.some((s) => s.id === "gate:signalled" && s.status === "error"),
+		).toBe(true);
+	});
+
+	it("defers the blocking throw until AFTER later gates report (ordering guarantee)", async () => {
+		// design.md:19 — one blocking failure must NEVER abort the loop and hide a
+		// later gate. The first gate blocks and fails; the second gate must still
+		// report its own status AND the aggregate throw must still name the blocker.
+		// Against a throw-on-first-blocking implementation, the second gate would
+		// never report → this goes RED.
+		await writeConfig(`
+version: 2
+gates:
+  - id: first-blocker
+    run: exit 1
+  - id: second-runs
+    run: echo second >> order.txt
+`);
+		const steps: CIStep[] = [];
+		await expect(
+			runCI({ projectDir: tmpDir, ...QUICK }, (s) => steps.push({ ...s })),
+		).rejects.toThrow(/blocking gate\(s\) failed: first-blocker/);
+
+		// (a) the SECOND gate still reported after the first blocking failure.
+		expect(
+			steps.some((s) => s.id === "gate:second-runs" && s.status === "done"),
+		).toBe(true);
+		expect(
+			await fs.readFile(path.join(tmpDir, "order.txt"), "utf-8"),
+		).toContain("second");
+		// (b) the aggregate error names the blocker.
+		expect(
+			steps.some((s) => s.id === "gate:first-blocker" && s.status === "error"),
 		).toBe(true);
 	});
 

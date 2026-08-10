@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
 import { HOOK_ASSETS_DIR } from "../constants.js";
@@ -463,11 +464,12 @@ function report(
 /**
  * Detect-step label: legacy format for auto, explicit otherwise.
  *
- * INVARIANT (holds for every `ResolvedRunners` value): `runners` is never
- * empty. The config path rejects an empty list before resolving
- * (`src/lib/ci-config.ts` — "runners is required and must be a non-empty
- * list"), and the `auto` and `stack-override` paths each yield exactly one
- * runner. `runners[0]` therefore needs no fallback.
+ * RUNNER COUNT: the `auto` and `stack-override` paths each yield exactly one
+ * runner, so their branches deref `runners[0]` safely. A gates-only v2 config
+ * (version 2, `runners` omitted) reaches here with ZERO runners on the `config`
+ * source; that branch never dereferences `runners[0]` — it only reads
+ * `runners.length` and maps over the (possibly empty) list — so an empty list
+ * is handled without a fallback.
  */
 function describeRunners(resolved: ResolvedRunners): string {
 	const first = resolved.runners[0];
@@ -1102,6 +1104,13 @@ function filterDefinedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
  * collector and the JSON `exitCode` field are populatable. A spawn error (e.g.
  * `bash` missing) rejects, and the collector treats that as a failure.
  *
+ * SIGNAL DEATH IS A FAILURE, NEVER A FALSE-GREEN: when the child is terminated
+ * by a signal (OOM kill, SIGSEGV/SIGABRT, external SIGTERM) `close` reports a
+ * NULL code. Mapping that to 0 would report a signal-killed blocking gate as
+ * `done` and let the build PASS — the exact false-green this phase exists to
+ * eliminate. A null code therefore resolves to a NON-ZERO code using the shell
+ * convention `128 + <signal number>` when the signal is resolvable, else 1.
+ *
  * Env values arrive as discrete map entries — never string-spliced into the
  * `bash -c` command — so metacharacters in a value cannot break out of the shell.
  */
@@ -1112,7 +1121,17 @@ export async function runGateNative(
 ): Promise<number> {
 	return await new Promise<number>((resolve, reject) => {
 		const proc = spawn("bash", ["-c", cmd], { cwd, env, stdio: "inherit" });
-		proc.on("close", (code) => resolve(code ?? 0));
+		proc.on("close", (code, signal) => {
+			if (code !== null) {
+				resolve(code);
+				return;
+			}
+			// Signal death: map to a non-zero code so the collector records a
+			// blocking failure. `128 + signum` mirrors the shell; fall back to 1
+			// when the signal name is not resolvable.
+			const signum = signal ? os.constants.signals[signal] : undefined;
+			resolve(signum !== undefined ? 128 + signum : 1);
+		});
 		proc.on("error", reject);
 	});
 }

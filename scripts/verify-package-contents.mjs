@@ -28,6 +28,19 @@ const REQUIRED_FILES = [
 	"modules/engram/install-engram.sh",
 	"workflows/reusable-build-node.yml",
 	"ci-local/ci-local.sh",
+	// PKG-002: every stack Dockerfile MUST ship so ensureImage's bundled
+	// fallback dir is complete and the first-run write-through (EACCES on
+	// root-owned global installs) never fires. Asserted BY NAME, one per
+	// stack getDockerfileContent produces, plus the shell scripts' shared
+	// java.Dockerfile and the default/ubuntu template (elixir.Dockerfile).
+	"ci-local/docker/node.Dockerfile",
+	"ci-local/docker/python.Dockerfile",
+	"ci-local/docker/go.Dockerfile",
+	"ci-local/docker/rust.Dockerfile",
+	"ci-local/docker/java-gradle.Dockerfile",
+	"ci-local/docker/java-maven.Dockerfile",
+	"ci-local/docker/java.Dockerfile",
+	"ci-local/docker/elixir.Dockerfile",
 	"lib/common.sh",
 	".gitignore.template",
 	"README.md",

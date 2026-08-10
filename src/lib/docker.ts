@@ -236,10 +236,27 @@ export async function ensureImage(
 		dockerfilePath = path.join(dockerDir, `${stack}.Dockerfile`);
 		contextDir = dockerDir;
 
-		// Write Dockerfile if it doesn't exist yet (first run)
 		if (!(await fs.pathExists(dockerfilePath))) {
-			await fs.ensureDir(dockerDir);
-			await fs.writeFile(dockerfilePath, getDockerfileContent(stack), "utf-8");
+			if (dockerfilesDir) {
+				// Caller-provided generation dir (dev / project-local flow):
+				// first-run generation is expected — write the canonical content.
+				await fs.ensureDir(dockerDir);
+				await fs.writeFile(
+					dockerfilePath,
+					getDockerfileContent(stack),
+					"utf-8",
+				);
+			} else {
+				// PKG-002: the package bundles a Dockerfile for EVERY stack, so a
+				// miss here means a corrupted/incomplete install. Writing into the
+				// install dir would EACCES on root-owned global installs and mask
+				// the real problem — fail closed with a clear message instead.
+				throw new Error(
+					`bundled Dockerfile "${stack}.Dockerfile" is missing from ` +
+						`"${dockerDir}" — the javi-forge installation looks corrupted; ` +
+						"reinstall the package (or pass an explicit dockerfilesDir)",
+				);
+			}
 		}
 	}
 

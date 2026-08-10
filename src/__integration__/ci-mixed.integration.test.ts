@@ -19,6 +19,26 @@ import { isDockerAvailable } from "../lib/docker.js";
 import { cleanupTempDir, collectSteps, createTempDir } from "./helpers.js";
 
 const DOCKER_OK = await isDockerAvailable();
+
+/** Probe a host toolchain once at module load — mirrors the DOCKER_OK gate. */
+async function hasTool(tool: string): Promise<boolean> {
+	try {
+		const { execFileAsync } = await import("../lib/exec.js");
+		await execFileAsync("bash", ["-c", `command -v ${tool}`], {
+			timeout: 5_000,
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+// The native Python runner cases need python3 + ruff on PATH. A node-only
+// containerized runner lacks them, so those cases SKIP (never fail) there.
+const PYTHON_OK = await hasTool("python3");
+const RUFF_OK = await hasTool("ruff");
+const PY_RUFF_OK = PYTHON_OK && RUFF_OK;
+
 /** bash:5 is pulled by the developer/CI environment; skip if absent. */
 const BASH_IMAGE_OK =
 	DOCKER_OK &&
@@ -84,37 +104,43 @@ describe("runCI() — mixed Node+Python fixture (native, real toolchains)", () =
 		await cleanupTempDir(tmpDir);
 	});
 
-	it("runs both runners in order, each in its own working directory", async () => {
-		await createHybridRepo(tmpDir);
-		const { steps, onStep } = collectSteps();
+	it.skipIf(!PY_RUFF_OK)(
+		"runs both runners in order, each in its own working directory",
+		async () => {
+			await createHybridRepo(tmpDir);
+			const { steps, onStep } = collectSteps();
 
-		await runCI({ projectDir: tmpDir, ...NATIVE }, onStep);
+			await runCI({ projectDir: tmpDir, ...NATIVE }, onStep);
 
-		// Both runners executed and passed with real tools:
-		// ruff really checked backend/, node really parsed index.mjs.
-		expect(steps.find((s) => s.id === "lint:backend")?.status).toBe("done");
-		expect(steps.find((s) => s.id === "lint:frontend")?.status).toBe("done");
-		// Runner order is the configured order.
-		expect(
-			steps.filter((s) => s.id.startsWith("lint:")).map((s) => s.id),
-		).toEqual(["lint:backend", "lint:frontend"]);
-		// Required tools were verified fail-closed before phases.
-		expect(steps.find((s) => s.id === "tools:backend")?.status).toBe("done");
-		expect(steps.find((s) => s.id === "tools:frontend")?.status).toBe("done");
-	});
+			// Both runners executed and passed with real tools:
+			// ruff really checked backend/, node really parsed index.mjs.
+			expect(steps.find((s) => s.id === "lint:backend")?.status).toBe("done");
+			expect(steps.find((s) => s.id === "lint:frontend")?.status).toBe("done");
+			// Runner order is the configured order.
+			expect(
+				steps.filter((s) => s.id.startsWith("lint:")).map((s) => s.id),
+			).toEqual(["lint:backend", "lint:frontend"]);
+			// Required tools were verified fail-closed before phases.
+			expect(steps.find((s) => s.id === "tools:backend")?.status).toBe("done");
+			expect(steps.find((s) => s.id === "tools:frontend")?.status).toBe("done");
+		},
+	);
 
-	it("fails closed when real ruff finds a violation; frontend never runs", async () => {
-		await createHybridRepo(tmpDir, INVALID_PY);
-		const { steps, onStep } = collectSteps();
+	it.skipIf(!PY_RUFF_OK)(
+		"fails closed when real ruff finds a violation; frontend never runs",
+		async () => {
+			await createHybridRepo(tmpDir, INVALID_PY);
+			const { steps, onStep } = collectSteps();
 
-		await expect(
-			runCI({ projectDir: tmpDir, ...NATIVE }, onStep),
-		).rejects.toBeDefined();
+			await expect(
+				runCI({ projectDir: tmpDir, ...NATIVE }, onStep),
+			).rejects.toBeDefined();
 
-		expect(steps.find((s) => s.id === "lint:backend")?.status).toBe("error");
-		// Fail fast: the second runner must not execute after a failure.
-		expect(steps.find((s) => s.id === "lint:frontend")).toBeUndefined();
-	});
+			expect(steps.find((s) => s.id === "lint:backend")?.status).toBe("error");
+			// Fail fast: the second runner must not execute after a failure.
+			expect(steps.find((s) => s.id === "lint:frontend")).toBeUndefined();
+		},
+	);
 
 	it("auto-detection still classifies the hybrid repo as node-only without config", async () => {
 		await createHybridRepo(tmpDir);

@@ -27,6 +27,22 @@ import { afterEach, describe, expect, it } from "vitest";
 const execFileAsync = promisify(execFile);
 const CLI_PATH = path.resolve(__dirname, "../../dist/index.js");
 
+/** Probe a host toolchain once at module load — skip (not fail) when absent. */
+async function hasTool(tool: string): Promise<boolean> {
+	try {
+		await execFileAsync("bash", ["-c", `command -v ${tool}`], {
+			timeout: 5_000,
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+// The ruff-missing case curates a PATH by symlinking python3 from the host, so
+// it needs python3 present. A node-only containerized runner lacks it → SKIP.
+const PYTHON_OK = await hasTool("python3");
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const sandboxes: string[] = [];
@@ -139,23 +155,25 @@ describe("hook contract — pre-commit (quick, no-docker)", () => {
 		expect(stdout).not.toContain("Lint [frontend]");
 	});
 
-	it("a missing required tool (ruff) fails closed with exit 1", async () => {
-		// Curated PATH without ruff: the check runs command -v ruff, which
-		// must fail even though every command in the config would succeed.
-		const binDir = path.join(
-			os.tmpdir(),
-			`javi-forge-path-${crypto.randomUUID()}`,
-		);
-		sandboxes.push(binDir);
-		await fs.ensureDir(binDir);
-		for (const tool of ["node", "bash", "python3"]) {
-			const real = (
-				await execFileAsync("bash", ["-c", `command -v ${tool}`])
-			).stdout.trim();
-			await fs.symlink(real, path.join(binDir, tool));
-		}
+	it.skipIf(!PYTHON_OK)(
+		"a missing required tool (ruff) fails closed with exit 1",
+		async () => {
+			// Curated PATH without ruff: the check runs command -v ruff, which
+			// must fail even though every command in the config would succeed.
+			const binDir = path.join(
+				os.tmpdir(),
+				`javi-forge-path-${crypto.randomUUID()}`,
+			);
+			sandboxes.push(binDir);
+			await fs.ensureDir(binDir);
+			for (const tool of ["node", "bash", "python3"]) {
+				const real = (
+					await execFileAsync("bash", ["-c", `command -v ${tool}`])
+				).stdout.trim();
+				await fs.symlink(real, path.join(binDir, tool));
+			}
 
-		const repo = await createHybridRepo(`
+			const repo = await createHybridRepo(`
 version: 1
 runners:
   - name: backend
@@ -164,20 +182,21 @@ runners:
     lint: "true"
     requires: [ruff]
 `);
-		const { exitCode, stdout } = await runCLI(PRE_COMMIT_ARGS, {
-			cwd: repo,
-			env: { PATH: binDir },
-		});
+			const { exitCode, stdout } = await runCLI(PRE_COMMIT_ARGS, {
+				cwd: repo,
+				env: { PATH: binDir },
+			});
 
-		expect(exitCode).toBe(1);
-		// Ink wraps long lines in the terminal frame — normalize whitespace.
-		const flat = stdout.replace(/\s+/g, " ");
-		expect(flat).toContain('required tool "ruff" not found');
-		expect(flat).toContain("backend");
-		// The runner's lint never executed (would have passed — proving the
-		// failure comes from the tool check, not from the command).
-		expect(stdout).not.toContain("Lint [backend] passed");
-	});
+			expect(exitCode).toBe(1);
+			// Ink wraps long lines in the terminal frame — normalize whitespace.
+			const flat = stdout.replace(/\s+/g, " ");
+			expect(flat).toContain('required tool "ruff" not found');
+			expect(flat).toContain("backend");
+			// The runner's lint never executed (would have passed — proving the
+			// failure comes from the tool check, not from the command).
+			expect(stdout).not.toContain("Lint [backend] passed");
+		},
+	);
 });
 
 // The pre-push (full, docker) contract block was RETIRED in hooks-ricos Slice B:

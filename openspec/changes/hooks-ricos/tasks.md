@@ -66,22 +66,22 @@ Sequential PRs to main, matching this session's pattern. Slices share no code. N
 
 ### Phase B1: RED
 
-- [ ] B1.1 Update `ci-hooks-exec.integration.test.ts:180-204` expectations to the NEW native contract FIRST (see B3.3) so the suite is RED against the current docker-probe body.
+- [x] B1.1 Update `ci-hooks-exec.integration.test.ts:180-204` expectations to the NEW native contract FIRST (see B3.3) so the suite is RED against the current docker-probe body.
 
 ### Phase B2: GREEN — body
 
-- [ ] B2.1 Replace `assets/hooks/pre-push` body with unconditional `javi-forge ci --quick --no-docker --no-security --no-ci-ghagga`; PRESERVE the `command -v javi-forge &>/dev/null … || npx javi-forge …` fallback adapted to the native invocation. STRIP the `if docker info` branch and the degrade `else` — NO degrade branch. Add `$SECONDS` elapsed logging + clear abort message; keep `git push --no-verify` in header comment.
+- [x] B2.1 Replace `assets/hooks/pre-push` body with unconditional `javi-forge ci --quick --no-docker --no-security --no-ci-ghagga`; PRESERVE the `command -v javi-forge &>/dev/null … || npx javi-forge …` fallback adapted to the native invocation. STRIP the `if docker info` branch and the degrade `else` — NO degrade branch. Add `$SECONDS` elapsed logging + clear abort message; keep `git push --no-verify` in header comment.
 
 ### Phase B3: manifest + coupled-test fixes
 
-- [ ] B3.1 `assets/hooks/manifest.json`: `pre-push.version` 1→2; `sha256` → v2hash; APPEND `{sha256: v2hash, firstCommit: <hex>}` to `pre-push.historical[]` keeping v1 `7de58640…` at index 0. Update `RELEASED_SNAPSHOT["pre-push"]` → `{sha256: v2hash, historical: [v1hash, v2hash]}` and set pre-push→2 in the EXPECTED_VERSION map from A3.3.
-- [ ] B3.2 `ci.test.ts:367`: `toContain("docker info")` → `toContain("--no-docker")`; `:368` `toContain("javi-forge ci")` stays. Rename the test (native-quick, no docker branch).
-- [ ] B3.3 `ci-hooks-exec.integration.test.ts`: `:180-186` rewrite argsLog `["info","ci"]` → single-element `[FROZEN_PRE_COMMIT_FLAGS]` = `["ci --quick --no-docker --no-security --no-ci-ghagga"]` (stub logs `$*` as ONE line; NOT a token array), rename case; `:188-195` update abort text + same single-element argsLog; `:197-204` DELETE the "Docker unavailable → refuse" case (fail-closed re-homed to gate layer).
-- [ ] B3.4 `ci-init.integration.test.ts:72`: `toContain("docker info")` → `toContain("--no-docker")`. `:73` `javi-forge ci` stays; `:74` `npx javi-forge ci` PRESERVED-BY-DECISION (no edit). `:68` rename stale title (cosmetic).
-- [ ] B3.5 `src/e2e/ci-hooks.e2e.test.ts`: fix module docstring `:5-6` (`pre-push: javi-forge ci (full, Docker)` → native `--quick --no-docker --no-security --no-ci-ghagga`); RETIRE the `describe("hook contract — pre-push (full, docker)")` block `:202-254` (now redundant with pre-commit's identical native arg vector) — reconcile only if retire is rejected.
+- [x] B3.1 `assets/hooks/manifest.json`: `pre-push.version` 1→2; `sha256` → v2hash; APPEND `{sha256: v2hash, firstCommit: <hex>}` to `pre-push.historical[]` keeping v1 `7de58640…` at index 0. Update `RELEASED_SNAPSHOT["pre-push"]` → `{sha256: v2hash, historical: [v1hash, v2hash]}` and set pre-push→2 in the EXPECTED_VERSION map from A3.3.
+- [x] B3.2 `ci.test.ts:367`: `toContain("docker info")` → `toContain("--no-docker")`; `:368` `toContain("javi-forge ci")` stays. Rename the test (native-quick, no docker branch).
+- [x] B3.3 `ci-hooks-exec.integration.test.ts`: `:180-186` rewrite argsLog `["info","ci"]` → single-element `[FROZEN_PRE_COMMIT_FLAGS]` = `["ci --quick --no-docker --no-security --no-ci-ghagga"]` (stub logs `$*` as ONE line; NOT a token array), rename case; `:188-195` update abort text + same single-element argsLog; `:197-204` DELETE the "Docker unavailable → refuse" case (fail-closed re-homed to gate layer).
+- [x] B3.4 `ci-init.integration.test.ts:72`: `toContain("docker info")` → `toContain("--no-docker")`. `:73` `javi-forge ci` stays; `:74` `npx javi-forge ci` PRESERVED-BY-DECISION (no edit). `:68` rename stale title (cosmetic).
+- [x] B3.5 `src/e2e/ci-hooks.e2e.test.ts`: fix module docstring `:5-6` (`pre-push: javi-forge ci (full, Docker)` → native `--quick --no-docker --no-security --no-ci-ghagga`); RETIRE the `describe("hook contract — pre-push (full, docker)")` block `:202-254` (now redundant with pre-commit's identical native arg vector) — reconcile only if retire is rejected.
 
 ### Phase B4: verification (GATE FIRST)
 
-- [ ] B4.1 **MANDATORY APPLY-TIME GATE** — re-grep the FULL test tree (`src/**/*.test.ts`, `src/__integration__/**`, `src/e2e/**`) for hook-body substrings, version/`sha256` literals, `docker info`, `npx`, `co-authored-by`, `anthropic`, and the pre-push arg vector `--quick --no-docker --no-security --no-ci-ghagga`. Reconcile ANY hit not in this checklist. Hard gate.
-- [ ] B4.2 `pnpm validate` exit 0.
-- [ ] B4.3 `npx vitest run --coverage` exit 0 (floors 85 lines / 80 branches).
+- [x] B4.1 **MANDATORY APPLY-TIME GATE** — re-grep the FULL test tree (`src/**/*.test.ts`, `src/__integration__/**`, `src/e2e/**`) for hook-body substrings, version/`sha256` literals, `docker info`, `npx`, `co-authored-by`, `anthropic`, and the pre-push arg vector `--quick --no-docker --no-security --no-ci-ghagga`. Reconcile ANY hit not in this checklist. Hard gate.
+- [x] B4.2 `pnpm validate` exit 0.
+- [x] B4.3 `npx vitest run --coverage` exit 0 (floors 85 lines / 80 branches).

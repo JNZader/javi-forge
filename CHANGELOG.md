@@ -1,3 +1,9 @@
+## [1.23.1](https://github.com/JNZader/javi-forge/compare/v1.23.0...v1.23.1) (2026-08-10)
+
+### Bug Fixes
+
+* **docker:** Dockerfile generator parity test + bundle all stacks (audit Phase 4) ([#35](https://github.com/JNZader/javi-forge/issues/35)) ([960b9b1](https://github.com/JNZader/javi-forge/commit/960b9b133b7e1852ceb7e2d7a17dd0b0dda3bacc))
+
 ## [1.23.0](https://github.com/JNZader/javi-forge/compare/v1.22.3...v1.23.0) (2026-08-10)
 
 ### Features

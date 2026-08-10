@@ -159,6 +159,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Validate an optional container `image` ref shared by the runner and gate
+ * paths (IMG-1). Rejects non-string / empty-after-trim and leading-dash refs
+ * (an image like "--privileged" or "-v /:/host" would be parsed by `docker run`
+ * as a FLAG, not an image, if it reached argv — JDB-004) with a named error at
+ * `fieldPath`. Returns the TRIMMED value to store, so a whitespace-padded ref
+ * fails cleanly at validation instead of reaching docker argv untrimmed.
+ * Returns undefined when the field is absent or invalid.
+ */
+function validateImageRef(
+	value: unknown,
+	fieldPath: string,
+	errors: CIConfigValidationError[],
+): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "string" || !value.trim()) {
+		errors.push({
+			path: fieldPath,
+			message: "image must be a non-empty string",
+		});
+		return undefined;
+	}
+	const trimmed = value.trim();
+	if (trimmed.startsWith("-")) {
+		errors.push({
+			path: fieldPath,
+			message:
+				"image must not start with '-' (would be parsed as a docker flag)",
+		});
+		return undefined;
+	}
+	return trimmed;
+}
+
 function normalizeCommands(
 	value: unknown,
 	fieldPath: string,
@@ -256,17 +290,7 @@ function validateRunner(
 		}
 	}
 
-	let image: string | undefined;
-	if (raw.image !== undefined) {
-		if (typeof raw.image !== "string" || !raw.image.trim()) {
-			errors.push({
-				path: `${base}.image`,
-				message: "image must be a non-empty string",
-			});
-		} else {
-			image = raw.image;
-		}
-	}
+	const image = validateImageRef(raw.image, `${base}.image`, errors);
 
 	let buildContext: string | undefined;
 	if (raw["build-context"] !== undefined) {
@@ -435,27 +459,7 @@ function validateGate(
 		}
 	}
 
-	let image: string | undefined;
-	if (raw.image !== undefined) {
-		if (typeof raw.image !== "string" || !raw.image.trim()) {
-			errors.push({
-				path: `${base}.image`,
-				message: "image must be a non-empty string",
-			});
-		} else if (raw.image.trim().startsWith("-")) {
-			// Harden against docker-flag injection: an image ref like "--privileged"
-			// or "-v /:/host" would be parsed by `docker run` as a FLAG, not an
-			// image argument, if it reached argv. Reject leading-dash refs at
-			// validation with a named error (JDB-004).
-			errors.push({
-				path: `${base}.image`,
-				message:
-					"image must not start with '-' (would be parsed as a docker flag)",
-			});
-		} else {
-			image = raw.image;
-		}
-	}
+	const image = validateImageRef(raw.image, `${base}.image`, errors);
 
 	let timeout: number | undefined;
 	if (raw.timeout !== undefined) {

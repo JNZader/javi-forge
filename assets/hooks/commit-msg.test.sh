@@ -2,14 +2,14 @@
 # =============================================================================
 # COMMIT-MSG TEST SUITE
 # =============================================================================
-# Valida que el hook commit-msg bloquea AI attribution en TODAS las variantes
-# conocidas, incluyendo bypasses identificados en auditoría 2026-05-17.
+# Verifies that the commit-msg hook blocks AI attribution across ALL known
+# variants, including bypasses identified in the 2026-05-17 audit.
 #
-# Uso:
+# Usage:
 #   ./commit-msg.test.sh
 #
-# Exit code 0 = todos los tests pasan
-# Exit code 1 = al menos un test falla
+# Exit code 0 = all tests pass
+# Exit code 1 = at least one test fails
 # =============================================================================
 
 set -u
@@ -26,7 +26,7 @@ PASS=0
 FAIL=0
 FAILED_TESTS=()
 
-# Garantiza limpieza de tmpfiles aún si el hook revienta con set -u, etc.
+# Guarantees tmpfile cleanup even if the hook blows up under set -u, etc.
 TMP_FILES=()
 cleanup() {
     if [ ${#TMP_FILES[@]} -gt 0 ]; then
@@ -44,7 +44,7 @@ make_tmp() {
 }
 
 # expect_block <description> <message>
-# El hook debe BLOQUEAR este mensaje (exit != 0)
+# The hook must BLOCK this message (exit != 0)
 expect_block() {
     local desc="$1"
     local msg="$2"
@@ -60,7 +60,7 @@ expect_block() {
 }
 
 # expect_pass <description> <message>
-# El hook debe PERMITIR este mensaje (exit 0)
+# The hook must ALLOW this message (exit 0)
 expect_pass() {
     local desc="$1"
     local msg="$2"
@@ -78,9 +78,9 @@ expect_pass() {
 echo "=== Running commit-msg hook test suite ==="
 echo ""
 
-# ─── Cases que DEBEN bloquear ────────────────────────────────────────
+# ─── Cases that MUST block ───────────────────────────────────────────
 
-# Co-authored-by con cada proveedor
+# Co-authored-by for each provider
 expect_block "Co-authored-by Claude" "feat: add foo
 
 Co-authored-by: Claude <claude@anthropic.com>"
@@ -116,7 +116,7 @@ expect_block "Built with Gemini" "feat: Built with Gemini"
 expect_block "Developed with Copilot" "feat: Developed with Copilot"
 expect_block "Authored by LLM" "feat: Authored by LLM"
 
-# Made/Generated/etc — DOUBLE space (bypass identificado en audit)
+# Made/Generated/etc — DOUBLE space (bypass identified in the audit)
 expect_block "Made by  Claude (double space)" "feat: Made by  Claude"
 expect_block "Generated with  GPT (double space)" "fix: Generated with  GPT"
 expect_block "Made by\tClaude (tab)" "$(printf 'feat: Made by\tClaude')"
@@ -127,7 +127,7 @@ expect_block "With help from Claude" "feat: x
 With help from Claude"
 expect_block "with help from GPT-4" "feat: with help from GPT-4"
 
-# X-assisted variants (bypass identificado)
+# X-assisted variants (identified bypass)
 expect_block "anthropic-assisted" "feat: anthropic-assisted refactor"
 expect_block "openai-assisted" "feat: openai-assisted change"
 expect_block "ai-assisted" "feat: ai-assisted commit"
@@ -141,7 +141,7 @@ expect_block "claude_code" "feat: claude_code generated"
 expect_block "GitHub Copilot" "feat: GitHub Copilot helped"
 expect_block "Microsoft Copilot" "feat: Microsoft Copilot did this"
 
-# Claude model variants (bypass identificado)
+# Claude model variants (identified bypass)
 expect_block "claude opus (space)" "feat: claude opus tested"
 expect_block "claude-sonnet (dash)" "feat: claude-sonnet used"
 expect_block "claude_haiku (underscore)" "feat: claude_haiku approach"
@@ -168,21 +168,21 @@ expect_block "@openai.com" "feat: y
 Co-authored-by: bot@openai.com"
 expect_block "noreply@anthropic" "feat: noreply@anthropic.example"
 
-# ─── Bypasses identificados en review 2026-05-17 (post-hardening) ─────
+# ─── Bypasses identified in the 2026-05-17 review (post-hardening) ────
 
-# Markdown formatting alrededor del proveedor
+# Markdown formatting around the provider
 expect_block "Made by **Claude** (markdown bold)" "feat: Made by **Claude**"
 expect_block "Made by __GPT__ (markdown italic)" "feat: Made by __GPT__"
 expect_block "Made by \`OpenAI\` (markdown code)" "feat: Made by \`OpenAI\`"
 expect_block "Made by ~~Gemini~~ (strikethrough)" "feat: Made by ~~Gemini~~"
 
-# Puntuación entre verbo y proveedor (no whitespace)
+# Punctuation between verb and provider (no whitespace)
 expect_block "Made by.Claude" "feat: Made by.Claude"
 expect_block "Made by,Claude" "feat: Made by,Claude"
 expect_block "Made by:Claude" "feat: Made by:Claude"
 expect_block "Made by;Claude" "feat: Made by;Claude"
 
-# Newline entre verbo y proveedor
+# Newline between verb and provider
 expect_block "Made by newline Claude" "$(printf 'feat: Made by\nClaude')"
 
 # Emoji separator
@@ -194,65 +194,65 @@ expect_block "Made by ZWSP Claude" "$(printf 'feat: Made by​Claude')"
 expect_block "Made by NBSP Claude" "$(printf 'feat: Made by Claude')"
 expect_block "Made by RLM Claude" "$(printf 'feat: Made by‏Claude')"
 
-# "thanks/powered by/courtesy of" alternativas
+# "thanks/powered by/courtesy of" alternatives
 expect_block "thanks to Claude" "feat: thanks to Claude for help"
 expect_block "powered by GPT" "feat: powered by GPT"
 expect_block "courtesy of OpenAI" "feat: courtesy of OpenAI"
 
-# AI IDEs / herramientas
+# AI IDEs / tools
 expect_block "Cursor IDE" "feat: built with Cursor"
 expect_block "Windsurf" "feat: written with Windsurf"
 expect_block "Codeium" "feat: codeium suggested this"
 expect_block "Cody" "feat: with Cody help"
 expect_block "Aider" "feat: aider generated"
 
-# Co-authored-by sin espacio antes de AI (bypass del review Sonnet)
+# Co-authored-by with no space before AI (bypass from the Sonnet review)
 expect_block "Co-authored-by AIAssistant" "feat: x
 
 Co-authored-by: AIAssistant <a@b.com>"
 
-# Co-authored-by Copilot standalone (sin GitHub/Microsoft prefix)
+# Co-authored-by Copilot standalone (without GitHub/Microsoft prefix)
 expect_block "Co-authored-by bare Copilot" "feat: x
 
 Co-authored-by: Copilot <c@gh.com>"
 
-# Verbos alternativos
+# Alternative verbs
 expect_block "produced by Claude" "feat: produced by Claude"
 expect_block "coded by GPT" "feat: coded by GPT"
 expect_block "crafted with AI" "feat: crafted with AI"
 
-# Using/via como alternativas a by/with
+# Using/via as alternatives to by/with
 expect_block "made using Claude" "feat: made using Claude"
 expect_block "generated via GPT" "feat: generated via GPT"
 
 # Full-width characters (NFKC normalization)
 expect_block "Ｍａｄｅ ｂｙ Claude (fullwidth)" "feat: Ｍａｄｅ ｂｙ Claude"
 
-# ─── Bypasses adicionales identificados en audit-2 (2026-05-17 review B) ──
+# ─── Additional bypasses identified in audit-2 (2026-05-17 review B) ──
 
 # Combining diacritics (U+0300-U+036F) — Ćlaude = C + U+0301
 expect_block "Ćlaude (combining acute)" "$(printf 'feat: Made by Ćlaude')"
 expect_block "Cláude (combining grave)" "$(printf 'feat: Made by Clàude')"
 
-# Verbos expandidos — sólo aplican si hay (by|with|using|via) después del verbo.
-# "asked Claude to ..." NO bloquea por diseño: el riesgo de false positive en
-# nombres personales o conversaciones legítimas es alto. Si necesitás defensa
-# adversarial usá signed commits.
+# Expanded verbs — only apply when (by|with|using|via) follows the verb.
+# "asked Claude to ..." does NOT block by design: the false-positive risk on
+# personal names or legitimate conversation is high. If you need adversarial
+# defense, use signed commits.
 expect_block "helped by Claude" "feat: helped by Claude"
 expect_block "wrote with GPT" "feat: wrote with GPT-4"
 expect_block "prompted via AI" "feat: prompted via AI"
 expect_block "fixed by Copilot" "feat: fixed by Copilot"
 expect_block "refactored with Cursor" "feat: refactored with Cursor"
 
-# Cases que DOCUMENTADAMENTE NO bloqueamos (bare provider sin verb-prepositional):
-# - "asked Claude to refactor"  (FP risk: pidió a una persona llamada Claude)
-# - "I used Claude to write"    (FP risk: usé al usuario Claude para escribir)
-# - "claude helped me debug"    (FP risk: Claude la persona ayudó a debuggear)
-# Estos son límites aceptados; ver header del hook.
+# Cases we DOCUMENTEDLY do NOT block (bare provider without verb-prepositional):
+# - "asked Claude to refactor"  (FP risk: asked a person named Claude)
+# - "I used Claude to write"    (FP risk: used the user Claude to write)
+# - "claude helped me debug"    (FP risk: Claude the person helped debug)
+# These are accepted limits; see the hook header.
 expect_pass "asked Claude (person, not attribution)" "feat: asked Claude to review the PR"
 expect_pass "user Claude in seed" "feat: configure user Claude in fixtures"
 
-# ─── Cases que DEBEN PASAR (false positive checks) ────────────────────
+# ─── Cases that MUST PASS (false positive checks) ─────────────────────
 
 expect_pass "Simple feat" "feat: add user profile endpoint"
 expect_pass "Simple fix" "fix: handle empty array in parser"

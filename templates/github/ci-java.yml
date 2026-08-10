@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   build:
-    uses: JNZader/javi-forge/.github/workflows/reusable-build-java.yml@main
+    uses: JNZader/javi-forge/.github/workflows/reusable-build-java.yml@667908ddb5e1aeb8e44ec65e84e4bc0e4f936d6c # main@2026-08-10
     with:
       java-version: '21'  # Change to your version: 17, 21, 25
       run-spotless: true

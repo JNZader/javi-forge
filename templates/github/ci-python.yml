@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   build:
-    uses: JNZader/javi-forge/.github/workflows/reusable-build-python.yml@main
+    uses: JNZader/javi-forge/.github/workflows/reusable-build-python.yml@667908ddb5e1aeb8e44ec65e84e4bc0e4f936d6c # main@2026-08-10
     with:
       python-version: '3.12'  # Change to: 3.10, 3.11, 3.12
       package-manager: 'pip'  # Change to: pip, poetry, uv

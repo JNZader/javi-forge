@@ -1250,10 +1250,12 @@ export interface GateOutcome {
 	/** First non-zero command code for a failed gate. */
 	exitCode?: number;
 	/**
-	 * Human-readable cause of a degrade/skip, surfaced so the headless JSON
-	 * consumer sees the degrade LOUDLY — not just in the Ink stream. Populated for
-	 * the scope:changed skip variants: base ref null, changed-file resolution
-	 * failure (shallow clone / missing ref), and the empty changed-set skip.
+	 * Human-readable cause of a degrade/skip/timeout, surfaced so the headless
+	 * JSON consumer sees it LOUDLY — not just in the Ink stream. Populated for the
+	 * scope:changed skip variants (base ref null, changed-file resolution failure
+	 * under a shallow clone / missing ref, empty changed-set skip) AND for a gate
+	 * that timed out (so a 124 wall-clock kill is distinguishable from a command
+	 * that itself exits 124).
 	 */
 	reason?: string;
 }

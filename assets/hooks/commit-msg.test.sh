@@ -266,6 +266,63 @@ expect_pass "Author named Claude (not attribution)" "feat: add user named Claude
 expect_pass "AI as acronym in product name" "feat: integrate with PaiAi API gateway"
 expect_pass "Word 'made' without AI context" "feat: changes I made last week to the parser"
 
+# ─── Conventional-commit subject enforcement ─────────────────────────
+# The subject guard runs INDEPENDENTLY of the attribution guard. A subject
+# that is not a valid Conventional Commit (and not an exempt prefix) is blocked.
+
+# Non-conforming subjects → BLOCK
+expect_block "bare wip subject" "wip"
+expect_block "random text subject" "random text with no type"
+expect_block "unknown type" "chores: not a valid type"
+expect_block "missing space after colon" "feat:no space"
+expect_block "uppercase type" "Feat: capitalized type"
+
+# Every conforming type → PASS
+expect_pass "type build" "build: bump toolchain"
+expect_pass "type chore" "chore: tidy up"
+expect_pass "type ci" "ci: adjust pipeline"
+expect_pass "type docs" "docs: update readme"
+expect_pass "type feat" "feat: add endpoint"
+expect_pass "type fix" "fix: correct bug"
+expect_pass "type perf" "perf: speed up query"
+expect_pass "type refactor" "refactor: extract helper"
+expect_pass "type revert" "revert: undo change"
+expect_pass "type style" "style: run formatter"
+expect_pass "type test" "test: add coverage"
+expect_pass "scope + bang breaking" "feat(api)!: change contract"
+expect_pass "scope with dots/dashes" "fix(some.module-name): patch"
+
+# Exempt prefixes → PASS (subject regex not applied)
+expect_pass "exempt Merge" "Merge branch 'main' into feature"
+expect_pass "exempt fixup!" "fixup! feat: add endpoint"
+expect_pass "exempt squash!" "squash! fix: correct bug"
+expect_pass "exempt amend!" "amend! feat: add endpoint"
+expect_pass "exempt reword!" "reword! docs: update readme"
+expect_pass "exempt Revert" "Revert \"feat: bad change\""
+
+# Both guards independent: conforming subject BUT attribution → BLOCK
+expect_block "valid subject with attribution trailer" "feat: add endpoint
+
+Co-authored-by: Claude <c@a.com>"
+
+# ─── Claude-Session trailer (Claude Code harness auto-appends this) ────
+# Canonical trailer injected by the Claude Code harness. This is the user's
+# #1 standing rule ("NUNCA trailer Claude-Session") and was the CRITICAL bug:
+# the trailer key + session URL passed BOTH guards and committed clean.
+expect_block "Claude-Session trailer" "feat: x
+
+Claude-Session: https://claude.ai/code/session_01NZExampleId"
+expect_block "claude.ai session URL in body" "feat: y
+
+See https://claude.ai/code/session_01ABC for context"
+expect_block "claude-session lowercase trailer" "fix: z
+
+claude-session: https://claude.ai/code/session_02def"
+
+# A subject that merely mentions the word "session" (no claude-session key,
+# no claude.ai host) must still PASS — no bare-name false positive.
+expect_pass "session word without claude trailer" "feat: persist user session in redis"
+
 # ─── Summary ──────────────────────────────────────────────────────────
 
 echo ""

@@ -125,6 +125,11 @@ describe("installed hooks — executed", () => {
 		{ name: "claude code marker", message: "feat: done with Claude Code\n" },
 		{ name: "chatgpt marker", message: "refactor: asked ChatGPT for this\n" },
 		{ name: "openai email", message: "feat: x\n\nContact: bot@openai.com\n" },
+		{
+			name: "claude-session trailer",
+			message:
+				"feat: add parser\n\nClaude-Session: https://claude.ai/code/session_01NZExampleId\n",
+		},
 	];
 
 	const ALLOWED_MESSAGES: Array<{ name: string; message: string }> = [

@@ -78,7 +78,8 @@ describe("installCIHooks() — integration", () => {
 		await installCIHooks(tmpDir);
 
 		const content = await readGenerated(tmpDir, ".git", "hooks", "commit-msg");
-		expect(content).toContain("co-authored-by:.*claude");
+		expect(content).toContain("co-authored-by");
+		expect(content).toContain("claude");
 		expect(content).toContain("AI Attribution Detected");
 		expect(content).toContain("COMMIT_MSG_FILE");
 	});

@@ -60,11 +60,23 @@ const RELEASED_SNAPSHOT: Record<
 		],
 	},
 	"commit-msg": {
-		sha256: "1c23a60cd4ba7f6bc666da400b5d2971c4294782c8d9ce41543e7815de11a1d6",
+		sha256: "127fb8bfebd81d6b06e6f04bdf1be0036a3a224268ac54f11784043f55796a18",
 		historical: [
 			"1c23a60cd4ba7f6bc666da400b5d2971c4294782c8d9ce41543e7815de11a1d6",
+			"127fb8bfebd81d6b06e6f04bdf1be0036a3a224268ac54f11784043f55796a18",
 		],
 	},
+};
+
+/**
+ * Expected shipped `version` per hook. Bumped in lockstep with a body change:
+ * commit-msg is at v2 (hooks-ricos Slice A); the others remain v1 until their
+ * own slice bumps them.
+ */
+const EXPECTED_VERSION: Record<HookName, number> = {
+	"pre-commit": 1,
+	"pre-push": 1,
+	"commit-msg": 2,
 };
 
 const sha256 = (buf: Buffer): string =>
@@ -140,12 +152,12 @@ describe("hook assets", () => {
 
 	it.each(
 		HOOK_NAMES,
-	)("%s v1 manifest hash equals the v0 historical entry (byte-equivalence to the inline literal)", (hook) => {
+	)("%s manifest hash equals the latest historical entry at its expected version", (hook) => {
 		const entry = readManifest()[hook];
 
-		expect(entry.version).toBe(1);
+		expect(entry.version).toBe(EXPECTED_VERSION[hook]);
 		expect(entry.historical.length).toBeGreaterThan(0);
-		expect(entry.sha256).toBe(entry.historical[0].sha256);
+		expect(entry.sha256).toBe(entry.historical.at(-1)?.sha256);
 	});
 
 	it.each(HOOK_NAMES)("%s historical entries are well-formed", (hook) => {

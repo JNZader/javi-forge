@@ -85,6 +85,7 @@ const FORBIDDEN_PATTERNS = [
 	/(^|\/)oauth(\.|\/|$)/i,
 	/(^|\/)npm-debug\.log$/,
 	/\.test\.[cm]?[jt]sx?$/,
+	/\.test\.sh$/,
 	/\.spec\.[cm]?[jt]sx?$/,
 	/\.map$/,
 	/\.log$/,

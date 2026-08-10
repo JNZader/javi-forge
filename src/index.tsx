@@ -2,6 +2,7 @@
 import { createRequire } from "node:module";
 import meow from "meow";
 import { handleCi } from "./cli/dispatch/ci.js";
+import { handleHooks } from "./cli/dispatch/hooks.js";
 import { handleSecurity } from "./cli/dispatch/security.js";
 import {
 	handleAnalyze,
@@ -36,9 +37,9 @@ const cli = meow(HELP_TEXT, {
 
 const subcommand = cli.input[0] ?? "init";
 
-// Global --help: every command except `ci` shows the global banner here. `ci`
-// owns its per-command help inside handleCi.
-if (cli.flags.help && subcommand !== "ci") {
+// Global --help: every command except `ci` and `hooks` shows the global banner
+// here. Those two own their per-command help inside their handlers.
+if (cli.flags.help && subcommand !== "ci" && subcommand !== "hooks") {
 	console.log(HELP_TEXT);
 	process.exit(0);
 }
@@ -54,6 +55,11 @@ switch (subcommand) {
 
 	case "ci": {
 		await handleCi(cli, { inkStdin, isCI });
+		break;
+	}
+
+	case "hooks": {
+		await handleHooks(cli);
 		break;
 	}
 

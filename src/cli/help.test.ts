@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { CI_HELP_TEXT, FLAGS_SCHEMA, HELP_TEXT } from "./help.js";
+import {
+	CI_HELP_TEXT,
+	FLAGS_SCHEMA,
+	HELP_TEXT,
+	HOOKS_HELP_TEXT,
+} from "./help.js";
 
 // =============================================================================
 // CI flag plumbing for mixed-stack CI (plan tasks 2)
@@ -99,5 +104,21 @@ describe("CI_HELP_TEXT — per-command help", () => {
 		]) {
 			expect(CI_HELP_TEXT).toContain(flag);
 		}
+	});
+});
+
+// =============================================================================
+// hooks dispatcher help (hook-consolidation S1a)
+// =============================================================================
+
+describe("help — hooks command", () => {
+	it("documents `hooks run` in the global help", () => {
+		expect(HELP_TEXT).toContain("hooks run");
+	});
+
+	it("HOOKS_HELP_TEXT documents the run subcommand and hook names", () => {
+		expect(HOOKS_HELP_TEXT).toContain("hooks run");
+		expect(HOOKS_HELP_TEXT).toContain("pre-commit");
+		expect(HOOKS_HELP_TEXT).toContain("pre-push");
 	});
 });

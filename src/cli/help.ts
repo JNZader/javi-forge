@@ -20,6 +20,7 @@ export const HELP_TEXT = `
     ci init           Install git hooks that call javi-forge ci
     tdd init          Install TDD-enforcing pre-commit hook (auto-detects stack)
     tdd pipeline      Install TDD pipeline pre-push hook (--mode strict|warn)
+    hooks run         Run a git hook's composed sections (pre-commit | pre-push)
     analyze           Run repoforge skills analysis
     doctor            Show health report
     workflow show     Render a workflow graph as ASCII (--template <name> or file path)
@@ -144,6 +145,32 @@ export const CI_HELP_TEXT = `
     $ javi-forge ci validate
     $ javi-forge ci validate --json
     $ javi-forge ci init --force
+`;
+
+/**
+ * Per-command help for `hooks`, shown by `javi-forge hooks --help` (or when
+ * `hooks` is given an unknown subcommand). Whitespace is significant.
+ */
+export const HOOKS_HELP_TEXT = `
+  Usage
+    $ javi-forge hooks run <pre-commit|pre-push>
+
+    Run the sections enabled under hooks: in .javi-forge/ci.yaml, in a fixed
+    cheap→expensive order, fail-fast. With no hooks: config the default is the
+    quick native CI gate (setup + lint + compile + gates — no tests, no coverage).
+
+  Subcommands
+    run pre-commit  Run the composed pre-commit sections
+    run pre-push    Run the composed pre-push sections
+
+  Notes
+    A blocking section failure exits non-zero and blocks the commit/push.
+    A broken .javi-forge/ci.yaml exits 1 (fail-closed — never skips a gate).
+    To skip: git commit --no-verify   (pre-push: git push --no-verify)
+
+  Examples
+    $ javi-forge hooks run pre-commit
+    $ javi-forge hooks run pre-push
 `;
 
 export const FLAGS_SCHEMA = {

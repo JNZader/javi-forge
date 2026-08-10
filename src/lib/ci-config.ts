@@ -93,11 +93,44 @@ export interface CIGateConfig {
 	timeout?: number;
 }
 
+/** pre-commit hook feature toggles (version 2 only). */
+export interface CIHookCommitConfig {
+	/** quick native CI gate (default true when `hooks:` is present) */
+	ci: boolean;
+	/** run the stack test command */
+	tdd: boolean;
+	/** L1 secret scan */
+	secrets: boolean;
+	/** L3 permission boundaries */
+	permissions: boolean;
+}
+
+/** pre-push hook feature toggles (version 2 only). */
+export interface CIHookPushConfig {
+	/** quick native CI gate (default true when `hooks:` is present) */
+	ci: boolean;
+	/** run the stack test command — false | "strict" | "warn" ("warn" = advisory) */
+	tdd: boolean | "strict" | "warn";
+	/** L2 dependency audit */
+	deps: boolean;
+}
+
+/**
+ * Parsed `hooks:` section. Every hook is always present with defaults applied
+ * (ci on, every other feature off) so the dispatcher never branches on absence.
+ */
+export interface CIHooksConfig {
+	preCommit: CIHookCommitConfig;
+	prePush: CIHookPushConfig;
+}
+
 export interface CIConfig {
 	version: number;
 	runners: CIRunnerConfig[];
 	/** Present only under version 2 when `gates:` is declared. */
 	gates?: CIGateConfig[];
+	/** Present only under version 2 when `hooks:` is declared. */
+	hooks?: CIHooksConfig;
 }
 
 export interface CIConfigValidationError {
@@ -526,6 +559,141 @@ export function validateGates(
 	return gates;
 }
 
+const HOOK_NAMES = new Set(["pre-commit", "pre-push"]);
+const PRE_COMMIT_FEATURES = new Set(["ci", "tdd", "secrets", "permissions"]);
+const PRE_PUSH_FEATURES = new Set(["ci", "tdd", "deps"]);
+
+/** Validate one boolean feature toggle, returning `dflt` when absent. */
+function validateBoolFeature(
+	raw: Record<string, unknown>,
+	key: string,
+	base: string,
+	errors: CIConfigValidationError[],
+	dflt: boolean,
+): boolean {
+	const value = raw[key];
+	if (value === undefined) return dflt;
+	if (typeof value !== "boolean") {
+		errors.push({
+			path: `${base}.${key}`,
+			message: `${key} must be a boolean`,
+		});
+		return dflt;
+	}
+	return value;
+}
+
+/** Validate the tri-state pre-push.tdd toggle (false | "strict" | "warn"). */
+function validatePushTdd(
+	value: unknown,
+	base: string,
+	errors: CIConfigValidationError[],
+): boolean | "strict" | "warn" {
+	if (value === undefined) return false;
+	if (typeof value === "boolean") return value;
+	if (value === "strict" || value === "warn") return value;
+	errors.push({
+		path: `${base}.tdd`,
+		message: `tdd must be a boolean or one of: strict, warn (got "${String(value)}")`,
+	});
+	return false;
+}
+
+/**
+ * Validate the `hooks:` block (version 2 only). Mirrors validateGate: every
+ * schema error names the offending field and the caller discards the whole
+ * config if `errors` is non-empty (fail closed). Always returns a fully
+ * defaulted config (ci on, every other feature off) so the dispatcher never
+ * branches on an omitted hook or feature.
+ */
+export function validateHooks(
+	raw: unknown,
+	errors: CIConfigValidationError[],
+): CIHooksConfig {
+	const preCommit: CIHookCommitConfig = {
+		ci: true,
+		tdd: false,
+		secrets: false,
+		permissions: false,
+	};
+	const prePush: CIHookPushConfig = { ci: true, tdd: false, deps: false };
+
+	if (!isRecord(raw)) {
+		errors.push({
+			path: "hooks",
+			message: "hooks must be a mapping of hook names to feature toggles",
+		});
+		return { preCommit, prePush };
+	}
+
+	for (const key of Object.keys(raw)) {
+		if (!HOOK_NAMES.has(key)) {
+			errors.push({ path: `hooks.${key}`, message: `unknown field "${key}"` });
+		}
+	}
+
+	if (raw["pre-commit"] !== undefined) {
+		const pc = raw["pre-commit"];
+		const base = "hooks.pre-commit";
+		if (!isRecord(pc)) {
+			errors.push({
+				path: base,
+				message: "pre-commit must be a mapping of feature toggles",
+			});
+		} else {
+			for (const key of Object.keys(pc)) {
+				if (!PRE_COMMIT_FEATURES.has(key)) {
+					errors.push({
+						path: `${base}.${key}`,
+						message: `unknown field "${key}"`,
+					});
+				}
+			}
+			preCommit.ci = validateBoolFeature(pc, "ci", base, errors, true);
+			preCommit.tdd = validateBoolFeature(pc, "tdd", base, errors, false);
+			preCommit.secrets = validateBoolFeature(
+				pc,
+				"secrets",
+				base,
+				errors,
+				false,
+			);
+			preCommit.permissions = validateBoolFeature(
+				pc,
+				"permissions",
+				base,
+				errors,
+				false,
+			);
+		}
+	}
+
+	if (raw["pre-push"] !== undefined) {
+		const pp = raw["pre-push"];
+		const base = "hooks.pre-push";
+		if (!isRecord(pp)) {
+			errors.push({
+				path: base,
+				message: "pre-push must be a mapping of feature toggles",
+			});
+		} else {
+			for (const key of Object.keys(pp)) {
+				if (!PRE_PUSH_FEATURES.has(key)) {
+					errors.push({
+						path: `${base}.${key}`,
+						message: `unknown field "${key}"`,
+					});
+				}
+			}
+			prePush.ci = validateBoolFeature(pp, "ci", base, errors, true);
+			prePush.tdd = validatePushTdd(pp.tdd, base, errors);
+			prePush.deps = validateBoolFeature(pp, "deps", base, errors, false);
+		}
+	}
+
+	return { preCommit, prePush };
+}
+
 // =============================================================================
 // Public API
 // =============================================================================
@@ -575,6 +743,7 @@ export function parseCIConfig(rawYaml: string, source?: string): CIConfig {
 
 	const isV2 = version === 2;
 	const hasGates = doc.gates !== undefined;
+	const hasHooks = doc.hooks !== undefined;
 
 	for (const key of Object.keys(doc)) {
 		if (TOP_LEVEL_FIELDS.has(key)) continue;
@@ -586,20 +755,29 @@ export function parseCIConfig(rawYaml: string, source?: string): CIConfig {
 			}
 			continue;
 		}
+		if (key === "hooks") {
+			// Same version-gating as `gates`: `hooks` is a v2-only key, so under any
+			// other version it reports a named error, not the generic unknown-field.
+			if (!isV2) {
+				errors.push({ path: "hooks", message: "hooks require version: 2" });
+			}
+			continue;
+		}
 		errors.push({ path: key, message: `unknown field "${key}"` });
 	}
 
 	if (isV2) {
-		// v2: runners OPTIONAL when gates present; NEITHER runners nor gates fails
-		// closed (nothing to run).
+		// v2: runners OPTIONAL when gates OR hooks are present; declaring NONE of the
+		// three fails closed (nothing to run).
 		if (
 			!hasGates &&
+			!hasHooks &&
 			(!Array.isArray(doc.runners) || doc.runners.length === 0)
 		) {
 			errors.push({
 				path: "runners",
 				message:
-					"a version 2 config must declare runners or gates (nothing to run otherwise)",
+					"a version 2 config must declare runners, gates or hooks (nothing to run otherwise)",
 			});
 		}
 	} else if (!Array.isArray(doc.runners) || doc.runners.length === 0) {
@@ -614,6 +792,11 @@ export function parseCIConfig(rawYaml: string, source?: string): CIConfig {
 	// above and must not surface a second, confusing wave of gate-field errors.
 	const gates: CIGateConfig[] =
 		isV2 && hasGates ? validateGates(doc.gates, errors) : [];
+
+	// Hooks are validated ONLY under v2 — a v1+hooks config is already rejected
+	// above and must not surface a second wave of hook-field errors.
+	const hooks: CIHooksConfig | undefined =
+		isV2 && hasHooks ? validateHooks(doc.hooks, errors) : undefined;
 
 	const runners: CIRunnerConfig[] = [];
 	if (Array.isArray(doc.runners)) {
@@ -643,6 +826,7 @@ export function parseCIConfig(rawYaml: string, source?: string): CIConfig {
 	// would have thrown). A v1 config carries NO gates key — byte-identical shape.
 	const config: CIConfig = { version: version ?? CI_CONFIG_VERSION, runners };
 	if (gates.length > 0) config.gates = gates;
+	if (hooks) config.hooks = hooks;
 	return config;
 }
 

@@ -92,6 +92,13 @@ runners:
 		expect(runner?.requires).toEqual([]);
 	});
 
+	it("stores a whitespace-padded runner image trimmed (IMG-1)", () => {
+		const config = parseCIConfig(
+			'version: 1\nrunners:\n  - name: x\n    stack: node\n    image: "  python:3.12-slim  "',
+		);
+		expect(config.runners[0]?.image).toBe("python:3.12-slim");
+	});
+
 	it("accepts a build context instead of an image", () => {
 		const config = parseCIConfig(`
 version: 1
@@ -201,6 +208,20 @@ describe("parseCIConfig — validation errors (fail closed)", () => {
 		expectError(
 			"version: 1\nrunners:\n  - name: x\n    stack: node\n    image: node:22\n    build-context: ./ci",
 			/image.*build|build.*image/i,
+		);
+	});
+
+	it("rejects a runner image starting with a dash (docker-flag injection, IMG-1)", () => {
+		expectError(
+			"version: 1\nrunners:\n  - name: x\n    stack: node\n    image: --privileged",
+			/docker flag|start with '-'/,
+		);
+	});
+
+	it("rejects a runner image that is leading-dash after trimming whitespace", () => {
+		expectError(
+			'version: 1\nrunners:\n  - name: x\n    stack: node\n    image: "  -v /:/host"',
+			/docker flag|start with '-'/,
 		);
 	});
 
@@ -542,6 +563,13 @@ describe("parseCIConfig — gates schema", () => {
 		validateGates([{ id: "g", run: "echo a", image: "  -v /:/host" }], errors);
 		const imgErr = errors.find((x) => x.path === "gates[0].image");
 		expect(imgErr?.message).toMatch(/docker flag|start with '-'/);
+	});
+
+	it("stores a whitespace-padded gate image trimmed (IMG-1)", () => {
+		const config = parseCIConfig(
+			V2("gates:\n  - id: audit\n    run: echo a\n    image: '  alpine:3  '"),
+		);
+		expect(config.gates?.[0]?.image).toBe("alpine:3");
 	});
 });
 

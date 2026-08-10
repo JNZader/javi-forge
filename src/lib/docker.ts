@@ -384,9 +384,13 @@ export async function runInContainer(
 		if (timeout !== undefined) {
 			killTimer = setTimeout(() => {
 				timedOut = true;
+				// Fire-and-forget teardown: swallow spawn errors (e.g. the docker
+				// binary vanished mid-run) so an unhandled 'error' event can't crash
+				// the process. The armed backstopTimer still guarantees the run
+				// promise resolves via the client SIGKILL. (jd A+B convergent finding)
 				spawn("docker", ["stop", "-t", String(DOCKER_STOP_GRACE_SEC), cid], {
 					stdio: "ignore",
-				});
+				}).on("error", () => {});
 				backstopTimer = setTimeout(
 					() => {
 						proc.kill("SIGKILL");

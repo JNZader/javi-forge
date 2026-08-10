@@ -325,8 +325,8 @@ describe("parseCIConfig — version negotiation {1,2}", () => {
 		}
 	});
 
-	it("rejects a version 2 config with NEITHER runners nor gates (fail closed)", () => {
-		expectError("version: 2", /runners or gates/i);
+	it("rejects a version 2 config with NEITHER runners, gates nor hooks (fail closed)", () => {
+		expectError("version: 2", /runners, gates or hooks/i);
 	});
 
 	it("rejects an unknown top-level key under version 2 (fail closed)", () => {
@@ -629,5 +629,122 @@ describe("loadCIConfig / findCIConfig", () => {
 
 	it("findCIConfig returns null when no config exists", async () => {
 		expect(await findCIConfig(tmpDir)).toBeNull();
+	});
+});
+
+// =============================================================================
+// parseCIConfig — hooks: schema (hook-consolidation S1a, design D2)
+// =============================================================================
+
+describe("parseCIConfig — hooks: schema", () => {
+	const expectError = (yaml: string, match: RegExp) => {
+		try {
+			parseCIConfig(yaml);
+			expect.unreachable("expected parseCIConfig to throw");
+		} catch (e) {
+			expect(e).toBeInstanceOf(CIConfigError);
+			expect((e as CIConfigError).message).toMatch(match);
+		}
+	};
+
+	it("accepts a v2 hooks-only config (no runners, no gates)", () => {
+		const config = parseCIConfig(
+			"version: 2\nhooks:\n  pre-commit:\n    ci: true\n    secrets: true\n  pre-push:\n    deps: true",
+		);
+		expect(config.version).toBe(2);
+		expect(config.hooks).toBeDefined();
+		expect(config.hooks?.preCommit.ci).toBe(true);
+		expect(config.hooks?.preCommit.secrets).toBe(true);
+		expect(config.hooks?.prePush.deps).toBe(true);
+	});
+
+	it("defaults ci to true and other features to false when omitted", () => {
+		const config = parseCIConfig(
+			"version: 2\nhooks:\n  pre-commit: {}\n  pre-push: {}",
+		);
+		expect(config.hooks?.preCommit.ci).toBe(true);
+		expect(config.hooks?.preCommit.tdd).toBe(false);
+		expect(config.hooks?.preCommit.secrets).toBe(false);
+		expect(config.hooks?.preCommit.permissions).toBe(false);
+		expect(config.hooks?.prePush.ci).toBe(true);
+		expect(config.hooks?.prePush.tdd).toBe(false);
+		expect(config.hooks?.prePush.deps).toBe(false);
+	});
+
+	it("synthesizes default hook sections when a hook key is omitted entirely", () => {
+		const config = parseCIConfig(
+			"version: 2\nhooks:\n  pre-commit:\n    ci: false",
+		);
+		expect(config.hooks?.preCommit.ci).toBe(false);
+		// pre-push omitted → defaults (ci on)
+		expect(config.hooks?.prePush.ci).toBe(true);
+	});
+
+	it('accepts pre-push.tdd as false | "strict" | "warn"', () => {
+		const config = parseCIConfig(
+			'version: 2\nhooks:\n  pre-push:\n    tdd: "warn"',
+		);
+		expect(config.hooks?.prePush.tdd).toBe("warn");
+		const strict = parseCIConfig(
+			'version: 2\nhooks:\n  pre-push:\n    tdd: "strict"',
+		);
+		expect(strict.hooks?.prePush.tdd).toBe("strict");
+	});
+
+	it("rejects hooks under version 1 with a named error (fail closed)", () => {
+		expectError(
+			"version: 1\nrunners:\n  - name: api\n    stack: go\nhooks:\n  pre-commit:\n    ci: true",
+			/hooks require version: 2/,
+		);
+	});
+
+	it("reports 'hooks require version: 2' as a NAMED error, not generic unknown-field", () => {
+		try {
+			parseCIConfig(
+				"version: 1\nrunners:\n  - name: api\n    stack: go\nhooks:\n  pre-commit:\n    ci: true",
+			);
+			expect.unreachable("expected parseCIConfig to throw");
+		} catch (e) {
+			const err = e as CIConfigError;
+			const hooksErr = err.errors.find((x) => x.path === "hooks");
+			expect(hooksErr?.message).toBe("hooks require version: 2");
+			expect(hooksErr?.message).not.toMatch(/unknown field/);
+		}
+	});
+
+	it("rejects an unknown hook name (fail closed)", () => {
+		expectError(
+			"version: 2\nhooks:\n  post-merge:\n    ci: true",
+			/unknown field "post-merge"/,
+		);
+	});
+
+	it("rejects an unknown feature key inside a hook (fail closed)", () => {
+		expectError(
+			"version: 2\nhooks:\n  pre-commit:\n    banana: true",
+			/unknown field "banana"/,
+		);
+	});
+
+	it("rejects a non-boolean pre-commit feature (fail closed)", () => {
+		expectError(
+			'version: 2\nhooks:\n  pre-commit:\n    secrets: "yes"',
+			/pre-commit\.secrets/,
+		);
+	});
+
+	it("rejects an invalid pre-push.tdd value (fail closed)", () => {
+		expectError(
+			'version: 2\nhooks:\n  pre-push:\n    tdd: "sometimes"',
+			/pre-push\.tdd/,
+		);
+	});
+
+	it("rejects a hooks section that is not a mapping (fail closed)", () => {
+		expectError("version: 2\nhooks: []", /hooks/);
+	});
+
+	it("rejects a hook entry that is not a mapping (fail closed)", () => {
+		expectError("version: 2\nhooks:\n  pre-commit: true", /pre-commit/);
 	});
 });

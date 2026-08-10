@@ -31,12 +31,12 @@ Chain strategy: stacked-to-main
 
 ## S1a — Dispatcher + config [hook-dispatch: Composition driven by hooks config; Fail-closed gate sections]
 
-- [ ] 1.1 RED `src/lib/ci-config.test.ts`: validateHooks per-field errors; garbage `hooks:` → fail-closed `CIConfigError`; `hooks` under v1 rejected ("require version: 2"); v2 hooks-only config valid ("runners, gates or hooks" relaxation, ci-config.ts:592-604)
-- [ ] 1.2 RED new `src/commands/hooks.test.ts`: fixed order pre-commit `secrets→permissions→tdd→ci`, pre-push `deps→tdd→ci`; fail-fast on first blocking failure; only `tdd:"warn"` advisory (prints, continues); no config → default `[ci]`; broken config → exit 1; `hooks run` rejects any name except `pre-commit`/`pre-push` (usage + exit 1)
-- [ ] 1.3 RED new `src/cli/dispatch/hooks.test.ts` + `src/cli/help.test.ts`: dispatch wiring, `HOOKS_HELP_TEXT`
-- [ ] 1.4 GREEN `src/lib/ci-config.ts`: `hooks` in TOP_LEVEL_FIELDS (:137) + version-gated branch (:579-590) + `validateHooks()` (validateGate style :358) + `CIHooksConfig` type + v2 relaxation
-- [ ] 1.5 GREEN `src/commands/hooks.ts`: `runHook` + `HookSection{id,blocking,run}`; ci section calls `runCI({projectDir, mode:"quick", noDocker:true, noSecurity:true, noGhagga:true})` **IN-PROCESS** (ci.ts:517) — throw = fail signal, NO subprocess
-- [ ] 1.6 GREEN `src/cli/dispatch/hooks.tsx` console-only handler (lazy import, ci.tsx:95-120 pattern) + `case "hooks"` in `src/index.tsx` + `HOOKS_HELP_TEXT` in `src/cli/help.ts`
+- [x] 1.1 RED `src/lib/ci-config.test.ts`: validateHooks per-field errors; garbage `hooks:` → fail-closed `CIConfigError`; `hooks` under v1 rejected ("require version: 2"); v2 hooks-only config valid ("runners, gates or hooks" relaxation, ci-config.ts:592-604)
+- [x] 1.2 RED new `src/commands/hooks.test.ts`: fixed order pre-commit `secrets→permissions→tdd→ci`, pre-push `deps→tdd→ci`; fail-fast on first blocking failure; only `tdd:"warn"` advisory (prints, continues); no config → default `[ci]`; broken config → exit 1; `hooks run` rejects any name except `pre-commit`/`pre-push` (usage + exit 1)
+- [x] 1.3 RED new `src/cli/dispatch/hooks.test.ts` + `src/cli/help.test.ts`: dispatch wiring, `HOOKS_HELP_TEXT`
+- [x] 1.4 GREEN `src/lib/ci-config.ts`: `hooks` version-gated branch (:579-590) + `validateHooks()` (validateGate style :358) + `CIHooksConfig` type + v2 relaxation
+- [x] 1.5 GREEN `src/commands/hooks.ts`: `runHook` + `HookSection{id,blocking,run}`; ci section calls `runCI({projectDir, mode:"quick", noDocker:true, noSecurity:true, noGhagga:true})` **IN-PROCESS** (ci.ts:517) — throw = fail signal, NO subprocess
+- [x] 1.6 GREEN `src/cli/dispatch/hooks.tsx` console-only handler (lazy import, ci.tsx:95-120 pattern) + `case "hooks"` in `src/index.tsx` + `HOOKS_HELP_TEXT` in `src/cli/help.ts`
 
 ## S1b — Shims + manifest [hook-dispatch: Static shims exec the dispatcher; Honest pre-push messaging | ci-hook-install: Shim release preserves silent auto-upgrade; Hooks verified by execution]
 

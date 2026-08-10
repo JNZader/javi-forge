@@ -375,10 +375,22 @@ therefore invisible until someone runs the command by hand.
   lockfile fails with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`. That install-phase abort
   is what killed the pre-push run — upstream of any gate code — and got mislabeled
   as an `EACCES`/`Lint failed` cascade.
-- **Fix (M8 pin-everything)**: pinned pnpm to major 10 in BOTH install sites in
-  lockstep (`RUN npm install -g pnpm@10`). `package.json` `packageManager` was
-  intentionally NOT added — it would alter the local corepack flow; the minimal
-  safe fix is the two Dockerfile install sites only.
+- **Fix (M8 pin-everything)**: pinned pnpm to major 10 (`RUN npm install -g pnpm@10`)
+  in ALL FOUR node-runner install sites in lockstep: `ci-local/docker/node.Dockerfile`,
+  the `getDockerfileContent("node")` template in `src/lib/docker.ts`, AND the two
+  standalone-runner heredocs `ci-local/ci-local.sh` + `ci-local/ci-local.ps1`. The
+  last two matter because `ensureImage()` writes `getDockerfileContent()` only when
+  the committed Dockerfile is ABSENT, otherwise reads the committed file — and running
+  `ci-local.sh full` / `.ps1 full` REGENERATES that committed file from its heredoc,
+  so an unpinned heredoc would silently clobber the pin and reintroduce the pnpm-11
+  drift (resilience review R4-001). `package.json` `packageManager` was intentionally
+  NOT added — it would alter the local corepack flow; the Dockerfile/heredoc pins are
+  the minimal safe fix.
+- **Follow-up (noted, NOT fixed here)**: the four sites diverge on the BASE image —
+  the two `ci-local/*` heredocs pin `node:22-slim@sha256:689c…` (digest) while the
+  committed `node.Dockerfile` + the `getDockerfileContent` template use floating
+  `node:22-slim`. For full M8 consistency, standardize all four on the same digest
+  (a separate decision, since it changes the built image + the docker.ts content test).
 - **The `_tmp_ EACCES` was NOT a code bug for the standard host**: `runInContainer`
   already runs `--user $(uid):$(gid)` (ENV-1), which grants owner+group write on the
   0775 host tree, so pnpm's atomic-temp write at the mount root succeeds for the

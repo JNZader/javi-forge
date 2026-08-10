@@ -1,3 +1,9 @@
+## [1.13.0](https://github.com/JNZader/javi-forge/compare/v1.12.0...v1.13.0) (2026-08-10)
+
+### Features
+
+* **ci:** gates-v2 host-native execution + warning status (slice 3/4) ([#10](https://github.com/JNZader/javi-forge/issues/10)) ([d459b55](https://github.com/JNZader/javi-forge/commit/d459b555e32e9676c39bb4b2b92a69905ddbe00c))
+
 ## [1.12.0](https://github.com/JNZader/javi-forge/compare/v1.11.0...v1.12.0) (2026-08-09)
 
 ### Features

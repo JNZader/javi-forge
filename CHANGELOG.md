@@ -1,3 +1,9 @@
+## [1.19.0](https://github.com/JNZader/javi-forge/compare/v1.18.0...v1.19.0) (2026-08-10)
+
+### Features
+
+* **hooks:** rich commit-msg guard — attribution + conventional-commit (hooks-ricos slice A) ([#19](https://github.com/JNZader/javi-forge/issues/19)) ([0751e48](https://github.com/JNZader/javi-forge/commit/0751e483e8bd18c781942e9c8ad81ec91e1b9876))
+
 ## [1.18.0](https://github.com/JNZader/javi-forge/compare/v1.17.0...v1.18.0) (2026-08-10)
 
 ### Features

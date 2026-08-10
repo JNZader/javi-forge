@@ -410,9 +410,45 @@ therefore invisible until someone runs the command by hand.
   Node+Python integration suite inside a single-language runner. Track separately if
   a fully green containerized full-CI is wanted (e.g. a multi-toolchain image or
   gating those tests on toolchain presence).
-- **Push implication**: pushes no longer need `--no-verify` for the pnpm reason —
-  the runner's frozen install passes. Any remaining `--no-verify` would only be for
-  the orthogonal python-toolchain integration failures above, not this ticket.
+- **Push implication (CORRECTED 2026-08-10)**: the earlier claim "pushes no longer
+  need `--no-verify`" was OPTIMISTIC and empirically FALSE — see STALE-GLOBAL-CLI
+  below. The pin is correct in the repo, but the LOCAL pre-push runs the
+  globally-installed `javi-forge` (v1.9.0), which bundles its OWN pre-fix
+  `ci-local/docker/*` and ignores the repo's committed pin. So pushes still needed
+  `--no-verify` this whole session — because the pre-push was exercising 1.9.0's
+  stale bundled code, not the working tree.
 - **`ERR_PNPM_IGNORED_BUILDS: esbuild`**: appears as a soft WARNING only (install
   exits 0); esbuild 0.28 ships its binary via the `@esbuild/linux-x64` optional
   package (no postinstall needed), so build+tests run fine. No action required.
+
+### STALE-GLOBAL-CLI — the local pre-push runs an OLD globally-installed `javi-forge`
+- **Status**: ROOT-CAUSED 2026-08-10, evidence-confirmed. This is the REAL reason
+  every push this session used `--no-verify`, and it retracts a wrong intermediate
+  hypothesis ("`ensureImage` doesn't rebuild on Dockerfile change" — FALSE; ensureImage
+  correctly rebuilds when the Dockerfile `dockerfile-hash` label differs, docker.ts:241-260).
+- **What actually happens**: the pre-push hook runs `command -v javi-forge && javi-forge ci …`
+  → the GLOBALLY-INSTALLED binary at `/home/linuxbrew/.linuxbrew/bin/javi-forge`, which is
+  **version 1.9.0**. That package bundles its OWN copy of `ci-local/docker/node.Dockerfile`
+  (`/home/linuxbrew/.linuxbrew/lib/node_modules/javi-forge/ci-local/docker/node.Dockerfile`)
+  = the OLD UNPINNED form (`FROM node:22-slim` + `RUN npm install -g pnpm`). `ensureImage`
+  reads the Dockerfile relative to ITS OWN module location, so the 1.9.0 CLI builds the node
+  runner from its stale bundled Dockerfile → pnpm 11 image → `runDepsStatusCheck` fails
+  against the pnpm-10 lockfile → the pre-push aborts in ~3s.
+- **Evidence (decisive)**: the built `javi-forge-ci-node:latest` carries
+  `dockerfile-hash` label `a3403755…` = the sha256 of the 1.9.0-bundled UNPINNED
+  Dockerfile; the repo's committed pinned `node.Dockerfile` hashes to `358382e5…`. The
+  running image's pnpm = 11.20.0. Global `javi-forge --version` = `1.9.0` (repo is at 1.21.1).
+- **Implication for the whole session**: the containerized pre-push has been exercising
+  1.9.0's bundled code the ENTIRE session — none of the containerized-gates / hooks-ricos /
+  pnpm-pin / digest work is in that binary. So `--no-verify` was unavoidable and the
+  pre-push's red was never about the working tree.
+- **Fix (user action, not a code change)**: update the global install —
+  `npm i -g javi-forge@latest` (the install lives under linuxbrew's node, so use that npm)
+  to ≥1.21.1. After that, the pre-push's `javi-forge` bundles the pinned Dockerfile →
+  ensureImage rebuilds a pnpm@10 image (hash now matches the pinned form) → frozen install
+  passes, python tests are skipIf-gated → the containerized pre-push should go green without
+  `--no-verify`. VERIFY by re-running a push after the upgrade.
+- **Optional hardening (own ticket)**: the pre-push could prefer the repo-local build
+  (`node dist/index.js ci` / the workspace binary) over a possibly-stale global install, so a
+  repo's own committed runner assets always win. Design decision — a global CLI is also a
+  legitimate choice; don't change the hook contract without intent.

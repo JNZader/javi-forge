@@ -111,7 +111,10 @@ export function getDockerfileContent(stack: Stack): string {
 			return [
 				"FROM node:22-slim",
 				"RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*",
-				"RUN npm install -g pnpm",
+				// Pin pnpm to major 10 to match ci.yml (pnpm/action-setup version:
+				// 10) and the lockfileVersion 9.0 lockfile. Unpinned drifts to
+				// pnpm 11, breaking the frozen install with LOCKFILE_CONFIG_MISMATCH.
+				"RUN npm install -g pnpm@10",
 				"RUN useradd -m -s /bin/bash runner",
 				"USER runner",
 				"WORKDIR /home/runner/work",

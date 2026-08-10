@@ -1,3 +1,9 @@
+## [1.16.0](https://github.com/JNZader/javi-forge/compare/v1.15.1...v1.16.0) (2026-08-10)
+
+### Features
+
+* **ci:** optional gate.image schema + flag-injection guard (containerized-gates slice 1/3) ([#15](https://github.com/JNZader/javi-forge/issues/15)) ([986209f](https://github.com/JNZader/javi-forge/commit/986209f912995917cbf5708375f3fabaa8373175))
+
 ## [1.15.1](https://github.com/JNZader/javi-forge/compare/v1.15.0...v1.15.1) (2026-08-10)
 
 ### Bug Fixes

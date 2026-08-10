@@ -1,3 +1,9 @@
+## [1.21.0](https://github.com/JNZader/javi-forge/compare/v1.20.0...v1.21.0) (2026-08-10)
+
+### Features
+
+* **ci:** absolute changed-files gate env variant (GATE-4); GATE-5 NUL documented impossible ([#22](https://github.com/JNZader/javi-forge/issues/22)) ([cf10eda](https://github.com/JNZader/javi-forge/commit/cf10edaf8205deabc166e9916bdc9fc11c30c19b))
+
 ## [1.20.0](https://github.com/JNZader/javi-forge/compare/v1.19.0...v1.20.0) (2026-08-10)
 
 ### Features

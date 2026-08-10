@@ -2,13 +2,16 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
 import { HOOK_ASSETS_DIR } from "../constants.js";
 import {
 	CI_STACKS,
+	type CIGateConfig,
 	type CIRunnerConfig,
 	findCIConfig,
+	GATE_MODE,
 	loadCIConfig,
 } from "../lib/ci-config.js";
 import { refreshContextDir } from "../lib/context.js";
@@ -44,7 +47,14 @@ export interface CIOptions {
 	stack?: string;
 }
 
-export type CIStepStatus = "pending" | "running" | "done" | "error" | "skipped";
+export type CIStepStatus =
+	| "pending"
+	| "running"
+	| "done"
+	| "error"
+	| "skipped"
+	// A gate with `mode: informative` that failed — surfaced but never fails the build.
+	| "warning";
 
 export interface CIStep {
 	id: string;
@@ -240,6 +250,8 @@ export type RunnerSource = "auto" | "config" | "stack-override";
 export interface ResolvedRunners {
 	readonly source: RunnerSource;
 	readonly runners: readonly ResolvedRunner[];
+	/** Declared quality gates (version 2 only); empty for auto/stack-override. */
+	readonly gates: readonly CIGateConfig[];
 }
 
 export interface ResolveRunnerOptions {
@@ -278,8 +290,13 @@ function freezeRunner(runner: {
 function freezeRunners(
 	source: RunnerSource,
 	runners: ResolvedRunner[],
+	gates: readonly CIGateConfig[] = [],
 ): ResolvedRunners {
-	return Object.freeze({ source, runners: Object.freeze(runners) });
+	return Object.freeze({
+		source,
+		runners: Object.freeze(runners),
+		gates: Object.freeze([...gates]),
+	});
 }
 
 /** Build-tool heuristic for a known stack in a given directory. */
@@ -395,7 +412,7 @@ export async function resolveCIRunners(
 		for (const runnerConfig of ciConfig.runners) {
 			runners.push(await resolveConfiguredRunner(projectDir, runnerConfig));
 		}
-		return freezeRunners("config", runners);
+		return freezeRunners("config", runners, ciConfig.gates ?? []);
 	}
 
 	// Zero-config default: single auto-detected runner (unchanged behavior).
@@ -447,11 +464,12 @@ function report(
 /**
  * Detect-step label: legacy format for auto, explicit otherwise.
  *
- * INVARIANT (holds for every `ResolvedRunners` value): `runners` is never
- * empty. The config path rejects an empty list before resolving
- * (`src/lib/ci-config.ts` — "runners is required and must be a non-empty
- * list"), and the `auto` and `stack-override` paths each yield exactly one
- * runner. `runners[0]` therefore needs no fallback.
+ * RUNNER COUNT: the `auto` and `stack-override` paths each yield exactly one
+ * runner, so their branches deref `runners[0]` safely. A gates-only v2 config
+ * (version 2, `runners` omitted) reaches here with ZERO runners on the `config`
+ * source; that branch never dereferences `runners[0]` — it only reads
+ * `runners.length` and maps over the (possibly empty) list — so an empty list
+ * is handled without a fallback.
  */
 function describeRunners(resolved: ResolvedRunners): string {
 	const first = resolved.runners[0];
@@ -495,9 +513,27 @@ export async function runCI(
 		throw e;
 	}
 
+	// ── Gates-only v2 repo (zero runners) ──────────────────────────────────────
+	// A `version: 2` config MAY declare `gates:` with NO `runners`. Such a repo
+	// has no stack to detect, no image to build, and no runner loop, so the
+	// runner prologue below (which dereferences `resolved.runners[0]`) must be
+	// skipped entirely. `detect`/`shell` have nothing to target → named error;
+	// `full`/`quick` jump straight to the gate phase and return.
+	if (resolved.runners.length === 0) {
+		if (mode === "detect" || mode === "shell") {
+			const detail = "no runners resolved — nothing to detect or shell into";
+			report(onStep, mode, `${mode} mode`, "error", detail);
+			throw new Error(
+				`no runners resolved — ${mode} mode requires at least one runner`,
+			);
+		}
+		await runGates(resolved.gates, projectDir, onStep);
+		return;
+	}
+
 	// Legacy single-runner view for the zero-config auto path. Keeping this
 	// shape guarantees single-stack repositories behave exactly as before.
-	// `runners[0]` is always present — see the invariant on `describeRunners`.
+	// `runners[0]` is always present here — the zero-runner case returned above.
 	// The command lists CAN be empty, so those keep their `?? null`.
 	const primary = resolved.runners[0];
 	const stackInfo: CIStackInfo = {
@@ -708,6 +744,15 @@ export async function runCI(
 				"ghagga not installed",
 			);
 		}
+	}
+
+	// ── Gate phase (full || quick — skipped in detect/shell) ────────────────────
+	// Gates run on every REAL CI run, including `--quick` (the pre-push path where
+	// a blocking gate matters most). `detect`/`shell` return earlier, so mode is
+	// already `full` or `quick` here; the guard makes the contract explicit.
+	// `runGates` no-ops on an empty gate list (a v1 repo carries none).
+	if (mode === "full" || mode === "quick") {
+		await runGates(resolved.gates, projectDir, onStep);
 	}
 }
 
@@ -1035,6 +1080,137 @@ async function runGhagga(projectDir: string): Promise<void> {
 		);
 		proc.on("error", reject);
 	});
+}
+
+// =============================================================================
+// Gate phase (version 2) — host-native, repo-level
+// =============================================================================
+
+/** Drop `undefined` entries so `process.env` fits the spawn env-map contract. */
+function filterDefinedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const [key, value] of Object.entries(env)) {
+		if (value !== undefined) out[key] = value;
+	}
+	return out;
+}
+
+/**
+ * Execute a single gate command HOST-NATIVE via `bash -c`, at the repo root,
+ * with the provided env MAP. Modeled on `runSemgrep`/`runGhagga` (a spawned
+ * process, NOT `runStep`'s Docker branch — gates have no runner or image).
+ *
+ * RESOLVES the child exit code (it does NOT throw on a non-zero exit) so the
+ * collector and the JSON `exitCode` field are populatable. A spawn error (e.g.
+ * `bash` missing) rejects, and the collector treats that as a failure.
+ *
+ * SIGNAL DEATH IS A FAILURE, NEVER A FALSE-GREEN: when the child is terminated
+ * by a signal (OOM kill, SIGSEGV/SIGABRT, external SIGTERM) `close` reports a
+ * NULL code. Mapping that to 0 would report a signal-killed blocking gate as
+ * `done` and let the build PASS — the exact false-green this phase exists to
+ * eliminate. A null code therefore resolves to a NON-ZERO code using the shell
+ * convention `128 + <signal number>` when the signal is resolvable, else 1.
+ *
+ * Env values arrive as discrete map entries — never string-spliced into the
+ * `bash -c` command — so metacharacters in a value cannot break out of the shell.
+ */
+export async function runGateNative(
+	cmd: string,
+	cwd: string,
+	env: Record<string, string>,
+): Promise<number> {
+	return await new Promise<number>((resolve, reject) => {
+		const proc = spawn("bash", ["-c", cmd], { cwd, env, stdio: "inherit" });
+		proc.on("close", (code, signal) => {
+			if (code !== null) {
+				resolve(code);
+				return;
+			}
+			// Signal death: map to a non-zero code so the collector records a
+			// blocking failure. `128 + signum` mirrors the shell; fall back to 1
+			// when the signal name is not resolvable.
+			const signum = signal ? os.constants.signals[signal] : undefined;
+			resolve(signum !== undefined ? 128 + signum : 1);
+		});
+		proc.on("error", reject);
+	});
+}
+
+/**
+ * Repo-level gate phase. Each gate runs host-native via `runGateNative` at the
+ * repo root. Outcome semantics:
+ *   - exit 0                         → `done`
+ *   - non-zero/spawn error, blocking → `error`, gate id recorded (NOT re-thrown)
+ *   - non-zero/spawn error, informative → `warning`, build never fails
+ *
+ * A blocking failure does NOT abort the phase — every gate reports its own
+ * status first. After the loop, if ANY blocking gate failed, ONE aggregate
+ * error is thrown so a single blocking failure never hides a later gate's
+ * result (the top-level catch yields exit 1). Informative failures never
+ * contribute to the accumulator, so the exit code stays 0.
+ *
+ * Multi-command gates run in order and STOP at the first non-zero exit
+ * (fail-fast, matching the runner precedent); that first code is reported.
+ *
+ * Slice 3 wires `mode` and `scope: all` gates with the engine-injected env
+ * (`CI=true`). `scope: changed` wiring, `baseline`, and gate `env` injection
+ * land in slice 4.
+ */
+async function runGates(
+	gates: readonly CIGateConfig[],
+	projectDir: string,
+	onStep: CIStepCallback,
+): Promise<void> {
+	if (gates.length === 0) return;
+
+	const blockingFailures: string[] = [];
+	// Engine-injected keys only in slice 3; gate `env` + JAVI_FORGE_CHANGED_FILES
+	// are added in slice 4.
+	const baseEnv: Record<string, string> = {
+		...filterDefinedEnv(process.env),
+		CI: "true",
+	};
+
+	for (const gate of gates) {
+		const stepId = `gate:${gate.id}`;
+		const label = `Gate: ${gate.id}`;
+		report(onStep, stepId, label, "running");
+
+		let exitCode = 0;
+		let spawnError: unknown;
+		try {
+			for (const cmd of gate.run) {
+				exitCode = await runGateNative(cmd, projectDir, baseEnv);
+				if (exitCode !== 0) break; // fail-fast: skip the remaining commands
+			}
+		} catch (e) {
+			spawnError = e;
+		}
+
+		if (spawnError === undefined && exitCode === 0) {
+			report(onStep, stepId, `${label} passed`, "done");
+			continue;
+		}
+
+		const detail =
+			spawnError !== undefined ? String(spawnError) : `exit ${exitCode}`;
+		if (gate.mode === GATE_MODE.BLOCKING) {
+			blockingFailures.push(gate.id);
+			report(onStep, stepId, `${label} failed`, "error", detail);
+		} else {
+			report(
+				onStep,
+				stepId,
+				`${label} failed (informative)`,
+				"warning",
+				detail,
+			);
+		}
+	}
+
+	if (blockingFailures.length > 0) {
+		throw new Error(`blocking gate(s) failed: ${blockingFailures.join(", ")}`);
+	}
 }
 
 // =============================================================================

@@ -174,7 +174,6 @@ RUN apt-get update && apt-get install -y git curl unzip && rm -rf /var/lib/apt/l
 RUN useradd -m -s /bin/bash runner
 USER runner
 WORKDIR /home/runner/work
-ENV GRADLE_USER_HOME=/home/runner/.gradle
 ENTRYPOINT ["/bin/bash", "-c"]
 DOCKERFILE
             ;;

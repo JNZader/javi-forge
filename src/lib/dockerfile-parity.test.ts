@@ -78,23 +78,22 @@ function extractPs1HereStrings(ps1: string): Map<string, string> {
  * template). `committed` is the bundled filename ensureImage resolves
  * (`${stack}.Dockerfile`).
  */
-const CASES: ReadonlyArray<{ stack: Stack; key: string; committed: string }> = [
-	{ stack: "node", key: "node", committed: "node.Dockerfile" },
-	{ stack: "python", key: "python", committed: "python.Dockerfile" },
-	{ stack: "go", key: "go", committed: "go.Dockerfile" },
-	{ stack: "rust", key: "rust", committed: "rust.Dockerfile" },
-	{
-		stack: "java-gradle",
-		key: "java-gradle",
-		committed: "java-gradle.Dockerfile",
-	},
-	{
-		stack: "java-maven",
-		key: "java-maven",
-		committed: "java-maven.Dockerfile",
-	},
-	{ stack: "elixir", key: "default", committed: "elixir.Dockerfile" },
-];
+const CASE_MAP = {
+	node: { key: "node", committed: "node.Dockerfile" },
+	python: { key: "python", committed: "python.Dockerfile" },
+	go: { key: "go", committed: "go.Dockerfile" },
+	rust: { key: "rust", committed: "rust.Dockerfile" },
+	"java-gradle": { key: "java-gradle", committed: "java-gradle.Dockerfile" },
+	"java-maven": { key: "java-maven", committed: "java-maven.Dockerfile" },
+	elixir: { key: "default", committed: "elixir.Dockerfile" },
+	// `satisfies Record<Stack, …>` makes this compile-time exhaustive (audit
+	// R4-002): adding a Stack value without a parity case is a tsc error, not
+	// a green suite that later hits ensureImage's fail-closed throw at runtime.
+} satisfies Record<Stack, { key: string; committed: string }>;
+
+const CASES: ReadonlyArray<{ stack: Stack; key: string; committed: string }> = (
+	Object.keys(CASE_MAP) as Stack[]
+).map((stack) => ({ stack, ...CASE_MAP[stack] }));
 
 describe("Dockerfile anti-drift parity (R2-001)", () => {
 	let shBodies: Map<string, string>;

@@ -108,11 +108,15 @@ export function getDockerfileContent(stack: Stack): string {
 				"RUN apt-get update && apt-get install -y git curl unzip && rm -rf /var/lib/apt/lists/*",
 				"RUN useradd -m -s /bin/bash runner",
 				"USER runner",
+				// No GRADLE_USER_HOME override (audit R4-001): on noble the
+				// `ubuntu` user owns uid 1000, so `useradd -m runner` lands at
+				// uid 1001 and /home/runner is 0750 runner:runner. Pinning
+				// GRADLE_USER_HOME=/home/runner/.gradle hard-fails the TS
+				// runtime path, which runs as the HOST uid (ENV-1, typically
+				// 1000) and cannot create that dir. Without the env both paths
+				// work off $HOME: shell path (--user runner) → /home/runner;
+				// host-uid path → getpwuid(1000) → /home/ubuntu.
 				"WORKDIR /home/runner/work",
-				// Explicit Gradle cache dir: same value $HOME/.gradle resolves to
-				// for the baked `runner` user, but stable even when the container
-				// runs as the host uid (ENV-1), where HOME falls back to "/".
-				"ENV GRADLE_USER_HOME=/home/runner/.gradle",
 				'ENTRYPOINT ["/bin/bash", "-c"]',
 			].join("\n");
 

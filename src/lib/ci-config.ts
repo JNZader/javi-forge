@@ -78,6 +78,12 @@ export interface CIGateConfig {
 	baseline?: string;
 	/** Optional env injected via the child-process env map (slice 4). */
 	env?: Record<string, string>;
+	/**
+	 * Optional per-command wall-clock timeout in seconds (GATE-2). When set, a
+	 * command exceeding it is killed and the gate FAILS (non-zero). Omitted →
+	 * no timeout (unchanged behavior).
+	 */
+	timeout?: number;
 }
 
 export interface CIConfig {
@@ -307,7 +313,15 @@ function validateRunner(
 	};
 }
 
-const GATE_FIELDS = new Set(["id", "run", "mode", "scope", "baseline", "env"]);
+const GATE_FIELDS = new Set([
+	"id",
+	"run",
+	"mode",
+	"scope",
+	"baseline",
+	"env",
+	"timeout",
+]);
 
 function validateGate(
 	raw: unknown,
@@ -413,6 +427,22 @@ function validateGate(
 		}
 	}
 
+	let timeout: number | undefined;
+	if (raw.timeout !== undefined) {
+		if (
+			typeof raw.timeout !== "number" ||
+			!Number.isFinite(raw.timeout) ||
+			raw.timeout <= 0
+		) {
+			errors.push({
+				path: `${base}.timeout`,
+				message: `timeout must be a positive number of seconds (got "${String(raw.timeout)}")`,
+			});
+		} else {
+			timeout = raw.timeout;
+		}
+	}
+
 	return {
 		id: typeof id === "string" ? id.trim() : "",
 		run,
@@ -420,6 +450,7 @@ function validateGate(
 		scope,
 		baseline,
 		env,
+		timeout,
 	};
 }
 

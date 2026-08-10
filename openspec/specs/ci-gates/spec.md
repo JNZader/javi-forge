@@ -50,9 +50,11 @@ unknown-key error: the allowed-key set MUST be computed AFTER reading `version`,
 
 Each gate MUST declare a tag-safe, unique `id` and a `run` (`string` or `string[]`). `mode` MUST
 be one of `blocking | informative` (default `blocking`). `scope` MUST be one of `all | changed`
-(default `all`). `baseline` (path) and `env` (record of string→string) are OPTIONAL. A duplicate
-`id` MUST fail with a named error. An invalid `mode` or `scope` value MUST fail with a named error
-naming the offending field.
+(default `all`). `baseline` (path), `env` (record of string→string) and `timeout` (a positive number
+of seconds) are OPTIONAL. A duplicate `id` MUST fail with a named error. An invalid `mode` or `scope`
+value MUST fail with a named error naming the offending field. A `timeout` that is not a positive
+finite number (e.g. `0`, a negative, or a non-number) MUST fail with a named error naming the
+`timeout` field. A gate WITHOUT `timeout` behaves exactly as before (no timeout, runs to completion).
 
 #### Scenario: valid gate with defaults
 
@@ -78,6 +80,12 @@ naming the offending field.
 - WHEN it is validated
 - THEN validation fails with a named error
 
+#### Scenario: non-positive or non-numeric timeout rejected
+
+- GIVEN a gate with `timeout: 0`, `timeout: -5`, or a non-numeric `timeout`
+- WHEN it is validated
+- THEN validation fails with a named error identifying the `timeout` field
+
 ### Requirement: Gate execution phase and outcome semantics
 
 Gates MUST run as a repo-level phase AFTER all runners, each executed HOST-NATIVE (a spawned
@@ -91,6 +99,16 @@ non-zero MUST report status `warning`, MUST leave the process exit code at 0, an
 remaining gates or runners. Informative gates MUST NEVER fail the build. For a multi-command gate,
 commands MUST run in order and STOP at the first non-zero exit (fail-fast, matching the runner
 precedent); that first non-zero code is the gate's reported `exitCode`.
+
+When a gate declares an optional `timeout` (seconds), the timeout applies PER COMMAND (wall-clock,
+matching the fail-fast model). A command still running after its timeout MUST be killed (SIGTERM,
+escalated to SIGKILL after a short grace if the child ignores SIGTERM). Once the timeout has fired,
+the executor MUST resolve a NON-ZERO exit code REGARDLESS of what the child reports — INCLUDING a
+child that traps SIGTERM and exits 0 gracefully before the SIGKILL escalation. The invariant is
+`timed-out ⇒ non-zero, ALWAYS`; the executor resolves the `timeout(1)` sentinel `124`. A timed-out
+gate therefore MUST NOT be reported as passing. A timed-out BLOCKING gate MUST fail the build; a
+timed-out INFORMATIVE gate MUST degrade to a `warning` and MUST NOT fail the build. A gate without
+`timeout` MUST run to completion with no timer (backward-compatible).
 
 The gate phase MUST run on every real CI run — both full mode and `--quick` mode — and MUST be
 skipped ONLY in `detect` and `shell` modes. A blocking gate MUST NOT be silently skipped under
@@ -119,6 +137,30 @@ skipped ONLY in `detect` and `shell` modes. A blocking gate MUST NOT be silently
 - GIVEN an `informative` gate whose command exits 1
 - WHEN the gate phase runs
 - THEN the gate status is `warning`, the process exit code stays 0, and subsequent gates still run
+
+#### Scenario: blocking gate timeout fails the build (no false-green)
+
+- GIVEN a `blocking` gate with `timeout: 1` whose command hangs (e.g. `sleep 10`)
+- WHEN the gate phase runs
+- THEN the command is killed on expiry, the gate resolves NON-ZERO (never 0), and the build FAILS
+
+#### Scenario: timed-out gate that traps SIGTERM and exits 0 still fails (no false-green)
+
+- GIVEN a `blocking` gate with `timeout: 1` whose command traps SIGTERM and exits 0 before SIGKILL
+- WHEN the gate phase runs
+- THEN the timeout override resolves NON-ZERO (never the child's 0) and the build FAILS
+
+#### Scenario: informative gate timeout degrades to a warning
+
+- GIVEN an `informative` gate with `timeout: 1` whose command hangs
+- WHEN the gate phase runs
+- THEN the gate status is `warning`, the process exit code stays 0, and subsequent gates still run
+
+#### Scenario: gate under its timeout completes normally
+
+- GIVEN a gate with a `timeout` whose command finishes well within it
+- WHEN the gate phase runs
+- THEN the gate reports its normal result and no timer leaks (the run does not hang)
 
 #### Scenario: gate env reaches the gate command
 

@@ -222,6 +222,30 @@ async function buildCICommands(
 	}
 }
 
+/**
+ * Prefer the REPO-LOCAL `ci-local/docker/` over the CLI's bundled Dockerfiles.
+ *
+ * A globally-installed javi-forge bundles its own `ci-local/docker/*.Dockerfile`,
+ * which can lag the fixes committed in the repo being CI'd (the stale-global
+ * pnpm-11 image incident). When the project ships its OWN Dockerfile for the
+ * detected stack, that committed file must win.
+ *
+ * Resolution is PER-STACK on purpose: the repo dir is returned ONLY when
+ * `ci-local/docker/${stack}.Dockerfile` actually exists. If the repo has the
+ * directory but not the specific stack Dockerfile, this returns `undefined` so
+ * `ensureImage` falls back to the bundled dir — which avoids `ensureImage`'s
+ * first-run write-through (docker.ts) generating a Dockerfile INTO the user's
+ * repo. `undefined` means "use the bundled default", exactly as before.
+ */
+async function resolveRepoDockerfilesDir(
+	projectDir: string,
+	stack: Stack,
+): Promise<string | undefined> {
+	const repoDockerDir = path.join(projectDir, "ci-local", "docker");
+	const stackDockerfile = path.join(repoDockerDir, `${stack}.Dockerfile`);
+	return (await fs.pathExists(stackDockerfile)) ? repoDockerDir : undefined;
+}
+
 // =============================================================================
 // Runner resolution (single resolution point — Docker never re-detects)
 // =============================================================================
@@ -596,9 +620,14 @@ export async function runCI(
 					imageTag: `javi-forge-ci-${primary.name}`,
 				});
 			} else {
+				const dockerfilesDir = await resolveRepoDockerfilesDir(
+					projectDir,
+					stackInfo.stackType,
+				);
 				shellImage = await ensureImage({
 					stack: stackInfo.stackType,
 					javaVersion: stackInfo.javaVersion,
+					...(dockerfilesDir ? { dockerfilesDir } : {}),
 				});
 			}
 			report(onStep, "docker-image", "Docker image ready", "done");
@@ -651,9 +680,14 @@ export async function runCI(
 				"running",
 			);
 			try {
+				const dockerfilesDir = await resolveRepoDockerfilesDir(
+					projectDir,
+					stackInfo.stackType,
+				);
 				autoImage = await ensureImage({
 					stack: stackInfo.stackType,
 					javaVersion: stackInfo.javaVersion,
+					...(dockerfilesDir ? { dockerfilesDir } : {}),
 				});
 				report(onStep, stepImage, "Docker image ready", "done");
 			} catch (e) {
@@ -901,9 +935,14 @@ async function runRunner(
 						`Building image for ${runner.name} (${runner.stack})`,
 						"running",
 					);
+					const dockerfilesDir = await resolveRepoDockerfilesDir(
+						projectDir,
+						runner.stack,
+					);
 					imageName = await ensureImage({
 						stack: runner.stack,
 						javaVersion: runner.javaVersion,
+						...(dockerfilesDir ? { dockerfilesDir } : {}),
 					});
 				}
 				if (!runner.image) {

@@ -3219,3 +3219,114 @@ describe("shell mode honors runner image/build context (B2)", () => {
 		expect(openShellCalls()).toEqual([getImageName("node")]);
 	});
 });
+
+// =============================================================================
+// Prefers the REPO-LOCAL ci-local/docker over the CLI's bundled Dockerfiles
+// =============================================================================
+//
+// A globally-installed javi-forge bundles its own ci-local/docker/*.Dockerfile,
+// which can lag the fixes committed in the repo being CI'd (the stale-global
+// pnpm-11 image incident). When the project ships its OWN Dockerfile for the
+// detected stack, that committed file must win — so `ensureImage` is handed the
+// repo-local `dockerfilesDir`. Resolution is PER-STACK: the repo dir is chosen
+// only when `ci-local/docker/${stack}.Dockerfile` exists, so a repo that has the
+// directory but not the specific stack Dockerfile falls back to the bundled copy
+// and NOTHING is written into the user's repo.
+
+describe("prefers repo-local ci-local/docker over bundled Dockerfiles", () => {
+	let tmpDir: string;
+
+	const firstEnsureImageArg = () =>
+		vi.mocked(ensureImage).mock.calls[0]?.[0] as unknown as
+			| Record<string, unknown>
+			| undefined;
+
+	const runAuto = async (projectDir: string): Promise<void> => {
+		await runCI(
+			{
+				projectDir,
+				mode: "quick",
+				noDocker: false,
+				noGhagga: true,
+				noSecurity: true,
+			},
+			() => {},
+		);
+	};
+
+	beforeEach(async () => {
+		vi.mocked(isDockerAvailable).mockReset();
+		vi.mocked(ensureImage).mockReset();
+		vi.mocked(runInContainer).mockReset();
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-dfdir-"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	it("(a) hands ensureImage the repo dir when ci-local/docker/<stack>.Dockerfile exists", async () => {
+		// Node auto repo that ships its OWN committed node.Dockerfile.
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			scripts: { lint: "eslint .", build: "tsc", test: "vitest run" },
+		});
+		await fs.writeFile(path.join(tmpDir, "pnpm-lock.yaml"), "");
+		await fs.outputFile(
+			path.join(tmpDir, "ci-local", "docker", "node.Dockerfile"),
+			"FROM node:22-slim\nRUN npm install -g pnpm@10\n",
+		);
+
+		await runAuto(tmpDir);
+
+		// The committed Dockerfile wins: ensureImage is pointed at the repo dir.
+		expect(ensureImage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				stack: "node",
+				dockerfilesDir: path.join(tmpDir, "ci-local", "docker"),
+			}),
+		);
+	});
+
+	it("(b) omits dockerfilesDir when the repo has no ci-local/docker (bundled default)", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			scripts: { lint: "eslint .", build: "tsc", test: "vitest run" },
+		});
+		await fs.writeFile(path.join(tmpDir, "pnpm-lock.yaml"), "");
+
+		await runAuto(tmpDir);
+
+		// No repo-local dir → no dockerfilesDir key at all → bundled default,
+		// behavior unchanged.
+		expect(ensureImage).toHaveBeenCalled();
+		expect(firstEnsureImageArg()).not.toHaveProperty("dockerfilesDir");
+	});
+
+	it("(c) falls back to bundled (and writes nothing into the repo) when the stack Dockerfile is missing", async () => {
+		// Python auto repo that has a ci-local/docker/ dir but NO python.Dockerfile
+		// (say, only a node.Dockerfile committed for a sibling stack).
+		await fs.writeFile(
+			path.join(tmpDir, "pyproject.toml"),
+			"[project]\nname = 'x'\n",
+		);
+		await fs.outputFile(
+			path.join(tmpDir, "ci-local", "docker", "node.Dockerfile"),
+			"FROM node:22-slim\n",
+		);
+
+		await runAuto(tmpDir);
+
+		// Per-stack resolution: python.Dockerfile is absent, so ensureImage is NOT
+		// pointed at the repo dir — it uses the bundled default.
+		expect(ensureImage).toHaveBeenCalledWith(
+			expect.objectContaining({ stack: "python" }),
+		);
+		expect(firstEnsureImageArg()).not.toHaveProperty("dockerfilesDir");
+
+		// And nothing is written into the user's repo for the missing stack.
+		expect(
+			await fs.pathExists(
+				path.join(tmpDir, "ci-local", "docker", "python.Dockerfile"),
+			),
+		).toBe(false);
+	});
+});

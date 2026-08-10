@@ -108,6 +108,14 @@ export function getDockerfileContent(stack: Stack): string {
 				"RUN apt-get update && apt-get install -y git curl unzip && rm -rf /var/lib/apt/lists/*",
 				"RUN useradd -m -s /bin/bash runner",
 				"USER runner",
+				// No GRADLE_USER_HOME override (audit R4-001): on noble the
+				// `ubuntu` user owns uid 1000, so `useradd -m runner` lands at
+				// uid 1001 and /home/runner is 0750 runner:runner. Pinning
+				// GRADLE_USER_HOME=/home/runner/.gradle hard-fails the TS
+				// runtime path, which runs as the HOST uid (ENV-1, typically
+				// 1000) and cannot create that dir. Without the env both paths
+				// work off $HOME: shell path (--user runner) → /home/runner;
+				// host-uid path → getpwuid(1000) → /home/ubuntu.
 				"WORKDIR /home/runner/work",
 				'ENTRYPOINT ["/bin/bash", "-c"]',
 			].join("\n");
@@ -232,10 +240,27 @@ export async function ensureImage(
 		dockerfilePath = path.join(dockerDir, `${stack}.Dockerfile`);
 		contextDir = dockerDir;
 
-		// Write Dockerfile if it doesn't exist yet (first run)
 		if (!(await fs.pathExists(dockerfilePath))) {
-			await fs.ensureDir(dockerDir);
-			await fs.writeFile(dockerfilePath, getDockerfileContent(stack), "utf-8");
+			if (dockerfilesDir) {
+				// Caller-provided generation dir (dev / project-local flow):
+				// first-run generation is expected — write the canonical content.
+				await fs.ensureDir(dockerDir);
+				await fs.writeFile(
+					dockerfilePath,
+					getDockerfileContent(stack),
+					"utf-8",
+				);
+			} else {
+				// PKG-002: the package bundles a Dockerfile for EVERY stack, so a
+				// miss here means a corrupted/incomplete install. Writing into the
+				// install dir would EACCES on root-owned global installs and mask
+				// the real problem — fail closed with a clear message instead.
+				throw new Error(
+					`bundled Dockerfile "${stack}.Dockerfile" is missing from ` +
+						`"${dockerDir}" — the javi-forge installation looks corrupted; ` +
+						"reinstall the package (or pass an explicit dockerfilesDir)",
+				);
+			}
 		}
 	}
 

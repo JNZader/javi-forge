@@ -233,6 +233,19 @@ describe("ensureImage", () => {
 		);
 	});
 
+	it("throws instead of writing into the bundled dir when the packaged Dockerfile is missing", async () => {
+		// PKG-002: every stack Dockerfile ships with the package, so a missing
+		// file in the BUNDLED fallback dir means a corrupted install. Writing
+		// there EACCESes on root-owned global installs — fail closed instead.
+		fs.pathExists.mockResolvedValue(false);
+
+		await expect(ensureImage({ stack: "python" })).rejects.toThrow(
+			/bundled Dockerfile.*python\.Dockerfile.*missing/s,
+		);
+		expect(fs.writeFile).not.toHaveBeenCalled();
+		expect(spawnMock).not.toHaveBeenCalled();
+	});
+
 	it("skips build when image hash matches Dockerfile hash", async () => {
 		const content = getDockerfileContent("node");
 		const crypto = await import("node:crypto");

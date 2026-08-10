@@ -503,6 +503,20 @@ export async function runCI(
 		timeout = 600,
 	} = options;
 
+	// ── Run-scoped Docker availability (lazy-memoized) ─────────────────────────
+	// Computed at most ONCE per run and only when an image gate needs it. The
+	// full/quick prologue below assigns its own `isDockerAvailable()` result back
+	// into this cache so `runGates` never re-probes; the gates-only path leaves it
+	// undefined until an image gate lazily triggers the probe (a native-only
+	// gates-only repo never touches Docker — behaves exactly as before slice 3).
+	let dockerAvailableCache: boolean | undefined;
+	const dockerAvailable = async (): Promise<boolean> =>
+		(dockerAvailableCache ??= await isDockerAvailable());
+	const dockerGate: DockerGateContext = {
+		noDocker,
+		isAvailable: dockerAvailable,
+	};
+
 	// ── Resolve runners (once — nothing downstream re-detects) ─────────────────
 	const stepDetect = "detect";
 	report(onStep, stepDetect, "Detecting stack", "running");
@@ -532,7 +546,13 @@ export async function runCI(
 				`no runners resolved — ${mode} mode requires at least one runner`,
 			);
 		}
-		await runGates(resolved.gates, projectDir, onStep, onGateOutcome);
+		await runGates(
+			resolved.gates,
+			projectDir,
+			onStep,
+			dockerGate,
+			onGateOutcome,
+		);
 		return;
 	}
 
@@ -604,6 +624,9 @@ export async function runCI(
 		const stepDocker = "docker-check";
 		report(onStep, stepDocker, "Checking Docker", "running");
 		const dockerOk = await isDockerAvailable();
+		// Reuse this result for the gate fail-closed check — `runGates` must not
+		// run a second `docker info` (memoization seam).
+		dockerAvailableCache = dockerOk;
 		if (!dockerOk) {
 			report(
 				onStep,
@@ -757,7 +780,13 @@ export async function runCI(
 	// already `full` or `quick` here; the guard makes the contract explicit.
 	// `runGates` no-ops on an empty gate list (a v1 repo carries none).
 	if (mode === "full" || mode === "quick") {
-		await runGates(resolved.gates, projectDir, onStep, onGateOutcome);
+		await runGates(
+			resolved.gates,
+			projectDir,
+			onStep,
+			dockerGate,
+			onGateOutcome,
+		);
 	}
 }
 
@@ -1347,10 +1376,26 @@ async function runGateCommand(
 	};
 }
 
+/**
+ * Run-scoped Docker context for the fail-closed gate matrix (slice 3).
+ *
+ * `isAvailable` is a lazy-memoized probe: it is called AT MOST ONCE per run and
+ * ONLY when an image-declaring gate actually needs it, so a native-only gate set
+ * pays no `docker info` cost. `noDocker` short-circuits BEFORE `isAvailable`, so
+ * `--no-docker` never even probes the daemon.
+ */
+interface DockerGateContext {
+	noDocker: boolean;
+	isAvailable: () => Promise<boolean>;
+}
+
 async function runGates(
 	gates: readonly CIGateConfig[],
 	projectDir: string,
 	onStep: CIStepCallback,
+	// REQUIRED, so it MUST precede the optional `onOutcome` (TS1016: a required
+	// parameter cannot follow an optional one). Both call sites pass it positionally.
+	docker: DockerGateContext,
 	onOutcome?: (outcome: GateOutcome) => void,
 ): Promise<void> {
 	if (gates.length === 0) return;
@@ -1406,6 +1451,39 @@ async function runGates(
 			});
 
 		report(onStep, stepId, label, "running");
+
+		// Fail-closed matrix (slice 3): an image gate that cannot reach Docker is
+		// REFUSED — it MUST NOT fall through to native/unpinned execution and MUST
+		// NOT be silently skipped/passed. Blocking → build failure (feeds the
+		// aggregate throw); informative → `warning` (never a false-green). A gate
+		// WITHOUT `image` is unaffected and runs native regardless of --no-docker.
+		//
+		// `isAvailable()` is touched ONLY for an image gate under Docker: the
+		// `noDocker` short-circuit means an image-less set (or a --no-docker run)
+		// never shells out to `docker info`, keeping the native path zero-cost.
+		if (gate.image !== undefined) {
+			if (docker.noDocker || !(await docker.isAvailable())) {
+				const why = docker.noDocker
+					? "--no-docker set"
+					: "Docker not available";
+				const reason = `gate "${gate.id}" requires image "${gate.image}" but ${why} — refusing (never runs native/unpinned)`;
+				if (blocking) {
+					blockingFailures.push(gate.id);
+					report(onStep, stepId, `${label} failed`, "error", reason);
+					emit("error", { reason });
+				} else {
+					report(
+						onStep,
+						stepId,
+						`${label} failed (informative)`,
+						"warning",
+						reason,
+					);
+					emit("warning", { reason });
+				}
+				continue; // NEVER falls through to native execution.
+			}
+		}
 
 		// Per-gate env: build the INJECTED allowlist (engine keys + baseline) once,
 		// then split into two maps (JDB-001):

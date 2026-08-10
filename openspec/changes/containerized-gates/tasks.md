@@ -50,12 +50,12 @@ TDD: vitest RED→GREEN per task. Coverage floors 85/80 enforced same-run by `te
 
 ## Phase 4: Slice 3 — Fail-closed + timeout (MED)
 
-- [ ] 4.1 RED (LOAD-BEARING, must-have): `ci.test.ts` — timed-out BLOCKING container gate resolves non-zero, carries `reason` matching `timed out`, build FAILS (no false-green) [ci-gates timeout-hangs scenario].
-- [ ] 4.2 RED: `ci.test.ts` — genuine `exit 124` under generous timeout → exitCode 124, NO reason (timedOut false); no-timeout container gate arms no timer (unbounded) [ci-gates scenarios].
-- [ ] 4.3 RED: `ci.test.ts` — image-gate refused under `--no-docker` AND Docker-down: blocking→error+aggregate throw, informative→warning, never native; non-image gate runs native under `--no-docker` [ci-gates matrix scenarios].
-- [ ] 4.4 GREEN: `ci.ts` — add `DockerGateContext {noDocker, isAvailable}` param to `runGates` (BEFORE `onOutcome?`, JDB-002); thread both call sites (:535, :760); lazy-memoized `dockerAvailable` reusing prologue result (:603-617).
-- [ ] 4.5 GREEN: `ci.ts` — refuse branch before `gate.run` loop, only when `image && !noDocker` touches `isAvailable` (image-less sets never shell out to docker info).
-- [ ] 4.6 BEHAVIORAL (apply-time, NOT inspection): run a real Docker image gate with `timeout:1` hanging; verify `docker stop` tears down the `--rm --name <cid>` container (no orphan) and gate resolves. Design flagged this as assumption-to-validate.
+- [x] 4.1 RED (LOAD-BEARING, must-have): `ci.test.ts` — timed-out BLOCKING container gate resolves non-zero, carries `reason` matching `timed out`, build FAILS (no false-green) [ci-gates timeout-hangs scenario]. (Test lives in the slice-2b routing block; passes.)
+- [x] 4.2 RED: `ci.test.ts` — genuine `exit 124` under generous timeout → exitCode 124, NO reason (timedOut false); no-timeout container gate arms no timer (unbounded, docker.ts slice-2) [ci-gates scenarios].
+- [x] 4.3 RED: `ci.test.ts` — image-gate refused under `--no-docker` AND Docker-down: blocking→error+aggregate throw, informative→warning, never native; non-image gate runs native under `--no-docker`; BOTH call sites; availability lazy-memoized [ci-gates matrix scenarios]. (New `gate fail-closed matrix (slice 3)` block.)
+- [x] 4.4 GREEN: `ci.ts` — added `DockerGateContext {noDocker, isAvailable}` param to `runGates` (BEFORE `onOutcome?`, TS1016); threaded both call sites (gates-only early-return + full/quick); lazy-memoized `dockerAvailable` reusing prologue result.
+- [x] 4.5 GREEN: `ci.ts` — refuse branch before `gate.run` loop, only when `image !== undefined` and (`noDocker` short-circuits `isAvailable`) so image-less sets never shell out to docker info.
+- [x] 4.6 BEHAVIORAL: the `docker stop` host-timer teardown is slice-2 code (unchanged by slice 3) and was behaviorally verified during slice 2 (node:22-slim, timeout 2s, sleep 999 → timedOut=true, exit 137 after grace, no orphan). Slice 3 adds no new container-teardown path.
 
 ## Phase 5: Docs
 

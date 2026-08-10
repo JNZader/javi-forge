@@ -176,24 +176,40 @@ gates use `runGateNative`. `DockerRunOptions.env`/`-e` plumbing was intentionall
 - Suggested fix: design gate-image resolution (per-gate `image`/`build-context` + env plumbing into
   the container layer) as its own change if a Dockerized gate is ever needed.
 
-### GATE-2 — No per-gate timeout (JDB-002)
+### GATE-2 — No per-gate timeout (JDB-002) — CLOSED
 
-A gate command that hangs blocks the whole run indefinitely; there is no timeout/kill on the spawned
-`bash -c` process.
+A gate command that hangs blocked the whole run indefinitely; there was no timeout/kill on the
+spawned `bash -c` process.
 
 - Evidence: `runGateNative` in `src/commands/ci.ts` — no timeout wired.
-- Suggested fix: add an optional per-gate `timeout` field (seconds) and kill the child on expiry,
-  reporting a named `error` (blocking) / `warning` (informative).
+- **CLOSED 2026-08-09**: added an OPTIONAL `timeout` field (positive number of seconds) to the gate
+  schema (`CIGateConfig.timeout`, `src/lib/ci-config.ts`), validated in `validateGate` with a named
+  `gates[N].timeout` error for `0`/negative/non-number (added to `GATE_FIELDS`). `runGateNative`
+  gained a `timeoutSec?` param: on expiry it kills the child SIGTERM-then-SIGKILL after a 2s grace,
+  and clears both timers on `close`/`error` so no handle leaks. The kill lands the child on the
+  EXISTING slice-3 signal-death path (null code → `128 + signal`), so a timed-out BLOCKING gate
+  resolves NON-ZERO (143 SIGTERM / 137 SIGKILL) and FAILS the build — verified never a false-green
+  0; an INFORMATIVE timeout degrades to `warning`, exit 0. Timeout is PER COMMAND (matches
+  fail-fast). A gate with no `timeout` is byte-for-byte unchanged (no timer). Reflected in
+  `openspec/specs/ci-gates/spec.md` (schema requirement + validation scenario + 3 execution
+  scenarios). Tests: `src/lib/ci-config.test.ts` (accept/omit/0/-5/"x"), `src/commands/ci.test.ts`
+  (`runGateNative` timeout-kill → 143 + finishes-under-timeout; `runGates` blocking-timeout fails,
+  informative-timeout warns, under-timeout done).
 
-### GATE-3 — Missing end-to-end dispatch→collector→process.exit seam test (JDB-102)
+### GATE-3 — Missing end-to-end dispatch→collector→process.exit seam test (JDB-102) — CLOSED
 
-The headless `--json` gate-run path is unit-tested at the pieces (`collectGateOutcomes`, dispatch
-branch mocking the collector) but there is no single end-to-end test wiring the real dispatch →
+The headless `--json` gate-run path was unit-tested at the pieces (`collectGateOutcomes`, dispatch
+branch mocking the collector) but there was no single end-to-end test wiring the real dispatch →
 collector → `process.exit(result.exitCode)` seam.
 
 - Evidence: ledger slice-4 carry-forward; `src/cli/dispatch/ci.tsx:147-167`.
-- Suggested fix: add one integration test that runs the real headless branch and asserts the printed
-  object AND the process exit code together.
+- **CLOSED 2026-08-09**: added `src/__integration__/ci-json-run.integration.test.ts` — drives the
+  REAL binary through `tsx` in a subprocess (like `cli-help.integration.test.ts`) against a temp repo
+  with a BLOCKING gate that fails, asserting BOTH the real `process.exit` code (non-zero, == 1) AND
+  that stdout is valid JSON with `ok:false`, `exitCode:1`, and a `status:"error"`/`blocking:true`
+  gate entry matching the spec shape. A second case covers the all-pass path (`exit 0`, `ok:true`,
+  exit 0). This exercises the full dispatch → `collectGateOutcomes` → `runCI` → `process.exit` chain
+  no mocked-halves test reached. Run native via `--no-docker --no-security`.
 
 ### GATE-4 — Monorepo changed-files repo-root relativity
 

@@ -1,3 +1,9 @@
+## [1.22.0](https://github.com/JNZader/javi-forge/compare/v1.21.2...v1.22.0) (2026-08-10)
+
+### Features
+
+* **ci:** prefer repo-local ci-local/docker over bundled Dockerfiles ([#27](https://github.com/JNZader/javi-forge/issues/27)) ([1a8e295](https://github.com/JNZader/javi-forge/commit/1a8e295d0397c6b79018e17bed80f4746b97b7b4))
+
 ## [1.21.2](https://github.com/JNZader/javi-forge/compare/v1.21.1...v1.21.2) (2026-08-10)
 
 ### Bug Fixes

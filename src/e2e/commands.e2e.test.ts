@@ -415,4 +415,32 @@ describe("javi-forge doctor", () => {
 		expect(stdout).toContain("engram");
 		expect(stdout).toContain("ghagga");
 	});
+
+	it("shows the Security advisories section (commit-signing + branch-protection)", async () => {
+		const { stdout, exitCode } = await runCLI(["doctor"]);
+
+		expect(exitCode).toBe(0);
+		// hook-consolidation D9: L4/L6 + L5 folded into read-only doctor advisories.
+		expect(stdout).toContain("Security");
+		expect(stdout).toContain("Commit signing");
+		expect(stdout).toContain("Branch protection");
+	});
+});
+
+// ── hooks ─────────────────────────────────────────────────────────────────────
+
+describe("javi-forge hooks", () => {
+	it("hooks --help shows the dispatcher usage", async () => {
+		const { stdout, exitCode } = await runCLI(["hooks", "--help"]);
+
+		expect(exitCode).toBe(0);
+		expect(stdout).toContain("javi-forge hooks run <pre-commit|pre-push>");
+	});
+
+	it("hooks with an unknown subcommand shows usage and exits 1", async () => {
+		const { stdout, exitCode } = await runCLI(["hooks", "bogus"]);
+
+		expect(exitCode).toBe(1);
+		expect(stdout).toContain("javi-forge hooks run <pre-commit|pre-push>");
+	});
 });

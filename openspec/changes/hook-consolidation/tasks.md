@@ -74,9 +74,9 @@ Chain strategy: stacked-to-main
 
 ## S5 — Docs + e2e + deprecation [hook-dispatch: Honest pre-push messaging]
 
-- [ ] 6.1 Update `src/e2e/ci-hooks.e2e.test.ts` + `src/e2e/commands.e2e.test.ts`: shim → dispatcher → exit-code round trip via built CLI
-- [ ] 6.2 Docs: `hooks:` config reference, `javi-forge hooks run`, doctor advisories, migration notes (matrix rows as user guidance)
-- [ ] 6.3 Passive deprecation note on tracked `ci-local/` hook bodies (docs only, no deletion)
+- [x] 6.1 Update `src/e2e/ci-hooks.e2e.test.ts` + `src/e2e/commands.e2e.test.ts`: shim → dispatcher → exit-code round trip via built CLI
+- [x] 6.2 Docs: `hooks:` config reference, `javi-forge hooks run`, doctor advisories, migration notes (matrix rows as user guidance)
+- [x] 6.3 Passive deprecation note on tracked `ci-local/` hook bodies (docs only, no deletion)
 
 ## Acceptance backbone
 

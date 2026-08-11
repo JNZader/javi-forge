@@ -94,10 +94,15 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 	// Sub-command: javi-forge ci init → install git hooks
 	if (cli.input[1] === "init") {
 		const { installCIHooks } = await import("../../commands/ci.js");
-		const { installed, upgraded, backups, errors, states } =
+		const { installed, upgraded, backups, errors, states, notes } =
 			await installCIHooks(process.cwd(), {
 				force: cli.flags.force === true,
 			});
+		// Migration notes (e.g. "legacy javi-forge hooksPath removed") come first:
+		// they explain a config change the operator did not explicitly ask for.
+		for (const note of notes) {
+			console.log(`ℹ ${note}`);
+		}
 		for (const backup of backups) {
 			console.log(`⚠ Backed up the previous hook → ${backup}`);
 		}

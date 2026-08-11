@@ -844,7 +844,13 @@ describe("Idempotency", () => {
 // ── CI Local tests ───────────────────────────────────────────────────────────
 
 describe("CI Local setup", () => {
-	it("init creates ci-local if source dir exists", async () => {
+	// D7 reconciliation removes ci-local/ scaffolding from init at SOURCE level
+	// (see ci-init.integration.test.ts + init.integration.test.ts). This e2e runs
+	// the BUILT dist/index.js, which lags the S2 source until the release build,
+	// so it stays tolerant: it asserts the flow completes and, IF a ci-local dir
+	// is produced by the current dist, that it is well-formed. Post-build the dir
+	// is simply absent and the guarded assertions are skipped.
+	it("init completes; any ci-local dir the current dist emits is well-formed", async () => {
 		const sandbox = await createSandbox();
 		await runInit(
 			[
@@ -860,18 +866,14 @@ describe("CI Local setup", () => {
 			sandbox,
 		);
 
-		// ci-local dir should exist (copied from forge root)
 		const ciLocalDir = path.join(sandbox, "ci-app", "ci-local");
-		const hasCILocal = await fs.pathExists(ciLocalDir);
-		if (hasCILocal) {
-			// Should have ci-local.sh or hooks
+		if (await fs.pathExists(ciLocalDir)) {
 			const hasCIScript = await fs.pathExists(
 				path.join(ciLocalDir, "ci-local.sh"),
 			);
 			const hasHooks = await fs.pathExists(path.join(ciLocalDir, "hooks"));
 			expect(hasCIScript || hasHooks).toBe(true);
 		}
-		// If ci-local source doesn't exist at forge root, this step is skipped — that's OK
 		expect(true).toBe(true);
 	});
 });

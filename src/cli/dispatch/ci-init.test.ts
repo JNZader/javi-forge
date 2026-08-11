@@ -17,6 +17,7 @@ interface InstallResultStub {
 	backups: string[];
 	errors: string[];
 	states: { name: string; state: string }[];
+	notes: string[];
 }
 
 const result = (overrides: Partial<InstallResultStub>): InstallResultStub => ({
@@ -25,6 +26,7 @@ const result = (overrides: Partial<InstallResultStub>): InstallResultStub => ({
 	backups: [],
 	errors: [],
 	states: [],
+	notes: [],
 	...overrides,
 });
 
@@ -101,6 +103,22 @@ describe("ci init dispatch", () => {
 		expect(joined).toContain("commit-msg");
 		expect(joined).toMatch(/Upgraded pre-commit/);
 		expect(joined).toContain("legacy-v0");
+		expect(exitCode).toBe(0);
+	});
+
+	it("surfaces the legacy-hooksPath migration note", async () => {
+		installCIHooks.mockResolvedValue(
+			result({
+				installed: ["pre-commit", "pre-push", "commit-msg"],
+				notes: [
+					"legacy javi-forge hooksPath removed; hooks now live in .git/hooks",
+				],
+			}),
+		);
+
+		const { out, exitCode } = await runInit();
+
+		expect(out.join("\n")).toContain("hooksPath removed");
 		expect(exitCode).toBe(0);
 	});
 

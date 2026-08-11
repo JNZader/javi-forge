@@ -1,6 +1,5 @@
 import path from "node:path";
 import fs from "fs-extra";
-import { CI_LOCAL_DIR } from "../../../constants.js";
 import { execFileAsync } from "../../../lib/exec.js";
 import { report } from "../report.js";
 import type { StepFn } from "../types.js";
@@ -47,61 +46,50 @@ export const stepGitInit: StepFn = async (ctx) => {
 };
 
 /**
- * Step 2: Configure git hooks path.
+ * Step 2: Install managed git hooks (D7 reconciliation).
  *
- * - Copies templates/ci-local/ → <project>/ci-local/ (no overwrite).
- * - chmod 0755 on hook files.
- * - Sets git config core.hooksPath to ci-local/hooks.
- * - Skips entirely when CI_LOCAL_DIR template is missing.
+ * Init no longer copies `ci-local/` hook bodies into the project nor flips
+ * `core.hooksPath` — both were the pre-consolidation mechanism. It now delegates
+ * to `installCIHooks`, the SINGLE writer of `.git/hooks` and the choke point for
+ * the ATOMIC `core.hooksPath` guard (D6). A foreign/global hooksPath, or a
+ * dormant foreign slot, is REFUSED there with zero mutation and surfaced as an
+ * error here — init never overrides the user's hook manager.
+ *
+ * - dry-run: reports "would install managed hooks", calls nothing.
  * - Errors are swallowed and reported as status:"error" — never thrown.
- *
- * Extracted VERBATIM from src/commands/init.ts (PR 1 of 6).
  */
 export const stepGitHooks: StepFn = async (ctx) => {
 	const { projectDir, dryRun, onStep } = ctx;
 	const stepId = "git-hooks";
-	report(onStep, stepId, "Configure git hooks path", "running");
+	const label = "Install git hooks";
+	report(onStep, stepId, label, "running");
+
+	if (dryRun) {
+		report(onStep, stepId, label, "done", "would install managed hooks");
+		return;
+	}
+
 	try {
-		const ciLocalSrc = CI_LOCAL_DIR;
-		const ciLocalDest = path.join(projectDir, "ci-local");
-		if (await fs.pathExists(ciLocalSrc)) {
-			if (!dryRun) {
-				await fs.copy(ciLocalSrc, ciLocalDest, {
-					overwrite: false,
-					errorOnExist: false,
-				});
-				// Set core.hooksPath to ci-local/hooks
-				const hooksDir = path.join(ciLocalDest, "hooks");
-				if (await fs.pathExists(hooksDir)) {
-					// Ensure hooks are executable
-					const hookFiles = await fs.readdir(hooksDir);
-					for (const hook of hookFiles) {
-						await fs.chmod(path.join(hooksDir, hook), 0o755);
-					}
-					await execFileAsync(
-						"git",
-						["config", "core.hooksPath", "ci-local/hooks"],
-						{ cwd: projectDir },
-					);
-				}
-			}
-			report(
-				onStep,
-				stepId,
-				"Configure git hooks path",
-				"done",
-				"ci-local/hooks",
-			);
-		} else {
-			report(
-				onStep,
-				stepId,
-				"Configure git hooks path",
-				"skipped",
-				"no ci-local dir",
-			);
+		// Lazy import: installCIHooks pulls in the CI command surface; keep it off
+		// the init cold-start path, exactly like the `ci init` dispatch branch.
+		const { installCIHooks } = await import("../../ci.js");
+		const { installed, upgraded, backups, errors, notes } =
+			await installCIHooks(projectDir);
+
+		if (errors.length > 0) {
+			report(onStep, stepId, label, "error", errors.join("; "));
+			return;
 		}
+
+		const detail =
+			[
+				...installed.map((h) => `installed ${h}`),
+				...upgraded.map((h) => `upgraded ${h}`),
+				...notes,
+				...backups.map((b) => `backup ${b}`),
+			].join("; ") || "managed hooks installed";
+		report(onStep, stepId, label, "done", detail);
 	} catch (e) {
-		report(onStep, stepId, "Configure git hooks path", "error", String(e));
+		report(onStep, stepId, label, "error", String(e));
 	}
 };

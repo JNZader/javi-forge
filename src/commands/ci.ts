@@ -1799,6 +1799,12 @@ export interface InstallHooksResult {
 	backups: string[];
 	errors: string[];
 	states: HookStateReport[];
+	/**
+	 * Informational messages from the hooksPath guard (D6) — e.g. the "legacy
+	 * javi-forge hooksPath removed" note emitted when the migration path unsets
+	 * a `ci-local/hooks` local value. NOT errors; surfaced to the operator.
+	 */
+	notes: string[];
 }
 
 const HOOK_NAMES = ["pre-commit", "pre-push", "commit-msg"] as const;
@@ -2145,12 +2151,173 @@ async function readHookBody(hookName: string): Promise<string> {
 	return await fs.readFile(path.join(HOOK_ASSETS_DIR, hookName), "utf8");
 }
 
+/** The exact — and ONLY — value javi-forge itself ever wrote (git.ts:83). */
+const LEGACY_HOOKSPATH = "ci-local/hooks";
+
+/**
+ * Read a higher-scope `core.hooksPath` with `git config <scope> --get`.
+ *
+ * `--global`/`--system` reads return each scope's OWN value regardless of the
+ * local value, so a shadowing higher-scope hooksPath is visible with ZERO
+ * mutation. git exits 1 (no section / no config file) or 5 (key unset) for "no
+ * value" → `{ value: "" }`. ANY other failure is surfaced as `failed` so the
+ * guard can fail CLOSED: a blind spot on a possible shadow must never let the
+ * migration unset the local value and half-migrate the repo.
+ */
+async function readScopedHooksPath(
+	projectDir: string,
+	scope: "--global" | "--system",
+): Promise<{ value: string; failed?: string }> {
+	try {
+		const { stdout } = await execFileAsync(
+			"git",
+			["config", scope, "--get", "core.hooksPath"],
+			{ cwd: projectDir },
+		);
+		return { value: stdout.trim() };
+	} catch (e) {
+		const code = (e as { code?: unknown }).code;
+		if (code === 1 || code === 5) {
+			return { value: "" };
+		}
+		return { value: "", failed: e instanceof Error ? e.message : String(e) };
+	}
+}
+
+/**
+ * Read the LOCAL `core.hooksPath`. ANY failure (key unset, or a `.git` present
+ * that is not a valid config repo) means "no local value to migrate" — the safe
+ * fresh-install path, never a mutation. Only a real value (exit 0) is acted on.
+ */
+async function readLocalHooksPath(projectDir: string): Promise<string> {
+	try {
+		const { stdout } = await execFileAsync(
+			"git",
+			["config", "--local", "--get", "core.hooksPath"],
+			{ cwd: projectDir },
+		);
+		return stdout.trim();
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * The ATOMIC `core.hooksPath` guard (design D6). Runs BEFORE the install loop
+ * mutates anything.
+ *
+ * DETECT-BEFORE-MUTATE — steps 1-4 are pure reads; only step 5 writes (unset
+ * the legacy local value). EVERY refuse path returns `{ refuse }` having mutated
+ * NOTHING, so the repo is left in its EXACT prior state and can never land
+ * half-migrated (JDA-001 / JDA-008). The single write (`--local --unset`) and
+ * the subsequent shim install happen ONLY on the fully-validated success/force
+ * path.
+ */
+async function guardHooksPath(
+	projectDir: string,
+	hooksDir: string,
+	manifest: Record<string, HookManifestEntry>,
+	force: boolean,
+): Promise<{ refuse: string } | { note?: string }> {
+	// ── Step 1: classify the managed slots (pure read), exactly as the install
+	//   loop will. A manifest problem is NOT classified here — it surfaces
+	//   per-hook in the loop; an unclassifiable slot is treated as ABSENT (never
+	//   fabricate a foreign refusal from a manifest error).
+	const foreignSlots: string[] = [];
+	for (const name of HOOK_NAMES) {
+		const entry = manifest[name];
+		try {
+			assertHookManifestEntry(entry, name);
+		} catch {
+			continue;
+		}
+		const state = await classifyHookPath(
+			path.join(hooksDir, name),
+			name,
+			entry,
+		);
+		if (state === HOOK_STATE.FOREIGN) {
+			foreignSlots.push(name);
+		}
+	}
+
+	// ── Step 2: DETECT a shadowing higher-scope hooksPath via SCOPED reads (ZERO
+	//   mutation). A global/system value shadows .git/hooks the moment git
+	//   consults hooksPath, so installing there would be INERT — refuse rather
+	//   than fail open. Detected WITHOUT unsetting local, so a
+	//   `local-unset + global-present` half-migration is impossible.
+	for (const scope of ["--system", "--global"] as const) {
+		const probe = await readScopedHooksPath(projectDir, scope);
+		if (probe.failed !== undefined) {
+			return {
+				refuse: `could not read ${scope} git config core.hooksPath (${probe.failed}). Refusing to install: a higher-scope hooksPath could silently shadow .git/hooks and the hooks would not run. Resolve the git error and re-run.`,
+			};
+		}
+		if (probe.value !== "") {
+			const label = scope === "--global" ? "global" : "system";
+			return {
+				refuse: `a ${label} core.hooksPath='${probe.value}' would redirect git away from .git/hooks — the installed hooks would NOT run. Resolve it first (git config ${scope} --unset core.hooksPath) and re-run.`,
+			};
+		}
+	}
+	// includeIf residual edge: a hooksPath injected only through a
+	// [includeIf "gitdir:…"] conditional include is NOT returned by --global/
+	// --system --get and would surface only in an effective read — a documented
+	// residual edge, not covered by these scoped reads.
+
+	// ── Step 3: the LOCAL value. A foreign local manager (husky/lefthook/custom)
+	//   owns this repo's hooks; never hijack it. --force does NOT override (force
+	//   is consent to lose a file, not to seize another manager's config).
+	const local = await readLocalHooksPath(projectDir);
+	if (local !== "" && local !== LEGACY_HOOKSPATH) {
+		return {
+			refuse: `core.hooksPath is set to '${local}' — another hook manager owns this repo's hooks. javi-forge refuses to install or change it. Unset it yourself (git config --local --unset core.hooksPath) if you want javi-forge hooks.`,
+		};
+	}
+	const legacy = local === LEGACY_HOOKSPATH;
+
+	// ── Step 4: installability, ONLY on the migration path. Unsetting the legacy
+	//   value ACTIVATES whatever sits in .git/hooks; if a slot is FOREIGN without
+	//   --force, migrating now would activate a dormant foreign hook → ATOMIC
+	//   REFUSE, leave core.hooksPath SET, install NOTHING. When there is no legacy
+	//   value to unset, foreign slots are handled per-hook by the install loop as
+	//   before — nothing is being activated.
+	if (legacy && !force && foreignSlots.length > 0) {
+		const slot = foreignSlots[0];
+		return {
+			refuse: `core.hooksPath=${LEGACY_HOOKSPATH} would be removed, but .git/hooks/${slot} holds a foreign hook (a prior 'tdd init' or hand-written hook). Migrating now would activate it. Resolve it (delete/back it up) or re-run with --force.`,
+		};
+	}
+
+	// ── Step 5: ONLY NOW mutate. Every check passed (or --force). Unset the
+	//   legacy local value — the ONLY value javi-forge ever wrote, and only the
+	//   --local scope is ever touched — then let the caller install. The install
+	//   NEVER runs before steps 2 and 4.
+	if (legacy) {
+		await execFileAsync(
+			"git",
+			["config", "--local", "--unset", "core.hooksPath"],
+			{ cwd: projectDir },
+		);
+		return {
+			note: "legacy javi-forge hooksPath removed; hooks now live in .git/hooks",
+		};
+	}
+	return {};
+}
+
 export async function installCIHooks(
 	projectDir: string,
 	options: InstallHooksOptions = {},
 ): Promise<InstallHooksResult> {
 	const force = options.force === true;
-	const empty = { installed: [], upgraded: [], backups: [], states: [] };
+	const empty = {
+		installed: [],
+		upgraded: [],
+		backups: [],
+		states: [],
+		notes: [],
+	};
 	const gitDir = path.join(projectDir, ".git");
 	if (!(await fs.pathExists(gitDir))) {
 		return {
@@ -2187,6 +2354,20 @@ export async function installCIHooks(
 	const backups: string[] = [];
 	const errors: string[] = [];
 	const states: HookStateReport[] = [];
+	const notes: string[] = [];
+
+	// The ATOMIC core.hooksPath guard (D6) is the SINGLE choke point shared by
+	// `ci init` and `init`. It runs DETECT-BEFORE-MUTATE: on refuse it has
+	// mutated nothing and we return without installing; on the success/force
+	// path it has already unset any legacy `ci-local/hooks` value and we
+	// proceed to install the shims.
+	const guard = await guardHooksPath(projectDir, hooksDir, manifest, force);
+	if ("refuse" in guard) {
+		return { ...empty, errors: [guard.refuse] };
+	}
+	if (guard.note !== undefined) {
+		notes.push(guard.note);
+	}
 
 	for (const name of HOOK_NAMES) {
 		const hookPath = path.join(hooksDir, name);
@@ -2235,5 +2416,5 @@ export async function installCIHooks(
 		}
 	}
 
-	return { installed, upgraded, backups, errors, states };
+	return { installed, upgraded, backups, errors, states, notes };
 }

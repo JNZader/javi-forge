@@ -40,11 +40,11 @@ Chain strategy: stacked-to-main
 
 ## S1b — Shims + manifest [hook-dispatch: Static shims exec the dispatcher; Honest pre-push messaging | ci-hook-install: Shim release preserves silent auto-upgrade; Hooks verified by execution]
 
-- [ ] 2.1 RED `src/__tests__/hook-assets.test.ts`: `EXPECTED_VERSION` → `{pre-commit:2, pre-push:3, commit-msg:2}` (:77); `RELEASED_SNAPSHOT` (:46) sha256 updated + outgoing hash appended to historical (append-only guard :34-70 stays green)
-- [ ] 2.2 RED `src/commands/ci-hooks.test.ts`: matrix **b** regression — prior-managed body (marker + historical hash) classifies MANAGED_OUTDATED (ci.ts:1863-1865) → silent auto-upgrade, no `--force`, NOT foreign
-- [ ] 2.3 RED `src/__integration__/ci-hooks-exec.integration.test.ts`: EXECUTE installed shim → invokes `javi-forge hooks run <name>`, propagates exit code; assert behavior, not flag strings
-- [ ] 2.4 GREEN `assets/hooks/pre-commit` (v2) + `assets/hooks/pre-push` (v3): static bodies exec `javi-forge hooks run <name>`, npx fallback **fail-closed** (`||` → exit 1), HONEST messaging — "setup + lint + compile + gates — no tests, no coverage", never "validate + coverage" (**DOC-004 fix**). `commit-msg` UNTOUCHED
-- [ ] 2.5 GREEN `assets/hooks/manifest.json`: pre-commit 1→2, pre-push 2→3, `historical[]` append (`firstCommit` = PR head sha), prior entries intact
+- [x] 2.1 RED `src/__tests__/hook-assets.test.ts`: `EXPECTED_VERSION` → `{pre-commit:2, pre-push:3, commit-msg:2}` (:77); `RELEASED_SNAPSHOT` (:46) sha256 updated + outgoing hash appended to historical (append-only guard :34-70 stays green)
+- [x] 2.2 RED `src/commands/ci-hooks.test.ts`: matrix **b** regression — prior-managed body (marker + historical hash) classifies MANAGED_OUTDATED (ci.ts:1863-1865) → silent auto-upgrade, no `--force`, NOT foreign
+- [x] 2.3 RED `src/__integration__/ci-hooks-exec.integration.test.ts`: EXECUTE installed shim → invokes `javi-forge hooks run <name>`, propagates exit code; assert behavior, not flag strings
+- [x] 2.4 GREEN `assets/hooks/pre-commit` (v2) + `assets/hooks/pre-push` (v3): static bodies exec `javi-forge hooks run <name>`, npx fallback **fail-closed** (`||` → exit 1), HONEST messaging — "setup + lint + compile + gates — no tests, no coverage", never "validate + coverage" (**DOC-004 fix**). `commit-msg` UNTOUCHED
+- [x] 2.5 GREEN `assets/hooks/manifest.json`: pre-commit 1→2, pre-push 2→3, `historical[]` append (`firstCommit` = PR head sha), prior entries intact
 
 ## S2 — Init reconciliation + ATOMIC hooksPath guard [ci-hook-install: core.hooksPath detection before install; init delegates to hardened installer]
 

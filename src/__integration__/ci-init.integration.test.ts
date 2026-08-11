@@ -55,23 +55,24 @@ describe("installCIHooks() — integration", () => {
 		}
 	});
 
-	it("pre-commit uses javi-forge ci with npx fallback", async () => {
+	it("pre-commit execs the dispatcher with npx fallback (S1b shim)", async () => {
 		await installCIHooks(tmpDir);
 
 		const content = await readGenerated(tmpDir, ".git", "hooks", "pre-commit");
 		expect(content).toContain("command -v javi-forge");
-		expect(content).toContain("npx javi-forge ci");
-		expect(content).toContain("--quick");
-		expect(content).toContain("--no-docker");
+		expect(content).toContain("javi-forge hooks run pre-commit");
+		expect(content).toContain("npx javi-forge hooks run pre-commit");
+		expect(content).not.toContain("ci --quick");
 	});
 
-	it("pre-push runs native quick CI with npx fallback", async () => {
+	it("pre-push execs the dispatcher with npx fallback (S1b shim)", async () => {
 		await installCIHooks(tmpDir);
 
 		const content = await readGenerated(tmpDir, ".git", "hooks", "pre-push");
-		expect(content).toContain("--no-docker");
-		expect(content).toContain("javi-forge ci");
-		expect(content).toContain("npx javi-forge ci");
+		expect(content).toContain("command -v javi-forge");
+		expect(content).toContain("javi-forge hooks run pre-push");
+		expect(content).toContain("npx javi-forge hooks run pre-push");
+		expect(content).not.toContain("ci --quick");
 	});
 
 	it("commit-msg blocks AI attribution patterns", async () => {

@@ -22,9 +22,14 @@ import { cleanupTempDir, createTempDir } from "./helpers.js";
 
 const execFileAsync = promisify(execFile);
 
-/** Frozen hook contract: pre-commit must call the CLI with exactly these flags. */
-const FROZEN_PRE_COMMIT_FLAGS =
-	"ci --quick --no-docker --no-security --no-ci-ghagga";
+/**
+ * Frozen hook contract (S1b): each shim execs the dispatcher `hooks run <name>`,
+ * NOT `ci --quick …` directly. The dispatcher decides which sections run from
+ * the `hooks:` config; the shim only forwards the hook name and propagates the
+ * exit code.
+ */
+const FROZEN_PRE_COMMIT_ARGS = "hooks run pre-commit";
+const FROZEN_PRE_PUSH_ARGS = "hooks run pre-push";
 
 interface HookRunResult {
 	exitCode: number;
@@ -163,49 +168,42 @@ describe("installed hooks — executed", () => {
 
 	// ── pre-commit ────────────────────────────────────────────────────────────
 
-	it("pre-commit invokes the CLI with the frozen flag set", async () => {
+	it("pre-commit invokes the dispatcher with the frozen `hooks run` args", async () => {
 		const result = await runHook("pre-commit");
 
 		expect(result.exitCode).toBe(0);
-		expect(await readArgsLog()).toEqual([FROZEN_PRE_COMMIT_FLAGS]);
+		expect(await readArgsLog()).toEqual([FROZEN_PRE_COMMIT_ARGS]);
 	});
 
-	it("pre-commit aborts when the CLI exits non-zero", async () => {
+	it("pre-commit aborts when the dispatcher exits non-zero", async () => {
 		const result = await runHook("pre-commit", [], { STUB_EXIT_CLI: "3" });
 
 		expect(result.exitCode).toBe(1);
-		expect(result.stdout).toContain("Quick check FAILED");
-		// The CLI really was invoked — the abort is a propagated failure,
+		expect(result.stdout).toContain("pre-commit FAILED");
+		// The dispatcher really was invoked — the abort is a propagated failure,
 		// not a hook that never ran anything.
-		expect(await readArgsLog()).toEqual([FROZEN_PRE_COMMIT_FLAGS]);
+		expect(await readArgsLog()).toEqual([FROZEN_PRE_COMMIT_ARGS]);
 	});
 
 	// ── pre-push ──────────────────────────────────────────────────────────────
-	// The native pre-push body runs the SAME frozen flag set as pre-commit
-	// (`ci --quick --no-docker --no-security --no-ci-ghagga`): native validate +
-	// coverage, no Docker probe. The stub logs `$*` as ONE line, so a single
-	// invocation is a single-element argsLog. Fail-closed for blocking image
-	// gates now lives at the ci gate layer, not in the hook body.
+	// The pre-push shim execs the SAME dispatcher entry point as pre-commit but
+	// forwards its OWN hook name (`hooks run pre-push`). The dispatcher — not the
+	// shim — decides which sections run from the `hooks:` config. The stub logs
+	// `$*` as ONE line, so a single invocation is a single-element argsLog.
 
-	it("pre-push runs the native CI checks with the frozen flag set", async () => {
+	it("pre-push invokes the dispatcher with the frozen `hooks run` args", async () => {
 		const result = await runHook("pre-push");
 
 		expect(result.exitCode).toBe(0);
-		expect(await readArgsLog()).toEqual([FROZEN_PRE_COMMIT_FLAGS]);
+		expect(await readArgsLog()).toEqual([FROZEN_PRE_PUSH_ARGS]);
 	});
 
-	it("pre-push aborts when the CLI exits non-zero", async () => {
+	it("pre-push aborts when the dispatcher exits non-zero", async () => {
 		const result = await runHook("pre-push", [], { STUB_EXIT_CLI: "5" });
 
 		expect(result.exitCode).toBe(1);
-		expect(result.stdout).toContain("CI FAILED");
-		// The CLI really ran with the native flags before the propagated abort.
-		expect(await readArgsLog()).toEqual([FROZEN_PRE_COMMIT_FLAGS]);
+		expect(result.stdout).toContain("pre-push FAILED");
+		// The dispatcher really ran before the propagated abort.
+		expect(await readArgsLog()).toEqual([FROZEN_PRE_PUSH_ARGS]);
 	});
-
-	// The pre-change "refuses to run CI when Docker is unavailable" case was
-	// DELETED here: the native pre-push body has no `docker info` probe, so a
-	// Docker-down refusal is meaningless at the hook layer. Fail-closed image-gate
-	// enforcement is re-homed to ci.ts runGates (a blocking image gate is REFUSED
-	// under --no-docker), covered by src/commands/ci.test.ts.
 });

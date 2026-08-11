@@ -1,15 +1,16 @@
 #!/bin/bash
-# Pre-commit: quick CI check via javi-forge
+# pre-commit: javi-forge hook dispatcher
+# Runs the sections enabled under hooks: in .javi-forge/ci.yaml.
+# Default: quick native CI gate (setup + lint + compile + gates — no tests, no coverage).
+# Requires javi-forge on PATH (npx fallback; offline npx fails -> hook fails closed).
 # To skip: git commit --no-verify
 set -e
-echo "PRE-COMMIT: Running quick check..."
-if command -v javi-forge &>/dev/null; then
-  javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
+if command -v javi-forge >/dev/null 2>&1; then
+  javi-forge hooks run pre-commit
 else
-  npx javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
+  npx javi-forge hooks run pre-commit
 fi || {
   echo ""
-  echo "Quick check FAILED — fix the issues above before committing."
-  echo "To skip: git commit --no-verify"
+  echo "pre-commit FAILED - fix the issues above."
   exit 1
 }

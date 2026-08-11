@@ -1,17 +1,21 @@
 {
 	"pre-commit": {
-		"version": 1,
-		"sha256": "811f34ce57517e129554bc9c09801a66c0207332cd3e7f2950db43a40580e914",
+		"version": 2,
+		"sha256": "6155f375647d13a8e86aff74d1b17165e0781ce8c94f9f1304724a8a54948b00",
 		"historical": [
 			{
 				"sha256": "811f34ce57517e129554bc9c09801a66c0207332cd3e7f2950db43a40580e914",
 				"firstCommit": "5587b3b9b9ed3c86809c0a3d89a850dd2bce7e1a"
+			},
+			{
+				"sha256": "6155f375647d13a8e86aff74d1b17165e0781ce8c94f9f1304724a8a54948b00",
+				"firstCommit": "0779d746b23ad614a13181d60f1fe3aa034e91dd"
 			}
 		]
 	},
 	"pre-push": {
-		"version": 2,
-		"sha256": "3dad58303d81fc513a35339083438a78aa483fcd28e3377f006bd26e8ce76a6d",
+		"version": 3,
+		"sha256": "c396387a15c3c448d524f68597a993f6b4341ae06143d2d5907ad914823d0ad0",
 		"historical": [
 			{
 				"sha256": "7de58640aeef33085a49f31f1d9d0c8bacde0069d6d3265ae41aa8d3cd14d7a5",
@@ -20,6 +24,10 @@
 			{
 				"sha256": "3dad58303d81fc513a35339083438a78aa483fcd28e3377f006bd26e8ce76a6d",
 				"firstCommit": "a35e09d39a5394d6380499d1ed73fdf22f08c829"
+			},
+			{
+				"sha256": "c396387a15c3c448d524f68597a993f6b4341ae06143d2d5907ad914823d0ad0",
+				"firstCommit": "0779d746b23ad614a13181d60f1fe3aa034e91dd"
 			}
 		]
 	},

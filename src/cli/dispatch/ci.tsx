@@ -108,7 +108,7 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 		}
 		if (installed.length > 0) {
 			console.log(`✓ Installed git hooks: ${installed.join(", ")}`);
-			console.log("  Hooks call javi-forge ci (with npx fallback)");
+			console.log("  Hooks call javi-forge hooks run (with npx fallback)");
 		}
 		// Upgrades are reported DISTINCTLY from fresh installs: replacing an
 		// older javi-forge hook is not the same event as writing a new one.

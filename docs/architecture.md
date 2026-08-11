@@ -168,5 +168,5 @@ flowchart TB
 | File operations | [fs-extra](https://github.com/jprichardson/node-fs-extra) |
 | YAML parsing | [yaml](https://github.com/eemeli/yaml) |
 | Language | TypeScript (strict) |
-| Runtime | Node.js 18+ |
+| Runtime | Node.js 22+ |
 | Testing | Vitest + Stryker mutation testing |

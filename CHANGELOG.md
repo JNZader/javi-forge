@@ -1,3 +1,9 @@
+## [1.25.1](https://github.com/JNZader/javi-forge/compare/v1.25.0...v1.25.1) (2026-08-11)
+
+### Refactoring
+
+* **tdd:** fold TDD hooks into the dispatcher (hook-consolidation S3) ([#38](https://github.com/JNZader/javi-forge/issues/38)) ([fe2303b](https://github.com/JNZader/javi-forge/commit/fe2303b1e70a60645d8f82dc17bdacebdb87be1e))
+
 ## [1.25.0](https://github.com/JNZader/javi-forge/compare/v1.24.0...v1.25.0) (2026-08-11)
 
 ### Features

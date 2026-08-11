@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import os from "node:os";
@@ -5,6 +6,7 @@ import path from "node:path";
 import fs from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOOK_ASSETS_DIR } from "../constants.js";
+import * as execMod from "../lib/exec.js";
 import {
 	classifyHookContent,
 	HOOK_STATE,
@@ -181,6 +183,10 @@ describe("installCIHooks classification and write policy", () => {
 
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookcls-"));
+		// Real repo: the guard now reads --local core.hooksPath fail-CLOSED
+		// (JDA-001), so a faked .git dir would (correctly) refuse. Exercise the
+		// real git-config path.
+		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
 		hooksDir = path.join(tmpDir, ".git", "hooks");
 		await fs.ensureDir(hooksDir);
 	});
@@ -542,6 +548,8 @@ describe("installCIHooks --force and the backup protocol", () => {
 
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookbak-"));
+		// Real repo: the guard reads --local core.hooksPath fail-CLOSED (JDA-001).
+		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
 		hooksDir = path.join(tmpDir, ".git", "hooks");
 		await fs.ensureDir(hooksDir);
 		preCommit = path.join(hooksDir, "pre-commit");
@@ -776,6 +784,8 @@ describe("installCIHooks manifest failures", () => {
 
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookman-"));
+		// Real repo: the guard reads --local core.hooksPath fail-CLOSED (JDA-001).
+		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
 		await fs.ensureDir(path.join(tmpDir, ".git", "hooks"));
 	});
 
@@ -875,5 +885,343 @@ describe("installCIHooks manifest failures", () => {
 		expect(
 			await fs.pathExists(path.join(tmpDir, ".git", "hooks", "pre-push")),
 		).toBe(false);
+	});
+});
+
+// =============================================================================
+// installCIHooks — the ATOMIC core.hooksPath guard (D6 detect-before-mutate)
+//
+// These run against REAL git repos (git init) so `git config` scope semantics
+// (--local / --global / --system) are exercised for real. GIT_CONFIG_GLOBAL /
+// GIT_CONFIG_SYSTEM are redirected to per-test temp files, so the guard is
+// hermetic against the developer's own global git config and a global/system
+// shadow can be simulated without touching the real machine config.
+//
+// The load-bearing invariant is ATOMICITY: every REFUSE path (steps 2, 3, 4)
+// leaves the repo in its EXACT prior state — the local core.hooksPath value is
+// NEVER mutated on a refuse, and nothing is installed. Only the fully-validated
+// success/force path (step 5) unsets the legacy value and writes the shims.
+// =============================================================================
+
+describe("installCIHooks core.hooksPath guard (D6 detect-before-mutate)", () => {
+	let tmpDir: string;
+	let hooksDir: string;
+	let globalCfg: string;
+	let systemCfg: string;
+	let prevGlobal: string | undefined;
+	let prevSystem: string | undefined;
+
+	const hookPathFor = (hook: string): string => path.join(hooksDir, hook);
+
+	const gitEnv = (): NodeJS.ProcessEnv => ({
+		...process.env,
+		GIT_CONFIG_GLOBAL: globalCfg,
+		GIT_CONFIG_SYSTEM: systemCfg,
+	});
+
+	/** Read a scoped core.hooksPath value the same way the guard does. "" = unset. */
+	const readScope = (scope: "--local" | "--global" | "--system"): string => {
+		try {
+			return execFileSync("git", ["config", scope, "--get", "core.hooksPath"], {
+				cwd: tmpDir,
+				env: gitEnv(),
+				encoding: "utf8",
+			}).trim();
+		} catch {
+			return "";
+		}
+	};
+
+	const setLocalHooksPath = (value: string): void => {
+		execFileSync("git", ["config", "--local", "core.hooksPath", value], {
+			cwd: tmpDir,
+			env: gitEnv(),
+		});
+	};
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookguard-"));
+		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		hooksDir = path.join(tmpDir, ".git", "hooks");
+		await fs.ensureDir(hooksDir);
+		// Redirect global/system git config to empty temp files so the guard is
+		// hermetic: no dev/CI global core.hooksPath can leak in.
+		globalCfg = path.join(tmpDir, "gitconfig-global");
+		systemCfg = path.join(tmpDir, "gitconfig-system");
+		await fs.writeFile(globalCfg, "");
+		await fs.writeFile(systemCfg, "");
+		prevGlobal = process.env.GIT_CONFIG_GLOBAL;
+		prevSystem = process.env.GIT_CONFIG_SYSTEM;
+		process.env.GIT_CONFIG_GLOBAL = globalCfg;
+		process.env.GIT_CONFIG_SYSTEM = systemCfg;
+	});
+
+	afterEach(async () => {
+		if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+		else process.env.GIT_CONFIG_GLOBAL = prevGlobal;
+		if (prevSystem === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+		else process.env.GIT_CONFIG_SYSTEM = prevSystem;
+		vi.restoreAllMocks();
+		await fs.remove(tmpDir);
+	});
+
+	// ── Fresh install: no hooksPath anywhere (spec "Unset value is a normal
+	//   install") ────────────────────────────────────────────────────────────
+	it("installs normally when core.hooksPath is unset, with no migration note", async () => {
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.errors).toEqual([]);
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-commit", "pre-push", "commit-msg"]),
+		);
+		expect(result.notes).toEqual([]);
+		expect(readScope("--local")).toBe("");
+	});
+
+	// ── Matrix row c — legacy migration: local hooksPath=ci-local/hooks, slots
+	//   absent → unset local + note + fresh install ────────────────────────────
+	it("row c: migrates the legacy ci-local/hooks value — unsets local, emits a note, installs the shims", async () => {
+		setLocalHooksPath("ci-local/hooks");
+		expect(readScope("--local")).toBe("ci-local/hooks");
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.errors).toEqual([]);
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-commit", "pre-push", "commit-msg"]),
+		);
+		// The legacy local value is now GONE (only --local scope touched).
+		expect(readScope("--local")).toBe("");
+		// A single informational note announces the removal.
+		expect(result.notes.some((n) => /hooksPath removed/i.test(n))).toBe(true);
+		expect(await fs.readFile(hookPathFor("pre-commit"), "utf8")).toContain(
+			"# javi-forge-hook: pre-commit v2",
+		);
+	});
+
+	// ── Matrix row d — foreign LOCAL manager (husky/lefthook/custom) → refuse,
+	//   zero mutation, --force irrelevant ──────────────────────────────────────
+	it("row d: refuses a foreign LOCAL hooksPath, mutates nothing, installs nothing", async () => {
+		setLocalHooksPath(".husky/_");
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual([]);
+		expect(result.upgraded).toEqual([]);
+		// Config UNCHANGED — never hijack another manager.
+		expect(readScope("--local")).toBe(".husky/_");
+		expect(await fs.pathExists(hookPathFor("pre-commit"))).toBe(false);
+		expect(result.errors.join("\n")).toMatch(/another hook manager|\.husky/);
+	});
+
+	it("row d: --force does NOT override a foreign LOCAL hooksPath", async () => {
+		setLocalHooksPath(".husky/_");
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(result.installed).toEqual([]);
+		expect(readScope("--local")).toBe(".husky/_");
+		expect(result.errors.length).toBeGreaterThan(0);
+	});
+
+	// ── Matrix row f — DORMANT foreign slot under a legacy hooksPath →
+	//   `guard_refuses_before_unset_when_dormant_foreign_slot`. Unsetting the
+	//   legacy value would ACTIVATE the dormant hook, so the guard REFUSES BEFORE
+	//   it mutates and leaves core.hooksPath STILL set to ci-local/hooks. ────────
+	it("guard_refuses_before_unset_when_dormant_foreign_slot: hooksPath UNCHANGED after refusal", async () => {
+		setLocalHooksPath("ci-local/hooks");
+		// A dormant foreign hook git is ignoring while hooksPath redirects it — e.g.
+		// a stale `tdd init` body written directly into .git/hooks.
+		const dormant = "#!/bin/bash\n# old tdd hook\nnpm test\n";
+		await fs.writeFile(hookPathFor("pre-commit"), dormant);
+
+		const result = await installCIHooks(tmpDir);
+
+		// ATOMIC REFUSE — zero mutation.
+		expect(readScope("--local")).toBe("ci-local/hooks");
+		expect(result.installed).toEqual([]);
+		expect(result.upgraded).toEqual([]);
+		// The dormant hook was never touched, never activated into a half state.
+		expect(await fs.readFile(hookPathFor("pre-commit"), "utf8")).toBe(dormant);
+		// No sibling was installed either — the WHOLE operation refused.
+		expect(await fs.pathExists(hookPathFor("pre-push"))).toBe(false);
+		expect(result.errors.join("\n")).toMatch(/foreign|--force/);
+	});
+
+	it("row f: --force unsets, backs up the dormant foreign slot, and installs the shims", async () => {
+		setLocalHooksPath("ci-local/hooks");
+		const dormant = "#!/bin/bash\n# old tdd hook\nnpm test\n";
+		await fs.writeFile(hookPathFor("pre-commit"), dormant);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(result.errors).toEqual([]);
+		// Now migrated: local value gone, dormant hook backed up, shims installed.
+		expect(readScope("--local")).toBe("");
+		expect(result.backups).toContain(`${hookPathFor("pre-commit")}.bak`);
+		expect(await fs.readFile(`${hookPathFor("pre-commit")}.bak`, "utf8")).toBe(
+			dormant,
+		);
+		expect(result.notes.some((n) => /hooksPath removed/i.test(n))).toBe(true);
+		expect(await fs.readFile(hookPathFor("pre-commit"), "utf8")).toContain(
+			"# javi-forge-hook: pre-commit v2",
+		);
+	});
+
+	// ── Matrix row g — a global/system shadow detected BEFORE any mutation →
+	//   `guard_refuses_global_shadow_leaves_local_hookspath_unchanged`. Detected
+	//   via scoped reads, so the local value is never unset. ────────────────────
+	it("guard_refuses_global_shadow_leaves_local_hookspath_unchanged: local value still exactly ci-local/hooks", async () => {
+		setLocalHooksPath("ci-local/hooks");
+		// A global core.hooksPath that WOULD shadow .git/hooks the instant local is
+		// unset — detectable via `git config --global --get` with zero mutation.
+		await fs.writeFile(
+			globalCfg,
+			"[core]\n\thooksPath = /home/user/.global-hooks\n",
+		);
+		expect(readScope("--global")).toBe("/home/user/.global-hooks");
+
+		const result = await installCIHooks(tmpDir);
+
+		// ATOMIC REFUSE — the LOCAL value is UNCHANGED (never unset).
+		expect(readScope("--local")).toBe("ci-local/hooks");
+		expect(result.installed).toEqual([]);
+		expect(result.upgraded).toEqual([]);
+		// Never report a successful install.
+		expect(await fs.pathExists(hookPathFor("pre-commit"))).toBe(false);
+		// The refusal names the shadowing global value.
+		expect(result.errors.join("\n")).toContain("/home/user/.global-hooks");
+	});
+
+	it("row g: a SYSTEM-scope shadow also refuses with zero mutation", async () => {
+		setLocalHooksPath("ci-local/hooks");
+		await fs.writeFile(systemCfg, "[core]\n\thooksPath = /etc/git-hooks\n");
+		expect(readScope("--system")).toBe("/etc/git-hooks");
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(readScope("--local")).toBe("ci-local/hooks");
+		expect(result.installed).toEqual([]);
+		expect(result.errors.join("\n")).toContain("/etc/git-hooks");
+	});
+
+	it("row g: a global shadow refuses even on a FRESH repo (no local value) — install would be inert", async () => {
+		// Even with nothing to unset, installing into .git/hooks while a global
+		// hooksPath shadows it is a FAIL-OPEN (hooks would never run). Refuse.
+		await fs.writeFile(
+			globalCfg,
+			"[core]\n\thooksPath = /home/user/.global-hooks\n",
+		);
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual([]);
+		expect(await fs.pathExists(hookPathFor("pre-commit"))).toBe(false);
+		expect(result.errors.join("\n")).toContain("/home/user/.global-hooks");
+	});
+
+	it("row g: --force does NOT override a global/system shadow", async () => {
+		setLocalHooksPath("ci-local/hooks");
+		await fs.writeFile(
+			globalCfg,
+			"[core]\n\thooksPath = /home/user/.global-hooks\n",
+		);
+
+		const result = await installCIHooks(tmpDir, { force: true });
+
+		expect(readScope("--local")).toBe("ci-local/hooks");
+		expect(result.installed).toEqual([]);
+		expect(result.errors.join("\n")).toContain("/home/user/.global-hooks");
+	});
+
+	// ── JDA-001 — the LOCAL read must fail CLOSED, exactly like the scoped reads.
+	//   A local core.hooksPath=ci-local/hooks that TRANSIENTLY fails to read with a
+	//   non-1/5 exit (config lock, I/O, git fault) must REFUSE — never be swallowed
+	//   to "" and mistaken for a fresh repo, which would install shims into
+	//   .git/hooks while the still-present local value keeps SHADOWING them. ───────
+	it("JDA-001: a non-1/5 failure of the --local read REFUSES (zero mutation, no install)", async () => {
+		// The repo genuinely has the legacy value set — git resolves hooks through
+		// it, so any shim written into .git/hooks would be inert (shadowed).
+		setLocalHooksPath("ci-local/hooks");
+
+		// Simulate a TRANSIENT git fault on the SINGLE `--local --get` read only;
+		// every other git invocation runs for real, so the scoped reads still pass.
+		const realExec = execMod.execFileAsync;
+		vi.spyOn(execMod, "execFileAsync").mockImplementation((async (
+			file: string,
+			args: readonly string[],
+			opts: unknown,
+		) => {
+			if (
+				file === "git" &&
+				Array.isArray(args) &&
+				args.join(" ") === "config --local --get core.hooksPath"
+			) {
+				const err = new Error(
+					"fatal: unable to read config file '.git/config': lock held",
+				) as Error & { code?: number };
+				err.code = 128; // non-1/5 → "cannot determine", must fail closed
+				throw err;
+			}
+			return realExec(
+				file as string,
+				args as string[],
+				opts as Record<string, unknown>,
+			);
+			// biome-ignore lint/suspicious/noExplicitAny: test double signature
+		}) as any);
+
+		const result = await installCIHooks(tmpDir);
+
+		// ATOMIC REFUSE — the local value is UNCHANGED, nothing was installed.
+		vi.restoreAllMocks();
+		expect(readScope("--local")).toBe("ci-local/hooks");
+		expect(result.installed).toEqual([]);
+		expect(result.upgraded).toEqual([]);
+		expect(await fs.pathExists(hookPathFor("pre-commit"))).toBe(false);
+		// The refusal names the local read and the reason.
+		expect(result.errors.join("\n")).toMatch(/could not read .*--local/i);
+	});
+
+	// ── JDA-002 — a WORKTREE-scoped core.hooksPath (with extensions.worktreeConfig
+	//   enabled) ALSO shadows .git/hooks and must REFUSE with zero mutation. ───────
+	it("JDA-002: a --worktree-scoped shadow refuses with zero mutation", async () => {
+		execFileSync("git", ["config", "extensions.worktreeConfig", "true"], {
+			cwd: tmpDir,
+			env: gitEnv(),
+		});
+		execFileSync(
+			"git",
+			["config", "--worktree", "core.hooksPath", "/home/user/.wt-hooks"],
+			{ cwd: tmpDir, env: gitEnv() },
+		);
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual([]);
+		expect(result.upgraded).toEqual([]);
+		expect(await fs.pathExists(hookPathFor("pre-commit"))).toBe(false);
+		expect(result.errors.join("\n")).toContain("/home/user/.wt-hooks");
+	});
+
+	// ── JDA-002 — with the extension ENABLED but the worktree scope UNSET, the
+	//   worktree read must NOT swallow the local legacy value (git does NOT fall
+	//   back to --local when the extension is on): a legacy migration still
+	//   proceeds. Guards against a false refuse. ─────────────────────────────────
+	it("JDA-002: extension enabled + worktree unset does NOT block a legacy migration", async () => {
+		execFileSync("git", ["config", "extensions.worktreeConfig", "true"], {
+			cwd: tmpDir,
+			env: gitEnv(),
+		});
+		setLocalHooksPath("ci-local/hooks");
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.errors).toEqual([]);
+		expect(result.installed).toEqual(
+			expect.arrayContaining(["pre-commit", "pre-push", "commit-msg"]),
+		);
+		expect(readScope("--local")).toBe("");
+		expect(result.notes.some((n) => /hooksPath removed/i.test(n))).toBe(true);
 	});
 });

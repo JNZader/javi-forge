@@ -128,3 +128,127 @@ describe("installCIHooks() — integration", () => {
 		expect(first).toBe(second);
 	});
 });
+
+// ── The ATOMIC core.hooksPath guard, end-to-end in a real git repo (matrix
+//    rows a/c/d/f/g). GIT_CONFIG_GLOBAL/SYSTEM are redirected to temp files so
+//    the guard is hermetic and a global/system shadow can be simulated. ────────
+describe("installCIHooks() — core.hooksPath guard (matrix a/c/d/f/g)", () => {
+	let repo: string;
+	let globalCfg: string;
+	let systemCfg: string;
+	let prevGlobal: string | undefined;
+	let prevSystem: string | undefined;
+
+	const hookPath = (hook: string): string =>
+		path.join(repo, ".git", "hooks", hook);
+
+	const gitEnv = (): NodeJS.ProcessEnv => ({
+		...process.env,
+		GIT_CONFIG_GLOBAL: globalCfg,
+		GIT_CONFIG_SYSTEM: systemCfg,
+	});
+
+	const localHooksPath = (): string => {
+		try {
+			return execFileSync(
+				"git",
+				["config", "--local", "--get", "core.hooksPath"],
+				{ cwd: repo, env: gitEnv(), encoding: "utf8" },
+			).trim();
+		} catch {
+			return "";
+		}
+	};
+
+	beforeEach(async () => {
+		repo = await createTempDir("ci-guard-");
+		execFileSync("git", ["init", "-q"], { cwd: repo });
+		globalCfg = path.join(repo, "gitconfig-global");
+		systemCfg = path.join(repo, "gitconfig-system");
+		await fs.writeFile(globalCfg, "");
+		await fs.writeFile(systemCfg, "");
+		prevGlobal = process.env.GIT_CONFIG_GLOBAL;
+		prevSystem = process.env.GIT_CONFIG_SYSTEM;
+		process.env.GIT_CONFIG_GLOBAL = globalCfg;
+		process.env.GIT_CONFIG_SYSTEM = systemCfg;
+	});
+
+	afterEach(async () => {
+		if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+		else process.env.GIT_CONFIG_GLOBAL = prevGlobal;
+		if (prevSystem === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+		else process.env.GIT_CONFIG_SYSTEM = prevSystem;
+		await cleanupTempDir(repo);
+	});
+
+	it("row a: fresh repo installs the shims with no migration note", async () => {
+		const result = await installCIHooks(repo);
+
+		expect(result.errors).toHaveLength(0);
+		expect(result.installed).toContain("pre-commit");
+		expect(result.notes).toEqual([]);
+		expect(localHooksPath()).toBe("");
+	});
+
+	it("row c: legacy ci-local/hooks migrates — local unset + note + install", async () => {
+		execFileSync(
+			"git",
+			["config", "--local", "core.hooksPath", "ci-local/hooks"],
+			{ cwd: repo, env: gitEnv() },
+		);
+
+		const result = await installCIHooks(repo);
+
+		expect(result.errors).toHaveLength(0);
+		expect(result.installed).toContain("pre-commit");
+		expect(localHooksPath()).toBe("");
+		expect(result.notes.some((n) => /hooksPath removed/i.test(n))).toBe(true);
+		expect(await fileExists(repo, ".git", "hooks", "pre-commit")).toBe(true);
+	});
+
+	it("row d: foreign local hooksPath refuses with zero mutation", async () => {
+		execFileSync("git", ["config", "--local", "core.hooksPath", ".husky/_"], {
+			cwd: repo,
+			env: gitEnv(),
+		});
+
+		const result = await installCIHooks(repo);
+
+		expect(result.installed).toEqual([]);
+		expect(localHooksPath()).toBe(".husky/_");
+		expect(await fileExists(repo, ".git", "hooks", "pre-commit")).toBe(false);
+	});
+
+	it("row f: dormant foreign slot under a legacy hooksPath refuses BEFORE unset", async () => {
+		execFileSync(
+			"git",
+			["config", "--local", "core.hooksPath", "ci-local/hooks"],
+			{ cwd: repo, env: gitEnv() },
+		);
+		await fs.writeFile(hookPath("pre-commit"), "#!/bin/bash\nnpm test\n");
+
+		const result = await installCIHooks(repo);
+
+		// hooksPath left SET — the dormant hook was never activated.
+		expect(localHooksPath()).toBe("ci-local/hooks");
+		expect(result.installed).toEqual([]);
+		expect(await fs.readFile(hookPath("pre-commit"), "utf8")).toBe(
+			"#!/bin/bash\nnpm test\n",
+		);
+	});
+
+	it("row g: a global shadow refuses, leaving the local hooksPath unchanged", async () => {
+		execFileSync(
+			"git",
+			["config", "--local", "core.hooksPath", "ci-local/hooks"],
+			{ cwd: repo, env: gitEnv() },
+		);
+		await fs.writeFile(globalCfg, "[core]\n\thooksPath = /global/hooks\n");
+
+		const result = await installCIHooks(repo);
+
+		expect(localHooksPath()).toBe("ci-local/hooks");
+		expect(result.installed).toEqual([]);
+		expect(result.errors.join("\n")).toContain("/global/hooks");
+	});
+});

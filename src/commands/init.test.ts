@@ -22,6 +22,21 @@ vi.mock("../lib/exec.js", () => ({
 	execFileAsync: vi.fn().mockResolvedValue({ stdout: "", stderr: "" }),
 }));
 
+// ── Mock the hardened hook installer (D7) ────────────────────────────────────
+// stepGitHooks now lazy-imports installCIHooks from src/commands/ci.js instead
+// of copying ci-local/ + flipping core.hooksPath. Stub a clean install so the
+// git-hooks step reports `done` in this fully-mocked orchestration suite.
+vi.mock("./ci.js", () => ({
+	installCIHooks: vi.fn().mockResolvedValue({
+		installed: ["pre-commit", "pre-push", "commit-msg"],
+		upgraded: [],
+		backups: [],
+		errors: [],
+		states: [],
+		notes: [],
+	}),
+}));
+
 // ── Mock template module ─────────────────────────────────────────────────────
 vi.mock("../lib/template.js", () => ({
 	generateDependabotYml: vi.fn().mockResolvedValue("dependabot-content"),

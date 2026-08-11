@@ -8,7 +8,6 @@ import {
 	collectSteps,
 	createTempDir,
 	fileExists,
-	getFileMode,
 	readGenerated,
 } from "./helpers.js";
 
@@ -108,19 +107,16 @@ describe("initProject() — integration", () => {
 			true,
 		);
 
-		// ci-local structure
+		// Reconciliation (D7): init no longer scaffolds ci-local/ into the project;
+		// hooks are provisioned into .git/hooks by installCIHooks instead. git is
+		// mocked in this suite, so we assert the NEGATIVE contract — ci-local/ is
+		// NOT created — which is what the spec now requires.
 		expect(await fileExists(opts.projectDir, "ci-local", "ci-local.sh")).toBe(
-			true,
+			false,
 		);
 		expect(
 			await fileExists(opts.projectDir, "ci-local", "hooks", "pre-commit"),
-		).toBe(true);
-		expect(
-			await fileExists(opts.projectDir, "ci-local", "hooks", "pre-push"),
-		).toBe(true);
-		expect(
-			await fileExists(opts.projectDir, "ci-local", "hooks", "commit-msg"),
-		).toBe(true);
+		).toBe(false);
 
 		// Modules
 		expect(
@@ -228,77 +224,26 @@ describe("initProject() — integration", () => {
 		expect(content.trim().length).toBeGreaterThan(10);
 	});
 
-	// ── Task 5: ci-local self-contained ─────────────────────────────────────
+	// ── Reconciliation (D7): init delegates hooks to the hardened installer ───
+	// The pre-consolidation ci-local/ self-contained scaffold (ci-local.sh,
+	// lib/common.sh, hooks/, semgrep.yml, --no-docker pre-commit body) is no
+	// longer copied into the project. `installCIHooks` is the single writer of
+	// .git/hooks and the choke point for the ATOMIC core.hooksPath guard. git is
+	// mocked here, so the reconciled stepGitHooks path is exercised end to end in
+	// the real installCIHooks integration file (ci-init.integration.test.ts);
+	// this suite asserts init no longer scaffolds ci-local/.
 
-	it("ci-local has bundled lib/common.sh", async () => {
+	it("does NOT scaffold a ci-local/ directory into the project", async () => {
 		const opts = makeOptions();
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
 
-		// lib/common.sh must exist inside ci-local
-		expect(
-			await fileExists(opts.projectDir, "ci-local", "lib", "common.sh"),
-		).toBe(true);
-
-		// ci-local.sh references local lib first
-		const ciLocal = await readGenerated(
-			opts.projectDir,
-			"ci-local",
-			"ci-local.sh",
+		expect(await fileExists(opts.projectDir, "ci-local")).toBe(false);
+		expect(await fileExists(opts.projectDir, "ci-local", "ci-local.sh")).toBe(
+			false,
 		);
-		expect(ciLocal).toContain("SCRIPT_DIR/lib/common.sh");
-	});
-
-	it("hooks are executable (755)", async () => {
-		const opts = makeOptions();
-		const { onStep } = collectSteps();
-		await initProject(opts, onStep);
-
-		const preCommitMode = await getFileMode(
-			opts.projectDir,
-			"ci-local",
-			"hooks",
-			"pre-commit",
-		);
-		const prePushMode = await getFileMode(
-			opts.projectDir,
-			"ci-local",
-			"hooks",
-			"pre-push",
-		);
-		const commitMsgMode = await getFileMode(
-			opts.projectDir,
-			"ci-local",
-			"hooks",
-			"commit-msg",
-		);
-
-		expect(preCommitMode & 0o111).toBeGreaterThan(0); // at least one execute bit
-		expect(prePushMode & 0o111).toBeGreaterThan(0);
-		expect(commitMsgMode & 0o111).toBeGreaterThan(0);
-	});
-
-	it("pre-commit hook uses --no-docker for quick checks", async () => {
-		const opts = makeOptions();
-		const { onStep } = collectSteps();
-		await initProject(opts, onStep);
-
-		const preCommit = await readGenerated(
-			opts.projectDir,
-			"ci-local",
-			"hooks",
-			"pre-commit",
-		);
-		expect(preCommit).toContain("--no-docker");
-	});
-
-	it("semgrep.yml is present in ci-local", async () => {
-		const opts = makeOptions();
-		const { onStep } = collectSteps();
-		await initProject(opts, onStep);
-
 		expect(await fileExists(opts.projectDir, "ci-local", "semgrep.yml")).toBe(
-			true,
+			false,
 		);
 	});
 

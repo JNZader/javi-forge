@@ -10,7 +10,7 @@ The most complete integration.
 |---------|---------|
 | Workflow location | `.github/workflows/ci.yml` |
 | Dependabot | `.github/dependabot.yml` (auto-generated) |
-| GHAGGA review | `.github/workflows/ghagga-review.yml` (if enabled) |
+| GHAGGA review | Local module (`.javi-forge/modules/ghagga`) — runs locally, not a GitHub Action |
 | Reusable workflows | Stored in `workflows/` directory |
 
 ### What gets created
@@ -18,8 +18,7 @@ The most complete integration.
 ```
 .github/
 ├── workflows/
-│   ├── ci.yml                # Stack-specific CI pipeline
-│   └── ghagga-review.yml     # Code review (optional)
+│   └── ci.yml                # Stack-specific CI pipeline
 └── dependabot.yml            # Dependency updates
 ```
 
@@ -60,7 +59,6 @@ flowchart TB
     subgraph "GitHub Actions"
         GH_CI["CI workflow"]
         GH_DEP["dependabot.yml"]
-        GH_GHA["GHAGGA review workflow"]
         GH_RW["Reusable workflows"]
     end
 
@@ -74,7 +72,6 @@ flowchart TB
 
     style GH_CI fill:#f97316,color:#fff
     style GH_DEP fill:#f97316,color:#fff
-    style GH_GHA fill:#f97316,color:#fff
     style GH_RW fill:#f97316,color:#fff
     style GL_CI fill:#f97316,color:#fff
     style WP_CI fill:#f97316,color:#fff

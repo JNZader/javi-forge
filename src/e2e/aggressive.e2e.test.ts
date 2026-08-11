@@ -585,7 +585,7 @@ describe("SDD (Spec-Driven Development)", () => {
 // ── GHAGGA tests ─────────────────────────────────────────────────────────────
 
 describe("GHAGGA review system", () => {
-	it("init --ghagga --ci github: creates ghagga workflow", async () => {
+	it("init --ghagga --ci github: installs the local module but NO GitHub Action workflow", async () => {
 		const sandbox = await createSandbox();
 		await runInit(
 			[
@@ -602,7 +602,7 @@ describe("GHAGGA review system", () => {
 			sandbox,
 		);
 
-		// GHAGGA module installed
+		// GHAGGA module installed (ghagga runs locally/self-hosted)
 		expect(
 			await fileExists(
 				sandbox,
@@ -613,7 +613,7 @@ describe("GHAGGA review system", () => {
 			),
 		).toBe(true);
 
-		// Ghagga workflow file
+		// …but NO ghagga GitHub Action workflow is scaffolded.
 		const workflowDir = path.join(
 			sandbox,
 			"ghagga-app",
@@ -625,7 +625,7 @@ describe("GHAGGA review system", () => {
 			const hasGhaggaWorkflow = files.some((f) =>
 				f.toLowerCase().includes("ghagga"),
 			);
-			expect(hasGhaggaWorkflow).toBe(true);
+			expect(hasGhaggaWorkflow).toBe(false);
 		}
 	});
 

@@ -137,16 +137,6 @@ describe("initProject() — integration", () => {
 				"README.md",
 			),
 		).toBe(true);
-
-		// Ghagga workflow
-		expect(
-			await fileExists(
-				opts.projectDir,
-				".github",
-				"workflows",
-				"ghagga-review.yml",
-			),
-		).toBe(true);
 	});
 
 	// ── Task 3: Verify content of generated files ───────────────────────────
@@ -319,19 +309,24 @@ describe("initProject() — integration", () => {
 		).toBe(true);
 	});
 
-	it("ghagga: workflow is a caller (on: pull_request), not reusable (on: workflow_call)", async () => {
+	it("ghagga: installs the local module but scaffolds NO GitHub Action workflow", async () => {
 		const opts = makeOptions({ ghagga: true });
 		const { onStep } = collectSteps();
 		await initProject(opts, onStep);
 
-		const workflow = await readGenerated(
-			opts.projectDir,
-			".github",
-			"workflows",
-			"ghagga-review.yml",
-		);
-		expect(workflow).toContain("pull_request");
-		expect(workflow).not.toContain("workflow_call");
+		// The local ghagga module is installed…
+		expect(
+			await fileExists(opts.projectDir, ".javi-forge", "modules", "ghagga"),
+		).toBe(true);
+		// …but no ghagga GitHub Action workflow is written (ghagga runs locally).
+		expect(
+			await fileExists(
+				opts.projectDir,
+				".github",
+				"workflows",
+				"ghagga-review.yml",
+			),
+		).toBe(false);
 	});
 
 	it("memory=none: no module installed, no MCP snippet", async () => {

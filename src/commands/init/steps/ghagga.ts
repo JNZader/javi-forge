@@ -1,25 +1,24 @@
 import path from "node:path";
 import fs from "fs-extra";
-import { FORGE_ROOT, MODULES_DIR } from "../../../constants.js";
+import { MODULES_DIR } from "../../../constants.js";
 import { ensureDirExists } from "../../../lib/common.js";
 import { report } from "../report.js";
 import type { StepFn } from "../types.js";
 
 /**
- * Step 9: Install GHAGGA review system.
+ * Step 9: Install the local GHAGGA review module.
  *
  * - When ghagga is false, reports "skipped".
  * - Copies <MODULES_DIR>/ghagga → <project>/.javi-forge/modules/ghagga (no overwrite).
- * - For GitHub provider, also copies the ghagga-review.yml caller workflow into
- *   <project>/.github/workflows/.
  * - If module source dir is missing, reports "error" with "module not found".
  * - Errors are swallowed and reported as status:"error" — never thrown.
  *
- * Extracted VERBATIM from src/commands/init.ts (PR 3 of 6).
+ * The GitHub Action review workflow is intentionally NOT scaffolded — ghagga
+ * runs locally/self-hosted, not as a GitHub Action.
  */
 export const stepGhagga: StepFn = async (ctx) => {
 	const { projectDir, dryRun, onStep, options } = ctx;
-	const { ghagga, ciProvider } = options;
+	const { ghagga } = options;
 	const stepId = "ghagga";
 	report(onStep, stepId, "Install GHAGGA review system", "running");
 	try {
@@ -38,26 +37,6 @@ export const stepGhagga: StepFn = async (ctx) => {
 						overwrite: false,
 						errorOnExist: false,
 					});
-
-					// Copy ghagga caller workflow to CI provider location
-					if (ciProvider === "github") {
-						const workflowSrc = path.join(
-							FORGE_ROOT,
-							"templates",
-							"github",
-							"ghagga-review.yml",
-						);
-						if (await fs.pathExists(workflowSrc)) {
-							const workflowDest = path.join(
-								projectDir,
-								".github",
-								"workflows",
-								"ghagga-review.yml",
-							);
-							await ensureDirExists(path.dirname(workflowDest));
-							await fs.copy(workflowSrc, workflowDest, { overwrite: false });
-						}
-					}
 				}
 				report(onStep, stepId, "Install GHAGGA review system", "done");
 			} else {

@@ -1,3 +1,9 @@
+## [1.26.0](https://github.com/JNZader/javi-forge/compare/v1.25.1...v1.26.0) (2026-08-11)
+
+### Features
+
+* **hooks:** security sections L1-L3 + doctor advisories, drop inert security subdir (hook-consolidation S4) ([#39](https://github.com/JNZader/javi-forge/issues/39)) ([f6d7cbd](https://github.com/JNZader/javi-forge/commit/f6d7cbd188766ded40af27c3a91a057cbda36f68))
+
 ## [1.25.1](https://github.com/JNZader/javi-forge/compare/v1.25.0...v1.25.1) (2026-08-11)
 
 ### Refactoring

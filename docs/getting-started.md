@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Node.js 18+** — [nodejs.org](https://nodejs.org)
+- **Node.js 22+** — [nodejs.org](https://nodejs.org)
 
 Optional (for full functionality):
 - **javi-ai** — for AI config sync (`npm install -g javi-ai`)

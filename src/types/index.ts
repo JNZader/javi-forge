@@ -88,17 +88,6 @@ export interface DoctorResult {
 	sections: DoctorSection[];
 }
 
-// ── TDD Pipeline Enforcement ────────────────────────────────────────────────
-
-export type TddPipelineMode = "strict" | "warn";
-
-export interface TddPipelineResult {
-	installed: string[];
-	skipped: string[];
-	errors: string[];
-	mode: TddPipelineMode;
-}
-
 // ── Plugin Marketplace ──────────────────────────────────────────────────────
 
 export interface PluginManifest {

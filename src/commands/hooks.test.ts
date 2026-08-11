@@ -5,10 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CIHooksConfig } from "../lib/ci-config.js";
 import {
 	composeSections,
+	defaultRegistry,
 	type HookSection,
 	loadHooksConfig,
 	type RunHookDeps,
 	runHook,
+	type TddSectionDeps,
+	tddSection,
 } from "./hooks.js";
 
 // =============================================================================
@@ -261,6 +264,106 @@ describe("ci section — runCI in-process with the frozen quick option set", () 
 		expect(joined).toContain("Lint");
 		expect(joined).toContain("Compile");
 		expect(joined).toContain("boom");
+	});
+});
+
+describe("tdd section — resolves the stack test command at hook-run time", () => {
+	const tddDeps = (over: Partial<TddSectionDeps> = {}): TddSectionDeps => ({
+		detectStack: async () => ({
+			stackType: "node",
+			buildTool: "pnpm",
+			javaVersion: "21",
+		}),
+		resolveTestCmd: async () => "pnpm run test",
+		runCommand: vi.fn(async () => ({ ok: true })),
+		log: () => {},
+		...over,
+	});
+
+	it("skips with a notice and ok:true when no test command is detected (a missing runner must NOT block)", async () => {
+		const log = vi.fn();
+		const runCommand = vi.fn(async () => ({ ok: true }));
+		const section = tddSection(
+			tddDeps({
+				detectStack: async () => ({
+					stackType: "rust",
+					buildTool: "cargo",
+					javaVersion: "21",
+				}),
+				resolveTestCmd: async () => null,
+				runCommand,
+				log,
+			}),
+		);
+		const result = await section.run({ projectDir: "/repo" });
+		expect(result.ok).toBe(true);
+		expect(runCommand).not.toHaveBeenCalled();
+		expect(log.mock.calls.flat().join(" ")).toMatch(/no test command|skip/i);
+	});
+
+	it("detects the stack, resolves the command, and runs it at hook-run time", async () => {
+		const detectStack = vi.fn(async () => ({
+			stackType: "node" as const,
+			buildTool: "pnpm",
+			javaVersion: "21",
+		}));
+		const resolveTestCmd = vi.fn(async () => "pnpm run test");
+		const runCommand = vi.fn(async () => ({ ok: true }));
+		const section = tddSection(
+			tddDeps({ detectStack, resolveTestCmd, runCommand }),
+		);
+		const result = await section.run({ projectDir: "/repo" });
+		expect(result.ok).toBe(true);
+		expect(detectStack).toHaveBeenCalledWith("/repo");
+		expect(resolveTestCmd).toHaveBeenCalledWith("node", "pnpm", "/repo");
+		expect(runCommand).toHaveBeenCalledWith("pnpm run test", "/repo");
+	});
+
+	it("reports ok:false when the resolved test command fails", async () => {
+		const runCommand = vi.fn(async () => ({
+			ok: false,
+			detail: "tests failed (exit 1)",
+		}));
+		const section = tddSection(tddDeps({ runCommand }));
+		const result = await section.run({ projectDir: "/repo" });
+		expect(result.ok).toBe(false);
+		expect(result.detail).toMatch(/tests failed/);
+	});
+});
+
+describe("defaultRegistry — the tdd section is registered (S3 wiring)", () => {
+	it("registers a tdd factory alongside ci", () => {
+		const registry = defaultRegistry(
+			vi.fn() as unknown as Parameters<typeof defaultRegistry>[0],
+			() => {},
+		);
+		expect(registry.ci).toBeTypeOf("function");
+		expect(registry.tdd).toBeTypeOf("function");
+	});
+
+	it("composes a tdd section through the default registry when enabled", async () => {
+		const runCommand = vi.fn(async () => ({ ok: true }));
+		const registry = defaultRegistry(
+			vi.fn() as unknown as Parameters<typeof defaultRegistry>[0],
+			() => {},
+			{
+				detectStack: async () => ({
+					stackType: "go",
+					buildTool: "go",
+					javaVersion: "21",
+				}),
+				resolveTestCmd: async () => "go test ./...",
+				runCommand,
+			},
+		);
+		const sections = composeSections(
+			"pre-commit",
+			hooksConfig({ preCommit: { tdd: true, ci: false } }),
+			registry,
+		);
+		expect(sections.map((s) => s.id)).toEqual(["tdd"]);
+		await sections[0].run({ projectDir: "/repo" });
+		expect(runCommand).toHaveBeenCalledWith("go test ./...", "/repo");
 	});
 });
 

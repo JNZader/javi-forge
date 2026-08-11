@@ -2185,20 +2185,94 @@ async function readScopedHooksPath(
 }
 
 /**
- * Read the LOCAL `core.hooksPath`. ANY failure (key unset, or a `.git` present
- * that is not a valid config repo) means "no local value to migrate" — the safe
- * fresh-install path, never a mutation. Only a real value (exit 0) is acted on.
+ * Read the LOCAL `core.hooksPath` with the SAME fail-closed discipline as
+ * {@link readScopedHooksPath} (JDA-001).
+ *
+ * git exits 1 (no section / no config file) or 5 (key unset) for a genuine "no
+ * value" → `{ value: "" }`, the safe fresh-install path. ANY OTHER failure
+ * (config lock, I/O error, a corrupt `.git/config`, a git fault) is surfaced as
+ * `failed` so the guard can REFUSE. Swallowing such a failure to `""` would be a
+ * FAIL-OPEN: a local value genuinely = `ci-local/hooks` that transiently fails
+ * to read would look like a fresh repo, so step 5 would never unset it and the
+ * shims would be installed into `.git/hooks` while the still-present local value
+ * keeps SHADOWING them — `installCIHooks` would report installed/upgraded while
+ * git runs the OLD ci-local bodies. An unknown-state local read must never be
+ * treated as a fresh install.
  */
-async function readLocalHooksPath(projectDir: string): Promise<string> {
+async function readLocalHooksPath(
+	projectDir: string,
+): Promise<{ value: string; failed?: string }> {
 	try {
 		const { stdout } = await execFileAsync(
 			"git",
 			["config", "--local", "--get", "core.hooksPath"],
 			{ cwd: projectDir },
 		);
-		return stdout.trim();
-	} catch {
-		return "";
+		return { value: stdout.trim() };
+	} catch (e) {
+		const code = (e as { code?: unknown }).code;
+		if (code === 1 || code === 5) {
+			return { value: "" };
+		}
+		return { value: "", failed: e instanceof Error ? e.message : String(e) };
+	}
+}
+
+/**
+ * Read a WORKTREE-scoped `core.hooksPath` (JDA-002), which — with
+ * `extensions.worktreeConfig` enabled — ALSO shadows `.git/hooks`.
+ *
+ * The extension is checked FIRST for a load-bearing reason: when it is OFF, `git
+ * config --worktree` silently behaves like `--local` (verified), so reading it
+ * here would double-count the LOCAL value and refuse a valid legacy migration.
+ * It is a DISTINCT scope only when the extension is enabled, and only then does
+ * `--worktree --get` read from `$GIT_DIR/config.worktree` WITHOUT falling back to
+ * local. Gating on the extension also handles the multiple-worktree + extension-off
+ * case where `--worktree` errors out ("not enabled"): we never issue that read, so
+ * that specific error can never surface as a spurious refuse.
+ *
+ * Same fail-closed discipline as the scoped reads: exit 1/5 → genuine no value;
+ * any OTHER failure → `failed` so the guard REFUSES rather than fail open.
+ */
+async function readWorktreeHooksPath(
+	projectDir: string,
+): Promise<{ value: string; failed?: string }> {
+	// Determine whether the worktree config extension is enabled.
+	let enabled = false;
+	try {
+		const { stdout } = await execFileAsync(
+			"git",
+			["config", "--bool", "--get", "extensions.worktreeConfig"],
+			{ cwd: projectDir },
+		);
+		enabled = stdout.trim() === "true";
+	} catch (e) {
+		const code = (e as { code?: unknown }).code;
+		if (code === 1 || code === 5) {
+			// Extension unset/disabled → no DISTINCT worktree scope exists; the local
+			// read (step 3) already covers the --worktree==--local fallback. Treat as
+			// no worktree value, never a refuse.
+			return { value: "" };
+		}
+		// Cannot determine the extension state → fail CLOSED.
+		return { value: "", failed: e instanceof Error ? e.message : String(e) };
+	}
+	if (!enabled) {
+		return { value: "" };
+	}
+	try {
+		const { stdout } = await execFileAsync(
+			"git",
+			["config", "--worktree", "--get", "core.hooksPath"],
+			{ cwd: projectDir },
+		);
+		return { value: stdout.trim() };
+	} catch (e) {
+		const code = (e as { code?: unknown }).code;
+		if (code === 1 || code === 5) {
+			return { value: "" };
+		}
+		return { value: "", failed: e instanceof Error ? e.message : String(e) };
 	}
 }
 
@@ -2260,15 +2334,39 @@ async function guardHooksPath(
 			};
 		}
 	}
-	// includeIf residual edge: a hooksPath injected only through a
-	// [includeIf "gitdir:…"] conditional include is NOT returned by --global/
-	// --system --get and would surface only in an effective read — a documented
-	// residual edge, not covered by these scoped reads.
+	// ── Step 2b (JDA-002): a WORKTREE-scoped hooksPath (with
+	//   extensions.worktreeConfig enabled) ALSO shadows .git/hooks. Same
+	//   fail-closed handling: a non-1/5 read failure REFUSES rather than fail open.
+	const worktree = await readWorktreeHooksPath(projectDir);
+	if (worktree.failed !== undefined) {
+		return {
+			refuse: `could not read --worktree git config core.hooksPath (${worktree.failed}). Refusing to install: a worktree-scoped hooksPath could silently shadow .git/hooks and the hooks would not run. Resolve the git error and re-run.`,
+		};
+	}
+	if (worktree.value !== "") {
+		return {
+			refuse: `a worktree core.hooksPath='${worktree.value}' would redirect git away from .git/hooks — the installed hooks would NOT run. Resolve it first (git config --worktree --unset core.hooksPath) and re-run.`,
+		};
+	}
+
+	// Shadow reads now cover --global, --system and --worktree. The includeIf
+	// residual edge remains: a hooksPath injected only through a
+	// [includeIf "gitdir:…"] conditional include is NOT returned by
+	// --global/--system/--worktree --get and would surface only in an effective
+	// read — a documented residual edge, not covered by these scoped reads.
 
 	// ── Step 3: the LOCAL value. A foreign local manager (husky/lefthook/custom)
 	//   owns this repo's hooks; never hijack it. --force does NOT override (force
-	//   is consent to lose a file, not to seize another manager's config).
-	const local = await readLocalHooksPath(projectDir);
+	//   is consent to lose a file, not to seize another manager's config). The read
+	//   fails CLOSED (JDA-001): a non-1/5 failure REFUSES rather than mistake an
+	//   unreadable local value for a fresh repo and install over a shadowing value.
+	const localProbe = await readLocalHooksPath(projectDir);
+	if (localProbe.failed !== undefined) {
+		return {
+			refuse: `could not read --local git config core.hooksPath (${localProbe.failed}). Refusing to install: a local hooksPath could silently shadow .git/hooks and the installed hooks would not run. Resolve the git error and re-run.`,
+		};
+	}
+	const local = localProbe.value;
 	if (local !== "" && local !== LEGACY_HOOKSPATH) {
 		return {
 			refuse: `core.hooksPath is set to '${local}' — another hook manager owns this repo's hooks. javi-forge refuses to install or change it. Unset it yourself (git config --local --unset core.hooksPath) if you want javi-forge hooks.`,

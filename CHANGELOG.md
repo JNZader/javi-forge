@@ -1,3 +1,9 @@
+## [1.25.0](https://github.com/JNZader/javi-forge/compare/v1.24.0...v1.25.0) (2026-08-11)
+
+### Features
+
+* **hooks:** atomic core.hooksPath guard + init reconciliation (hook-consolidation S2) ([#37](https://github.com/JNZader/javi-forge/issues/37)) ([035724b](https://github.com/JNZader/javi-forge/commit/035724bc09fa8a87bb85c012a3bd8ba3f0270fb6))
+
 ## [1.24.0](https://github.com/JNZader/javi-forge/compare/v1.23.1...v1.24.0) (2026-08-11)
 
 ### Features

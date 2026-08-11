@@ -1,3 +1,9 @@
+## [1.24.0](https://github.com/JNZader/javi-forge/compare/v1.23.1...v1.24.0) (2026-08-11)
+
+### Features
+
+* **hooks:** static shim bodies exec dispatcher + manifest v2/v3 (hook-consolidation S1b) ([#36](https://github.com/JNZader/javi-forge/issues/36)) ([8dc0292](https://github.com/JNZader/javi-forge/commit/8dc0292decff0ed71f37d92f1e5c05ffaecb388f))
+
 ## [1.23.1](https://github.com/JNZader/javi-forge/compare/v1.23.0...v1.23.1) (2026-08-10)
 
 ### Bug Fixes

@@ -44,67 +44,48 @@ const mockedExecFile = vi.mocked(execFile);
 
 const { runDoctor } = await import("./doctor.js");
 
+// `execFileAsync` is `promisify(execFile)`, which appends the callback as the
+// LAST argument — so a call with an options object (e.g.
+// `execFile("git", args, { cwd }, cb)`) puts the callback in position 4. These
+// helpers locate the callback as the last function argument regardless of arity
+// (the S4 Security checks pass `{ cwd }`, unlike the older 3-arg tool probes).
+type ExecCb = (
+	e: Error | null,
+	out: { stdout: string; stderr: string },
+) => void;
+
+function lastCallback(args: unknown[]): ExecCb | null {
+	const last = args[args.length - 1];
+	return typeof last === "function" ? (last as ExecCb) : null;
+}
+
+function respond(args: unknown[], e: Error | null, stdout: string) {
+	const cb = lastCallback(args);
+	if (cb) cb(e, { stdout, stderr: "" });
+	return undefined as unknown as ChildProcess;
+}
+
 // Default execFile behaviour: every tool "exists" and reports v1.0.0. Tests
 // that need a tool to be missing override the implementation per-case.
 function execFileAllPresent() {
-	mockedExecFile.mockImplementation(
-		(_cmd: unknown, _args: unknown, cb: unknown) => {
-			const cmd = String(_cmd);
-			if (cmd === "which" || cmd === "command") {
-				if (typeof cb === "function")
-					(
-						cb as (
-							e: Error | null,
-							out: { stdout: string; stderr: string },
-						) => void
-					)(null, { stdout: "/usr/bin/tool", stderr: "" });
-			} else {
-				if (typeof cb === "function")
-					(
-						cb as (
-							e: Error | null,
-							out: { stdout: string; stderr: string },
-						) => void
-					)(null, { stdout: "v1.0.0", stderr: "" });
-			}
-			return undefined as unknown as ChildProcess;
-		},
-	);
+	mockedExecFile.mockImplementation((...callArgs: unknown[]) => {
+		const cmd = String(callArgs[0]);
+		if (cmd === "which" || cmd === "command")
+			return respond(callArgs, null, "/usr/bin/tool");
+		return respond(callArgs, null, "v1.0.0");
+	});
 }
 
 function execFileMissing(toolName: string) {
-	mockedExecFile.mockImplementation(
-		(_cmd: unknown, _args: unknown, cb: unknown) => {
-			const cmd = String(_cmd);
-			const args = _args as string[];
-			if ((cmd === "which" || cmd === "command") && args?.includes(toolName)) {
-				if (typeof cb === "function")
-					(
-						cb as (
-							e: Error | null,
-							out: { stdout: string; stderr: string },
-						) => void
-					)(new Error("not found"), { stdout: "", stderr: "" });
-			} else if (cmd === "which" || cmd === "command") {
-				if (typeof cb === "function")
-					(
-						cb as (
-							e: Error | null,
-							out: { stdout: string; stderr: string },
-						) => void
-					)(null, { stdout: "/usr/bin/tool", stderr: "" });
-			} else {
-				if (typeof cb === "function")
-					(
-						cb as (
-							e: Error | null,
-							out: { stdout: string; stderr: string },
-						) => void
-					)(null, { stdout: "v1.0.0", stderr: "" });
-			}
-			return undefined as unknown as ChildProcess;
-		},
-	);
+	mockedExecFile.mockImplementation((...callArgs: unknown[]) => {
+		const cmd = String(callArgs[0]);
+		const args = (callArgs[1] as string[]) ?? [];
+		if ((cmd === "which" || cmd === "command") && args.includes(toolName))
+			return respond(callArgs, new Error("not found"), "");
+		if (cmd === "which" || cmd === "command")
+			return respond(callArgs, null, "/usr/bin/tool");
+		return respond(callArgs, null, "v1.0.0");
+	});
 }
 
 // ─── tmpdir scaffolding ────────────────────────────────────────────
@@ -291,5 +272,156 @@ describe("runDoctor", () => {
 			(s) => s.title === "Context Directory",
 		)!;
 		expect(ctxSection.checks[0].status).toBe("skip");
+	});
+});
+
+// =============================================================================
+// Security advisories (hook-consolidation S4)
+//
+// commit-signing (L4+L6 merged) + branch-protection (L5) are advisories: doctor
+// reports, nothing blocks. These tests drive the mocked execFile per-case to
+// simulate git config values and gh api responses.
+// =============================================================================
+
+/**
+ * Route the mocked execFile by (cmd, args). `git config --get <key>` resolves
+ * from `gitConfig`; `which <bin>` resolves present/absent from `bins`; `gh api`
+ * resolves/rejects from `ghApi`; everything else succeeds with a stub.
+ */
+function routeExecFile(opts: {
+	gitConfig?: Record<string, string>;
+	bins?: Record<string, boolean>;
+	originHead?: string;
+	ghApiOk?: boolean;
+}) {
+	const gitConfig = opts.gitConfig ?? {};
+	const bins = opts.bins ?? {};
+	mockedExecFile.mockImplementation((...callArgs: unknown[]) => {
+		const cmd = String(callArgs[0]);
+		const args = (callArgs[1] as string[]) ?? [];
+		if (cmd === "which" || cmd === "command") {
+			const bin = args[args.length - 1];
+			return respond(
+				callArgs,
+				bins[bin] === false ? new Error("not found") : null,
+				"/usr/bin/x",
+			);
+		}
+		if (cmd === "git" && args[0] === "config") {
+			const key = args[args.length - 1];
+			const val = gitConfig[key];
+			return val === undefined
+				? respond(callArgs, new Error("unset"), "")
+				: respond(callArgs, null, val);
+		}
+		if (cmd === "git" && args[0] === "symbolic-ref") {
+			return respond(
+				callArgs,
+				opts.originHead ? null : new Error("no head"),
+				opts.originHead ?? "",
+			);
+		}
+		if (cmd === "gh" && args[0] === "api") {
+			return respond(
+				callArgs,
+				opts.ghApiOk ? null : new Error("HTTP 404"),
+				"{}",
+			);
+		}
+		return respond(callArgs, null, "v1.0.0");
+	});
+}
+
+describe("runDoctor — Security advisories", () => {
+	it("commit-signing: ok when gpgsign=true AND signingkey set", async () => {
+		routeExecFile({
+			gitConfig: {
+				"commit.gpgsign": "true",
+				"user.signingkey": "ABC123",
+				"remote.origin.url": "",
+			},
+		});
+		const result = await runDoctor(tmpDir);
+		const sec = result.sections.find((s) => s.title === "Security")!;
+		const signing = sec.checks.find((c) => c.label === "Commit signing")!;
+		expect(signing.status).toBe("ok");
+		expect(signing.detail).toContain("enabled");
+	});
+
+	it("commit-signing: skip (advisory) when not configured, detail carries the snippet", async () => {
+		routeExecFile({ gitConfig: {} });
+		const result = await runDoctor(tmpDir);
+		const sec = result.sections.find((s) => s.title === "Security")!;
+		const signing = sec.checks.find((c) => c.label === "Commit signing")!;
+		expect(signing.status).toBe("skip");
+		expect(signing.detail).toContain("commit.gpgsign true");
+	});
+
+	it("commit-signing: skip when gpgsign true but signingkey missing", async () => {
+		routeExecFile({ gitConfig: { "commit.gpgsign": "true" } });
+		const result = await runDoctor(tmpDir);
+		const sec = result.sections.find((s) => s.title === "Security")!;
+		const signing = sec.checks.find((c) => c.label === "Commit signing")!;
+		expect(signing.status).toBe("skip");
+	});
+
+	it("branch-protection: ok when gh + GitHub origin + protection API succeeds", async () => {
+		routeExecFile({
+			gitConfig: {
+				"remote.origin.url": "git@github.com:acme/widgets.git",
+			},
+			bins: { gh: true },
+			originHead: "origin/main",
+			ghApiOk: true,
+		});
+		const result = await runDoctor(tmpDir);
+		const sec = result.sections.find((s) => s.title === "Security")!;
+		const bp = sec.checks.find((c) => c.label === "Branch protection")!;
+		expect(bp.status).toBe("ok");
+		expect(bp.detail).toContain("main");
+	});
+
+	it("branch-protection: skip (advisory) when GitHub protection API 404s", async () => {
+		routeExecFile({
+			gitConfig: {
+				"remote.origin.url": "https://github.com/acme/widgets.git",
+			},
+			bins: { gh: true },
+			originHead: "origin/main",
+			ghApiOk: false,
+		});
+		const result = await runDoctor(tmpDir);
+		const sec = result.sections.find((s) => s.title === "Security")!;
+		const bp = sec.checks.find((c) => c.label === "Branch protection")!;
+		expect(bp.status).toBe("skip");
+		expect(bp.detail).toContain("no server-side branch protection");
+	});
+
+	it("branch-protection: skip-with-note for a GitLab origin (no gh probe)", async () => {
+		routeExecFile({
+			gitConfig: {
+				"remote.origin.url": "git@gitlab.com:acme/widgets.git",
+			},
+			bins: { gh: true },
+		});
+		const result = await runDoctor(tmpDir);
+		const sec = result.sections.find((s) => s.title === "Security")!;
+		const bp = sec.checks.find((c) => c.label === "Branch protection")!;
+		expect(bp.status).toBe("skip");
+		expect(bp.detail).toContain("forge UI");
+	});
+
+	it("branch-protection: skip-with-note when gh is not installed", async () => {
+		routeExecFile({
+			gitConfig: {
+				"remote.origin.url": "git@github.com:acme/widgets.git",
+			},
+			bins: { gh: false },
+		});
+		const result = await runDoctor(tmpDir);
+		const sec = result.sections.find((s) => s.title === "Security")!;
+		const bp = sec.checks.find((c) => c.label === "Branch protection")!;
+		expect(bp.status).toBe("skip");
+		expect(bp.detail).toContain("forge UI");
 	});
 });

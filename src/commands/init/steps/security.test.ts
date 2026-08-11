@@ -5,10 +5,7 @@ import type { InitOptions, InitStep } from "../../../types/index.js";
 vi.mock("fs-extra", () => {
 	const mockFs = {
 		pathExists: vi.fn(),
-		readdir: vi.fn(),
-		writeJson: vi.fn(),
 		copy: vi.fn(),
-		chmod: vi.fn(),
 	};
 	return { default: mockFs, ...mockFs };
 });
@@ -18,26 +15,29 @@ vi.mock("../../../lib/common.js", () => ({
 	ensureDirExists: vi.fn().mockResolvedValue(undefined),
 }));
 
+// ── Mock the hooks-config writer (setHookFeature) ─────────────────────────────
+// stepSecurityHooks (S4) folds the security git-hook bodies into `hooks:` config
+// entries merged via setHookFeature — no more ci-local/hooks/security/ copy.
+vi.mock("../../../lib/ci-config.js", () => ({
+	setHookFeature: vi
+		.fn()
+		.mockResolvedValue("/test/project/.javi-forge/ci.yaml"),
+}));
+
 import fs from "fs-extra";
-import { stepHookProfile, stepSecurityHooks } from "./security.js";
+import { setHookFeature } from "../../../lib/ci-config.js";
+import { stepSecurityHooks } from "./security.js";
 
 const mockedFs = vi.mocked(fs);
+const mockedSetHookFeature = vi.mocked(setHookFeature);
 
 beforeEach(() => {
 	vi.resetAllMocks();
 	mockedFs.pathExists.mockResolvedValue(true as never);
-	mockedFs.writeJson.mockResolvedValue(undefined as never);
 	mockedFs.copy.mockResolvedValue(undefined as never);
-	mockedFs.chmod.mockResolvedValue(undefined as never);
-	mockedFs.readdir.mockResolvedValue([
-		"pre-commit-secrets",
-		"pre-push-deps",
-		"pre-commit-permissions",
-		"pre-push-signing",
-		"pre-push-branch-protection",
-		"commit-msg-signing",
-		"claude-settings-security.json",
-	] as never);
+	mockedSetHookFeature.mockResolvedValue(
+		"/test/project/.javi-forge/ci.yaml" as never,
+	);
 });
 
 function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
@@ -64,7 +64,7 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
 	};
 }
 
-async function collectSecurity(options: InitOptions): Promise<InitStep[]> {
+async function collect(options: InitOptions): Promise<InitStep[]> {
 	const steps: InitStep[] = [];
 	await stepSecurityHooks({
 		options,
@@ -75,173 +75,107 @@ async function collectSecurity(options: InitOptions): Promise<InitStep[]> {
 	return steps;
 }
 
-async function collectProfile(options: InitOptions): Promise<InitStep[]> {
-	const steps: InitStep[] = [];
-	await stepHookProfile({
-		options,
-		projectDir: options.projectDir,
-		dryRun: options.dryRun,
-		onStep: (s) => steps.push(s),
-	});
-	return steps;
+function mergedFeatures(): string[] {
+	return mockedSetHookFeature.mock.calls.map(
+		(c) => `${String(c[1])}.${String(c[2])}`,
+	);
 }
 
-describe("stepSecurityHooks", () => {
-	it("security-hooks step copies git hooks and runtime settings when enabled", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.endsWith(".git")) return false as never;
-			// settings.json does not exist yet
-			if (s.endsWith("settings.json")) return false as never;
-			return true as never;
-		});
-
-		const steps = await collectSecurity(makeOptions({ securityHooks: true }));
-		const secStep = steps.find(
-			(s) => s.id === "security-hooks" && s.status === "done",
+describe("stepSecurityHooks (S4 fold)", () => {
+	it("does NOT copy any ci-local/hooks/security/ git hooks", async () => {
+		mockedFs.pathExists.mockImplementation(async (p: unknown) =>
+			String(p).endsWith("settings.json") ? false : (true as never),
 		);
-		expect(secStep).toBeDefined();
-		expect(secStep!.detail).toContain("6 git layers");
+		await collect(makeOptions({ securityHooks: true, hookProfile: "strict" }));
 
-		// Should copy hook files (6 git hooks, not the JSON)
-		const copyCalls = mockedFs.copy.mock.calls.map((c: unknown[]) =>
-			String(c[0]),
+		const securityHookCopies = mockedFs.copy.mock.calls.filter((c: unknown[]) =>
+			String(c[0]).includes(`${"hooks"}/security`),
 		);
-		const securityCopies = copyCalls.filter((p: string) =>
-			p.includes("security-hooks"),
-		);
-		expect(securityCopies.length).toBeGreaterThanOrEqual(6);
-
-		// Should chmod each git hook
-		expect(mockedFs.chmod).toHaveBeenCalled();
+		expect(securityHookCopies).toHaveLength(0);
 	});
 
-	it("security-hooks step is skipped when securityHooks is false", async () => {
-		mockedFs.pathExists.mockResolvedValue(true as never);
-		const steps = await collectSecurity(makeOptions({ securityHooks: false }));
-		const secStep = steps.find(
-			(s) => s.id === "security-hooks" && s.status === "skipped",
+	it("KEEPS the .claude/settings.json copy when it does not already exist", async () => {
+		mockedFs.pathExists.mockImplementation(async (p: unknown) =>
+			String(p).endsWith("settings.json") ? false : (true as never),
 		);
-		expect(secStep).toBeDefined();
-		expect(secStep!.detail).toContain("not selected");
+		await collect(makeOptions({ securityHooks: true }));
+
+		const settingsCopy = mockedFs.copy.mock.calls.find((c: unknown[]) =>
+			String(c[1]).endsWith("settings.json"),
+		);
+		expect(settingsCopy).toBeDefined();
 	});
 
-	it("security-hooks dry-run writes nothing", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.endsWith(".git")) return false as never;
-			return true as never;
-		});
+	it("does NOT overwrite an existing .claude/settings.json", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never); // settings.json exists
+		await collect(makeOptions({ securityHooks: true }));
 
-		const steps = await collectSecurity(
-			makeOptions({ securityHooks: true, dryRun: true }),
+		const settingsCopy = mockedFs.copy.mock.calls.find((c: unknown[]) =>
+			String(c[1]).endsWith("settings.json"),
 		);
-		const secStep = steps.find(
-			(s) => s.id === "security-hooks" && s.status === "done",
-		);
-		expect(secStep).toBeDefined();
-		expect(secStep!.detail).toContain("dry-run");
-
-		// No copy calls for security hooks in dry-run
-		const securityCopies = mockedFs.copy.mock.calls.filter((call: unknown[]) =>
-			String(call[0]).includes("security-hooks"),
-		);
-		expect(securityCopies).toHaveLength(0);
+		expect(settingsCopy).toBeUndefined();
 	});
 
-	it("security-hooks reports error when templates not found", async () => {
-		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
-			const s = String(p);
-			if (s.includes("security-hooks") && !s.includes(".javi-forge"))
-				return false as never;
-			if (s.endsWith(".git")) return false as never;
-			return true as never;
-		});
-
-		const steps = await collectSecurity(makeOptions({ securityHooks: true }));
-		const secStep = steps.find(
-			(s) => s.id === "security-hooks" && s.status === "error",
-		);
-		expect(secStep).toBeDefined();
-		expect(secStep!.detail).toContain("templates not found");
-	});
-});
-
-describe("stepHookProfile", () => {
-	it("hook-profile step writes profile.json with selected profile", async () => {
-		mockedFs.pathExists.mockResolvedValue(true as never);
-
-		await collectProfile(
-			makeOptions({ securityHooks: true, hookProfile: "strict" }),
-		);
-
-		const writeJsonCalls = mockedFs.writeJson.mock.calls;
-		const profileCall = writeJsonCalls.find((args) =>
-			String(args[0]).endsWith("profile.json"),
-		);
-		expect(profileCall).toBeDefined();
-		expect(profileCall![1]).toEqual({ profile: "strict" });
+	it("strict profile merges secrets + permissions + deps", async () => {
+		await collect(makeOptions({ securityHooks: true, hookProfile: "strict" }));
+		expect(mergedFeatures()).toEqual([
+			"pre-commit.secrets",
+			"pre-commit.permissions",
+			"pre-push.deps",
+		]);
+		for (const call of mockedSetHookFeature.mock.calls) {
+			expect(call[0]).toBe("/test/project");
+			expect(call[3]).toBe(true);
+		}
 	});
 
-	it("hook-profile step defaults to standard when hookProfile is not set", async () => {
-		mockedFs.pathExists.mockResolvedValue(true as never);
-
-		await collectProfile(
+	it("standard profile merges secrets + deps (no permissions)", async () => {
+		await collect(
 			makeOptions({ securityHooks: true, hookProfile: "standard" }),
 		);
-
-		const writeJsonCalls = mockedFs.writeJson.mock.calls;
-		const profileCall = writeJsonCalls.find((args) =>
-			String(args[0]).endsWith("profile.json"),
-		);
-		expect(profileCall).toBeDefined();
-		expect(profileCall![1]).toEqual({ profile: "standard" });
+		expect(mergedFeatures()).toEqual(["pre-commit.secrets", "pre-push.deps"]);
 	});
 
-	it("hook-profile step is skipped when securityHooks is false", async () => {
-		mockedFs.pathExists.mockResolvedValue(true as never);
-
-		const steps = await collectProfile(
-			makeOptions({ securityHooks: false, hookProfile: "minimal" }),
-		);
-		const profileStep = steps.find(
-			(s) => s.id === "hook-profile" && s.status === "skipped",
-		);
-		expect(profileStep).toBeDefined();
-		expect(profileStep!.detail).toContain("security hooks not selected");
+	it("minimal profile merges NO security sections", async () => {
+		await collect(makeOptions({ securityHooks: true, hookProfile: "minimal" }));
+		expect(mockedSetHookFeature).not.toHaveBeenCalled();
 	});
 
-	it("hook-profile step reports done with profile name in detail", async () => {
-		mockedFs.pathExists.mockResolvedValue(true as never);
-
-		const steps = await collectProfile(
-			makeOptions({ securityHooks: true, hookProfile: "minimal" }),
+	it("is skipped when securityHooks is false", async () => {
+		const steps = await collect(makeOptions({ securityHooks: false }));
+		const step = steps.find(
+			(s) => s.id === "security-hooks" && s.status === "skipped",
 		);
-		const profileStep = steps.find(
-			(s) => s.id === "hook-profile" && s.status === "done",
-		);
-		expect(profileStep).toBeDefined();
-		expect(profileStep!.detail).toContain("minimal");
-		expect(profileStep!.detail).toContain("profile.json");
+		expect(step).toBeDefined();
+		expect(step!.detail).toContain("not selected");
+		expect(mockedSetHookFeature).not.toHaveBeenCalled();
 	});
 
-	it("hook-profile step is dry-run aware", async () => {
-		mockedFs.pathExists.mockResolvedValue(true as never);
-
-		const steps = await collectProfile(
+	it("dry-run merges nothing and copies nothing", async () => {
+		const steps = await collect(
 			makeOptions({ securityHooks: true, hookProfile: "strict", dryRun: true }),
 		);
-		const profileStep = steps.find(
-			(s) => s.id === "hook-profile" && s.status === "done",
+		const step = steps.find(
+			(s) => s.id === "security-hooks" && s.status === "done",
 		);
-		expect(profileStep).toBeDefined();
-		expect(profileStep!.detail).toContain("dry-run");
+		expect(step).toBeDefined();
+		expect(step!.detail).toContain("dry-run");
+		expect(mockedSetHookFeature).not.toHaveBeenCalled();
+		expect(mockedFs.copy).not.toHaveBeenCalled();
+	});
 
-		// writeJson should NOT have been called in dry-run
-		const writeJsonCalls = mockedFs.writeJson.mock.calls;
-		const profileCall = writeJsonCalls.find((args) =>
-			String(args[0]).endsWith("profile.json"),
+	it("reports done with the merged features in the detail", async () => {
+		mockedFs.pathExists.mockImplementation(async (p: unknown) =>
+			String(p).endsWith("settings.json") ? false : (true as never),
 		);
-		expect(profileCall).toBeUndefined();
+		const steps = await collect(
+			makeOptions({ securityHooks: true, hookProfile: "strict" }),
+		);
+		const step = steps.find(
+			(s) => s.id === "security-hooks" && s.status === "done",
+		);
+		expect(step).toBeDefined();
+		expect(step!.detail).toContain("pre-commit.secrets");
+		expect(step!.detail).toContain("pre-push.deps");
 	});
 });

@@ -10,10 +10,10 @@
  * behavior); a config that FAILS to validate exits 1 — a broken config never
  * silently skips a gate.
  *
- * S1a/S3 scope: the `ci` and `tdd` sections have bodies. The
- * secrets/permissions/deps sections have no factory yet (they land in S4); an
- * enabled-but-unregistered feature is skipped by `composeSections` until its
- * slice wires a factory.
+ * S1a/S3/S4 scope: the `ci`, `tdd`, `secrets`, `permissions` and `deps`
+ * sections all have factories now. `composeSections` still skips any enabled
+ * feature with no registered factory, so a future feature can land the same
+ * way.
  */
 
 import { spawn } from "node:child_process";
@@ -24,6 +24,9 @@ import {
 } from "../lib/ci-config.js";
 import type { Stack } from "../types/index.js";
 import { type CIStep, detectCIStack, runCI } from "./ci.js";
+import { depsSection } from "./hooks/sections/deps.js";
+import { permissionsSection } from "./hooks/sections/permissions.js";
+import { secretsSection } from "./hooks/sections/secrets.js";
 import { getTddTestCommand } from "./tdd.js";
 
 /** A single composable unit of hook work. */
@@ -274,6 +277,12 @@ export function defaultRegistry(
 				runCommand: tddDeps.runCommand ?? runTestCommand,
 				log: tddDeps.log ?? log,
 			}),
+		// S4 security sections. Each resolves its git/fs/exec seams at run time
+		// via the section's own defaults; unit tests inject mocks by importing
+		// the factory directly (see src/commands/hooks/sections/*.test.ts).
+		secrets: () => secretsSection({ log }),
+		permissions: () => permissionsSection({ log }),
+		deps: () => depsSection({ log }),
 	};
 }
 

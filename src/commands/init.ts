@@ -15,7 +15,7 @@ import { stepManifest } from "./init/steps/manifest.js";
 import { stepMemory } from "./init/steps/memory.js";
 import { stepMock } from "./init/steps/mock.js";
 import { stepSDD } from "./init/steps/sdd.js";
-import { stepHookProfile, stepSecurityHooks } from "./init/steps/security.js";
+import { stepSecurityHooks } from "./init/steps/security.js";
 import type { StepCallback, StepContext } from "./init/types.js";
 
 /**
@@ -52,7 +52,6 @@ export async function initProject(
 	await stepClaudeMd(ctx);
 	await stepDockerDeploy(ctx);
 	await stepSecurityHooks(ctx);
-	await stepHookProfile(ctx);
 	await stepCodeGraph(ctx);
 	await stepLocalAi(ctx);
 	await stepAgentSkills(ctx);

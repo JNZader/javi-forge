@@ -5,10 +5,13 @@ import { CIProvider } from "./CIContext.js";
 import HookProfileSelector from "./HookProfileSelector.js";
 
 /**
- * HookProfileSelector — single-select for hook reliability profiles.
+ * HookProfileSelector — single-select for the hook security preset
+ * (hook-consolidation S4). The chosen profile drives WHICH `hooks:` security
+ * sections stepSecurityHooks merges into `.javi-forge/ci.yaml`
+ * (minimal → ci only, standard → secrets+deps, strict → secrets+permissions+deps).
  *
- * Risk: selected profile drives profile.json content. Wrong default or
- * broken selection = wrong hook behavior for all devs on that project.
+ * Risk: wrong default or broken selection = wrong security-section set for all
+ * devs on that project.
  */
 
 function renderWithCI(ui: React.ReactElement, isCI = false) {
@@ -28,16 +31,16 @@ describe("HookProfileSelector", () => {
 		expect(frame).toContain("Strict");
 	});
 
-	it("renders profile descriptions", () => {
+	it("renders the security-preset descriptions", () => {
 		const onConfirm = vi.fn();
 		const { lastFrame } = renderWithCI(
 			React.createElement(HookProfileSelector, { onConfirm }),
 		);
 
 		const frame = lastFrame()!;
-		expect(frame).toContain("pre-commit only");
-		expect(frame).toContain("pre-push");
-		expect(frame).toContain("commit-msg");
+		expect(frame).toContain("CI gate only");
+		expect(frame).toContain("secret scan");
+		expect(frame).toContain("dependency audit");
 	});
 
 	it("defaults to Standard profile (index 1)", () => {

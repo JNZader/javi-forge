@@ -206,7 +206,7 @@ describe("installCIHooks classification and write policy", () => {
 		);
 
 		expect(lines[0]).toBe("#!/bin/bash");
-		expect(lines[1]).toBe("# javi-forge-hook: pre-commit v1");
+		expect(lines[1]).toBe("# javi-forge-hook: pre-commit v2");
 		expect(lines[2]).toBe(
 			`# javi-forge-hash: sha256:${sha256(readAsset("pre-commit"))}`,
 		);
@@ -243,7 +243,7 @@ describe("installCIHooks classification and write policy", () => {
 		expect(result.installed).not.toContain("pre-commit");
 		expect(result.errors).toEqual([]);
 		expect(await fs.readFile(hookPathFor("pre-commit"), "utf8")).toContain(
-			"# javi-forge-hook: pre-commit v1",
+			"# javi-forge-hook: pre-commit v2",
 		);
 	});
 
@@ -291,8 +291,69 @@ describe("installCIHooks classification and write policy", () => {
 		expect(stateOf(result, "pre-commit")).toBe(HOOK_STATE.MANAGED_OUTDATED);
 		expect(result.upgraded).toContain("pre-commit");
 		expect(await fs.readFile(hookPathFor("pre-commit"), "utf8")).toContain(
-			"# javi-forge-hook: pre-commit v1",
+			"# javi-forge-hook: pre-commit v2",
 		);
+	});
+
+	// ── Matrix row b — managed-outdated auto-upgrade (the rollout's load-bearing
+	// path) ────────────────────────────────────────────────────────────────────
+	// A prior-managed install (marker present) carrying the OLD pre-commit(v1)
+	// body — whose hash now lives in historical[] — MUST classify
+	// MANAGED_OUTDATED and silently auto-upgrade to the shim: no --force, listed
+	// under `upgraded`, never `errors`, never FOREIGN. If this regressed, every
+	// existing install would refuse the S1b upgrade and the fleet would freeze on
+	// v1/v2 hooks.
+	const OLD_PRE_COMMIT_V1_BODY =
+		"#!/bin/bash\n" +
+		"# Pre-commit: quick CI check via javi-forge\n" +
+		"# To skip: git commit --no-verify\n" +
+		"set -e\n" +
+		'echo "PRE-COMMIT: Running quick check..."\n' +
+		"if command -v javi-forge &>/dev/null; then\n" +
+		"  javi-forge ci --quick --no-docker --no-security --no-ci-ghagga\n" +
+		"else\n" +
+		"  npx javi-forge ci --quick --no-docker --no-security --no-ci-ghagga\n" +
+		"fi || {\n" +
+		'  echo ""\n' +
+		'  echo "Quick check FAILED — fix the issues above before committing."\n' +
+		'  echo "To skip: git commit --no-verify"\n' +
+		"  exit 1\n" +
+		"}\n";
+
+	it("silently auto-upgrades a prior-managed v1 body (hash in historical[]) to the shim — MANAGED_OUTDATED, not FOREIGN, no --force", async () => {
+		// Sanity: the embedded body really is a released body (its hash is in the
+		// shipped manifest's historical list), so this exercises the true upgrade
+		// path, not a synthetic one.
+		const preCommitEntry = readManifestEntry("pre-commit");
+		expect(preCommitEntry.historical.map((h) => h.sha256)).toContain(
+			sha256(OLD_PRE_COMMIT_V1_BODY),
+		);
+
+		await fs.writeFile(
+			hookPathFor("pre-commit"),
+			withMarker(
+				OLD_PRE_COMMIT_V1_BODY,
+				"pre-commit",
+				1,
+				sha256(OLD_PRE_COMMIT_V1_BODY),
+			),
+		);
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(stateOf(result, "pre-commit")).toBe(HOOK_STATE.MANAGED_OUTDATED);
+		expect(result.upgraded).toContain("pre-commit");
+		expect(result.installed).not.toContain("pre-commit");
+		expect(
+			result.errors.find((e) => e.startsWith("pre-commit:")),
+		).toBeUndefined();
+
+		// The file is now the S1b shim: v2 marker + execs `hooks run pre-commit`,
+		// no leftover `ci --quick` invocation from the old body.
+		const upgraded = await fs.readFile(hookPathFor("pre-commit"), "utf8");
+		expect(upgraded).toContain("# javi-forge-hook: pre-commit v2");
+		expect(upgraded).toContain("javi-forge hooks run pre-commit");
+		expect(upgraded).not.toContain("ci --quick");
 	});
 
 	it("refuses a managed-edited hook, leaving the bytes untouched", async () => {
@@ -509,7 +570,7 @@ describe("installCIHooks --force and the backup protocol", () => {
 		expect(await fs.readFile(`${preCommit}.bak`)).toEqual(original);
 		expect((await fs.stat(`${preCommit}.bak`)).mode & 0o777).toBe(0o700);
 		expect(await fs.readFile(preCommit, "utf8")).toContain(
-			"# javi-forge-hook: pre-commit v1",
+			"# javi-forge-hook: pre-commit v2",
 		);
 	});
 
@@ -638,7 +699,7 @@ describe("installCIHooks --force and the backup protocol", () => {
 		expect(result.errors).toEqual([]);
 		expect(result.installed).toContain("pre-commit");
 		expect(await fs.readFile(preCommit, "utf8")).toContain(
-			"# javi-forge-hook: pre-commit v1",
+			"# javi-forge-hook: pre-commit v2",
 		);
 		expect((await fs.stat(preCommit)).mode & 0o777).toBe(0o755);
 		// The BACKUP keeps the original mode — only the hook is normalized.
@@ -679,7 +740,7 @@ describe("installCIHooks --force and the backup protocol", () => {
 		expect(result.backups).toEqual([]);
 		expect(await fs.pathExists(`${preCommit}.bak`)).toBe(false);
 		expect(await fs.readFile(preCommit, "utf8")).toContain(
-			"# javi-forge-hook: pre-commit v1",
+			"# javi-forge-hook: pre-commit v2",
 		);
 	});
 

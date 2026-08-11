@@ -48,16 +48,18 @@ const RELEASED_SNAPSHOT: Record<
 	{ sha256: string; historical: string[] }
 > = {
 	"pre-commit": {
-		sha256: "811f34ce57517e129554bc9c09801a66c0207332cd3e7f2950db43a40580e914",
+		sha256: "6155f375647d13a8e86aff74d1b17165e0781ce8c94f9f1304724a8a54948b00",
 		historical: [
 			"811f34ce57517e129554bc9c09801a66c0207332cd3e7f2950db43a40580e914",
+			"6155f375647d13a8e86aff74d1b17165e0781ce8c94f9f1304724a8a54948b00",
 		],
 	},
 	"pre-push": {
-		sha256: "3dad58303d81fc513a35339083438a78aa483fcd28e3377f006bd26e8ce76a6d",
+		sha256: "c396387a15c3c448d524f68597a993f6b4341ae06143d2d5907ad914823d0ad0",
 		historical: [
 			"7de58640aeef33085a49f31f1d9d0c8bacde0069d6d3265ae41aa8d3cd14d7a5",
 			"3dad58303d81fc513a35339083438a78aa483fcd28e3377f006bd26e8ce76a6d",
+			"c396387a15c3c448d524f68597a993f6b4341ae06143d2d5907ad914823d0ad0",
 		],
 	},
 	"commit-msg": {
@@ -71,12 +73,13 @@ const RELEASED_SNAPSHOT: Record<
 
 /**
  * Expected shipped `version` per hook. Bumped in lockstep with a body change:
- * commit-msg is at v2 (hooks-ricos Slice A) and pre-push is at v2 (hooks-ricos
- * Slice B); pre-commit remains v1 until its own slice bumps it.
+ * hook-consolidation S1b folds pre-commit (v1→v2) and pre-push (v2→v3) into
+ * static shims that exec `javi-forge hooks run <name>`. commit-msg stays at v2
+ * (unchanged static bash).
  */
 const EXPECTED_VERSION: Record<HookName, number> = {
-	"pre-commit": 1,
-	"pre-push": 2,
+	"pre-commit": 2,
+	"pre-push": 3,
 	"commit-msg": 2,
 };
 
@@ -170,6 +173,39 @@ describe("hook assets", () => {
 			expect(historical.firstCommit).toMatch(/^[0-9a-f]{7,40}$/);
 		}
 		expect(new Set(hashes).size).toBe(hashes.length);
+	});
+});
+
+describe("shim bodies exec the dispatcher (S1b) with honest messaging", () => {
+	it.each([
+		"pre-commit",
+		"pre-push",
+	] as const)("%s execs `javi-forge hooks run <name>` with a fail-closed npx fallback", (hook) => {
+		const body = readAsset(hook).toString("utf8");
+
+		// Both the on-PATH and the npx fallback branches route to the S1b
+		// dispatcher — no leftover `ci --quick` invocation from the old body.
+		expect(body).toContain(`javi-forge hooks run ${hook}`);
+		expect(body).toContain(`npx javi-forge hooks run ${hook}`);
+		expect(body).not.toContain("ci --quick");
+		// Fail-closed: the `|| { … exit 1 }` guard means an offline npx (or any
+		// non-zero) aborts the hook rather than passing silently.
+		expect(body).toContain("exit 1");
+		expect(body).toContain("command -v javi-forge");
+	});
+
+	it("pre-push messaging is HONEST — states what --quick runs, never claims coverage (DOC-004)", () => {
+		const body = readAsset("pre-push").toString("utf8");
+
+		// The old body advertised "validate + coverage"; the shim must not — quick
+		// runs setup+lint+compile+gates only, with NO tests and NO coverage. The
+		// ONLY permitted occurrence of the word "coverage" is the honest negation,
+		// so every occurrence must belong to "no tests, no coverage".
+		expect(body).not.toContain("validate + coverage");
+		expect(body).toContain("no tests, no coverage");
+		const coverageMentions = body.match(/coverage/g)?.length ?? 0;
+		const honestMentions = body.match(/no tests, no coverage/g)?.length ?? 0;
+		expect(coverageMentions).toBe(honestMentions);
 	});
 });
 

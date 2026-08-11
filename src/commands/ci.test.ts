@@ -345,28 +345,29 @@ describe("installCIHooks", () => {
 		expect(await fs.pathExists(path.join(tmpDir, ".git", "hooks"))).toBe(true);
 	});
 
-	it("pre-commit hook delegates to javi-forge with --quick", async () => {
+	it("pre-commit hook execs the `hooks run pre-commit` dispatcher (S1b shim)", async () => {
 		await fs.ensureDir(path.join(tmpDir, ".git"));
 		await installCIHooks(tmpDir);
 		const content = await fs.readFile(
 			path.join(tmpDir, ".git", "hooks", "pre-commit"),
 			"utf-8",
 		);
-		expect(content).toContain("javi-forge ci --quick");
-		expect(content).toContain("--no-docker");
-		expect(content).toContain("--no-security");
-		expect(content).toContain("--no-ci-ghagga");
+		expect(content).toContain("javi-forge hooks run pre-commit");
+		expect(content).toContain("npx javi-forge hooks run pre-commit");
+		// The dispatcher owns the flag set now — the shim no longer hard-codes it.
+		expect(content).not.toContain("ci --quick");
 	});
 
-	it("pre-push hook runs the native quick CI checks (no docker probe)", async () => {
+	it("pre-push hook execs the `hooks run pre-push` dispatcher (S1b shim)", async () => {
 		await fs.ensureDir(path.join(tmpDir, ".git"));
 		await installCIHooks(tmpDir);
 		const content = await fs.readFile(
 			path.join(tmpDir, ".git", "hooks", "pre-push"),
 			"utf-8",
 		);
-		expect(content).toContain("--no-docker");
-		expect(content).toContain("javi-forge ci");
+		expect(content).toContain("javi-forge hooks run pre-push");
+		expect(content).toContain("npx javi-forge hooks run pre-push");
+		expect(content).not.toContain("ci --quick");
 	});
 
 	it("commit-msg hook lists AI attribution patterns", async () => {

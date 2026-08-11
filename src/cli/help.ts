@@ -18,8 +18,8 @@ export const HELP_TEXT = `
     ci                Run CI simulation (lint + compile + test + security + ghagga)
     ci validate       Validate .javi-forge/ci.yaml without running anything
     ci init           Install git hooks that call javi-forge ci
-    tdd init          Install TDD-enforcing pre-commit hook (auto-detects stack)
-    tdd pipeline      Install TDD pipeline pre-push hook (--mode strict|warn)
+    tdd init          Enable the TDD pre-commit section + install managed hooks
+    tdd pipeline      Enable the TDD pre-push section (--mode strict|warn)
     hooks run         Run a git hook's composed sections (pre-commit | pre-push)
     analyze           Run repoforge skills analysis
     doctor            Show health report

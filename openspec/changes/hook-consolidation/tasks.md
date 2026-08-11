@@ -56,11 +56,11 @@ Chain strategy: stacked-to-main
 
 ## S3 — TDD fold [ci-hook-install: Legacy generated TDD hooks migrate via the foreign path | hook-dispatch: Gate plus TDD section]
 
-- [ ] 4.1 RED `src/commands/hooks.test.ts`: tdd section runs `detectCIStack` + `getTddTestCommand` at HOOK RUN time; null testCmd → skip notice, ok:true
-- [ ] 4.2 RED `src/cli/dispatch/tdd.test.ts`: `tdd init` → set `hooks.pre-commit.tdd: true` + `installCIHooks(cwd,{force})`; `tdd pipeline --mode m` → `hooks.pre-push.tdd: m`
-- [ ] 4.3 RED `src/commands/tdd.test.ts` + `src/commands/tdd-pipeline.test.ts`: prune writer tests; matrix **e** — old generated TDD hook classifies FOREIGN → refusal names `--force`; `--force` → COPYFILE_EXCL backup + overwrite
-- [ ] 4.4 GREEN delete `generateTddHook`/`installTddHooks` (src/commands/tdd.ts:56-148) + `generateTddPipelineHook`/`installTddPipelineHook` (src/commands/tdd-pipeline.ts:23-178); KEEP `getTddTestCommand` (tdd.ts:23-46)
-- [ ] 4.5 GREEN `src/cli/dispatch/tdd.ts` handlers rewired to config flags + tdd section added to dispatcher
+- [x] 4.1 RED `src/commands/hooks.test.ts`: tdd section runs `detectCIStack` + `getTddTestCommand` at HOOK RUN time; null testCmd → skip notice, ok:true
+- [x] 4.2 RED `src/cli/dispatch/tdd.test.ts`: `tdd init` → set `hooks.pre-commit.tdd: true` + `installCIHooks(cwd,{force})`; `tdd pipeline --mode m` → `hooks.pre-push.tdd: m`
+- [x] 4.3 RED `src/commands/tdd.test.ts` + `src/commands/tdd-pipeline.test.ts`: prune writer tests; matrix **e** — old generated TDD hook classifies FOREIGN → refusal names `--force`; `--force` → COPYFILE_EXCL backup + overwrite
+- [x] 4.4 GREEN delete `generateTddHook`/`installTddHooks` (src/commands/tdd.ts:56-148) + `generateTddPipelineHook`/`installTddPipelineHook` (src/commands/tdd-pipeline.ts:23-178); KEEP `getTddTestCommand` (tdd.ts:23-46)
+- [x] 4.5 GREEN `src/cli/dispatch/tdd.ts` handlers rewired to config flags + tdd section added to dispatcher
 
 ## S4 — Security fold + K-005 [hook-dispatch: Security sections L1–L3 NUL-safe; L4–L6 are doctor advisories]
 

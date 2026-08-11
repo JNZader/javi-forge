@@ -2,52 +2,101 @@
  * `javi-forge tdd <init|pipeline>` handler.
  *
  * Console-only (no Ink, no React, no CIContextProvider).
- * Lazy-loads ./commands/tdd.js or ./commands/tdd-pipeline.js INSIDE the function
- * to preserve cold-start performance — heavy command modules MUST NOT be
- * eager-imported at the top of this file.
+ *
+ * hook-consolidation S3: the handlers no longer WRITE `.git/hooks` themselves.
+ * They flip the `hooks.*.tdd` flag in `.javi-forge/ci.yaml` and delegate the
+ * hook install to the hardened `installCIHooks` — the single writer of
+ * `.git/hooks`. Heavy modules are lazy-imported INSIDE the function to preserve
+ * cold-start performance.
  */
 
+import type { InstallHooksResult } from "../../commands/ci.js";
 import type { CLI } from "./types.js";
 
-export async function handleTdd(cli: CLI): Promise<void> {
-	if (cli.input[1] === "init") {
-		const { installTddHooks } = await import("../../commands/tdd.js");
-		const { installed, errors } = await installTddHooks(process.cwd());
-		if (installed.length > 0) {
-			console.log(`\u2713 Installed TDD hooks: ${installed.join(", ")}`);
-			console.log("  Pre-commit hook enforces tests must pass before commit");
-		}
-		for (const err of errors) {
-			console.error(`\u2717 ${err}`);
-		}
-		process.exit(errors.length > 0 ? 1 : 0);
-	} else if (cli.input[1] === "pipeline") {
-		const { installTddPipelineHook } = await import(
-			"../../commands/tdd-pipeline.js"
+/** Surface an installCIHooks result to the console (notes → backups → installed
+ * → upgraded → errors), matching the `ci init` output contract. */
+function reportInstall(result: InstallHooksResult): void {
+	for (const note of result.notes) {
+		console.log(`ℹ ${note}`);
+	}
+	for (const backup of result.backups) {
+		console.log(`⚠ Backed up the previous hook → ${backup}`);
+	}
+	if (result.installed.length > 0) {
+		console.log(`✓ Installed git hooks: ${result.installed.join(", ")}`);
+	}
+	for (const hook of result.upgraded) {
+		const was = result.states.find((entry) => entry.name === hook)?.state;
+		console.log(
+			`↑ Upgraded ${hook}${was === undefined ? "" : ` (was ${was})`}`,
 		);
-		const mode =
-			cli.flags.mode === "warn" ? ("warn" as const) : ("strict" as const);
-		const result = await installTddPipelineHook(process.cwd(), mode);
-		if (result.installed.length > 0) {
-			console.log(
-				`\u2713 Installed TDD pipeline hook: ${result.installed.join(", ")} [${result.mode}]`,
-			);
-			console.log(
-				`  Pre-push hook enforces TDD pipeline (${result.mode} mode)`,
-			);
-		}
-		for (const skip of result.skipped) {
-			console.log(`\u26A0 ${skip}`);
-		}
-		for (const err of result.errors) {
-			console.error(`\u2717 ${err}`);
-		}
-		process.exit(result.errors.length > 0 ? 1 : 0);
+	}
+	for (const err of result.errors) {
+		console.error(`✗ ${err}`);
+	}
+}
+
+export async function handleTdd(cli: CLI): Promise<void> {
+	const sub = cli.input[1];
+	const force = cli.flags.force === true;
+
+	if (sub === "init") {
+		const { setHookFeature } = await import("../../lib/ci-config.js");
+		const { installCIHooks } = await import("../../commands/ci.js");
+
+		// Install FIRST: installCIHooks writes generic static shims and does not
+		// depend on the tdd flag (the flag is read at hook-RUN time). Only once the
+		// managed hook is actually in place do we flip the config — otherwise a
+		// refused install (foreign hook / husky core.hooksPath) would leave ci.yaml
+		// claiming tdd:true while no managed hook exists.
+		const result = await installCIHooks(process.cwd(), { force });
+		reportInstall(result);
+		if (result.errors.length > 0) process.exit(1);
+
+		const configPath = await setHookFeature(
+			process.cwd(),
+			"pre-commit",
+			"tdd",
+			true,
+		);
+		console.log(`✓ Enabled TDD in ${configPath} (hooks.pre-commit.tdd: true)`);
+		console.log(
+			"  The pre-commit hook now runs the stack test command via the dispatcher.",
+		);
+		process.exit(0);
+	} else if (sub === "pipeline") {
+		const mode = cli.flags.mode === "warn" ? "warn" : "strict";
+		const { setHookFeature } = await import("../../lib/ci-config.js");
+		const { installCIHooks } = await import("../../commands/ci.js");
+
+		// Install FIRST (see `init` above): never leave the config ahead of a
+		// refused install.
+		const result = await installCIHooks(process.cwd(), { force });
+		reportInstall(result);
+		if (result.errors.length > 0) process.exit(1);
+
+		const configPath = await setHookFeature(
+			process.cwd(),
+			"pre-push",
+			"tdd",
+			mode,
+		);
+		console.log(
+			`✓ Enabled TDD pipeline in ${configPath} (hooks.pre-push.tdd: ${mode})`,
+		);
+		console.log(
+			mode === "warn"
+				? "  The pre-push hook runs tests as an ADVISORY section (never blocks)."
+				: "  The pre-push hook BLOCKS the push when tests fail.",
+		);
+		process.exit(0);
 	} else {
 		console.error("Usage: javi-forge tdd <command>");
-		console.error("  init      Install TDD-enforcing pre-commit hook");
 		console.error(
-			"  pipeline  Install TDD pipeline pre-push hook (--mode strict|warn)",
+			"  init      Enable the TDD pre-commit section and install the managed hooks",
+		);
+		console.error(
+			"  pipeline  Enable the TDD pre-push section (--mode strict|warn)",
 		);
 		process.exit(1);
 	}

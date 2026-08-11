@@ -10,17 +10,21 @@
  * behavior); a config that FAILS to validate exits 1 — a broken config never
  * silently skips a gate.
  *
- * S1a scope: only the `ci` section has a body. The tdd/secrets/permissions/deps
- * sections have no factory yet (they land in S3/S4); an enabled-but-unregistered
- * feature is skipped by `composeSections` until its slice wires a factory.
+ * S1a/S3 scope: the `ci` and `tdd` sections have bodies. The
+ * secrets/permissions/deps sections have no factory yet (they land in S4); an
+ * enabled-but-unregistered feature is skipped by `composeSections` until its
+ * slice wires a factory.
  */
 
+import { spawn } from "node:child_process";
 import {
 	type CIHooksConfig,
 	findCIConfig,
 	loadCIConfig,
 } from "../lib/ci-config.js";
-import { type CIStep, runCI } from "./ci.js";
+import type { Stack } from "../types/index.js";
+import { type CIStep, detectCIStack, runCI } from "./ci.js";
+import { getTddTestCommand } from "./tdd.js";
 
 /** A single composable unit of hook work. */
 export interface HookSection {
@@ -154,11 +158,123 @@ function reportStep(step: CIStep, log: (msg: string) => void): void {
 	else if (step.status === "warning") log(`  ⚠ ${step.label}`);
 }
 
-function defaultRegistry(
+/**
+ * Injectable seams for the `tdd` section. The section resolves the project's
+ * test command at HOOK-RUN time (never interpolated into a file), so the stack
+ * detector, the command resolver and the command runner are all overridable in
+ * tests. Every field defaults to the real implementation in `defaultRegistry`.
+ */
+export interface TddSectionDeps {
+	/** Only the stack + build tool are consumed — the wider CIStackInfo is fine. */
+	detectStack: (
+		projectDir: string,
+	) => Promise<{ stackType: Stack; buildTool: string }>;
+	resolveTestCmd: typeof getTddTestCommand;
+	runCommand: (
+		cmd: string,
+		projectDir: string,
+	) => Promise<{ ok: boolean; detail?: string }>;
+	log: (msg: string) => void;
+}
+
+/**
+ * Run a resolved test command through `bash -c`, matching the rest of the
+ * codebase's project-command idiom (`runStep` in ci.ts). `getTddTestCommand`
+ * only ever returns a fixed, controlled set of commands (`npm test`,
+ * `<buildTool> run test`, `pytest`, `go test ./...`) — never user input — so
+ * `bash -c` introduces no injection vector, and it fixes native Windows where
+ * `npm`/`pnpm`/`yarn` are `.cmd` shims that a shell-less `spawn` cannot exec
+ * (ENOENT). A non-zero exit or a spawn error is a blocking failure; a passing
+ * command is ok:true.
+ */
+function runTestCommand(
+	cmd: string,
+	projectDir: string,
+): Promise<{ ok: boolean; detail?: string }> {
+	return new Promise((resolve) => {
+		const proc = spawn("bash", ["-c", cmd], {
+			cwd: projectDir,
+			stdio: "inherit",
+			env: { ...process.env, CI: "true" },
+		});
+		proc.on("close", (code) =>
+			resolve(
+				code === 0
+					? { ok: true }
+					: { ok: false, detail: `tests failed (exit ${code ?? "unknown"})` },
+			),
+		);
+		proc.on("error", (e) =>
+			resolve({
+				ok: false,
+				detail: e instanceof Error ? e.message : String(e),
+			}),
+		);
+	});
+}
+
+/**
+ * The `tdd` section: at hook-run time it detects the stack, resolves the stack
+ * test command and runs it. A null command (no test runner configured) is NOT a
+ * failure — it prints an honest skip notice and returns ok:true (parity with the
+ * old warning-only generated hook). A missing test runner must never block a
+ * commit or push. When the command resolves it runs and its exit code decides.
+ */
+export function tddSection(deps: TddSectionDeps): HookSection {
+	return {
+		id: "tdd",
+		blocking: true,
+		async run({ projectDir }) {
+			// A thrown detector / resolver / runner must NEVER propagate out of the
+			// section — an unhandled rejection would crash the hook (raw stack trace)
+			// and, for an advisory pre-push tdd:"warn", would BLOCK the push,
+			// violating the advisory-never-blocks invariant. Mirror ciSection: on a
+			// throw, report a blocking-mappable failure instead.
+			try {
+				const { stackType, buildTool } = await deps.detectStack(projectDir);
+				const testCmd = await deps.resolveTestCmd(
+					stackType,
+					buildTool,
+					projectDir,
+				);
+				if (testCmd === null) {
+					deps.log(
+						`  ⓘ tdd: no test command detected for stack '${stackType}' — skipping (a missing test runner does not block).`,
+					);
+					return { ok: true };
+				}
+				deps.log(`  ▶ tdd: ${testCmd}`);
+				return await deps.runCommand(testCmd, projectDir);
+			} catch (e) {
+				return {
+					ok: false,
+					detail: e instanceof Error ? e.message : String(e),
+				};
+			}
+		},
+	};
+}
+
+/**
+ * The default section registry: the real `ci` and `tdd` factories. `tddDeps`
+ * overrides the tdd section's seams in tests (stack/command/runner); every
+ * omitted seam falls back to the real implementation.
+ */
+export function defaultRegistry(
 	runCIImpl: typeof runCI,
 	log: (msg: string) => void,
+	tddDeps: Partial<TddSectionDeps> = {},
 ): SectionRegistry {
-	return { ci: () => ciSection(runCIImpl, log) };
+	return {
+		ci: () => ciSection(runCIImpl, log),
+		tdd: () =>
+			tddSection({
+				detectStack: tddDeps.detectStack ?? detectCIStack,
+				resolveTestCmd: tddDeps.resolveTestCmd ?? getTddTestCommand,
+				runCommand: tddDeps.runCommand ?? runTestCommand,
+				log: tddDeps.log ?? log,
+			}),
+	};
 }
 
 /** Resolve the parsed `hooks:` config for a project (null → default [ci]). */

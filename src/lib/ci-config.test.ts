@@ -8,6 +8,7 @@ import {
 	findCIConfig,
 	loadCIConfig,
 	parseCIConfig,
+	setHookFeature,
 	validateGates,
 } from "./ci-config.js";
 
@@ -746,5 +747,95 @@ describe("parseCIConfig — hooks: schema", () => {
 
 	it("rejects a hook entry that is not a mapping (fail closed)", () => {
 		expectError("version: 2\nhooks:\n  pre-commit: true", /pre-commit/);
+	});
+});
+
+// =============================================================================
+// setHookFeature — minimal writer used by `tdd init` / `tdd pipeline` (S3)
+// =============================================================================
+
+describe("setHookFeature", () => {
+	let tmpDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-sethook-"));
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+	});
+
+	it("creates a minimal version:2 ci.yaml with the flag when none exists", async () => {
+		const written = await setHookFeature(tmpDir, "pre-commit", "tdd", true);
+
+		expect(written).toBe(path.join(tmpDir, ".javi-forge", "ci.yaml"));
+		const config = await loadCIConfig(written);
+		expect(config.version).toBe(2);
+		expect(config.hooks?.preCommit.tdd).toBe(true);
+	});
+
+	it("serializes pre-push.tdd:'strict' in a form validatePushTdd accepts", async () => {
+		const written = await setHookFeature(tmpDir, "pre-push", "tdd", "strict");
+		const config = await loadCIConfig(written);
+		expect(config.hooks?.prePush.tdd).toBe("strict");
+	});
+
+	it("merges into an existing config, preserving runners and other hooks", async () => {
+		await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
+		await fs.writeFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			[
+				"version: 2",
+				"runners:",
+				"  - name: api",
+				"    stack: go",
+				"hooks:",
+				"  pre-commit:",
+				"    secrets: true",
+			].join("\n"),
+		);
+
+		await setHookFeature(tmpDir, "pre-push", "tdd", "warn");
+
+		const config = await loadCIConfig(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+		);
+		// Pre-existing content survives the merge…
+		expect(config.runners.map((r) => r.name)).toEqual(["api"]);
+		expect(config.hooks?.preCommit.secrets).toBe(true);
+		// …and the new flag is applied.
+		expect(config.hooks?.prePush.tdd).toBe("warn");
+	});
+
+	it("bumps a version:1 config to version:2 when a hook feature is added", async () => {
+		await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
+		await fs.writeFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			"version: 1\nrunners:\n  - name: api\n    stack: go\n",
+		);
+
+		await setHookFeature(tmpDir, "pre-commit", "tdd", true);
+
+		const config = await loadCIConfig(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+		);
+		expect(config.version).toBe(2);
+		expect(config.hooks?.preCommit.tdd).toBe(true);
+		expect(config.runners.map((r) => r.name)).toEqual(["api"]);
+	});
+
+	it("throws CIConfigError and leaves a malformed config BYTE-IDENTICAL (fail-closed)", async () => {
+		await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
+		const configPath = path.join(tmpDir, ".javi-forge", "ci.yaml");
+		// Unparseable YAML (unclosed flow map) — parseDocument records doc.errors.
+		const malformed = "version: 2\nhooks: {pre-commit: {tdd: true\n";
+		await fs.writeFile(configPath, malformed);
+
+		await expect(
+			setHookFeature(tmpDir, "pre-commit", "tdd", true),
+		).rejects.toBeInstanceOf(CIConfigError);
+
+		// The malformed file must NOT be written over.
+		expect(await fs.readFile(configPath, "utf-8")).toBe(malformed);
 	});
 });

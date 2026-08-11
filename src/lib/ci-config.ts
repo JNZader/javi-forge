@@ -845,6 +845,52 @@ export async function loadCIConfig(configPath: string): Promise<CIConfig> {
 }
 
 /**
+ * Set a single `hooks.<hook>.<feature>` flag in a project's CI config, creating
+ * a minimal `version: 2` `.javi-forge/ci.yaml` when none exists. Existing
+ * content — runners, gates, other hooks, comments and formatting — is preserved
+ * via a YAML document round-trip (`parseDocument`), so this NEVER clobbers a
+ * hand-authored config. `hooks:` is a v2-only key, so the version is bumped to 2
+ * when a hook feature is written into an older document. Returns the path
+ * written. Fail-closed callers still validate on the next `loadCIConfig`.
+ */
+export async function setHookFeature(
+	projectDir: string,
+	hook: "pre-commit" | "pre-push",
+	feature: string,
+	value: boolean | string,
+): Promise<string> {
+	const existing = await findCIConfig(projectDir);
+	const configPath = existing ?? path.join(projectDir, CI_CONFIG_CANDIDATES[0]);
+
+	const doc = existing
+		? YAML.parseDocument(await fs.readFile(existing, "utf-8"))
+		: YAML.parseDocument("version: 2\n");
+
+	// Fail-closed: never write over a malformed config. A parse error means the
+	// document is only partially represented, so setIn + write would silently
+	// drop the unparseable remainder of a hand-authored file.
+	if (doc.errors.length > 0) {
+		throw new CIConfigError(
+			doc.errors.map((e) => ({
+				path: "<document>",
+				message: `invalid YAML: ${e.message.split("\n")[0]}`,
+			})),
+			configPath,
+		);
+	}
+
+	// `hooks:` requires version 2; bump an older/unset document in place.
+	if (doc.get("version") !== 2) {
+		doc.set("version", 2);
+	}
+	doc.setIn(["hooks", hook, feature], value);
+
+	await fs.ensureDir(path.dirname(configPath));
+	await fs.writeFile(configPath, doc.toString());
+	return configPath;
+}
+
+/**
  * Discover the default CI config for a project directory.
  * Returns the config path, or null when the project has no config
  * (single-stack auto-detection stays the default).

@@ -1,11 +1,15 @@
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { generateTddHook, getTddTestCommand, installTddHooks } from "./tdd.js";
+import { installCIHooks } from "./ci.js";
+import { getTddTestCommand } from "./tdd.js";
 
 // =============================================================================
-// getTddTestCommand
+// getTddTestCommand — the ONLY survivor of the TDD fold (S3). The generated-hook
+// writers (generateTddHook / installTddHooks) are deleted; the dispatcher's tdd
+// section resolves the command at hook-run time instead.
 // =============================================================================
 
 describe("getTddTestCommand", () => {
@@ -82,148 +86,76 @@ describe("getTddTestCommand", () => {
 });
 
 // =============================================================================
-// generateTddHook
+// Migration matrix row e — a legacy generated TDD pre-commit hook (interpolated
+// body, NO javi-forge marker) classifies FOREIGN, so installCIHooks refuses it
+// naming --force; with --force it is backed up (COPYFILE_EXCL ladder) and the
+// managed shim overwrites it. That existing refusal+backup path IS the whole
+// migration — no bespoke TDD-hook migration code exists.
 // =============================================================================
 
-describe("generateTddHook", () => {
-	it("generates valid bash script with shebang for node", () => {
-		const hook = generateTddHook("pnpm run test", "node");
-		expect(hook).toContain("#!/bin/bash");
-		expect(hook).toContain("set -e");
-		expect(hook).toContain("pnpm run test");
-		expect(hook).toContain("Stack: node");
-	});
+/** A representative body written by the DELETED generateTddHook (no marker). */
+const LEGACY_TDD_HOOK = `#!/bin/bash
+# =============================================================================
+# TDD PRE-COMMIT: Enforced test-driven development
+# =============================================================================
+# Stack: node | Command: pnpm run test
+# To skip: git commit --no-verify
+# =============================================================================
 
-	it("generates hook with pytest for python", () => {
-		const hook = generateTddHook("pytest", "python");
-		expect(hook).toContain("pytest");
-		expect(hook).toContain("Stack: python");
-	});
+set -e
 
-	it("generates hook with go test for go", () => {
-		const hook = generateTddHook("go test ./...", "go");
-		expect(hook).toContain("go test ./...");
-		expect(hook).toContain("Stack: go");
-	});
+echo "TDD PRE-COMMIT: Running tests..."
+pnpm run test || {
+    echo "TDD FAILED — Tests did not pass."
+    exit 1
+}
+`;
 
-	it("generates warning hook when testCmd is null", () => {
-		const hook = generateTddHook(null, "rust");
-		expect(hook).toContain("#!/bin/bash");
-		expect(hook).toContain("No test command");
-		expect(hook).toContain("exit 0");
-		expect(hook).not.toContain("set -e");
-	});
-
-	it("includes skip instruction in test hook", () => {
-		const hook = generateTddHook("npm test", "node");
-		expect(hook).toContain("git commit --no-verify");
-	});
-
-	it("includes TDD FAILED message on test failure", () => {
-		const hook = generateTddHook("npm test", "node");
-		expect(hook).toContain("TDD FAILED");
-	});
-
-	it("includes TDD PASSED message on success", () => {
-		const hook = generateTddHook("npm test", "node");
-		expect(hook).toContain("TDD PASSED");
-	});
-});
-
-// =============================================================================
-// installTddHooks
-// =============================================================================
-
-describe("installTddHooks", () => {
+describe("legacy generated TDD hook migrates via the foreign path (matrix e)", () => {
 	let tmpDir: string;
+	const preCommit = (dir: string): string =>
+		path.join(dir, ".git", "hooks", "pre-commit");
 
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(
-			path.join(os.tmpdir(), "javi-forge-tdd-install-"),
+			path.join(os.tmpdir(), "javi-forge-tdd-migrate-"),
 		);
+		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		await fs.ensureDir(path.join(tmpDir, ".git", "hooks"));
+		await fs.writeFile(preCommit(tmpDir), LEGACY_TDD_HOOK, { mode: 0o755 });
 	});
 
 	afterEach(async () => {
 		await fs.remove(tmpDir);
 	});
 
-	it("returns error when not a git repository", async () => {
-		const result = await installTddHooks(tmpDir);
-		expect(result.installed).toEqual([]);
-		expect(result.errors).toContain(
-			"Not a git repository. Run git init first.",
+	it("classifies FOREIGN and refuses without --force, leaving the body untouched", async () => {
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.states.find((s) => s.name === "pre-commit")?.state).toBe(
+			"foreign",
 		);
+		const error = result.errors.find((e) => e.startsWith("pre-commit"));
+		expect(error).toBeDefined();
+		expect(error).toContain("--force");
+		// Zero mutation: the legacy body is still exactly what we wrote.
+		expect(await fs.readFile(preCommit(tmpDir), "utf8")).toBe(LEGACY_TDD_HOOK);
 	});
 
-	it("installs pre-commit hook in git repo with node stack", async () => {
-		await fs.ensureDir(path.join(tmpDir, ".git"));
-		await fs.writeJson(path.join(tmpDir, "package.json"), {
-			scripts: { test: "vitest run" },
-		});
-		await fs.writeFile(path.join(tmpDir, "pnpm-lock.yaml"), "");
+	it("with --force backs the legacy body up and overwrites it with the managed shim", async () => {
+		const result = await installCIHooks(tmpDir, { force: true });
 
-		const result = await installTddHooks(tmpDir);
-		expect(result.installed).toContain("pre-commit");
 		expect(result.errors).toEqual([]);
+		expect(result.backups.length).toBeGreaterThan(0);
 
-		// Verify hook file exists and is executable
-		const hookPath = path.join(tmpDir, ".git", "hooks", "pre-commit");
-		expect(await fs.pathExists(hookPath)).toBe(true);
+		// The backup preserves the original legacy body byte-for-byte.
+		const backup = result.backups.find((b) => b.includes("pre-commit"));
+		expect(backup).toBeDefined();
+		expect(await fs.readFile(backup as string, "utf8")).toBe(LEGACY_TDD_HOOK);
 
-		const stat = await fs.stat(hookPath);
-		// Check executable bit (owner execute = 0o100)
-		expect(stat.mode & 0o111).toBeGreaterThan(0);
-
-		// Verify content references the right test command
-		const content = await fs.readFile(hookPath, "utf-8");
-		expect(content).toContain("pnpm run test");
-	});
-
-	it("installs warning hook for unknown stack", async () => {
-		await fs.ensureDir(path.join(tmpDir, ".git"));
-		// No package.json, no go.mod, etc. — defaults to node with no test script
-
-		const result = await installTddHooks(tmpDir);
-		expect(result.installed).toContain("pre-commit");
-
-		const hookPath = path.join(tmpDir, ".git", "hooks", "pre-commit");
-		const content = await fs.readFile(hookPath, "utf-8");
-		expect(content).toContain("No test command");
-	});
-
-	it("installs hook for python stack", async () => {
-		await fs.ensureDir(path.join(tmpDir, ".git"));
-		await fs.writeFile(path.join(tmpDir, "pyproject.toml"), "");
-
-		const result = await installTddHooks(tmpDir);
-		expect(result.installed).toContain("pre-commit");
-
-		const hookPath = path.join(tmpDir, ".git", "hooks", "pre-commit");
-		const content = await fs.readFile(hookPath, "utf-8");
-		expect(content).toContain("pytest");
-	});
-
-	it("installs hook for go stack", async () => {
-		await fs.ensureDir(path.join(tmpDir, ".git"));
-		await fs.writeFile(path.join(tmpDir, "go.mod"), "module example.com/app");
-
-		const result = await installTddHooks(tmpDir);
-		expect(result.installed).toContain("pre-commit");
-
-		const hookPath = path.join(tmpDir, ".git", "hooks", "pre-commit");
-		const content = await fs.readFile(hookPath, "utf-8");
-		expect(content).toContain("go test ./...");
-	});
-
-	it("creates hooks directory if missing", async () => {
-		await fs.ensureDir(path.join(tmpDir, ".git"));
-		await fs.writeFile(path.join(tmpDir, "pyproject.toml"), "");
-
-		// .git/hooks does not exist yet
-		expect(await fs.pathExists(path.join(tmpDir, ".git", "hooks"))).toBe(false);
-
-		const result = await installTddHooks(tmpDir);
-		expect(result.installed).toContain("pre-commit");
-		expect(await fs.pathExists(path.join(tmpDir, ".git", "hooks"))).toBe(true);
+		// The live hook is now the managed shim (marker present, not the old body).
+		const live = await fs.readFile(preCommit(tmpDir), "utf8");
+		expect(live).toContain("# javi-forge-hook: pre-commit");
+		expect(live).not.toContain("TDD PRE-COMMIT");
 	});
 });

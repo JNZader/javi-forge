@@ -64,13 +64,13 @@ Chain strategy: stacked-to-main
 
 ## S4 — Security fold + K-005 [hook-dispatch: Security sections L1–L3 NUL-safe; L4–L6 are doctor advisories]
 
-- [ ] 5.1 RED `src/commands/hooks/sections/*.test.ts`: L1 golden-case fidelity tests incl. whitespace-named staged file (`app secrets.env`) with planted AKIA key scanned as ONE path (**K-005 regression**); NUL-safe argv (no shell, no xargs); 512-file argv chunking; L2 tool-missing → advisory skip ok:true; L3 world-writable/unexpected-executable checks
-- [ ] 5.2 RED `src/commands/doctor.test.ts`: `commit-signing` advisory (L4+L6 merged — one check) + `branch-protection` advisory (gh+GitHub → API probe, 404 → warn; GitLab/no-gh → skip-with-note)
-- [ ] 5.3 RED `src/commands/init/steps/security.test.ts`: no `ci-local/hooks/security/` copy; `.claude/settings.json` copy KEPT; securityHooks → merge `hooks:{pre-commit:{secrets,permissions},pre-push:{deps}}` into ci.yaml (create minimal v2 if absent)
-- [ ] 5.4 RED `src/commands/init.test.ts` (:201-213 + :263-276 — REMOVE "hook-profile" step assertions, drop from exact step-id sequence) + `src/__integration__/init.integration.test.ts` (:63-67, :494, :550 — remove hookProfile drive-through, keep securityHooks path) + `src/ui/HookProfileSelector.test.tsx` (preset-mapper minimal/standard/strict or removal — JD flag)
-- [ ] 5.5 GREEN `src/commands/hooks/sections/` L1 secret-scan (`git diff --cached --name-only --diff-filter=ACM -z`, split `"\0"`, execFileAsync argv batches of 512) / L2 dep-audit ladder / L3 permissions (`fs.stat` mode checks)
-- [ ] 5.6 GREEN doctor "Security" section in `runDoctor` (src/commands/doctor.ts:53), existing `DoctorCheck` shape, zero renderer changes
-- [ ] 5.7 GREEN `stepSecurityHooks` (security.ts:22-92) drops subdir copy + merges `hooks:`; **delete `stepHookProfile`** (security.ts:105-150) + profile.json; delete `templates/security-hooks/` git-hook bodies (keep `claude-settings-security.json`)
+- [x] 5.1 RED `src/commands/hooks/sections/*.test.ts`: L1 golden-case fidelity tests incl. whitespace-named staged file (`app secrets.env`) with planted AKIA key scanned as ONE path (**K-005 regression**); NUL-safe argv (no shell, no xargs); 512-file argv chunking; L2 tool-missing → advisory skip ok:true; L3 world-writable/unexpected-executable checks
+- [x] 5.2 RED `src/commands/doctor.test.ts`: `commit-signing` advisory (L4+L6 merged — one check) + `branch-protection` advisory (gh+GitHub → API probe, 404 → warn; GitLab/no-gh → skip-with-note)
+- [x] 5.3 RED `src/commands/init/steps/security.test.ts`: no `ci-local/hooks/security/` copy; `.claude/settings.json` copy KEPT; securityHooks → merge `hooks:{pre-commit:{secrets,permissions},pre-push:{deps}}` into ci.yaml (create minimal v2 if absent)
+- [x] 5.4 RED `src/commands/init.test.ts` (:201-213 + :263-276 — REMOVE "hook-profile" step assertions, drop from exact step-id sequence) + `src/__integration__/init.integration.test.ts` (:63-67, :494, :550 — remove hookProfile drive-through, keep securityHooks path) + `src/ui/HookProfileSelector.test.tsx` (preset-mapper minimal/standard/strict or removal — JD flag)
+- [x] 5.5 GREEN `src/commands/hooks/sections/` L1 secret-scan (`git diff --cached --name-only --diff-filter=ACM -z`, split `"\0"`, execFileAsync argv batches of 512) / L2 dep-audit ladder / L3 permissions (`fs.stat` mode checks)
+- [x] 5.6 GREEN doctor "Security" section in `runDoctor` (src/commands/doctor.ts:53), existing `DoctorCheck` shape, zero renderer changes
+- [x] 5.7 GREEN `stepSecurityHooks` (security.ts:22-92) drops subdir copy + merges `hooks:`; **delete `stepHookProfile`** (security.ts:105-150) + profile.json; delete `templates/security-hooks/` git-hook bodies (keep `claude-settings-security.json`)
 
 ## S5 — Docs + e2e + deprecation [hook-dispatch: Honest pre-push messaging]
 

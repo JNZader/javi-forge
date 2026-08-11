@@ -776,6 +776,41 @@ runners:
 		await writeConfig("version: 1\nrunners: []");
 		await expect(resolveCIRunners(tmpDir)).rejects.toThrow(/runners/i);
 	});
+
+	it("JD-B-001: a hooks-only v2 config falls through to zero-config auto-detect", async () => {
+		// S4's default hook init writes a ci.yaml carrying ONLY version+hooks (no
+		// runners, no gates). That must NOT suppress auto-detection: `javi-forge ci`
+		// still has to run a real runner, not a zero-runner no-op.
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			scripts: { lint: "eslint .", test: "vitest" },
+		});
+		await fs.writeFile(path.join(tmpDir, "pnpm-lock.yaml"), "");
+		await writeConfig(`
+version: 2
+hooks:
+  pre-commit:
+    ci: true
+`);
+
+		const resolved = await resolveCIRunners(tmpDir);
+		expect(resolved.source).toBe("auto");
+		expect(resolved.runners).toHaveLength(1);
+		expect(resolved.runners[0]?.stack).toBe("node");
+	});
+
+	it("JD-B-001 regression: a gates-only v2 config still resolves source:config, zero runners", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: smoke
+    run: echo ok
+`);
+
+		const resolved = await resolveCIRunners(tmpDir);
+		expect(resolved.source).toBe("config");
+		expect(resolved.runners).toHaveLength(0);
+		expect(resolved.gates.map((g) => g.id)).toEqual(["smoke"]);
+	});
 });
 
 // =============================================================================
@@ -837,6 +872,46 @@ runners:
 			"lint:backend",
 			"lint:frontend",
 		]);
+	});
+
+	it("JD-B-001: a hooks-only ci.yaml still drives the auto-detected runner (not a no-op)", async () => {
+		// With ONLY version+hooks in ci.yaml, `javi-forge ci` must fall through to
+		// auto-detect and actually run the node runner's lint — never short-circuit
+		// to a zero-runner exit-0 no-op.
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			scripts: { lint: "echo linted >> ran.txt" },
+		});
+		await fs.writeFile(path.join(tmpDir, "package-lock.json"), "{}");
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			`
+version: 2
+hooks:
+  pre-commit:
+    ci: true
+`,
+		);
+
+		const steps: CIStep[] = [];
+		await runCI(
+			{
+				projectDir: tmpDir,
+				mode: "quick",
+				noDocker: true,
+				noGhagga: true,
+				noSecurity: true,
+			},
+			(s) => steps.push({ ...s }),
+		);
+
+		// The auto node runner detected + linted (script actually ran) — not a no-op.
+		expect(steps.some((s) => s.id === "detect" && s.status === "done")).toBe(
+			true,
+		);
+		expect(steps.some((s) => s.id === "lint" && s.status === "done")).toBe(
+			true,
+		);
+		expect(await fs.pathExists(path.join(tmpDir, "ran.txt"))).toBe(true);
 	});
 
 	it("fails the run when any configured runner fails", async () => {

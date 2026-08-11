@@ -47,6 +47,126 @@ async function countDir(dir: string): Promise<number> {
 	return entries.filter((e) => !e.startsWith(".")).length;
 }
 
+/** Read a single git config value, "" when unset or on any error. */
+async function gitConfigValue(cwd: string, key: string): Promise<string> {
+	try {
+		const { stdout } = await execFileAsync("git", ["config", "--get", key], {
+			cwd,
+		});
+		return stdout.trim();
+	} catch {
+		return "";
+	}
+}
+
+interface RemoteInfo {
+	host: "github" | "gitlab" | "other";
+	owner: string;
+	repo: string;
+}
+
+/** Parse an origin remote URL (ssh or https) into host/owner/repo. */
+export function parseRemote(url: string): RemoteInfo | null {
+	const trimmed = url.trim();
+	if (!trimmed) return null;
+	// git@host:owner/repo(.git) | ssh://git@host/owner/repo | https://host/owner/repo(.git)
+	const m = trimmed.match(
+		/(?:git@|https?:\/\/|ssh:\/\/(?:git@)?)([^/:]+)[/:]([^/]+)\/(.+?)(?:\.git)?$/,
+	);
+	if (!m) return null;
+	const [, hostRaw, owner, repo] = m;
+	const host = hostRaw.includes("github")
+		? "github"
+		: hostRaw.includes("gitlab")
+			? "gitlab"
+			: "other";
+	return { host, owner, repo };
+}
+
+/**
+ * L4+L6 advisory (merged — signing is one check): report `ok` when commit
+ * signing is fully configured (`commit.gpgsign=true` AND `user.signingkey`
+ * set), otherwise `skip` with the enable snippet. Doctor is read-only — this is
+ * a recommendation, never a gate (a hook enforcing it was trivially bypassed
+ * with `--no-verify`).
+ */
+async function commitSigningCheck(cwd: string): Promise<DoctorCheck> {
+	const gpgSign = await gitConfigValue(cwd, "commit.gpgsign");
+	const signingKey = await gitConfigValue(cwd, "user.signingkey");
+	if (gpgSign === "true" && signingKey) {
+		return {
+			label: "Commit signing",
+			status: "ok",
+			detail: "signing enabled (commit.gpgsign=true)",
+		};
+	}
+	return {
+		label: "Commit signing",
+		status: "skip",
+		detail:
+			"not configured — enable with: git config commit.gpgsign true && git config user.signingkey <KEY>",
+	};
+}
+
+/**
+ * L5 advisory: server-side branch protection is the real control (the old local
+ * push-blocking hook was CI-exempt and `--no-verify`-bypassable). When `gh` is
+ * on PATH and origin is GitHub, probe the branch protection API; a missing
+ * probe or protection is a non-alarming `skip` (advisory, not a failure).
+ * GitLab or no `gh` → `skip` with a note to verify in the forge UI.
+ */
+async function branchProtectionCheck(cwd: string): Promise<DoctorCheck> {
+	const remote = parseRemote(await gitConfigValue(cwd, "remote.origin.url"));
+	const label = "Branch protection";
+
+	if (!remote || remote.host === "other") {
+		return {
+			label,
+			status: "skip",
+			detail:
+				"no GitHub/GitLab origin — verify branch protection in the forge UI",
+		};
+	}
+	if (remote.host === "gitlab" || !(await which("gh"))) {
+		return {
+			label,
+			status: "skip",
+			detail: "verify branch protection in the forge UI",
+		};
+	}
+
+	// gh + GitHub: resolve the default branch, then probe protection.
+	let branch = "main";
+	try {
+		const { stdout } = await execFileAsync(
+			"git",
+			["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+			{ cwd },
+		);
+		branch = stdout.trim().replace(/^origin\//, "") || "main";
+	} catch {
+		/* fall back to main */
+	}
+
+	try {
+		await execFileAsync("gh", [
+			"api",
+			`repos/${remote.owner}/${remote.repo}/branches/${branch}/protection`,
+		]);
+		return {
+			label,
+			status: "ok",
+			detail: `server-side protection enabled on ${branch}`,
+		};
+	} catch {
+		return {
+			label,
+			status: "skip",
+			detail: `no server-side branch protection detected on ${branch}`,
+		};
+	}
+}
+
 /**
  * Run comprehensive health checks for the project and framework.
  */
@@ -90,6 +210,15 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 		}
 	}
 	sections.push({ title: "System Tools", checks: toolChecks });
+
+	// ── 1b. Security (advisories, read-only) ────────────────────────────────────
+	// L4/L6 (commit signing) and L5 (branch protection) are advisories, NOT hooks
+	// (hook-consolidation D9): doctor reports, nothing blocks.
+	const securityChecks: DoctorCheck[] = [
+		await commitSigningCheck(cwd),
+		await branchProtectionCheck(cwd),
+	];
+	sections.push({ title: "Security", checks: securityChecks });
 
 	// ── 2. Framework Structure ─────────────────────────────────────────────────
 	const structureChecks: DoctorCheck[] = [];

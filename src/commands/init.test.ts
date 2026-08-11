@@ -37,6 +37,15 @@ vi.mock("./ci.js", () => ({
 	}),
 }));
 
+// ── Mock the hooks-config writer (S4 security fold) ──────────────────────────
+// stepSecurityHooks merges `hooks:` features via setHookFeature; stub it so the
+// orchestration suite does not touch a real ci.yaml.
+vi.mock("../lib/ci-config.js", () => ({
+	setHookFeature: vi
+		.fn()
+		.mockResolvedValue("/test/project/.javi-forge/ci.yaml"),
+}));
+
 // ── Mock template module ─────────────────────────────────────────────────────
 vi.mock("../lib/template.js", () => ({
 	generateDependabotYml: vi.fn().mockResolvedValue("dependabot-content"),
@@ -213,7 +222,7 @@ describe("initProject", () => {
 		expect(skillsIdx).toBeLessThan(manifestIdx);
 	});
 
-	it("hook-profile step runs after security-hooks", async () => {
+	it("ci-template step runs before security-hooks (S4: the hooks merge needs ci.yaml)", async () => {
 		mockedFs.pathExists.mockImplementation(async (p: unknown) => {
 			const s = String(p);
 			if (s.endsWith(".git")) return false as never;
@@ -224,10 +233,11 @@ describe("initProject", () => {
 			makeOptions({ securityHooks: true, hookProfile: "standard" }),
 		);
 		const stepIds = steps.map((s) => s.id);
+		const ciTemplateIdx = stepIds.indexOf("ci-template");
 		const securityIdx = stepIds.lastIndexOf("security-hooks");
-		const profileIdx = stepIds.indexOf("hook-profile");
 
-		expect(profileIdx).toBeGreaterThan(securityIdx);
+		expect(ciTemplateIdx).toBeGreaterThanOrEqual(0);
+		expect(securityIdx).toBeGreaterThan(ciTemplateIdx);
 	});
 
 	// ── Step ordering contract ────────────────────────────────────────────────
@@ -288,7 +298,6 @@ describe("initProject", () => {
 			"claude-md",
 			"docker-deploy",
 			"security-hooks",
-			"hook-profile",
 			"code-graph",
 			"local-ai",
 			"agent-skills",

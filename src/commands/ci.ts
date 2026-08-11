@@ -437,11 +437,21 @@ export async function resolveCIRunners(
 	const configPath = config ?? (await findCIConfig(projectDir));
 	if (configPath) {
 		const ciConfig = await loadCIConfig(configPath);
-		const runners: ResolvedRunner[] = [];
-		for (const runnerConfig of ciConfig.runners) {
-			runners.push(await resolveConfiguredRunner(projectDir, runnerConfig));
+		const hasRunners = ciConfig.runners.length > 0;
+		const hasGates = (ciConfig.gates ?? []).length > 0;
+		// A config that declares runners OR gates is a genuine "user configured CI"
+		// signal: resolve it as the `config` source (a gates-only v2 config keeps
+		// its zero-runner, gates-run contract — see describeRunners). A hooks-only
+		// (or otherwise empty) v2 config declares NEITHER runners NOR gates, so it
+		// must NOT suppress zero-config auto-detection: fall through so `javi-forge
+		// ci` still runs a real lint/compile/test runner instead of a no-op.
+		if (hasRunners || hasGates) {
+			const runners: ResolvedRunner[] = [];
+			for (const runnerConfig of ciConfig.runners) {
+				runners.push(await resolveConfiguredRunner(projectDir, runnerConfig));
+			}
+			return freezeRunners("config", runners, ciConfig.gates ?? []);
 		}
-		return freezeRunners("config", runners, ciConfig.gates ?? []);
 	}
 
 	// Zero-config default: single auto-detected runner (unchanged behavior).

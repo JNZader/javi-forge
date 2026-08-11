@@ -217,7 +217,12 @@ export const DEPLOY_DESTINATION_MAP: Record<string, string> = {
 	woodpecker: ".woodpecker/deploy.yml",
 };
 
-/** Hook reliability profile definitions */
+/**
+ * Hook security-preset definitions (hook-consolidation S4). The selected
+ * profile drives WHICH `hooks:` security sections get merged into
+ * `.javi-forge/ci.yaml` (see src/commands/init/steps/security.ts PROFILE_PRESET).
+ * `hooks` lists the enabled dispatcher sections for display only.
+ */
 export const HOOK_PROFILES: Record<
 	HookProfile,
 	{
@@ -228,19 +233,18 @@ export const HOOK_PROFILES: Record<
 > = {
 	minimal: {
 		label: "Minimal",
-		description: "pre-commit only: lint + format check",
-		hooks: ["pre-commit"],
+		description: "CI gate only — no security scans",
+		hooks: ["ci"],
 	},
 	standard: {
 		label: "Standard",
-		description: "pre-commit + pre-push + CI gate check",
-		hooks: ["pre-commit", "pre-push", "ci-gate"],
+		description: "secret scan + dependency audit",
+		hooks: ["secrets", "deps", "ci"],
 	},
 	strict: {
 		label: "Strict",
-		description:
-			"all standard + commit-msg validation + security scan on every push",
-		hooks: ["pre-commit", "pre-push", "ci-gate", "commit-msg", "security-scan"],
+		description: "secret scan + permission checks + dependency audit",
+		hooks: ["secrets", "permissions", "deps", "ci"],
 	},
 };
 

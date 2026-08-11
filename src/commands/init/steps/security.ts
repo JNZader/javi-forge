@@ -1,83 +1,54 @@
 import path from "node:path";
 import fs from "fs-extra";
 import { SECURITY_HOOKS_DIR } from "../../../constants.js";
+import { setHookFeature } from "../../../lib/ci-config.js";
 import { ensureDirExists } from "../../../lib/common.js";
 import type { HookProfile } from "../../../types/index.js";
 import { report } from "../report.js";
 import type { StepFn } from "../types.js";
 
 /**
- * Step 14: Scaffold security hooks.
+ * Hook-feature preset per reliability profile (hook-consolidation S4).
+ *
+ * The old `stepHookProfile` wrote a `ci-local/hooks/profile.json` that had ZERO
+ * runtime readers (design D7). The selector is repurposed: the chosen profile
+ * now drives WHICH `hooks:` security sections get merged into
+ * `.javi-forge/ci.yaml`, using the EXISTING `HookProfile` values (no "relaxed"):
+ *   - strict   → secrets + permissions + deps (every section)
+ *   - standard → secrets + deps
+ *   - minimal  → CI gate only (no security sections)
+ */
+const PROFILE_PRESET: Record<
+	HookProfile,
+	{ preCommit: string[]; prePush: string[] }
+> = {
+	minimal: { preCommit: [], prePush: [] },
+	standard: { preCommit: ["secrets"], prePush: ["deps"] },
+	strict: { preCommit: ["secrets", "permissions"], prePush: ["deps"] },
+};
+
+/**
+ * Step 14: Scaffold security hooks (hook-consolidation S4 fold).
  *
  * - When options.securityHooks is false, reports "skipped".
- * - When SECURITY_HOOKS_DIR templates are missing, reports "error".
- * - Otherwise copies the 6-layer git security hooks into
- *   ci-local/hooks/security/ (skipping existing files, chmod 0755) and copies
- *   the kiteguard-style runtime settings to .claude/settings.json when absent.
+ * - Otherwise:
+ *   1. Copies the kiteguard-style runtime settings to `.claude/settings.json`
+ *      when absent (KEPT — this is a real feature).
+ *   2. Merges the `hooks:` security sections for the selected reliability
+ *      profile into `.javi-forge/ci.yaml` via `setHookFeature` (creating a
+ *      minimal `version: 2` config when absent). The dispatcher composes these
+ *      sections at hook-run time (see src/commands/hooks.ts).
+ * - The old inert `ci-local/hooks/security/` git-hook copy is GONE (those hook
+ *   bodies were ported to TypeScript sections in S4).
  * - Errors are swallowed and reported as status:"error" — never thrown.
- *
- * Extracted VERBATIM from src/commands/init.ts (PR 5 of 6).
- * Grouped with stepHookProfile for cohesion — both manage ci-local/hooks/.
  */
 export const stepSecurityHooks: StepFn = async (ctx) => {
 	const { projectDir, dryRun, onStep, options } = ctx;
-	const { securityHooks } = options;
+	const { securityHooks, hookProfile } = options;
 	const stepId = "security-hooks";
 	report(onStep, stepId, "Scaffold security hooks", "running");
 	try {
-		if (securityHooks) {
-			if (await fs.pathExists(SECURITY_HOOKS_DIR)) {
-				if (!dryRun) {
-					// Copy 6-layer git security hooks into ci-local/hooks/security/
-					const secHooksDest = path.join(
-						projectDir,
-						"ci-local",
-						"hooks",
-						"security",
-					);
-					await ensureDirExists(secHooksDest);
-					const hookFiles = await fs.readdir(SECURITY_HOOKS_DIR);
-					const gitHooks = hookFiles.filter((f) => !f.endsWith(".json"));
-					for (const hook of gitHooks) {
-						const src = path.join(SECURITY_HOOKS_DIR, hook);
-						const dest = path.join(secHooksDest, hook);
-						await fs.copy(src, dest, { overwrite: false });
-						await fs.chmod(dest, 0o755);
-					}
-
-					// Copy runtime security settings (kiteguard-style) to .claude/
-					const settingsSrc = path.join(
-						SECURITY_HOOKS_DIR,
-						"claude-settings-security.json",
-					);
-					if (await fs.pathExists(settingsSrc)) {
-						const claudeDir = path.join(projectDir, ".claude");
-						await ensureDirExists(claudeDir);
-						const settingsDest = path.join(claudeDir, "settings.json");
-						if (!(await fs.pathExists(settingsDest))) {
-							await fs.copy(settingsSrc, settingsDest);
-						}
-					}
-				}
-				report(
-					onStep,
-					stepId,
-					"Scaffold security hooks",
-					"done",
-					dryRun
-						? "dry-run: would scaffold security hooks"
-						: "6 git layers + runtime hooks",
-				);
-			} else {
-				report(
-					onStep,
-					stepId,
-					"Scaffold security hooks",
-					"error",
-					"security-hooks templates not found",
-				);
-			}
-		} else {
+		if (!securityHooks) {
 			report(
 				onStep,
 				stepId,
@@ -85,66 +56,59 @@ export const stepSecurityHooks: StepFn = async (ctx) => {
 				"skipped",
 				"not selected",
 			);
+			return;
 		}
-	} catch (e) {
-		report(onStep, stepId, "Scaffold security hooks", "error", String(e));
-	}
-};
 
-/**
- * Step 14b: Write hook reliability profile.
- *
- * - When options.securityHooks is false, reports "skipped".
- * - Otherwise writes ci-local/hooks/profile.json with the resolved profile
- *   (defaults to "standard" when hookProfile is undefined).
- * - Errors are swallowed and reported as status:"error" — never thrown.
- *
- * Extracted VERBATIM from src/commands/init.ts (PR 5 of 6).
- * Grouped with stepSecurityHooks for cohesion — both manage ci-local/hooks/.
- */
-export const stepHookProfile: StepFn = async (ctx) => {
-	const { projectDir, dryRun, onStep, options } = ctx;
-	const { securityHooks, hookProfile } = options;
-	const stepId = "hook-profile";
-	report(onStep, stepId, "Write hook reliability profile", "running");
-	try {
-		if (securityHooks) {
-			if (!dryRun) {
-				const hooksDir = path.join(projectDir, "ci-local", "hooks");
-				await ensureDirExists(hooksDir);
-				const profilePath = path.join(hooksDir, "profile.json");
-				const resolvedProfile: HookProfile = hookProfile ?? "standard";
-				await fs.writeJson(
-					profilePath,
-					{ profile: resolvedProfile },
-					{ spaces: 2 },
-				);
-			}
+		const profile: HookProfile = hookProfile ?? "standard";
+		const preset = PROFILE_PRESET[profile];
+
+		if (dryRun) {
 			report(
 				onStep,
 				stepId,
-				"Write hook reliability profile",
+				"Scaffold security hooks",
 				"done",
-				dryRun
-					? `dry-run: would write profile.json (${hookProfile ?? "standard"})`
-					: `ci-local/hooks/profile.json (${hookProfile ?? "standard"})`,
+				`dry-run: would merge ${profile} hooks preset + copy .claude/settings.json`,
 			);
-		} else {
-			report(
-				onStep,
-				stepId,
-				"Write hook reliability profile",
-				"skipped",
-				"security hooks not selected",
-			);
+			return;
 		}
-	} catch (e) {
+
+		// 1. Copy the kiteguard-style runtime security settings to .claude/.
+		const settingsSrc = path.join(
+			SECURITY_HOOKS_DIR,
+			"claude-settings-security.json",
+		);
+		if (await fs.pathExists(settingsSrc)) {
+			const claudeDir = path.join(projectDir, ".claude");
+			await ensureDirExists(claudeDir);
+			const settingsDest = path.join(claudeDir, "settings.json");
+			if (!(await fs.pathExists(settingsDest))) {
+				await fs.copy(settingsSrc, settingsDest);
+			}
+		}
+
+		// 2. Merge the profile's security sections into .javi-forge/ci.yaml.
+		for (const feature of preset.preCommit) {
+			await setHookFeature(projectDir, "pre-commit", feature, true);
+		}
+		for (const feature of preset.prePush) {
+			await setHookFeature(projectDir, "pre-push", feature, true);
+		}
+
+		const merged = [
+			...preset.preCommit.map((f) => `pre-commit.${f}`),
+			...preset.prePush.map((f) => `pre-push.${f}`),
+		];
 		report(
 			onStep,
 			stepId,
-			"Write hook reliability profile",
-			"error",
-			String(e),
+			"Scaffold security hooks",
+			"done",
+			merged.length > 0
+				? `${profile} preset: ${merged.join(", ")}`
+				: `${profile} preset: CI gate only (no security sections)`,
 		);
+	} catch (e) {
+		report(onStep, stepId, "Scaffold security hooks", "error", String(e));
 	}
 };

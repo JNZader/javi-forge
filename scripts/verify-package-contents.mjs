@@ -88,7 +88,6 @@ const FORBIDDEN_FILES = [
 const ALLOWED_SENSITIVE_EXAMPLES = new Set([
 	"modules/ghagga/.env.example",
 	"templates/local-ai/.env.example",
-	"templates/security-hooks/pre-commit-secrets",
 ]);
 
 const FORBIDDEN_PATTERNS = [

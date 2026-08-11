@@ -156,6 +156,7 @@ npx javi-forge doctor
 | Section | Checks |
 |---------|--------|
 | **System Tools** | git, docker, semgrep, node, pnpm |
+| **Security** | commit-signing advisory (`commit.gpgsign` + `user.signingkey`), branch-protection advisory (GitHub → `gh api` probe; GitLab/no-gh → skip-with-note) |
 | **Framework Structure** | templates/, modules/, ai-config/, workflows/, schemas/, ci-local/ |
 | **Stack Detection** | Looks for package.json, go.mod, Cargo.toml, build.gradle, pom.xml, etc. |
 | **Project Manifest** | `.javi-forge/manifest.json` — project name, stack, creation date |
@@ -182,6 +183,84 @@ Auto-detects your project stack and installs a `.git/hooks/pre-commit` hook with
 | **go** | `go test ./...` |
 
 To bypass the hook: `git commit --no-verify`.
+
+---
+
+## hooks
+
+Run the consolidated git-hook dispatcher. The static shims installed in
+`.git/hooks/` delegate to this command — they contain no logic of their own, so
+all composition is driven from `.javi-forge/ci.yaml`.
+
+```bash
+javi-forge hooks run pre-commit
+javi-forge hooks run pre-push
+```
+
+Only `pre-commit` and `pre-push` are accepted; any other name prints usage and
+exits 1 (fail-closed). A blocking section failure exits non-zero and blocks the
+git operation. A `.javi-forge/ci.yaml` that fails to validate also exits 1 — a
+broken config never silently skips a gate.
+
+With **no** `hooks:` config, the dispatcher runs the default composition: the
+quick native CI gate (setup + lint + compile + gates — **no tests, no
+coverage**).
+
+To bypass: `git commit --no-verify` (pre-push: `git push --no-verify`).
+
+### `hooks:` config reference
+
+Add a `hooks:` section to a **version 2** `.javi-forge/ci.yaml` to choose which
+sections each hook composes. Sections run in a fixed cheap→expensive order,
+fail-fast on the first blocking failure.
+
+```yaml
+version: 2
+hooks:
+  pre-commit:
+    ci: true          # quick native CI gate (setup + lint + compile + gates)
+    tdd: false        # run the stack test command
+    secrets: false    # L1 staged-file secret scan
+    permissions: false # L3 permission-boundary checks
+  pre-push:
+    ci: true          # quick native CI gate
+    tdd: false        # false | "warn" (advisory, never blocks) | "strict"
+    deps: false       # L2 dependency-audit ladder
+```
+
+| Hook | Section | Default | Meaning |
+|------|---------|---------|---------|
+| `pre-commit` | `ci` | `true` | Quick native CI gate |
+| `pre-commit` | `tdd` | `false` | Run the stack test command |
+| `pre-commit` | `secrets` | `false` | L1 staged-file secret scan |
+| `pre-commit` | `permissions` | `false` | L3 permission-boundary checks |
+| `pre-push` | `ci` | `true` | Quick native CI gate |
+| `pre-push` | `tdd` | `false` | `false` \| `"warn"` (advisory) \| `"strict"` |
+| `pre-push` | `deps` | `false` | L2 dependency-audit ladder |
+
+Notes:
+
+- `hooks:` requires `version: 2`. Declaring it under `version: 1` is rejected
+  (`hooks require version: 2`).
+- Only `pre-push.tdd` has a mode. `"warn"` prints but never blocks the push;
+  `"strict"` (or `true`) blocks. Every other section is always blocking.
+- A `hooks:`-only v2 config (no `runners:`/`gates:`) is valid.
+
+### Migration notes
+
+`installCIHooks` (used by both `ci init` and `init`) is the only writer of
+`.git/hooks/`. It reconciles legacy setups on the next install:
+
+- A repo whose **local** `core.hooksPath` is exactly `ci-local/hooks` is
+  auto-migrated: the value is unset and the shims are installed, with a note
+  explaining the config change.
+- A **foreign** `core.hooksPath` (any other non-empty value, at any scope) or a
+  foreign existing hook is left untouched — the installer refuses with zero
+  writes. Re-run with `--force` to overwrite a foreign hook body (the previous
+  body is backed up first). `--force` does **not** override a foreign
+  `core.hooksPath`.
+- A previously javi-forge-managed but outdated shim is silently upgraded — no
+  `--force` needed.
 
 ---
 

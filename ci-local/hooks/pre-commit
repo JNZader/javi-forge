@@ -1,5 +1,13 @@
 #!/bin/bash
 # =============================================================================
+# LEGACY — retained for reference only (hook-consolidation).
+# The canonical hook mechanism is now `.git/hooks/` written by `installCIHooks`
+# (javi-forge ci init / init), whose static shims exec the dispatcher
+# `javi-forge hooks run <name>`. `javi-forge init` no longer copies this
+# directory or sets `core.hooksPath=ci-local/hooks`; a repo still on that legacy
+# path is auto-migrated on the next install. This body is kept for historical
+# reference and is NOT the source of truth. See docs/commands.md → hooks.
+# =============================================================================
 # PRE-COMMIT: Quick CI check via javi-forge
 # =============================================================================
 # Requires: npm install -g javi-forge

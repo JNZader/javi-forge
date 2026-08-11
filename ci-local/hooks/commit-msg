@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 # =============================================================================
+# LEGACY — retained for reference only (hook-consolidation).
+# The canonical hook mechanism is now `.git/hooks/` written by `installCIHooks`
+# (javi-forge ci init / init). The shipped commit-msg shim lives in
+# assets/hooks/commit-msg; `javi-forge init` no longer copies this directory or
+# sets `core.hooksPath=ci-local/hooks`. This body is kept for historical
+# reference and is NOT the source of truth. See docs/commands.md → hooks.
+# =============================================================================
 # COMMIT-MSG: Block accidental AI-attribution in commit messages
 # =============================================================================
 # Best-effort, NOT an adversarial-grade security control.

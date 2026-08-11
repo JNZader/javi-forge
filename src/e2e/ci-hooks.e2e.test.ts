@@ -1,22 +1,36 @@
 /**
- * E2E hook-contract tests for mixed-stack CI — plan task 7.
+ * E2E hook-contract tests for the consolidated hook dispatcher.
  *
- * The git hooks installed by `javi-forge ci init` delegate to these commands:
- *   pre-commit: javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
- *   pre-push:   javi-forge ci --quick --no-docker --no-security --no-ci-ghagga
- * Both hooks now invoke the SAME native flag set (hooks-ricos Slice B dropped
- * the pre-push Docker path to sidestep the container EACCES failure). The hook
- * blocks the git operation when the command exits non-zero. These tests prove
- * exit-code propagation end to end by spawning the compiled CLI in a hybrid
- * repository: a failing configured runner must produce exit 1, a passing run
- * must produce exit 0.
+ * Since hook-consolidation, the static shims installed by `javi-forge ci init`
+ * delegate to the SAME dispatcher entry point:
+ *   pre-commit: javi-forge hooks run pre-commit
+ *   pre-push:   javi-forge hooks run pre-push
+ * The dispatcher (not the shim) composes the sections enabled under `hooks:` in
+ * `.javi-forge/ci.yaml` and runs them fail-fast. The default composition, with
+ * no `hooks:` config, is the quick native CI gate (setup + lint + compile +
+ * gates — no tests, no coverage). The shim blocks the git operation when the
+ * dispatcher exits non-zero.
+ *
+ * These tests prove the shim → dispatcher → exit-code round trip end to end by
+ * spawning the COMPILED CLI:
+ *   1. `hooks run pre-commit` against a real `hooks:` config composes the ci
+ *      section and propagates its exit code (0 on pass, non-zero on a blocking
+ *      failure).
+ *   2. `hooks run <bogus>` prints usage and exits 1 (fail-closed).
+ *   3. `ci init` installs a shim whose body invokes `javi-forge hooks run
+ *      <name>` — the delegation the round trip depends on.
+ *
+ * The ci-section quick-gate exit propagation is exercised directly below via the
+ * flag vector the section wraps; the argv-log proof that the installed shim
+ * drives the dispatcher lives in
+ * src/__integration__/ci-hooks-exec.integration.test.ts.
  *
  * Notes:
  *   - args-level coverage lives in src/lib/docker.test.ts.
  *
  * Prerequisites: `pnpm build` must be run before these tests.
  */
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -133,9 +147,49 @@ const PRE_COMMIT_ARGS = [
 	"--no-ci-ghagga",
 ];
 
-// ── pre-commit path (--quick --no-docker) ────────────────────────────────────
+// A valid v2 config whose ci section wraps the same quick native gate the shims
+// default to. `runners` give the ci section real work; `hooks:` enables only the
+// ci section so the round trip is deterministic.
+const DISPATCH_PASSING_CONFIG = `
+version: 2
+runners:
+  - name: backend
+    stack: python
+    directory: backend
+    lint: "true"
+  - name: frontend
+    stack: node
+    directory: .
+    lint: "true"
+hooks:
+  pre-commit:
+    ci: true
+  pre-push:
+    ci: true
+`;
 
-describe("hook contract — pre-commit (quick, no-docker)", () => {
+const DISPATCH_FAILING_CONFIG = `
+version: 2
+runners:
+  - name: backend
+    stack: python
+    directory: backend
+    lint: "exit 1"
+  - name: frontend
+    stack: node
+    directory: .
+    lint: "true"
+hooks:
+  pre-commit:
+    ci: true
+`;
+
+// ── ci-section quick gate (the vector the ci section wraps) ───────────────────
+// This block proves the quick native gate's exit-code propagation directly via
+// the flag vector the dispatcher's ci section invokes in-process. The dispatcher
+// round trip (shim → hooks run → this gate) is proven in the block below.
+
+describe("hook contract — ci section quick gate (quick, no-docker)", () => {
 	it("passing configured runners exit 0 — commit proceeds", async () => {
 		const repo = await createHybridRepo(PASSING_CONFIG);
 		const { exitCode, stdout } = await runCLI(PRE_COMMIT_ARGS, { cwd: repo });
@@ -202,6 +256,86 @@ runners:
 // The pre-push (full, docker) contract block was RETIRED in hooks-ricos Slice B:
 // the native pre-push arg vector is now identical to pre-commit's
 // (`ci --quick --no-docker --no-security --no-ci-ghagga`), so its exit-code
-// propagation is already proven by the pre-commit contract block above. Docker
+// propagation is already proven by the ci-section quick-gate block above. Docker
 // image-gate behavior is covered by src/commands/ci.test.ts (runGates) and
 // src/lib/docker.test.ts; re-testing it here would be redundant.
+
+// ── dispatcher round trip: shim → hooks run → exit code ──────────────────────
+// The substantive S5 assertion: the BUILT CLI's `hooks run <name>` reads the
+// `hooks:` config, composes the ci section and propagates its exit code; a bogus
+// hook name fails closed; and the shim `ci init` installs actually invokes
+// `javi-forge hooks run <name>`.
+
+describe("hook dispatcher — hooks run round trip", () => {
+	it("hooks run pre-commit composes the ci section and exits 0 on pass", async () => {
+		const repo = await createHybridRepo(DISPATCH_PASSING_CONFIG);
+		const { exitCode, stdout } = await runCLI(["hooks", "run", "pre-commit"], {
+			cwd: repo,
+		});
+
+		expect(exitCode).toBe(0);
+		// The dispatcher announced the composed ci section...
+		expect(stdout).toContain("▶ ci");
+		// ...and the wrapped quick gate really ran both configured runners.
+		expect(stdout).toContain("Lint [backend] passed");
+		expect(stdout).toContain("Lint [frontend] passed");
+	});
+
+	it("hooks run pre-commit exits non-zero when the ci section fails", async () => {
+		const repo = await createHybridRepo(DISPATCH_FAILING_CONFIG);
+		const { exitCode, stdout, stderr } = await runCLI(
+			["hooks", "run", "pre-commit"],
+			{ cwd: repo },
+		);
+
+		expect(exitCode).toBe(1);
+		// The ci section ran the failing runner (step feedback on stdout)...
+		expect(stdout).toContain("Lint [backend] failed");
+		// ...and the dispatcher reported the blocking section failure (stderr).
+		expect(stderr).toContain("✗ ci failed");
+	});
+
+	it("hooks run pre-push composes the ci section and exits 0 on pass", async () => {
+		const repo = await createHybridRepo(DISPATCH_PASSING_CONFIG);
+		const { exitCode, stdout } = await runCLI(["hooks", "run", "pre-push"], {
+			cwd: repo,
+		});
+
+		expect(exitCode).toBe(0);
+		expect(stdout).toContain("▶ ci");
+	});
+
+	it("hooks run <bogus> prints usage and exits 1 (fail-closed)", async () => {
+		const repo = await createHybridRepo(DISPATCH_PASSING_CONFIG);
+		const { exitCode, stderr } = await runCLI(["hooks", "run", "post-merge"], {
+			cwd: repo,
+		});
+
+		expect(exitCode).toBe(1);
+		expect(stderr).toContain(
+			"Usage: javi-forge hooks run <pre-commit|pre-push>",
+		);
+	});
+
+	it("ci init installs a shim whose body invokes the dispatcher", async () => {
+		const repo = await createHybridRepo(DISPATCH_PASSING_CONFIG);
+		// A real git repo is required for installCIHooks to write .git/hooks.
+		execFileSync("git", ["init"], { cwd: repo });
+
+		const { exitCode } = await runCLI(["ci", "init"], { cwd: repo });
+		expect(exitCode).toBe(0);
+
+		// The installed shims delegate to the dispatcher — this is the link the
+		// round trip above depends on.
+		const preCommit = await fs.readFile(
+			path.join(repo, ".git", "hooks", "pre-commit"),
+			"utf-8",
+		);
+		const prePush = await fs.readFile(
+			path.join(repo, ".git", "hooks", "pre-push"),
+			"utf-8",
+		);
+		expect(preCommit).toContain("javi-forge hooks run pre-commit");
+		expect(prePush).toContain("javi-forge hooks run pre-push");
+	});
+});

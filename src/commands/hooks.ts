@@ -178,23 +178,21 @@ export interface TddSectionDeps {
 }
 
 /**
- * Run a resolved test command WITHOUT a shell. `getTddTestCommand` only ever
- * returns a fixed, controlled set of commands (`npm test`, `pnpm run test`,
- * `pytest`, `go test ./...`), so splitting on whitespace into argv and spawning
- * directly is safe and avoids `sh -c` string interpolation entirely. A non-zero
- * exit or a spawn error is a blocking failure; a passing command is ok:true.
+ * Run a resolved test command through `bash -c`, matching the rest of the
+ * codebase's project-command idiom (`runStep` in ci.ts). `getTddTestCommand`
+ * only ever returns a fixed, controlled set of commands (`npm test`,
+ * `<buildTool> run test`, `pytest`, `go test ./...`) — never user input — so
+ * `bash -c` introduces no injection vector, and it fixes native Windows where
+ * `npm`/`pnpm`/`yarn` are `.cmd` shims that a shell-less `spawn` cannot exec
+ * (ENOENT). A non-zero exit or a spawn error is a blocking failure; a passing
+ * command is ok:true.
  */
 function runTestCommand(
 	cmd: string,
 	projectDir: string,
 ): Promise<{ ok: boolean; detail?: string }> {
-	const [bin, ...args] = cmd.split(/\s+/).filter(Boolean);
 	return new Promise((resolve) => {
-		if (bin === undefined) {
-			resolve({ ok: true });
-			return;
-		}
-		const proc = spawn(bin, args, {
+		const proc = spawn("bash", ["-c", cmd], {
 			cwd: projectDir,
 			stdio: "inherit",
 			env: { ...process.env, CI: "true" },
@@ -227,20 +225,32 @@ export function tddSection(deps: TddSectionDeps): HookSection {
 		id: "tdd",
 		blocking: true,
 		async run({ projectDir }) {
-			const { stackType, buildTool } = await deps.detectStack(projectDir);
-			const testCmd = await deps.resolveTestCmd(
-				stackType,
-				buildTool,
-				projectDir,
-			);
-			if (testCmd === null) {
-				deps.log(
-					`  ⓘ tdd: no test command detected for stack '${stackType}' — skipping (a missing test runner does not block).`,
+			// A thrown detector / resolver / runner must NEVER propagate out of the
+			// section — an unhandled rejection would crash the hook (raw stack trace)
+			// and, for an advisory pre-push tdd:"warn", would BLOCK the push,
+			// violating the advisory-never-blocks invariant. Mirror ciSection: on a
+			// throw, report a blocking-mappable failure instead.
+			try {
+				const { stackType, buildTool } = await deps.detectStack(projectDir);
+				const testCmd = await deps.resolveTestCmd(
+					stackType,
+					buildTool,
+					projectDir,
 				);
-				return { ok: true };
+				if (testCmd === null) {
+					deps.log(
+						`  ⓘ tdd: no test command detected for stack '${stackType}' — skipping (a missing test runner does not block).`,
+					);
+					return { ok: true };
+				}
+				deps.log(`  ▶ tdd: ${testCmd}`);
+				return await deps.runCommand(testCmd, projectDir);
+			} catch (e) {
+				return {
+					ok: false,
+					detail: e instanceof Error ? e.message : String(e),
+				};
 			}
-			deps.log(`  ▶ tdd: ${testCmd}`);
-			return deps.runCommand(testCmd, projectDir);
 		},
 	};
 }

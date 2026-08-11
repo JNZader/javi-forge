@@ -132,6 +132,10 @@ describe("tdd init dispatch", () => {
 		expect(out.join("\n")).toContain("/repo/.git/hooks/pre-commit.bak.1-0");
 		expect(err.join("\n")).toContain("--force");
 		expect(exitCode).toBe(1);
+		// A refused install must NOT leave the config ahead of the install:
+		// the tdd flag is never written and no "✓ Enabled" line prints.
+		expect(setHookFeature).not.toHaveBeenCalled();
+		expect(out.join("\n")).not.toContain("Enabled TDD");
 	});
 });
 
@@ -181,6 +185,25 @@ describe("tdd pipeline dispatch", () => {
 		});
 		expect(out.join("\n")).toContain("pre-push");
 		expect(exitCode).toBe(0);
+	});
+
+	it("does NOT write the config flag when the pre-push install is refused (exit 1)", async () => {
+		installCIHooks.mockResolvedValue(
+			result({
+				errors: [
+					"pre-push: refusing to overwrite a foreign hook — use --force",
+				],
+			}),
+		);
+
+		const { out, err, exitCode } = await runTdd(["tdd", "pipeline"], {
+			mode: "strict",
+		});
+
+		expect(exitCode).toBe(1);
+		expect(err.join("\n")).toContain("--force");
+		expect(setHookFeature).not.toHaveBeenCalled();
+		expect(out.join("\n")).not.toContain("Enabled TDD");
 	});
 });
 

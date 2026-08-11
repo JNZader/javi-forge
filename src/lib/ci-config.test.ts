@@ -823,4 +823,19 @@ describe("setHookFeature", () => {
 		expect(config.hooks?.preCommit.tdd).toBe(true);
 		expect(config.runners.map((r) => r.name)).toEqual(["api"]);
 	});
+
+	it("throws CIConfigError and leaves a malformed config BYTE-IDENTICAL (fail-closed)", async () => {
+		await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
+		const configPath = path.join(tmpDir, ".javi-forge", "ci.yaml");
+		// Unparseable YAML (unclosed flow map) — parseDocument records doc.errors.
+		const malformed = "version: 2\nhooks: {pre-commit: {tdd: true\n";
+		await fs.writeFile(configPath, malformed);
+
+		await expect(
+			setHookFeature(tmpDir, "pre-commit", "tdd", true),
+		).rejects.toBeInstanceOf(CIConfigError);
+
+		// The malformed file must NOT be written over.
+		expect(await fs.readFile(configPath, "utf-8")).toBe(malformed);
+	});
 });

@@ -44,6 +44,15 @@ export async function handleTdd(cli: CLI): Promise<void> {
 		const { setHookFeature } = await import("../../lib/ci-config.js");
 		const { installCIHooks } = await import("../../commands/ci.js");
 
+		// Install FIRST: installCIHooks writes generic static shims and does not
+		// depend on the tdd flag (the flag is read at hook-RUN time). Only once the
+		// managed hook is actually in place do we flip the config — otherwise a
+		// refused install (foreign hook / husky core.hooksPath) would leave ci.yaml
+		// claiming tdd:true while no managed hook exists.
+		const result = await installCIHooks(process.cwd(), { force });
+		reportInstall(result);
+		if (result.errors.length > 0) process.exit(1);
+
 		const configPath = await setHookFeature(
 			process.cwd(),
 			"pre-commit",
@@ -54,14 +63,17 @@ export async function handleTdd(cli: CLI): Promise<void> {
 		console.log(
 			"  The pre-commit hook now runs the stack test command via the dispatcher.",
 		);
-
-		const result = await installCIHooks(process.cwd(), { force });
-		reportInstall(result);
-		process.exit(result.errors.length > 0 ? 1 : 0);
+		process.exit(0);
 	} else if (sub === "pipeline") {
 		const mode = cli.flags.mode === "warn" ? "warn" : "strict";
 		const { setHookFeature } = await import("../../lib/ci-config.js");
 		const { installCIHooks } = await import("../../commands/ci.js");
+
+		// Install FIRST (see `init` above): never leave the config ahead of a
+		// refused install.
+		const result = await installCIHooks(process.cwd(), { force });
+		reportInstall(result);
+		if (result.errors.length > 0) process.exit(1);
 
 		const configPath = await setHookFeature(
 			process.cwd(),
@@ -77,10 +89,7 @@ export async function handleTdd(cli: CLI): Promise<void> {
 				? "  The pre-push hook runs tests as an ADVISORY section (never blocks)."
 				: "  The pre-push hook BLOCKS the push when tests fail.",
 		);
-
-		const result = await installCIHooks(process.cwd(), { force });
-		reportInstall(result);
-		process.exit(result.errors.length > 0 ? 1 : 0);
+		process.exit(0);
 	} else {
 		console.error("Usage: javi-forge tdd <command>");
 		console.error(

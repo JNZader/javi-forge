@@ -1,8 +1,10 @@
+import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CIHooksConfig } from "../lib/ci-config.js";
+import type { Stack } from "../types/index.js";
 import {
 	composeSections,
 	defaultRegistry,
@@ -329,6 +331,55 @@ describe("tdd section — resolves the stack test command at hook-run time", () 
 		expect(result.ok).toBe(false);
 		expect(result.detail).toMatch(/tests failed/);
 	});
+
+	it("returns ok:false (never rejects) when detectStack throws", async () => {
+		const section = tddSection(
+			tddDeps({
+				detectStack: async () => {
+					throw new Error("stack detection blew up");
+				},
+			}),
+		);
+		// The section MUST resolve to ok:false, not propagate the rejection —
+		// a thrown detector must not crash the hook.
+		const result = await section.run({ projectDir: "/repo" });
+		expect(result.ok).toBe(false);
+		expect(result.detail).toMatch(/stack detection blew up/);
+	});
+});
+
+describe("runHook — a throwing tdd section never crashes the hook (advisory stays advisory)", () => {
+	it("pre-push tdd:'warn' with a throwing detector exits 0 (push proceeds), not a crash", async () => {
+		const out: string[] = [];
+		const errs: string[] = [];
+		const registry = defaultRegistry(
+			vi.fn() as unknown as Parameters<typeof defaultRegistry>[0],
+			(m) => out.push(m),
+			{
+				detectStack: async () => {
+					throw new Error("boom in detect");
+				},
+			},
+		);
+		// pre-push tdd:"warn" (advisory), ci off → the throwing tdd section must
+		// print and continue, NOT block the push and NOT throw out of runHook.
+		const code = await runHook("pre-push", "/repo", {
+			loadConfig: async () => ({
+				preCommit: {
+					ci: false,
+					tdd: false,
+					secrets: false,
+					permissions: false,
+				},
+				prePush: { ci: false, tdd: "warn", deps: false },
+			}),
+			registry,
+			log: (m) => out.push(m),
+			logError: (m) => errs.push(m),
+		});
+		expect(code).toBe(0);
+		expect([...out, ...errs].join("\n")).toMatch(/boom in detect/);
+	});
 });
 
 describe("defaultRegistry — the tdd section is registered (S3 wiring)", () => {
@@ -410,3 +461,53 @@ describe("loadHooksConfig — resolve the hooks: section from disk", () => {
 		await expect(loadHooksConfig(tmpDir)).rejects.toThrow(/Invalid CI config/);
 	});
 });
+
+// =============================================================================
+// S3 hardening — REAL exercise of the safety-critical exec path
+// =============================================================================
+// These spawn through the real runTestCommand via the real defaultRegistry
+// (no runCommand mock) so the bash-idiom exec is covered by an integration test,
+// not just injected fakes.
+
+function bashAvailable(): boolean {
+	try {
+		spawnSync("bash", ["-c", "exit 0"]);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+describe.skipIf(!bashAvailable())(
+	"runTestCommand (real exec through defaultRegistry) — no mocks",
+	() => {
+		const realTddSection = (cmd: string): HookSection => {
+			const registry = defaultRegistry(
+				vi.fn() as unknown as Parameters<typeof defaultRegistry>[0],
+				() => {},
+				{
+					detectStack: async () => ({
+						stackType: "node" as Stack,
+						buildTool: "npm",
+					}),
+					resolveTestCmd: async () => cmd,
+					// runCommand intentionally omitted → the REAL runTestCommand runs.
+				},
+			);
+			const factory = registry.tdd;
+			if (!factory) throw new Error("tdd factory missing");
+			return factory();
+		};
+
+		it("ok:true when the real command exits 0", async () => {
+			const result = await realTddSection("true").run({ projectDir: "." });
+			expect(result.ok).toBe(true);
+		});
+
+		it("ok:false when the real command exits non-zero", async () => {
+			const result = await realTddSection("exit 1").run({ projectDir: "." });
+			expect(result.ok).toBe(false);
+			expect(result.detail).toMatch(/exit 1/);
+		});
+	},
+);

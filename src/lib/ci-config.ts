@@ -866,6 +866,19 @@ export async function setHookFeature(
 		? YAML.parseDocument(await fs.readFile(existing, "utf-8"))
 		: YAML.parseDocument("version: 2\n");
 
+	// Fail-closed: never write over a malformed config. A parse error means the
+	// document is only partially represented, so setIn + write would silently
+	// drop the unparseable remainder of a hand-authored file.
+	if (doc.errors.length > 0) {
+		throw new CIConfigError(
+			doc.errors.map((e) => ({
+				path: "<document>",
+				message: `invalid YAML: ${e.message.split("\n")[0]}`,
+			})),
+			configPath,
+		);
+	}
+
 	// `hooks:` requires version 2; bump an older/unset document in place.
 	if (doc.get("version") !== 2) {
 		doc.set("version", 2);

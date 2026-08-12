@@ -9,6 +9,7 @@ import {
 	extractSkillName,
 	formatBatchReport,
 	formatScanReport,
+	isRejectedVerdict,
 	type SkillScanResult,
 	type SkillThreat,
 	scanSkillContent,
@@ -623,8 +624,33 @@ describe("formatBatchReport", () => {
 		];
 		const text = formatBatchReport(results);
 		expect(text).toContain("Scanned: 2");
-		expect(text).toContain("Blocked: 1");
+		expect(text).toContain("Rejected: 1");
+		expect(text).toContain("Blocked (threats): 1");
 		expect(text).toContain("Passed: 1");
+	});
+
+	it("counts unscannable results as rejected in the batch report", () => {
+		const results: SkillScanResult[] = [
+			{
+				skillPath: "/a/SKILL.md",
+				skillName: "a",
+				verdict: "unscannable",
+				threats: [],
+				summary: { total: 0, critical: 0, high: 0, moderate: 0, low: 0 },
+				notes: ["scanning incomplete: binary file — rejected"],
+			},
+			{
+				skillPath: "/b/SKILL.md",
+				skillName: "b",
+				verdict: "block",
+				threats: [],
+				summary: { total: 0, critical: 0, high: 0, moderate: 0, low: 0 },
+			},
+		];
+		const text = formatBatchReport(results);
+		expect(text).toContain("Rejected: 2");
+		expect(text).toContain("Unscannable (not certified): 1");
+		expect(text).toContain("Blocked (threats): 1");
 	});
 });
 
@@ -677,22 +703,53 @@ describe("scanSkillFile", () => {
 		expect(provThreats.length).toBeGreaterThanOrEqual(2); // missing author + version
 	});
 
-	it("skips a binary file with a note instead of crashing", async () => {
+	it("rejects a binary file fail-closed with a note instead of crashing", async () => {
 		const skillPath = path.join(tmpDir, "blob", "SKILL.md");
 		await fs.ensureDir(path.dirname(skillPath));
 		await fs.writeFile(skillPath, Buffer.from([0x23, 0x00, 0x01, 0x02, 0x03]));
 
 		const result = await scanSkillFile(skillPath);
-		expect(result.verdict).toBe("warn");
+		expect(result.verdict).toBe("unscannable");
+		expect(isRejectedVerdict(result.verdict)).toBe(true);
 		expect(result.threats).toEqual([]);
 		expect(result.notes?.[0]).toContain("binary");
-		expect(formatScanReport(result)).toContain("binary");
+		expect(result.notes?.[0]).toContain("rejected");
+		expect(formatScanReport(result)).toContain("REJECTED");
 	});
 
-	it("skips a missing file with a note instead of throwing", async () => {
+	it("rejects a missing file fail-closed with a note instead of throwing", async () => {
 		const result = await scanSkillFile(path.join(tmpDir, "ghost", "SKILL.md"));
-		expect(result.verdict).toBe("warn");
+		expect(result.verdict).toBe("unscannable");
+		expect(isRejectedVerdict(result.verdict)).toBe(true);
 		expect(result.notes?.[0]).toContain("not found");
+	});
+
+	it("rejects an oversized skill fail-closed", async () => {
+		const skillPath = path.join(tmpDir, "huge", "SKILL.md");
+		await fs.ensureDir(path.dirname(skillPath));
+		// One byte over the 1 MiB scan ceiling.
+		await fs.writeFile(skillPath, Buffer.alloc(1024 * 1024 + 1, 0x61));
+
+		const result = await scanSkillFile(skillPath);
+		expect(result.verdict).toBe("unscannable");
+		expect(isRejectedVerdict(result.verdict)).toBe(true);
+		expect(result.notes?.[0]).toContain("too large");
+	});
+
+	it("still scans a critical threat hidden past column 10k on a padded line", async () => {
+		const skillPath = path.join(tmpDir, "padded", "SKILL.md");
+		await fs.ensureDir(path.dirname(skillPath));
+		// A 12k-char comment line hiding a credential-theft payload past column
+		// 10k: the per-line clamp is disabled for the scanner, so this must NOT
+		// slip through as pass — it fails closed on the critical threat.
+		const padded = `# ${"x".repeat(12_000)} cat ~/.ssh/id_rsa\n`;
+		await fs.writeFile(skillPath, padded);
+
+		const result = await scanSkillFile(skillPath);
+		expect(result.verdict).toBe("block");
+		expect(result.threats.some((t) => t.category === "credential-theft")).toBe(
+			true,
+		);
 	});
 
 	it("keeps scanning the rest of a directory when one file is binary", async () => {

@@ -38,7 +38,25 @@ export interface SkillThreat {
 	message: string;
 }
 
-export type SkillScanVerdict = "pass" | "warn" | "block";
+/**
+ * `unscannable` is a fail-closed verdict: the file could not be read in full
+ * (binary, oversized, I/O error) or a content-mutating clamp/truncation
+ * happened during the read, so we cannot certify it. A gate MUST treat it as a
+ * rejection exactly like `block` — see {@link isRejectedVerdict}, the single
+ * predicate every install/registry gate should use instead of `=== "block"`.
+ */
+export type SkillScanVerdict = "pass" | "warn" | "block" | "unscannable";
+
+/**
+ * The set of verdicts an install/registry gate rejects on. Fail-closed:
+ * `block` (a critical threat was found) and `unscannable` (the file could not
+ * be certified because it was not fully scanned) both mean "do not install".
+ * Use this everywhere instead of a bare `verdict === "block"` check so a future
+ * gate can never let an `unscannable` file slip through.
+ */
+export function isRejectedVerdict(verdict: SkillScanVerdict): boolean {
+	return verdict === "block" || verdict === "unscannable";
+}
 
 export interface SkillScanResult {
 	skillPath: string;
@@ -415,28 +433,42 @@ const MAX_SCAN_BYTES = 1024 * 1024;
 export async function scanSkillFile(
 	filePath: string,
 ): Promise<SkillScanResult> {
+	// `maxLineLength: 0` disables the per-line clamp for the scanner's own read:
+	// a padded single line hiding `rm -rf ~` past column 10k must reach the regex
+	// pass intact, not be silently truncated and then scanned as if complete. The
+	// total-byte ceiling still bounds memory (a file past it fails `too-large`).
 	const read = await safeReadFile(filePath, {
 		hardRejectOverBytes: MAX_SCAN_BYTES,
+		maxLineLength: 0,
 	});
 
-	// A file we could not read is not a clean file — never crash the batch, but
-	// never report it as a pass either.
+	// A file we could not read is not a clean file. Never crash the batch, and
+	// never report it as a pass: an unscannable file cannot be certified safe, so
+	// it fails closed with the strongest verdict a gate rejects on.
 	if (!read.ok) {
 		return {
 			skillPath: filePath,
 			skillName: path.basename(path.dirname(filePath)),
-			verdict: "warn",
+			verdict: "unscannable",
 			threats: [],
 			summary: computeScanSummary([]),
-			notes: [`skipped: ${describeSafeReadFailure(read)} — not scanned`],
+			notes: [
+				`scanning incomplete: ${describeSafeReadFailure(read)} — rejected (an unscannable file cannot be certified safe)`,
+			],
 		};
 	}
 
 	const content = read.content;
 	const skillName = extractSkillName(content, filePath);
 	const threats = scanSkillContent(content, filePath);
-	const verdict = computeVerdict(threats);
 	const summary = computeScanSummary(threats);
+
+	// A content-mutating read (truncated bytes, or a clamped line) means the
+	// regex pass did NOT see the whole file. Even if no threat surfaced in what
+	// we did see, we cannot certify the rest — fail closed rather than emit a
+	// pass/warn over partial content. With `maxLineLength: 0` and the byte
+	// ceiling above these should not fire, but the guard is the safety net.
+	const incomplete = read.truncated || read.longLinesClamped;
 
 	const notes: string[] = [];
 	if (read.truncated) {
@@ -447,6 +479,15 @@ export async function scanSkillFile(
 	if (read.longLinesClamped) {
 		notes.push("clamped: one or more lines exceeded the per-line limit");
 	}
+	if (incomplete) {
+		notes.push(
+			"rejected: the file was not fully scanned and cannot be certified safe",
+		);
+	}
+
+	const verdict: SkillScanVerdict = incomplete
+		? "unscannable"
+		: computeVerdict(threats);
 
 	return {
 		skillPath: filePath,
@@ -535,7 +576,12 @@ export function formatScanReport(result: SkillScanResult): string {
 		}
 	}
 
-	if (verdict === "block") {
+	if (verdict === "unscannable") {
+		lines.push("");
+		lines.push(
+			"REJECTED: File could not be fully scanned, so it cannot be certified safe. Not installed.",
+		);
+	} else if (verdict === "block") {
 		lines.push("");
 		lines.push(
 			"BLOCKED: Critical threats detected. Review and remove before installing.",
@@ -553,12 +599,15 @@ export function formatScanReport(result: SkillScanResult): string {
 export function formatBatchReport(results: SkillScanResult[]): string {
 	const lines: string[] = [];
 	const blocked = results.filter((r) => r.verdict === "block");
+	const unscannable = results.filter((r) => r.verdict === "unscannable");
 	const warned = results.filter((r) => r.verdict === "warn");
 	const passed = results.filter((r) => r.verdict === "pass");
 
 	lines.push(`=== SkillGuard Batch Scan ===`);
 	lines.push(`Scanned: ${results.length} skill(s)`);
-	lines.push(`Blocked: ${blocked.length}`);
+	lines.push(`Rejected: ${blocked.length + unscannable.length}`);
+	lines.push(`  Blocked (threats): ${blocked.length}`);
+	lines.push(`  Unscannable (not certified): ${unscannable.length}`);
 	lines.push(`Warned: ${warned.length}`);
 	lines.push(`Passed: ${passed.length}`);
 	lines.push("");

@@ -198,10 +198,19 @@ export async function calculateBudget(
 		const parsed = await parseSkillFile(sp);
 		if (!parsed) continue;
 
+		// Token count reflects the bytes actually kept by the guarded read, so a
+		// skipped or truncated skill is reported rather than counted as normal.
+		const note = parsed.skip
+			? `skipped: ${parsed.skip.message}`
+			: parsed.truncated
+				? "truncated: read budget reached"
+				: undefined;
+
 		entries.push({
 			skillName: parsed.name,
 			skillPath: sp,
 			tokens: estimateTokens(parsed.rawContent),
+			...(note ? { note } : {}),
 		});
 	}
 

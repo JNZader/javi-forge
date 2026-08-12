@@ -287,6 +287,11 @@ export interface SkillBudgetEntry {
 	skillName: string;
 	skillPath: string;
 	tokens: number;
+	/**
+	 * Set when the SKILL.md could not be fully read (binary, oversized, I/O
+	 * error) — `tokens` is then partial or zero and should be read with care.
+	 */
+	note?: string;
 }
 
 export interface SkillBudgetSuggestion {

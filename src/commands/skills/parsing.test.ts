@@ -17,8 +17,18 @@ vi.mock("../../lib/frontmatter.js", () => ({
 	parseFrontmatter: vi.fn(),
 }));
 
+// ── Mock safe-read ──────────────────────────────────────────────────────────
+// parseSkillFile reads through the guarded reader; the suite still drives file
+// content through the fs-extra mock above.
+vi.mock("../../lib/safe-read.js", async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import("../../lib/safe-read.js")>();
+	return { ...actual, safeReadFile: vi.fn() };
+});
+
 import fs from "fs-extra";
 import { parseFrontmatter } from "../../lib/frontmatter.js";
+import { safeReadFile } from "../../lib/safe-read.js";
 import {
 	discoverSkills,
 	estimateTokens,
@@ -29,9 +39,35 @@ import {
 
 const mockedFs = vi.mocked(fs);
 const mockedParseFrontmatter = vi.mocked(parseFrontmatter);
+const mockedSafeReadFile = vi.mocked(safeReadFile);
+
+/** Route safeReadFile through the fs-extra readFile mock. */
+function wireSafeReadToMockedFs(): void {
+	mockedSafeReadFile.mockImplementation(async (filePath) => {
+		const content = await (
+			mockedFs.readFile as unknown as (
+				p: string,
+				enc: string,
+			) => Promise<unknown>
+		)(filePath, "utf-8");
+		if (typeof content !== "string") {
+			return { ok: false, reason: "not-found" };
+		}
+		const bytes = Buffer.byteLength(content, "utf-8");
+		return {
+			ok: true,
+			content,
+			truncated: false,
+			bytesRead: bytes,
+			totalBytes: bytes,
+			longLinesClamped: false,
+		};
+	});
+}
 
 beforeEach(() => {
 	vi.resetAllMocks();
+	wireSafeReadToMockedFs();
 });
 
 // ── estimateTokens ──────────────────────────────────────────────────────────
@@ -221,5 +257,52 @@ describe("parseSkillFile", () => {
 		const result = await parseSkillFile("/skills/my-skill/SKILL.md");
 		expect(result).not.toBeNull();
 		expect(result!.name).toBe("my-skill");
+	});
+
+	it("reports an oversized SKILL.md as a skip instead of throwing", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "too-large",
+			detail: "4000000 bytes exceeds limit of 1048576",
+		});
+
+		const result = await parseSkillFile("/skills/huge/SKILL.md");
+		expect(result).not.toBeNull();
+		expect(result!.skip?.reason).toBe("too-large");
+		expect(result!.skip?.message).toContain("too large");
+		expect(result!.rawContent).toBe("");
+		expect(result!.rules).toEqual([]);
+		expect(result!.name).toBe("huge");
+	});
+
+	it("reports a binary SKILL.md as a skip", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "binary",
+			detail: "NUL byte in first chunk",
+		});
+
+		const result = await parseSkillFile("/skills/blob/SKILL.md");
+		expect(result!.skip?.reason).toBe("binary");
+		expect(estimateTokens(result!.rawContent)).toBe(0);
+	});
+
+	it("propagates truncation so token estimates reflect the kept text", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: true,
+			content: "abcd",
+			truncated: true,
+			bytesRead: 4,
+			totalBytes: 4000,
+			longLinesClamped: false,
+		});
+		mockedParseFrontmatter.mockReturnValue(null);
+
+		const result = await parseSkillFile("/skills/long/SKILL.md");
+		expect(result!.truncated).toBe(true);
+		expect(estimateTokens(result!.rawContent)).toBe(1);
 	});
 });

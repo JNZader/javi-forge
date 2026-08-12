@@ -19,6 +19,12 @@ export const DEFAULT_THRESHOLD = 50;
 /** Default registry quality threshold */
 export const DEFAULT_REGISTRY_THRESHOLD = 60;
 
+/**
+ * Hard ceiling for a SKILL.md. A skill file past this is not a skill — it is a
+ * dumped log or a vendored bundle — so it is skipped instead of truncated.
+ */
+export const MAX_SKILL_BYTES = 1024 * 1024;
+
 // ── Contradiction keywords (pairs that signal opposite intent) ───────────────
 
 export const CONTRADICTION_PAIRS: [RegExp, RegExp][] = [

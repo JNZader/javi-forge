@@ -17,8 +17,18 @@ vi.mock("../../lib/frontmatter.js", () => ({
 	parseFrontmatter: vi.fn(),
 }));
 
+// ── Mock safe-read ──────────────────────────────────────────────────────────
+// parseSkillFile reads through the guarded reader; the suite still drives file
+// content through the fs-extra mock above.
+vi.mock("../../lib/safe-read.js", async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import("../../lib/safe-read.js")>();
+	return { ...actual, safeReadFile: vi.fn() };
+});
+
 import fs from "fs-extra";
 import { parseFrontmatter } from "../../lib/frontmatter.js";
+import { safeReadFile } from "../../lib/safe-read.js";
 import {
 	calculateBudget,
 	detectRuleConflict,
@@ -30,8 +40,35 @@ import {
 const mockedFs = vi.mocked(fs);
 const mockedParseFrontmatter = vi.mocked(parseFrontmatter);
 
+const mockedSafeReadFile = vi.mocked(safeReadFile);
+
+/** Route safeReadFile through the fs-extra readFile mock. */
+function wireSafeReadToMockedFs(): void {
+	mockedSafeReadFile.mockImplementation(async (filePath) => {
+		const content = await (
+			mockedFs.readFile as unknown as (
+				p: string,
+				enc: string,
+			) => Promise<unknown>
+		)(filePath, "utf-8");
+		if (typeof content !== "string") {
+			return { ok: false, reason: "not-found" };
+		}
+		const bytes = Buffer.byteLength(content, "utf-8");
+		return {
+			ok: true,
+			content,
+			truncated: false,
+			bytesRead: bytes,
+			totalBytes: bytes,
+			longLinesClamped: false,
+		};
+	});
+}
+
 beforeEach(() => {
 	vi.resetAllMocks();
+	wireSafeReadToMockedFs();
 });
 
 // ── detectRuleConflict ──────────────────────────────────────────────────────

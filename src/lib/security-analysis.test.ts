@@ -280,6 +280,14 @@ describe("buildSummary", () => {
 		const summary = buildSummary([], "high");
 		expect(summary.total).toBe(0);
 		expect(summary.passed).toBe(true);
+		expect(summary.incomplete).toBe(false);
+	});
+
+	it("fails closed when the scan was incomplete, even with no findings", () => {
+		const summary = buildSummary([], "high", true);
+		expect(summary.total).toBe(0);
+		expect(summary.incomplete).toBe(true);
+		expect(summary.passed).toBe(false);
 	});
 });
 
@@ -630,6 +638,24 @@ describe("runSecurityAnalysis", () => {
 
 		const report = await runSecurityAnalysis(tmpDir);
 		expect(report.skipped).toBeUndefined();
+		expect(report.summary.incomplete).toBe(false);
+	});
+
+	it("fails closed when a file was skipped, even with no findings", async () => {
+		// Clean code that would otherwise pass...
+		await fs.writeFile(path.join(tmpDir, "clean.ts"), "const x = 1;\n");
+		// ...plus a binary blob with a scannable extension that cannot be read.
+		await fs.writeFile(
+			path.join(tmpDir, "blob.ts"),
+			Buffer.from([0x00, 0x01, 0x02, 0x03]),
+		);
+
+		const report = await runSecurityAnalysis(tmpDir);
+		expect(report.findings).toHaveLength(0);
+		expect(report.skipped).toHaveLength(1);
+		expect(report.summary.incomplete).toBe(true);
+		expect(report.summary.passed).toBe(false);
+		expect(formatReportText(report)).toContain("incomplete scan");
 	});
 
 	it("passes with clean code", async () => {

@@ -9,6 +9,7 @@
 import path from "node:path";
 import fs from "fs-extra";
 import type { SecuritySeverity } from "../types/index.js";
+import { describeSafeReadFailure, safeReadFile } from "./safe-read.js";
 
 // =============================================================================
 // Types
@@ -35,6 +36,17 @@ export interface SecurityAnalysisReport {
 	projectDir: string;
 	findings: SecurityAnalysisFinding[];
 	summary: SecurityAnalysisSummary;
+	/**
+	 * Files the pattern pass never saw — binary, oversized or unreadable. A scan
+	 * that silently skipped files is not a clean scan, so they are reported.
+	 */
+	skipped?: SecurityAnalysisSkippedFile[];
+}
+
+export interface SecurityAnalysisSkippedFile {
+	/** Path relative to `projectDir`, matching the finding paths. */
+	file: string;
+	reason: string;
 }
 
 export interface SecurityAnalysisSummary {
@@ -61,6 +73,12 @@ export interface SecurityAnalysisOptions {
 // =============================================================================
 // Constants
 // =============================================================================
+
+/**
+ * Hard ceiling per scanned file. Source files past this are generated or
+ * vendored bundles: running every rule over them costs far more than it finds.
+ */
+const MAX_ANALYSIS_BYTES = 2 * 1024 * 1024;
 
 const SEVERITY_ORDER: Record<SecuritySeverity, number> = {
 	critical: 5,
@@ -460,6 +478,7 @@ export function buildReport(
 	findings: SecurityAnalysisFinding[],
 	projectDir: string,
 	options: SecurityAnalysisOptions = {},
+	skipped: SecurityAnalysisSkippedFile[] = [],
 ): SecurityAnalysisReport {
 	const failThreshold = options.failThreshold ?? "high";
 
@@ -469,6 +488,7 @@ export function buildReport(
 		projectDir,
 		findings,
 		summary: buildSummary(findings, failThreshold),
+		...(skipped.length > 0 ? { skipped } : {}),
 	};
 }
 
@@ -570,16 +590,32 @@ export async function runSecurityAnalysis(
 
 	// Run pattern matching
 	const findings: SecurityAnalysisFinding[] = [];
+	const skipped: SecurityAnalysisSkippedFile[] = [];
 	for (const filePath of allFiles) {
-		let content: string;
-		try {
-			content = await fs.readFile(filePath, "utf-8");
-		} catch {
-			continue;
-		}
+		// Guarded read: a binary blob or a multi-megabyte bundle would otherwise
+		// be fed to every regex rule in the set.
+		const read = await safeReadFile(filePath, {
+			hardRejectOverBytes: MAX_ANALYSIS_BYTES,
+		});
 
 		// Use relative paths in findings for readability
 		const relativePath = path.relative(projectDir, filePath);
+
+		if (!read.ok) {
+			skipped.push({
+				file: relativePath,
+				reason: describeSafeReadFailure(read),
+			});
+			continue;
+		}
+
+		const content = read.content;
+		if (read.truncated) {
+			skipped.push({
+				file: relativePath,
+				reason: `truncated at ${read.bytesRead} of ${read.totalBytes} bytes — scanned partially`,
+			});
+		}
 
 		for (const rule of rules) {
 			const matches = matchRule(rule, content, filePath);
@@ -598,7 +634,7 @@ export async function runSecurityAnalysis(
 		return a.file.localeCompare(b.file);
 	});
 
-	return buildReport(findings, projectDir, options);
+	return buildReport(findings, projectDir, options, skipped);
 }
 
 // =============================================================================
@@ -622,6 +658,9 @@ export function formatReportText(report: SecurityAnalysisReport): string {
 	);
 	lines.push(`Pass threshold: ${summary.failThreshold}`);
 	lines.push(`Result: ${summary.passed ? "PASS" : "FAIL"}`);
+	if (report.skipped && report.skipped.length > 0) {
+		lines.push(`Skipped files: ${report.skipped.length}`);
+	}
 	lines.push("");
 
 	if (findings.length > 0) {
@@ -633,6 +672,14 @@ export function formatReportText(report: SecurityAnalysisReport): string {
 			const cwe = f.cwe ? ` [${f.cwe}]` : "";
 			lines.push(`[${f.severity.toUpperCase()}] ${f.ruleId}${cwe} at ${loc}`);
 			lines.push(`  ${f.message}`);
+		}
+	}
+
+	if (report.skipped && report.skipped.length > 0) {
+		lines.push("");
+		lines.push("--- Skipped ---");
+		for (const s of report.skipped) {
+			lines.push(`${s.file}: ${s.reason}`);
 		}
 	}
 

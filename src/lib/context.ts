@@ -228,10 +228,10 @@ export async function detectDependenciesDetailed(
  * Detect top-level dependencies from project manifest files.
  * Returns up to 10 dependency names (key deps only, not devDeps).
  *
- * Kept as a list-returning convenience over `detectDependenciesDetailed` — the
- * blanket `catch { return [] }` it used to carry is gone: read and parse
- * failures now surface as warnings rather than being indistinguishable from an
- * honest empty dependency list.
+ * List-returning convenience over `detectDependenciesDetailed`. It DISCARDS the
+ * read/parse warnings — an unreadable manifest is indistinguishable from an
+ * honest empty list through this function. Callers that must tell those two
+ * apart (like `refreshContextDir`) call `detectDependenciesDetailed` directly.
  */
 export async function detectDependencies(
 	projectDir: string,
@@ -281,9 +281,14 @@ export async function generateContextDir(
  * Reads manifest, detects current dependencies, regenerates INDEX.md + summary.md.
  * Returns null if the project is not forge-managed or has no .context/ dir.
  */
-export async function refreshContextDir(
-	projectDir: string,
-): Promise<{ index: string; summary: string; updated: boolean } | null> {
+export async function refreshContextDir(projectDir: string): Promise<{
+	index: string;
+	summary: string;
+	updated: boolean;
+	/** Manifest read/parse warnings — surfaced so an unreadable manifest is not
+	 * silently reported as a project with no dependencies. */
+	warnings: string[];
+} | null> {
 	const manifestPath = path.join(projectDir, ".javi-forge", "manifest.json");
 	const contextDirPath = path.join(projectDir, ".context");
 
@@ -303,7 +308,10 @@ export async function refreshContextDir(
 	}
 
 	const stackCtx = getStackContext(manifest.stack);
-	const dependencies = await detectDependencies(projectDir, manifest.stack);
+	const { dependencies, warnings } = await detectDependenciesDetailed(
+		projectDir,
+		manifest.stack,
+	);
 
 	const index = buildIndexMd(
 		manifest.projectName,
@@ -328,5 +336,5 @@ export async function refreshContextDir(
 	manifest.updatedAt = new Date().toISOString();
 	await fs.writeJson(manifestPath, manifest, { spaces: 2 });
 
-	return { index, summary, updated: true };
+	return { index, summary, updated: true, warnings };
 }

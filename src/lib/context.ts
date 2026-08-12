@@ -6,6 +6,7 @@ import type {
 	InitOptions,
 	StackContextEntry,
 } from "../types/index.js";
+import { describeSafeReadFailure, safeReadFile } from "./safe-read.js";
 
 // =============================================================================
 // Internal helpers
@@ -78,99 +79,166 @@ ${stack}-based project scaffolded with javi-forge.
 // Dependency detection
 // =============================================================================
 
+const MAX_DEPS = 10;
+
+/**
+ * Byte ceiling for a dependency manifest. A package.json or go.mod past this is
+ * not a manifest we can learn anything useful from — it is generated noise.
+ */
+const MAX_MANIFEST_BYTES = 512 * 1024;
+
+/**
+ * Dependency detection outcome. `warnings` explains every manifest that could
+ * not be read or parsed, so a failure is distinguishable from "no dependencies"
+ * instead of being swallowed by a blanket catch.
+ */
+export interface DependencyDetection {
+	dependencies: string[];
+	warnings: string[];
+}
+
+/** Read a manifest under a byte budget; returns null and a warning on failure. */
+async function readManifest(
+	manifestPath: string,
+	warnings: string[],
+): Promise<string | null> {
+	const read = await safeReadFile(manifestPath, {
+		hardRejectOverBytes: MAX_MANIFEST_BYTES,
+	});
+	if (!read.ok) {
+		warnings.push(
+			`${path.basename(manifestPath)}: ${describeSafeReadFailure(read)}`,
+		);
+		return null;
+	}
+	if (read.truncated) {
+		warnings.push(
+			`${path.basename(manifestPath)}: truncated at ${read.bytesRead} of ${read.totalBytes} bytes`,
+		);
+	}
+	return read.content;
+}
+
+/**
+ * Detect top-level dependencies from project manifest files, reporting why a
+ * manifest was skipped. Returns up to 10 dependency names (key deps only).
+ */
+export async function detectDependenciesDetailed(
+	projectDir: string,
+	stack: string,
+): Promise<DependencyDetection> {
+	const warnings: string[] = [];
+
+	switch (stack) {
+		case "node": {
+			const pkgPath = path.join(projectDir, "package.json");
+			if (!(await fs.pathExists(pkgPath)))
+				return { dependencies: [], warnings };
+			const content = await readManifest(pkgPath, warnings);
+			if (content === null) return { dependencies: [], warnings };
+			let pkg: { dependencies?: Record<string, unknown> };
+			try {
+				pkg = JSON.parse(content);
+			} catch (err) {
+				warnings.push(
+					`package.json: invalid JSON (${err instanceof Error ? err.message : String(err)})`,
+				);
+				return { dependencies: [], warnings };
+			}
+			const deps = Object.keys(pkg?.dependencies ?? {});
+			return { dependencies: deps.slice(0, MAX_DEPS), warnings };
+		}
+		case "python": {
+			const pyprojectPath = path.join(projectDir, "pyproject.toml");
+			if (await fs.pathExists(pyprojectPath)) {
+				const content = await readManifest(pyprojectPath, warnings);
+				const match = content?.match(/dependencies\s*=\s*\[([\s\S]*?)\]/);
+				if (match?.[1]) {
+					const deps = match[1]
+						.split("\n")
+						.map((l) => l.replace(/[",]/g, "").trim())
+						.filter((l) => l.length > 0 && !l.startsWith("#"))
+						.map((l) => l.split(/[>=<~!]/)[0].trim())
+						.filter(Boolean);
+					return { dependencies: deps.slice(0, MAX_DEPS), warnings };
+				}
+			}
+			const reqPath = path.join(projectDir, "requirements.txt");
+			if (await fs.pathExists(reqPath)) {
+				const content = await readManifest(reqPath, warnings);
+				if (content === null) return { dependencies: [], warnings };
+				const deps = content
+					.split("\n")
+					.map((l) => l.trim())
+					.filter(
+						(l) => l.length > 0 && !l.startsWith("#") && !l.startsWith("-"),
+					)
+					.map((l) => l.split(/[>=<~!]/)[0].trim())
+					.filter(Boolean);
+				return { dependencies: deps.slice(0, MAX_DEPS), warnings };
+			}
+			return { dependencies: [], warnings };
+		}
+		case "go": {
+			const goModPath = path.join(projectDir, "go.mod");
+			if (!(await fs.pathExists(goModPath)))
+				return { dependencies: [], warnings };
+			const content = await readManifest(goModPath, warnings);
+			const requireBlock = content?.match(/require\s*\(([\s\S]*?)\)/);
+			if (requireBlock?.[1]) {
+				const deps = requireBlock[1]
+					.split("\n")
+					.map((l) => l.trim())
+					.filter((l) => l.length > 0 && !l.startsWith("//"))
+					.map((l) => {
+						const parts = l.split(/\s+/);
+						const mod = parts[0] ?? "";
+						return mod.split("/").pop() ?? mod;
+					})
+					.filter(Boolean);
+				return { dependencies: deps.slice(0, MAX_DEPS), warnings };
+			}
+			return { dependencies: [], warnings };
+		}
+		case "rust": {
+			const cargoPath = path.join(projectDir, "Cargo.toml");
+			if (!(await fs.pathExists(cargoPath)))
+				return { dependencies: [], warnings };
+			const content = await readManifest(cargoPath, warnings);
+			const depsSection = content?.match(
+				/\[dependencies\]([\s\S]*?)(?=\n\[|$)/,
+			);
+			if (depsSection?.[1]) {
+				const deps = depsSection[1]
+					.split("\n")
+					.map((l) => l.trim())
+					.filter((l) => l.length > 0 && !l.startsWith("#"))
+					.map((l) => l.split(/\s*=/)[0].trim())
+					.filter(Boolean);
+				return { dependencies: deps.slice(0, MAX_DEPS), warnings };
+			}
+			return { dependencies: [], warnings };
+		}
+		default:
+			return { dependencies: [], warnings };
+	}
+}
+
 /**
  * Detect top-level dependencies from project manifest files.
  * Returns up to 10 dependency names (key deps only, not devDeps).
+ *
+ * Kept as a list-returning convenience over `detectDependenciesDetailed` — the
+ * blanket `catch { return [] }` it used to carry is gone: read and parse
+ * failures now surface as warnings rather than being indistinguishable from an
+ * honest empty dependency list.
  */
 export async function detectDependencies(
 	projectDir: string,
 	stack: string,
 ): Promise<string[]> {
-	const MAX_DEPS = 10;
-
-	try {
-		switch (stack) {
-			case "node": {
-				const pkgPath = path.join(projectDir, "package.json");
-				if (!(await fs.pathExists(pkgPath))) return [];
-				const pkg = await fs.readJson(pkgPath).catch(() => ({}));
-				const deps = Object.keys(pkg.dependencies ?? {});
-				return deps.slice(0, MAX_DEPS);
-			}
-			case "python": {
-				const pyprojectPath = path.join(projectDir, "pyproject.toml");
-				if (await fs.pathExists(pyprojectPath)) {
-					const content = await fs.readFile(pyprojectPath, "utf-8");
-					const match = content.match(/dependencies\s*=\s*\[([\s\S]*?)\]/);
-					if (match?.[1]) {
-						const deps = match[1]
-							.split("\n")
-							.map((l) => l.replace(/[",]/g, "").trim())
-							.filter((l) => l.length > 0 && !l.startsWith("#"))
-							.map((l) => l.split(/[>=<~!]/)[0].trim())
-							.filter(Boolean);
-						return deps.slice(0, MAX_DEPS);
-					}
-				}
-				const reqPath = path.join(projectDir, "requirements.txt");
-				if (await fs.pathExists(reqPath)) {
-					const content = await fs.readFile(reqPath, "utf-8");
-					const deps = content
-						.split("\n")
-						.map((l) => l.trim())
-						.filter(
-							(l) => l.length > 0 && !l.startsWith("#") && !l.startsWith("-"),
-						)
-						.map((l) => l.split(/[>=<~!]/)[0].trim())
-						.filter(Boolean);
-					return deps.slice(0, MAX_DEPS);
-				}
-				return [];
-			}
-			case "go": {
-				const goModPath = path.join(projectDir, "go.mod");
-				if (!(await fs.pathExists(goModPath))) return [];
-				const content = await fs.readFile(goModPath, "utf-8");
-				const requireBlock = content.match(/require\s*\(([\s\S]*?)\)/);
-				if (requireBlock?.[1]) {
-					const deps = requireBlock[1]
-						.split("\n")
-						.map((l) => l.trim())
-						.filter((l) => l.length > 0 && !l.startsWith("//"))
-						.map((l) => {
-							const parts = l.split(/\s+/);
-							const mod = parts[0] ?? "";
-							return mod.split("/").pop() ?? mod;
-						})
-						.filter(Boolean);
-					return deps.slice(0, MAX_DEPS);
-				}
-				return [];
-			}
-			case "rust": {
-				const cargoPath = path.join(projectDir, "Cargo.toml");
-				if (!(await fs.pathExists(cargoPath))) return [];
-				const content = await fs.readFile(cargoPath, "utf-8");
-				const depsSection = content.match(
-					/\[dependencies\]([\s\S]*?)(?=\n\[|$)/,
-				);
-				if (depsSection?.[1]) {
-					const deps = depsSection[1]
-						.split("\n")
-						.map((l) => l.trim())
-						.filter((l) => l.length > 0 && !l.startsWith("#"))
-						.map((l) => l.split(/\s*=/)[0].trim())
-						.filter(Boolean);
-					return deps.slice(0, MAX_DEPS);
-				}
-				return [];
-			}
-			default:
-				return [];
-		}
-	} catch {
-		return [];
-	}
+	const { dependencies } = await detectDependenciesDetailed(projectDir, stack);
+	return dependencies;
 }
 
 // =============================================================================

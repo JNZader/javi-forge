@@ -1,7 +1,12 @@
 import path from "node:path";
 import fs from "fs-extra";
 import { parseFrontmatter } from "../../lib/frontmatter.js";
-import { CHARS_PER_TOKEN } from "./constants.js";
+import {
+	describeSafeReadFailure,
+	type SafeReadFailureReason,
+	safeReadFile,
+} from "../../lib/safe-read.js";
+import { CHARS_PER_TOKEN, MAX_SKILL_BYTES } from "./constants.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -10,16 +15,53 @@ export function estimateTokens(text: string): number {
 	return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
-/** Read a SKILL.md and extract its name + critical rules section */
-export async function parseSkillFile(skillPath: string): Promise<{
+/** Why a SKILL.md could not be analysed — reportable, never thrown */
+export interface SkillReadSkip {
+	reason: SafeReadFailureReason;
+	message: string;
+}
+
+export interface ParsedSkillFile {
 	name: string;
 	rules: string[];
 	rawContent: string;
 	triggers: string[];
-} | null> {
+	/**
+	 * Non-null when the file could not be read as analysable text (binary,
+	 * oversized, permission denied). `rawContent` is empty in that case, so
+	 * callers can report the skip instead of scoring an empty skill.
+	 */
+	skip: SkillReadSkip | null;
+	/** True when the file was longer than the read budget and got cut short. */
+	truncated: boolean;
+}
+
+/** Read a SKILL.md and extract its name + critical rules section */
+export async function parseSkillFile(
+	skillPath: string,
+): Promise<ParsedSkillFile | null> {
 	if (!(await fs.pathExists(skillPath))) return null;
 
-	const raw = await fs.readFile(skillPath, "utf-8");
+	const read = await safeReadFile(skillPath, {
+		hardRejectOverBytes: MAX_SKILL_BYTES,
+	});
+
+	if (!read.ok) {
+		// A path that vanished between the existence check and the read is the
+		// same "no such skill" case the caller already handles with null.
+		if (read.reason === "not-found" || read.reason === "not-a-file")
+			return null;
+		return {
+			name: path.basename(path.dirname(skillPath)),
+			rules: [],
+			rawContent: "",
+			triggers: [],
+			skip: { reason: read.reason, message: describeSafeReadFailure(read) },
+			truncated: false,
+		};
+	}
+
+	const raw = read.content;
 	const fm = parseFrontmatter(raw);
 
 	const rawName = fm?.data?.name;
@@ -36,7 +78,15 @@ export async function parseSkillFile(skillPath: string): Promise<{
 	const description = typeof rawDesc === "string" ? rawDesc : "";
 	const triggers = extractTriggers(description);
 
-	return { name, rules, rawContent: raw, triggers };
+	// rawContent is the kept text, so token estimates reflect what was analysed.
+	return {
+		name,
+		rules,
+		rawContent: raw,
+		triggers,
+		skip: null,
+		truncated: read.truncated,
+	};
 }
 
 /** Extract critical rules from markdown content */

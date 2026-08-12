@@ -9,6 +9,7 @@
 import path from "node:path";
 import fs from "fs-extra";
 import type { SecuritySeverity } from "../types/index.js";
+import { describeSafeReadFailure, safeReadFile } from "./safe-read.js";
 
 // =============================================================================
 // Types
@@ -35,6 +36,17 @@ export interface SecurityAnalysisReport {
 	projectDir: string;
 	findings: SecurityAnalysisFinding[];
 	summary: SecurityAnalysisSummary;
+	/**
+	 * Files the pattern pass never saw — binary, oversized or unreadable. A scan
+	 * that silently skipped files is not a clean scan, so they are reported.
+	 */
+	skipped?: SecurityAnalysisSkippedFile[];
+}
+
+export interface SecurityAnalysisSkippedFile {
+	/** Path relative to `projectDir`, matching the finding paths. */
+	file: string;
+	reason: string;
 }
 
 export interface SecurityAnalysisSummary {
@@ -42,6 +54,13 @@ export interface SecurityAnalysisSummary {
 	bySeverity: Record<SecuritySeverity, number>;
 	byCategory: Record<string, number>;
 	passed: boolean;
+	/**
+	 * True when at least one file was skipped or only partially scanned (binary,
+	 * oversized, I/O error, truncated, or clamped). The scan did not see the whole
+	 * codebase, so `passed` is forced to `false` — a clean result over an
+	 * incomplete scan would be a fail-open lie.
+	 */
+	incomplete: boolean;
 	failThreshold: SecuritySeverity;
 }
 
@@ -61,6 +80,12 @@ export interface SecurityAnalysisOptions {
 // =============================================================================
 // Constants
 // =============================================================================
+
+/**
+ * Hard ceiling per scanned file. Source files past this are generated or
+ * vendored bundles: running every rule over them costs far more than it finds.
+ */
+const MAX_ANALYSIS_BYTES = 2 * 1024 * 1024;
 
 const SEVERITY_ORDER: Record<SecuritySeverity, number> = {
 	critical: 5,
@@ -428,6 +453,7 @@ export function severityAtOrAbove(
 export function buildSummary(
 	findings: SecurityAnalysisFinding[],
 	failThreshold: SecuritySeverity,
+	incomplete = false,
 ): SecurityAnalysisSummary {
 	const bySeverity: Record<SecuritySeverity, number> = {
 		critical: 0,
@@ -443,15 +469,20 @@ export function buildSummary(
 		byCategory[f.category] = (byCategory[f.category] ?? 0) + 1;
 	}
 
-	const passed = !findings.some((f) =>
+	// Fail closed on an incomplete scan: a file we never fully read could hold the
+	// very finding that would have failed the gate. No threshold finding is not
+	// the same as "clean" when part of the codebase was invisible to the scan.
+	const noThresholdFinding = !findings.some((f) =>
 		severityAtOrAbove(f.severity, failThreshold),
 	);
+	const passed = noThresholdFinding && !incomplete;
 
 	return {
 		total: findings.length,
 		bySeverity,
 		byCategory,
 		passed,
+		incomplete,
 		failThreshold,
 	};
 }
@@ -460,6 +491,7 @@ export function buildReport(
 	findings: SecurityAnalysisFinding[],
 	projectDir: string,
 	options: SecurityAnalysisOptions = {},
+	skipped: SecurityAnalysisSkippedFile[] = [],
 ): SecurityAnalysisReport {
 	const failThreshold = options.failThreshold ?? "high";
 
@@ -468,7 +500,8 @@ export function buildReport(
 		timestamp: new Date().toISOString(),
 		projectDir,
 		findings,
-		summary: buildSummary(findings, failThreshold),
+		summary: buildSummary(findings, failThreshold, skipped.length > 0),
+		...(skipped.length > 0 ? { skipped } : {}),
 	};
 }
 
@@ -570,16 +603,45 @@ export async function runSecurityAnalysis(
 
 	// Run pattern matching
 	const findings: SecurityAnalysisFinding[] = [];
+	const skipped: SecurityAnalysisSkippedFile[] = [];
 	for (const filePath of allFiles) {
-		let content: string;
-		try {
-			content = await fs.readFile(filePath, "utf-8");
-		} catch {
-			continue;
-		}
+		// Guarded read: a binary blob or a multi-megabyte bundle would otherwise
+		// be fed to every regex rule in the set. `maxBytes` is pinned to the same
+		// ceiling as the hard reject so the documented 2 MiB limit is the effective
+		// scan cap — otherwise the 1 MiB default would silently truncate every file
+		// between 1 and 2 MiB and MAX_ANALYSIS_BYTES would be a dead constant.
+		const read = await safeReadFile(filePath, {
+			maxBytes: MAX_ANALYSIS_BYTES,
+			hardRejectOverBytes: MAX_ANALYSIS_BYTES,
+		});
 
 		// Use relative paths in findings for readability
 		const relativePath = path.relative(projectDir, filePath);
+
+		if (!read.ok) {
+			skipped.push({
+				file: relativePath,
+				reason: describeSafeReadFailure(read),
+			});
+			continue;
+		}
+
+		const content = read.content;
+		if (read.truncated) {
+			skipped.push({
+				file: relativePath,
+				reason: `truncated at ${read.bytesRead} of ${read.totalBytes} bytes — scanned partially`,
+			});
+		}
+		// A clamped long line means the regex pass saw a shortened line — a payload
+		// hidden past the clamp would be invisible. Record it like a truncation so
+		// the scan is marked incomplete and cannot report a clean pass.
+		if (read.longLinesClamped) {
+			skipped.push({
+				file: relativePath,
+				reason: "long line(s) clamped — scanned partially",
+			});
+		}
 
 		for (const rule of rules) {
 			const matches = matchRule(rule, content, filePath);
@@ -598,7 +660,7 @@ export async function runSecurityAnalysis(
 		return a.file.localeCompare(b.file);
 	});
 
-	return buildReport(findings, projectDir, options);
+	return buildReport(findings, projectDir, options, skipped);
 }
 
 // =============================================================================
@@ -621,7 +683,18 @@ export function formatReportText(report: SecurityAnalysisReport): string {
 		}`,
 	);
 	lines.push(`Pass threshold: ${summary.failThreshold}`);
-	lines.push(`Result: ${summary.passed ? "PASS" : "FAIL"}`);
+	lines.push(
+		`Result: ${
+			summary.passed
+				? "PASS"
+				: summary.incomplete
+					? "FAIL (incomplete scan — some files were not fully analysed)"
+					: "FAIL"
+		}`,
+	);
+	if (report.skipped && report.skipped.length > 0) {
+		lines.push(`Skipped files: ${report.skipped.length}`);
+	}
 	lines.push("");
 
 	if (findings.length > 0) {
@@ -633,6 +706,14 @@ export function formatReportText(report: SecurityAnalysisReport): string {
 			const cwe = f.cwe ? ` [${f.cwe}]` : "";
 			lines.push(`[${f.severity.toUpperCase()}] ${f.ruleId}${cwe} at ${loc}`);
 			lines.push(`  ${f.message}`);
+		}
+	}
+
+	if (report.skipped && report.skipped.length > 0) {
+		lines.push("");
+		lines.push("--- Skipped ---");
+		for (const s of report.skipped) {
+			lines.push(`${s.file}: ${s.reason}`);
 		}
 	}
 

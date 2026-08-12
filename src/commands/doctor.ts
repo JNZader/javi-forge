@@ -352,6 +352,15 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 				status: "ok",
 				detail: "INDEX.md + summary.md updated",
 			});
+			// A manifest that could not be read is not "no dependencies" — surface
+			// each warning so an unreadable/oversized/invalid manifest is visible.
+			for (const warning of result.warnings) {
+				contextChecks.push({
+					label: "dependency manifest",
+					status: "fail",
+					detail: warning,
+				});
+			}
 		} else {
 			contextChecks.push({
 				label: ".context/ refresh",

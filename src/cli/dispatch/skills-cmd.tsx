@@ -89,6 +89,12 @@ export async function handleSkillsCmd(
 				console.error(`\u2717 Skill not found: ${skillPath}`);
 				process.exit(1);
 			}
+			if (result.unread) {
+				console.error(
+					`\u2717 Skill could not be scored \u2014 ${result.unread}: ${skillPath}`,
+				);
+				process.exit(1);
+			}
 			console.log(`\nSkill: ${result.skillName}`);
 			console.log(`  Completeness:      ${result.completeness}/100`);
 			console.log(`  Clarity:           ${result.clarity}/100`);
@@ -110,6 +116,12 @@ export async function handleSkillsCmd(
 		const result = await benchmarkSkill(skillPath);
 		if (!result) {
 			console.error(`\u2717 Skill not found: ${skillPath}`);
+			process.exit(1);
+		}
+		if (result.unread) {
+			console.error(
+				`\u2717 Skill could not be benchmarked \u2014 ${result.unread}: ${skillPath}`,
+			);
 			process.exit(1);
 		}
 		console.log(`\nBenchmark: ${result.skillName}`);

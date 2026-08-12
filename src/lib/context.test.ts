@@ -13,6 +13,14 @@ vi.mock("fs-extra", () => {
 	return { default: mockFs, ...mockFs };
 });
 
+// ── Mock safe-read ──────────────────────────────────────────────────────────
+// Manifest reads go through the guarded reader; the suite still drives file
+// content through the fs-extra mock above.
+vi.mock("./safe-read.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./safe-read.js")>();
+	return { ...actual, safeReadFile: vi.fn() };
+});
+
 import fs from "fs-extra";
 import { STACK_CONTEXT_MAP } from "../constants.js";
 import type { InitOptions, Stack } from "../types/index.js";
@@ -20,11 +28,38 @@ import {
 	buildIndexMd,
 	buildSummaryMd,
 	detectDependencies,
+	detectDependenciesDetailed,
 	generateContextDir,
 	refreshContextDir,
 } from "./context.js";
+import { safeReadFile } from "./safe-read.js";
 
 const mockedFs = vi.mocked(fs);
+const mockedSafeReadFile = vi.mocked(safeReadFile);
+
+/** Route safeReadFile through the fs-extra readFile mock. */
+function wireSafeReadToMockedFs(): void {
+	mockedSafeReadFile.mockImplementation(async (filePath) => {
+		const content = await (
+			mockedFs.readFile as unknown as (
+				p: string,
+				enc: string,
+			) => Promise<unknown>
+		)(filePath, "utf-8");
+		if (typeof content !== "string") {
+			return { ok: false, reason: "not-found" };
+		}
+		const bytes = Buffer.byteLength(content, "utf-8");
+		return {
+			ok: true,
+			content,
+			truncated: false,
+			bytesRead: bytes,
+			totalBytes: bytes,
+			longLinesClamped: false,
+		};
+	});
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Test helpers
@@ -69,6 +104,7 @@ beforeEach(() => {
 	mockedFs.pathExists.mockResolvedValue(false as never);
 	mockedFs.writeFile.mockResolvedValue(undefined as never);
 	mockedFs.writeJson.mockResolvedValue(undefined as never);
+	wireSafeReadToMockedFs();
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -232,10 +268,12 @@ describe("buildSummaryMd", () => {
 describe("detectDependencies", () => {
 	it("reads node dependencies from package.json", async () => {
 		mockedFs.pathExists.mockResolvedValue(true as never);
-		mockedFs.readJson.mockResolvedValue({
-			dependencies: { react: "^18.0.0", next: "^14.0.0", zod: "^3.0.0" },
-			devDependencies: { vitest: "^1.0.0" },
-		} as never);
+		mockedFs.readFile.mockResolvedValue(
+			JSON.stringify({
+				dependencies: { react: "^18.0.0", next: "^14.0.0", zod: "^3.0.0" },
+				devDependencies: { vitest: "^1.0.0" },
+			}) as never,
+		);
 
 		const deps = await detectDependencies("/project", "node");
 		expect(deps).toEqual(["react", "next", "zod"]);
@@ -251,7 +289,9 @@ describe("detectDependencies", () => {
 		const manyDeps: Record<string, string> = {};
 		for (let i = 0; i < 15; i++) manyDeps[`dep-${i}`] = "1.0.0";
 		mockedFs.pathExists.mockResolvedValue(true as never);
-		mockedFs.readJson.mockResolvedValue({ dependencies: manyDeps } as never);
+		mockedFs.readFile.mockResolvedValue(
+			JSON.stringify({ dependencies: manyDeps }) as never,
+		);
 
 		const deps = await detectDependencies("/project", "node");
 		expect(deps).toHaveLength(10);
@@ -331,10 +371,54 @@ axum = "0.7"
 
 	it("returns empty on read error", async () => {
 		mockedFs.pathExists.mockResolvedValue(true as never);
-		mockedFs.readJson.mockRejectedValue(new Error("parse error") as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "io-error",
+			detail: "EACCES",
+		});
 
 		const deps = await detectDependencies("/project", "node");
 		expect(deps).toEqual([]);
+	});
+
+	it("reports an unreadable manifest as a warning instead of swallowing it", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "too-large",
+			detail: "9000000 bytes exceeds limit of 524288",
+		});
+
+		const result = await detectDependenciesDetailed("/project", "node");
+		expect(result.dependencies).toEqual([]);
+		expect(result.warnings).toHaveLength(1);
+		expect(result.warnings[0]).toContain("package.json");
+		expect(result.warnings[0]).toContain("too large");
+	});
+
+	it("reports invalid manifest JSON as a warning", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedFs.readFile.mockResolvedValue("{ not json" as never);
+
+		const result = await detectDependenciesDetailed("/project", "node");
+		expect(result.dependencies).toEqual([]);
+		expect(result.warnings[0]).toContain("invalid JSON");
+	});
+
+	it("reports a truncated manifest as a warning", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: true,
+			content: '{"dependencies":{"react":"^18.0.0"}}',
+			truncated: true,
+			bytesRead: 36,
+			totalBytes: 9000,
+			longLinesClamped: false,
+		});
+
+		const result = await detectDependenciesDetailed("/project", "node");
+		expect(result.dependencies).toEqual(["react"]);
+		expect(result.warnings[0]).toContain("truncated");
 	});
 });
 

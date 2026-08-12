@@ -713,12 +713,17 @@ export async function runCI(
 	try {
 		const ctxResult = await refreshContextDir(projectDir);
 		if (ctxResult) {
+			// An unreadable manifest is reported, not silently treated as no deps.
+			const detail =
+				ctxResult.warnings.length > 0
+					? `INDEX.md + summary.md updated (manifest warnings: ${ctxResult.warnings.join("; ")})`
+					: "INDEX.md + summary.md updated";
 			report(
 				onStep,
 				stepContext,
 				"Refresh .context/ directory",
 				"done",
-				"INDEX.md + summary.md updated",
+				detail,
 			);
 		} else {
 			report(

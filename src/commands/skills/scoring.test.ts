@@ -17,8 +17,18 @@ vi.mock("../../lib/frontmatter.js", () => ({
 	parseFrontmatter: vi.fn(),
 }));
 
+// ── Mock safe-read ──────────────────────────────────────────────────────────
+// parseSkillFile reads through the guarded reader; the suite still drives file
+// content through the fs-extra mock above.
+vi.mock("../../lib/safe-read.js", async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import("../../lib/safe-read.js")>();
+	return { ...actual, safeReadFile: vi.fn() };
+});
+
 import fs from "fs-extra";
 import { parseFrontmatter } from "../../lib/frontmatter.js";
+import { safeReadFile } from "../../lib/safe-read.js";
 import {
 	computeGrade,
 	registryGate,
@@ -34,8 +44,35 @@ import {
 const mockedFs = vi.mocked(fs);
 const mockedParseFrontmatter = vi.mocked(parseFrontmatter);
 
+const mockedSafeReadFile = vi.mocked(safeReadFile);
+
+/** Route safeReadFile through the fs-extra readFile mock. */
+function wireSafeReadToMockedFs(): void {
+	mockedSafeReadFile.mockImplementation(async (filePath) => {
+		const content = await (
+			mockedFs.readFile as unknown as (
+				p: string,
+				enc: string,
+			) => Promise<unknown>
+		)(filePath, "utf-8");
+		if (typeof content !== "string") {
+			return { ok: false, reason: "not-found" };
+		}
+		const bytes = Buffer.byteLength(content, "utf-8");
+		return {
+			ok: true,
+			content,
+			truncated: false,
+			bytesRead: bytes,
+			totalBytes: bytes,
+			longLinesClamped: false,
+		};
+	});
+}
+
 beforeEach(() => {
 	vi.resetAllMocks();
+	wireSafeReadToMockedFs();
 });
 
 // ── scoreCompleteness ──────────────────────────────────────────────────────
@@ -275,6 +312,24 @@ describe("scoreSkill", () => {
 		expect(result).not.toBeNull();
 		expect(result!.passing).toBe(false);
 		expect(result!.overall).toBeLessThan(90);
+	});
+
+	it("represents an unreadable skill as unread, not an empty-scored skill", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		// The guarded read fails (e.g. oversized) — the file was never seen.
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "too-large",
+			detail: "3000000 bytes exceeds limit of 1048576",
+		});
+
+		const result = await scoreSkill("/skills/huge/SKILL.md", 50);
+		expect(result).not.toBeNull();
+		expect(result!.unread).toBeTruthy();
+		// It must NOT be scored: never a perfect-safety free pass on empty content.
+		expect(result!.safety).not.toBe(100);
+		expect(result!.safety).toBe(0);
+		expect(result!.passing).toBe(false);
 	});
 });
 
@@ -519,5 +574,21 @@ describe("registryGate", () => {
 		expect(result).not.toBeNull();
 		expect(result!.score.threshold).toBe(60);
 		expect(result!.accepted).toBe(false);
+	});
+
+	it("rejects an unreadable skill as unread, not scored", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "binary",
+			detail: "NUL byte in first chunk",
+		});
+
+		const result = await registryGate("/skills/blob/SKILL.md");
+		expect(result).not.toBeNull();
+		expect(result!.accepted).toBe(false);
+		expect(result!.reason).toContain("could not read");
+		expect(result!.score.unread).toBeTruthy();
+		expect(result!.score.safety).not.toBe(100);
 	});
 });

@@ -8,6 +8,7 @@ vi.mock("fs-extra", () => {
 		readdir: vi.fn(),
 		readJson: vi.fn(),
 		ensureDir: vi.fn(),
+		stat: vi.fn(),
 	};
 	return { default: mockFs, ...mockFs };
 });
@@ -17,8 +18,18 @@ vi.mock("../../lib/frontmatter.js", () => ({
 	parseFrontmatter: vi.fn(),
 }));
 
+// ── Mock safe-read ──────────────────────────────────────────────────────────
+// parseSkillFile reads through the guarded reader; the suite still drives file
+// content through the fs-extra mock above.
+vi.mock("../../lib/safe-read.js", async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import("../../lib/safe-read.js")>();
+	return { ...actual, safeReadFile: vi.fn() };
+});
+
 import fs from "fs-extra";
 import { parseFrontmatter } from "../../lib/frontmatter.js";
+import { safeReadFile } from "../../lib/safe-read.js";
 import {
 	calculateBudget,
 	detectRuleConflict,
@@ -30,8 +41,35 @@ import {
 const mockedFs = vi.mocked(fs);
 const mockedParseFrontmatter = vi.mocked(parseFrontmatter);
 
+const mockedSafeReadFile = vi.mocked(safeReadFile);
+
+/** Route safeReadFile through the fs-extra readFile mock. */
+function wireSafeReadToMockedFs(): void {
+	mockedSafeReadFile.mockImplementation(async (filePath) => {
+		const content = await (
+			mockedFs.readFile as unknown as (
+				p: string,
+				enc: string,
+			) => Promise<unknown>
+		)(filePath, "utf-8");
+		if (typeof content !== "string") {
+			return { ok: false, reason: "not-found" };
+		}
+		const bytes = Buffer.byteLength(content, "utf-8");
+		return {
+			ok: true,
+			content,
+			truncated: false,
+			bytesRead: bytes,
+			totalBytes: bytes,
+			longLinesClamped: false,
+		};
+	});
+}
+
 beforeEach(() => {
 	vi.resetAllMocks();
+	wireSafeReadToMockedFs();
 });
 
 // ── detectRuleConflict ──────────────────────────────────────────────────────
@@ -153,6 +191,19 @@ describe("findConflicts", () => {
 		const conflicts = await findConflicts("/nonexistent");
 		expect(conflicts).toHaveLength(0);
 	});
+
+	it("skips an unreadable skill without crashing", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedFs.readdir.mockResolvedValue(["blob"] as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "binary",
+			detail: "NUL byte in first chunk",
+		});
+
+		const conflicts = await findConflicts("/skills");
+		expect(conflicts).toHaveLength(0);
+	});
 });
 
 // ── calculateBudget ─────────────────────────────────────────────────────────
@@ -211,6 +262,29 @@ describe("calculateBudget", () => {
 		expect(result.totalTokens).toBe(0);
 		expect(result.overBudget).toBe(false);
 		expect(result.optimizations).toHaveLength(0);
+	});
+
+	it("counts an oversized skill by real byte size, not zero", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedFs.readdir.mockResolvedValue(["huge"] as never);
+		// The guarded read rejects the file as too-large: rawContent is empty.
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "too-large",
+			detail: "3145728 bytes exceeds limit of 1048576",
+		});
+		// ...but the real on-disk size is available via stat (3 MiB → 786432 tokens).
+		(mockedFs.stat as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+			size: 3 * 1024 * 1024,
+		} as never);
+
+		const result = await calculateBudget("/skills", 5000);
+		expect(result.entries).toHaveLength(1);
+		// Not hidden as tokens: 0 — it is the biggest consumer and over budget.
+		expect(result.entries[0].tokens).toBe(Math.ceil((3 * 1024 * 1024) / 4));
+		expect(result.entries[0].note).toContain("skipped");
+		expect(result.overBudget).toBe(true);
+		expect(result.totalTokens).toBeGreaterThan(5000);
 	});
 
 	it("sorts entries by token count descending", async () => {

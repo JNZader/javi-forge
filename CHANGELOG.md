@@ -1,3 +1,9 @@
+## [1.27.0](https://github.com/JNZader/javi-forge/compare/v1.26.0...v1.27.0) (2026-08-12)
+
+### Features
+
+* **lib:** bounded safe-read + fail-closed skillguard hardening ([#44](https://github.com/JNZader/javi-forge/issues/44)) ([2466195](https://github.com/JNZader/javi-forge/commit/24661957a5473477216c2f9e6c7351c1091362bb))
+
 ## [1.26.0](https://github.com/JNZader/javi-forge/compare/v1.25.1...v1.26.0) (2026-08-11)
 
 ### Features

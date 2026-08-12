@@ -1,3 +1,4 @@
+import fs from "fs-extra";
 import type {
 	ConflictKind,
 	SkillBudgetEntry,
@@ -7,7 +8,11 @@ import type {
 	SkillCriticalRule,
 	SkillDuplicate,
 } from "../../types/index.js";
-import { CONTRADICTION_PAIRS, DEFAULT_BUDGET } from "./constants.js";
+import {
+	CHARS_PER_TOKEN,
+	CONTRADICTION_PAIRS,
+	DEFAULT_BUDGET,
+} from "./constants.js";
 import { detectDirectiveClash } from "./directives.js";
 import { discoverSkills, estimateTokens, parseSkillFile } from "./parsing.js";
 
@@ -147,6 +152,11 @@ export async function findConflicts(
 	for (const sp of skillPaths) {
 		const parsed = await parseSkillFile(sp);
 		if (!parsed) continue;
+		// A skipped file has no readable rules to compare. Don't treat its empty
+		// rule list as "no conflicts" — it is surfaced as a skip in the budget
+		// section (calculateBudget always runs alongside conflict detection), so
+		// skip it here explicitly rather than letting it pass silently.
+		if (parsed.skip) continue;
 
 		for (const rule of parsed.rules) {
 			allRules.push({
@@ -206,10 +216,24 @@ export async function calculateBudget(
 				? "truncated: read budget reached"
 				: undefined;
 
+		// A skipped skill has empty `rawContent`, so token estimation from it would
+		// be 0 and the file would sort last — the budget tool would hide the very
+		// oversized file it exists to flag. Fall back to the real on-disk byte size
+		// so an unread skill still counts toward the total and over-budget check.
+		let tokens = estimateTokens(parsed.rawContent);
+		if (parsed.skip) {
+			try {
+				const { size } = await fs.stat(sp);
+				tokens = Math.ceil(size / CHARS_PER_TOKEN);
+			} catch {
+				// Vanished between discovery and stat — leave 0; the note still flags it.
+			}
+		}
+
 		entries.push({
 			skillName: parsed.name,
 			skillPath: sp,
-			tokens: estimateTokens(parsed.rawContent),
+			tokens,
 			...(note ? { note } : {}),
 		});
 	}

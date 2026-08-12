@@ -8,6 +8,7 @@ vi.mock("fs-extra", () => {
 		readdir: vi.fn(),
 		readJson: vi.fn(),
 		ensureDir: vi.fn(),
+		stat: vi.fn(),
 	};
 	return { default: mockFs, ...mockFs };
 });
@@ -190,6 +191,19 @@ describe("findConflicts", () => {
 		const conflicts = await findConflicts("/nonexistent");
 		expect(conflicts).toHaveLength(0);
 	});
+
+	it("skips an unreadable skill without crashing", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedFs.readdir.mockResolvedValue(["blob"] as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "binary",
+			detail: "NUL byte in first chunk",
+		});
+
+		const conflicts = await findConflicts("/skills");
+		expect(conflicts).toHaveLength(0);
+	});
 });
 
 // ── calculateBudget ─────────────────────────────────────────────────────────
@@ -248,6 +262,29 @@ describe("calculateBudget", () => {
 		expect(result.totalTokens).toBe(0);
 		expect(result.overBudget).toBe(false);
 		expect(result.optimizations).toHaveLength(0);
+	});
+
+	it("counts an oversized skill by real byte size, not zero", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedFs.readdir.mockResolvedValue(["huge"] as never);
+		// The guarded read rejects the file as too-large: rawContent is empty.
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "too-large",
+			detail: "3145728 bytes exceeds limit of 1048576",
+		});
+		// ...but the real on-disk size is available via stat (3 MiB → 786432 tokens).
+		(mockedFs.stat as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+			size: 3 * 1024 * 1024,
+		} as never);
+
+		const result = await calculateBudget("/skills", 5000);
+		expect(result.entries).toHaveLength(1);
+		// Not hidden as tokens: 0 — it is the biggest consumer and over budget.
+		expect(result.entries[0].tokens).toBe(Math.ceil((3 * 1024 * 1024) / 4));
+		expect(result.entries[0].note).toContain("skipped");
+		expect(result.overBudget).toBe(true);
+		expect(result.totalTokens).toBeGreaterThan(5000);
 	});
 
 	it("sorts entries by token count descending", async () => {

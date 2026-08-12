@@ -17,6 +17,17 @@ export async function benchmarkSkill(
 	const parsed = await parseSkillFile(skillPath);
 	if (!parsed) return null;
 
+	// A file that could not be read has no structure to benchmark. Reporting it
+	// as a skill that failed every check is misleading — mark it unread instead.
+	if (parsed.skip) {
+		return {
+			skillName: parsed.name,
+			checks: [],
+			passRate: 0,
+			unread: parsed.skip.message,
+		};
+	}
+
 	const checks: SkillBenchmarkCheck[] = [];
 
 	// Check 1: Has YAML frontmatter with name

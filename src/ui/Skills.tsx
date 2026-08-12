@@ -97,11 +97,23 @@ export default function Skills({ mode, budget, deep, skillsDir }: SkillsProps) {
 							</Text>
 						</Box>
 						{result.budget.entries.map((entry) => (
-							<Box key={entry.skillName} marginLeft={4}>
-								<Text color={theme.muted}>{entry.skillName}</Text>
-								<Text color={theme.muted} dimColor>
-									{"  "}~{entry.tokens} tokens
-								</Text>
+							<Box key={entry.skillName} flexDirection="column" marginLeft={4}>
+								<Box>
+									<Text color={entry.note ? theme.warning : theme.muted}>
+										{entry.skillName}
+									</Text>
+									<Text color={theme.muted} dimColor>
+										{"  "}~{entry.tokens} tokens
+									</Text>
+								</Box>
+								{entry.note && (
+									<Box marginLeft={2}>
+										<Text color={theme.warning}>
+											{"! "}
+											{entry.note}
+										</Text>
+									</Box>
+								)}
 							</Box>
 						))}
 						{result.budget.suggestions.map((s, i) => (

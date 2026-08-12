@@ -345,6 +345,13 @@ export interface SkillScore {
 	grade: SkillGrade;
 	threshold: number;
 	passing: boolean;
+	/**
+	 * Set when the SKILL.md could not be read (binary, oversized, I/O error). The
+	 * numeric dimensions are then meaningless placeholders (all `0`, never a
+	 * computed grade or `safety: 100`); callers must surface the file as unread
+	 * rather than as a scored skill. `passing` is always `false` in this state.
+	 */
+	unread?: string;
 }
 
 export interface SkillRegistryGateResult {
@@ -364,6 +371,12 @@ export interface SkillBenchmarkResult {
 	skillName: string;
 	checks: SkillBenchmarkCheck[];
 	passRate: number;
+	/**
+	 * Set when the SKILL.md could not be read (binary, oversized, I/O error). No
+	 * checks were run (`checks` is empty, `passRate` is `0`); callers must surface
+	 * the file as unread rather than as a benchmarked skill that failed every check.
+	 */
+	unread?: string;
 }
 
 // ── Workflow Graphs ─────────────────────────────────────────────────────────

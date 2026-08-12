@@ -4,17 +4,24 @@ import type {
 	SkillScore,
 } from "../../types/index.js";
 import { DEFAULT_REGISTRY_THRESHOLD, DEFAULT_THRESHOLD } from "./constants.js";
-import { estimateTokens, parseSkillFile } from "./parsing.js";
+import {
+	estimateTokens,
+	type ParsedSkillFile,
+	parseSkillFile,
+} from "./parsing.js";
 import { ACTION_VERBS, VAGUE_TERMS } from "./rules.js";
 
 // ── Local types ─────────────────────────────────────────────────────────────
 
-type ParsedSkill = {
-	name: string;
-	rules: string[];
-	rawContent: string;
-	triggers: string[];
-};
+/**
+ * The fields the dimension scorers read. Derived from `ParsedSkillFile` with
+ * `Pick` (not a hand-copied shape) so the `skip` field can never be silently
+ * dropped: a skipped parse is caught in `scoreSkill` before it reaches a scorer.
+ */
+type ParsedSkill = Pick<
+	ParsedSkillFile,
+	"name" | "rules" | "rawContent" | "triggers"
+>;
 
 // ── Dangerous content patterns (private to scoreSafety) ─────────────────────
 
@@ -292,6 +299,27 @@ export async function scoreSkill(
 	const parsed = await parseSkillFile(skillPath);
 	if (!parsed) return null;
 
+	// A file that could not be read is NOT a zero-content skill. Scoring it would
+	// invent a grade over an empty string — worse, `scoreSafety` starts at 100
+	// and finds no dangerous patterns in nothing, so an unreadable file would
+	// report perfect safety. Represent it as unread and fail closed instead.
+	if (parsed.skip) {
+		return {
+			skillName: parsed.name,
+			completeness: 0,
+			clarity: 0,
+			testability: 0,
+			tokenEfficiency: 0,
+			safety: 0,
+			agentReadiness: 0,
+			overall: 0,
+			grade: "F",
+			threshold,
+			passing: false,
+			unread: parsed.skip.message,
+		};
+	}
+
 	const completeness = scoreCompleteness(parsed);
 	const clarity = scoreClarity(parsed);
 	const testability = scoreTestability(parsed);
@@ -336,6 +364,17 @@ export async function registryGate(
 ): Promise<SkillRegistryGateResult | null> {
 	const score = await scoreSkill(skillPath, threshold);
 	if (!score) return null;
+
+	// An unread skill can never be accepted into the registry: it was not scored,
+	// so it cannot clear any threshold. Reject it with an explicit reason.
+	if (score.unread) {
+		return {
+			skillName: score.skillName,
+			score,
+			accepted: false,
+			reason: `Rejected: could not read skill (${score.unread}) — not scored`,
+		};
+	}
 
 	const accepted = score.passing;
 	let reason: string | undefined;

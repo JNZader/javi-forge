@@ -313,6 +313,24 @@ describe("scoreSkill", () => {
 		expect(result!.passing).toBe(false);
 		expect(result!.overall).toBeLessThan(90);
 	});
+
+	it("represents an unreadable skill as unread, not an empty-scored skill", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		// The guarded read fails (e.g. oversized) — the file was never seen.
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "too-large",
+			detail: "3000000 bytes exceeds limit of 1048576",
+		});
+
+		const result = await scoreSkill("/skills/huge/SKILL.md", 50);
+		expect(result).not.toBeNull();
+		expect(result!.unread).toBeTruthy();
+		// It must NOT be scored: never a perfect-safety free pass on empty content.
+		expect(result!.safety).not.toBe(100);
+		expect(result!.safety).toBe(0);
+		expect(result!.passing).toBe(false);
+	});
 });
 
 // ── scoreSafety ──────────────────────────────────────────────────────────
@@ -556,5 +574,21 @@ describe("registryGate", () => {
 		expect(result).not.toBeNull();
 		expect(result!.score.threshold).toBe(60);
 		expect(result!.accepted).toBe(false);
+	});
+
+	it("rejects an unreadable skill as unread, not scored", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "binary",
+			detail: "NUL byte in first chunk",
+		});
+
+		const result = await registryGate("/skills/blob/SKILL.md");
+		expect(result).not.toBeNull();
+		expect(result!.accepted).toBe(false);
+		expect(result!.reason).toContain("could not read");
+		expect(result!.score.unread).toBeTruthy();
+		expect(result!.score.safety).not.toBe(100);
 	});
 });

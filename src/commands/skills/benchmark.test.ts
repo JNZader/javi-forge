@@ -118,4 +118,19 @@ describe("benchmarkSkill", () => {
 		expect(result).not.toBeNull();
 		expect(result!.passRate).toBeLessThan(50);
 	});
+
+	it("represents an unreadable skill as unread, not a run of failed checks", async () => {
+		mockedFs.pathExists.mockResolvedValue(true as never);
+		mockedSafeReadFile.mockResolvedValue({
+			ok: false,
+			reason: "too-large",
+			detail: "3000000 bytes exceeds limit of 1048576",
+		});
+
+		const result = await benchmarkSkill("/skills/huge/SKILL.md");
+		expect(result).not.toBeNull();
+		expect(result!.unread).toBeTruthy();
+		expect(result!.checks).toHaveLength(0);
+		expect(result!.passRate).toBe(0);
+	});
 });

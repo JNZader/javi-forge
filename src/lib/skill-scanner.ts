@@ -9,6 +9,7 @@
 import path from "node:path";
 import fs from "fs-extra";
 import type { SecuritySeverity } from "../types/index.js";
+import { describeSafeReadFailure, safeReadFile } from "./safe-read.js";
 
 // =============================================================================
 // Types
@@ -45,6 +46,12 @@ export interface SkillScanResult {
 	verdict: SkillScanVerdict;
 	threats: SkillThreat[];
 	summary: SkillScanSummary;
+	/**
+	 * Scan-level notes — populated when the file could not be fully analysed
+	 * (binary, oversized, unreadable) so a skipped file is visible in the report
+	 * instead of masquerading as a clean pass.
+	 */
+	notes?: string[];
 }
 
 export interface SkillScanSummary {
@@ -398,14 +405,48 @@ export function extractSkillName(content: string, filePath: string): string {
 // Main scan function
 // =============================================================================
 
+/**
+ * Hard ceiling for a scanned skill file. Past this it is not a skill document
+ * but a dumped log or a vendored bundle: scanning it would run every regex
+ * over megabytes of noise, so it is skipped and reported instead.
+ */
+const MAX_SCAN_BYTES = 1024 * 1024;
+
 export async function scanSkillFile(
 	filePath: string,
 ): Promise<SkillScanResult> {
-	const content = await fs.readFile(filePath, "utf-8");
+	const read = await safeReadFile(filePath, {
+		hardRejectOverBytes: MAX_SCAN_BYTES,
+	});
+
+	// A file we could not read is not a clean file — never crash the batch, but
+	// never report it as a pass either.
+	if (!read.ok) {
+		return {
+			skillPath: filePath,
+			skillName: path.basename(path.dirname(filePath)),
+			verdict: "warn",
+			threats: [],
+			summary: computeScanSummary([]),
+			notes: [`skipped: ${describeSafeReadFailure(read)} — not scanned`],
+		};
+	}
+
+	const content = read.content;
 	const skillName = extractSkillName(content, filePath);
 	const threats = scanSkillContent(content, filePath);
 	const verdict = computeVerdict(threats);
 	const summary = computeScanSummary(threats);
+
+	const notes: string[] = [];
+	if (read.truncated) {
+		notes.push(
+			`truncated: only the first ${read.bytesRead} of ${read.totalBytes} bytes were scanned`,
+		);
+	}
+	if (read.longLinesClamped) {
+		notes.push("clamped: one or more lines exceeded the per-line limit");
+	}
 
 	return {
 		skillPath: filePath,
@@ -413,6 +454,7 @@ export async function scanSkillFile(
 		verdict,
 		threats,
 		summary,
+		...(notes.length > 0 ? { notes } : {}),
 	};
 }
 
@@ -475,6 +517,12 @@ export function formatScanReport(result: SkillScanResult): string {
 		`Findings: ${summary.total} (${summary.critical} critical, ${summary.high} high, ${summary.moderate} moderate, ${summary.low} low)`,
 	);
 	lines.push("");
+
+	if (result.notes && result.notes.length > 0) {
+		lines.push("--- Notes ---");
+		for (const note of result.notes) lines.push(`  ${note}`);
+		lines.push("");
+	}
 
 	if (threats.length > 0) {
 		lines.push("--- Threats ---");

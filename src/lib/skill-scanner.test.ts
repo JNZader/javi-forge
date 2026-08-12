@@ -676,6 +676,38 @@ describe("scanSkillFile", () => {
 		);
 		expect(provThreats.length).toBeGreaterThanOrEqual(2); // missing author + version
 	});
+
+	it("skips a binary file with a note instead of crashing", async () => {
+		const skillPath = path.join(tmpDir, "blob", "SKILL.md");
+		await fs.ensureDir(path.dirname(skillPath));
+		await fs.writeFile(skillPath, Buffer.from([0x23, 0x00, 0x01, 0x02, 0x03]));
+
+		const result = await scanSkillFile(skillPath);
+		expect(result.verdict).toBe("warn");
+		expect(result.threats).toEqual([]);
+		expect(result.notes?.[0]).toContain("binary");
+		expect(formatScanReport(result)).toContain("binary");
+	});
+
+	it("skips a missing file with a note instead of throwing", async () => {
+		const result = await scanSkillFile(path.join(tmpDir, "ghost", "SKILL.md"));
+		expect(result.verdict).toBe("warn");
+		expect(result.notes?.[0]).toContain("not found");
+	});
+
+	it("keeps scanning the rest of a directory when one file is binary", async () => {
+		const safePath = path.join(tmpDir, "safe", "SKILL.md");
+		await fs.ensureDir(path.dirname(safePath));
+		await fs.writeFile(safePath, SAFE_SKILL);
+		const blobPath = path.join(tmpDir, "blob", "SKILL.md");
+		await fs.ensureDir(path.dirname(blobPath));
+		await fs.writeFile(blobPath, Buffer.from([0x00, 0x01, 0x02]));
+
+		const results = await scanSkillsDirectory(tmpDir);
+		expect(results).toHaveLength(2);
+		expect(results.some((r) => r.verdict === "pass")).toBe(true);
+		expect(results.some((r) => (r.notes?.length ?? 0) > 0)).toBe(true);
+	});
 });
 
 // =============================================================================

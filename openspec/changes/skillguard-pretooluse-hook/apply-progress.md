@@ -44,7 +44,7 @@
 
 ## Review Budget
 
-- Actual Slice 1 implementation diff against `feat/skillguard-pretooluse-hook`: **663 additions, 0 deletions** before this progress artifact/task marks.
+- Actual complete Slice 1 diff against `feat/skillguard-pretooluse-hook`: **752 changed lines** (**739 additions + 13 deletions**), within the 800-line hard limit.
 - Delivery remains the selected feature-branch chain; this child targets `feat/skillguard-pretooluse-hook` exactly.
 
 ## Discovered Patterns

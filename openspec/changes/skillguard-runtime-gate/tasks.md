@@ -62,4 +62,4 @@ Chain strategy: pending
 
 ## Phase 6: Docs / rollout (JD-008)
 
-- [ ] 6.1 design.md Migration wording is the contract: new package-author requirements (every `SKILL.md`/`skill.md` anywhere in the tree declared; no symlinks; non-empty `skills` on import) — JD-008: name the strictness tradeoff explicitly ("legit symlinked packages are force-proof refused; deliberate"), do NOT weaken the policy in code or comments.
+- [x] 6.1 design.md Migration wording is the contract: new package-author requirements (every `SKILL.md`/`skill.md` anywhere in the tree declared; no symlinks; non-empty `skills` on import) — JD-008: name the strictness tradeoff explicitly ("legit symlinked packages are force-proof refused; deliberate"), do NOT weaken the policy in code or comments.

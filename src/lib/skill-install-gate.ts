@@ -11,10 +11,10 @@
  *
  * Force rule (fail-closed): `block` always refuses; `--force` lifts ONLY
  * `unscannable`. Manifest-integrity refusals (undeclared SKILL.md in the tree,
- * any symlink, empty/missing `skills` on import, declared paths escaping the
- * source dir) are NOT verdicts — `evaluateCoverageGate` enforces the
- * walk-derived ones BEFORE the verdict gate runs, so `force` can never lift
- * them either.
+ * any symlink, case-colliding declared dirs, empty/missing `skills` on import,
+ * declared paths escaping the source dir) are NOT verdicts —
+ * `evaluateCoverageGate` enforces the walk-derived ones BEFORE the verdict
+ * gate runs, so `force` can never lift them either.
  */
 
 import type { SkillCoverageScan, SkillScanResult } from "./skill-scanner.js";
@@ -69,10 +69,7 @@ export interface CoverageGateDecision {
  * verdict branch already encodes the force rule via {@link evaluateInstallGate}).
  */
 export function evaluateCoverageGate(
-	coverage: Pick<
-		SkillCoverageScan,
-		"declared" | "undeclared" | "symlinks" | "errors"
-	>,
+	coverage: SkillCoverageScan,
 	options?: { force?: boolean },
 ): CoverageGateDecision {
 	// Manifest-integrity refusals — block-level, force NEVER lifts
@@ -84,6 +81,15 @@ export function evaluateCoverageGate(
 		return {
 			gate: { allowed: false, rejected: [] },
 			refusalError: `skillguard: install refused — ${coverage.errors.length} path(s) could not be read (walk incomplete; manifest-integrity, force never lifts):\n${coverage.errors.map((p) => `  ${p}`).join("\n")}`,
+		};
+	}
+	// FU-5 (F3 residual): a declared dir with case-colliding on-disk twins
+	// is ambiguous — the declared scan read one twin while both install.
+	const ambiguous = coverage.ambiguousDeclaredDirs ?? [];
+	if (ambiguous.length > 0) {
+		return {
+			gate: { allowed: false, rejected: [] },
+			refusalError: `skillguard: install refused — ambiguous declared skill dir(s) (case-colliding on-disk dirs; manifest-integrity, force never lifts):\n${ambiguous.map((p) => `  ${p}`).join("\n")}`,
 		};
 	}
 	if (coverage.symlinks.length > 0) {

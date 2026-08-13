@@ -216,6 +216,22 @@ describe("evaluateCoverageGate", () => {
 		);
 	});
 
+	it("refuses ambiguous declared dirs (case-colliding twins) — after errors, before symlinks, force never lifts (FU-5)", () => {
+		const decision = evaluateCoverageGate(
+			{
+				declared: [fakeScanResult("alpha", "pass")],
+				undeclared: [],
+				symlinks: ["/fake/linked"],
+				errors: [],
+				ambiguousDeclaredDirs: ["/fake/skills/Alpha", "/fake/skills/alpha"],
+			},
+			{ force: true },
+		);
+		expect(decision.refusalError).toBe(
+			"skillguard: install refused — ambiguous declared skill dir(s) (case-colliding on-disk dirs; manifest-integrity, force never lifts):\n  /fake/skills/Alpha\n  /fake/skills/alpha",
+		);
+	});
+
 	it("refuses symlinks — manifest-integrity, force never lifts (JD-007)", () => {
 		const decision = evaluateCoverageGate(
 			{

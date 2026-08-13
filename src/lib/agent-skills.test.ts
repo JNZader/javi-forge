@@ -544,6 +544,33 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
+	it("refuses an ambiguous declared dir (case-colliding on-disk twin) — force never lifts (FU-5)", async () => {
+		mockSuccessfulImport();
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("alpha", "pass")],
+			undeclared: [],
+			symlinks: [],
+			errors: [],
+			ambiguousDeclaredDirs: [
+				"/fake/source/skills/Alpha",
+				"/fake/source/skills/alpha",
+			],
+		});
+
+		const result = await importAgentSkillsPackage("/fake/source", {
+			force: true,
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(result.error).toContain("ambiguous");
+		expect(result.error).toContain("manifest-integrity");
+		expect(result.error).toContain("skills/Alpha");
+		expect(result.refused).toBe(true);
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+
 	it("refuses when the coverage walk could not read paths — force never lifts (JD-013)", async () => {
 		mockSuccessfulImport();
 		mockFs.readJson.mockResolvedValue(validManifest as never);

@@ -1195,6 +1195,63 @@ describe("scanSkillsWithCoverage", () => {
 		expect(fs.existsSync(scan.declared[0].skillPath)).toBe(true);
 	});
 
+	it("flags a declared dir with a case-colliding on-disk TWIN as ambiguous (FU-5, F3 residual)", async () => {
+		// Declared `skills/alpha` + undeclared on-disk sibling `skills/Alpha`
+		// (case-sensitive FS): lowercased declared-dir membership (R1-F2-N1)
+		// recognizes BOTH twins as declared, so neither SKILL.md lands in
+		// `undeclared` — while the declared scan reads only the exact-case
+		// dir. The ambiguity must surface as a refusal-class condition the
+		// gate refuses on (manifest-integrity, force never lifts).
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.ensureDir(path.join(tmpDir, "skills", "Alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "Alpha", "SKILL.md"),
+			MALICIOUS_CREDENTIAL_SKILL,
+		);
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		// Both colliding dirs are reported (sorted, deterministic).
+		expect(scan.ambiguousDeclaredDirs).toEqual([
+			path.join(tmpDir, "skills", "Alpha"),
+			path.join(tmpDir, "skills", "alpha"),
+		]);
+		// The twin's file is NOT undeclared (lowercased membership passes it)
+		// — the ambiguity field is what closes the residual.
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.symlinks).toEqual([]);
+		expect(scan.errors).toEqual([]);
+		// Declared scan still reads the exact-case real dir only.
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.declared[0].verdict).toBe("pass");
+		expect(scan.declared[0].skillPath).toBe(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+		);
+	});
+
+	it("does NOT flag a single case-folded on-disk dir as ambiguous — F3 case-fold resolution preserved (FU-5)", async () => {
+		// Declared `skills/Alpha`, disk carries only `skills/alpha` (no twin):
+		// the two-tier case-fold lookup (R1-F2-N1) resolves it — that is the
+		// legit case-insensitive-FS-authored package, NOT an ambiguity.
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/Alpha"]);
+
+		expect(scan.ambiguousDeclaredDirs).toEqual([]);
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.errors).toEqual([]);
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.declared[0].verdict).toBe("pass");
+	});
+
 	it("still refuses a non-canonical-case skill.md OUTSIDE a declared dir as undeclared (CASE3 preserved)", async () => {
 		// The case-insensitive membership fix must not weaken the smuggling
 		// refusal: an undeclared dir's case-folded `Skill.md` still misses the

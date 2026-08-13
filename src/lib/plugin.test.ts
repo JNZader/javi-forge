@@ -524,6 +524,29 @@ describe("installPlugin — skillguard gate", () => {
 		expect(mockFs.move).not.toHaveBeenCalled();
 	});
 
+	it("refuses an ambiguous declared dir (case-colliding on-disk twin) — force never lifts (FU-5)", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "pass")],
+			undeclared: [],
+			symlinks: [],
+			errors: [],
+			ambiguousDeclaredDirs: [
+				"/tmp/plugins/.tmp/install-1/skills/Alpha",
+				"/tmp/plugins/.tmp/install-1/skills/alpha",
+			],
+		});
+
+		const result = await installPlugin("org/repo", { force: true });
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(result.error).toContain("ambiguous");
+		expect(result.error).toContain("manifest-integrity");
+		expect(result.error).toContain("skills/Alpha");
+		expect(result.refused).toBe(true);
+		expect(mockFs.move).not.toHaveBeenCalled();
+	});
+
 	it("refuses ANY symlink in the tree — manifest-integrity, force never lifts (JD-007)", async () => {
 		mockSuccessfulInstall();
 		mockScanner.mockResolvedValue({

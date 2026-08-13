@@ -2,7 +2,11 @@ import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { evaluateInstallGate } from "./skill-install-gate.js";
+import {
+	evaluateCoverageGate,
+	evaluateInstallGate,
+	scanFailureMessage,
+} from "./skill-install-gate.js";
 import { type SkillScanResult, scanSkillFile } from "./skill-scanner.js";
 
 // =============================================================================
@@ -165,5 +169,142 @@ describe("evaluateInstallGate", () => {
 
 		const decision = evaluateInstallGate([blob], {});
 		expect(decision.allowed).toBe(false);
+	});
+});
+
+// =============================================================================
+// evaluateCoverageGate — shared refusal chain (R2-001)
+// =============================================================================
+
+function fakeScanResult(
+	skillName: string,
+	verdict: SkillScanResult["verdict"],
+): SkillScanResult {
+	return {
+		skillPath: `/fake/${skillName}/SKILL.md`,
+		skillName,
+		verdict,
+		threats: [],
+		summary: { total: 0, critical: 0, high: 0, moderate: 0, low: 0 },
+	};
+}
+
+describe("evaluateCoverageGate", () => {
+	it("allows a clean coverage scan — refusalError null", () => {
+		const decision = evaluateCoverageGate({
+			declared: [fakeScanResult("alpha", "pass")],
+			undeclared: [],
+			symlinks: [],
+			errors: [],
+		});
+		expect(decision.refusalError).toBeNull();
+		expect(decision.gate.allowed).toBe(true);
+	});
+
+	it("refuses walk errors FIRST — before symlink/undeclared/verdict checks (JD-013)", () => {
+		const decision = evaluateCoverageGate(
+			{
+				declared: [fakeScanResult("alpha", "block")],
+				undeclared: ["/fake/evil/SKILL.md"],
+				symlinks: ["/fake/linked"],
+				errors: ["/fake/locked", "/fake/locked2"],
+			},
+			{ force: true },
+		);
+		expect(decision.refusalError).toBe(
+			"skillguard: install refused — 2 path(s) could not be read (walk incomplete; manifest-integrity, force never lifts):\n  /fake/locked\n  /fake/locked2",
+		);
+	});
+
+	it("refuses ambiguous declared dirs (case-colliding twins) — after errors, before symlinks, force never lifts (FU-5)", () => {
+		const decision = evaluateCoverageGate(
+			{
+				declared: [fakeScanResult("alpha", "pass")],
+				undeclared: [],
+				symlinks: ["/fake/linked"],
+				errors: [],
+				ambiguousDeclaredDirs: ["/fake/skills/Alpha", "/fake/skills/alpha"],
+			},
+			{ force: true },
+		);
+		expect(decision.refusalError).toBe(
+			"skillguard: install refused — ambiguous declared skill dir(s) (case-colliding on-disk dirs; manifest-integrity, force never lifts):\n  /fake/skills/Alpha\n  /fake/skills/alpha",
+		);
+	});
+
+	it("refuses symlinks — manifest-integrity, force never lifts (JD-007)", () => {
+		const decision = evaluateCoverageGate(
+			{
+				declared: [fakeScanResult("alpha", "pass")],
+				undeclared: [],
+				symlinks: ["/fake/linked/SKILL.md"],
+				errors: [],
+			},
+			{ force: true },
+		);
+		expect(decision.refusalError).toBe(
+			"skillguard: install refused — symlink(s) in tree (manifest-integrity, force never lifts):\n  /fake/linked/SKILL.md",
+		);
+	});
+
+	it("refuses undeclared SKILL.md(s) — force never lifts (JD-006)", () => {
+		const decision = evaluateCoverageGate(
+			{
+				declared: [fakeScanResult("alpha", "pass")],
+				undeclared: ["/fake/evil/SKILL.md"],
+				symlinks: [],
+				errors: [],
+			},
+			{ force: true },
+		);
+		expect(decision.refusalError).toBe(
+			"skillguard: install refused — undeclared SKILL.md(s) in tree (every skill-shaped file must be declared; force never lifts):\n  /fake/evil/SKILL.md",
+		);
+	});
+
+	it("verdict refusal names rejected counts over the FULL declared report (D6/JD-014)", () => {
+		const decision = evaluateCoverageGate({
+			declared: [
+				fakeScanResult("alpha", "block"),
+				fakeScanResult("beta", "unscannable"),
+				fakeScanResult("gamma", "pass"),
+			],
+			undeclared: [],
+			symlinks: [],
+			errors: [],
+		});
+		expect(decision.refusalError).toContain(
+			"skillguard: install refused — 2 rejected (1 blocked, 1 unscannable)",
+		);
+		// The batch report renders the full declared set (3 scanned), not just
+		// the rejected ones.
+		expect(decision.refusalError).toContain("Scanned: 3 skill(s)");
+		expect(decision.refusalError).toContain("[PASS] gamma");
+	});
+
+	it("force lifts an unscannable-only declared set — refusalError null", () => {
+		const decision = evaluateCoverageGate(
+			{
+				declared: [fakeScanResult("alpha", "unscannable")],
+				undeclared: [],
+				symlinks: [],
+				errors: [],
+			},
+			{ force: true },
+		);
+		expect(decision.refusalError).toBeNull();
+		expect(decision.gate.allowed).toBe(true);
+	});
+});
+
+describe("scanFailureMessage", () => {
+	it("renders Error instances with their message", () => {
+		expect(scanFailureMessage(new Error("boom"))).toBe(
+			"skillguard scan failed — boom",
+		);
+	});
+
+	it("stringifies non-Error throws", () => {
+		expect(scanFailureMessage("weird")).toBe("skillguard scan failed — weird");
 	});
 });

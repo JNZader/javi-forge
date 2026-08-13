@@ -524,6 +524,29 @@ describe("installPlugin — skillguard gate", () => {
 		expect(mockFs.move).not.toHaveBeenCalled();
 	});
 
+	it("refuses an ambiguous declared dir (case-colliding on-disk twin) — force never lifts (FU-5)", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "pass")],
+			undeclared: [],
+			symlinks: [],
+			errors: [],
+			ambiguousDeclaredDirs: [
+				"/tmp/plugins/.tmp/install-1/skills/Alpha",
+				"/tmp/plugins/.tmp/install-1/skills/alpha",
+			],
+		});
+
+		const result = await installPlugin("org/repo", { force: true });
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(result.error).toContain("ambiguous");
+		expect(result.error).toContain("manifest-integrity");
+		expect(result.error).toContain("skills/Alpha");
+		expect(result.refused).toBe(true);
+		expect(mockFs.move).not.toHaveBeenCalled();
+	});
+
 	it("refuses ANY symlink in the tree — manifest-integrity, force never lifts (JD-007)", async () => {
 		mockSuccessfulInstall();
 		mockScanner.mockResolvedValue({
@@ -566,6 +589,60 @@ describe("installPlugin — skillguard gate", () => {
 		const result = await installPlugin("org/repo", { dryRun: true });
 		expect(result.success).toBe(true);
 		expect(mockScanner).not.toHaveBeenCalled();
+	});
+
+	it("marks gate refusals with refused: true — the CLI exit-code signal (FU-1/R4-002)", async () => {
+		// Verdict refusal (block, even with force) → refused flag set.
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "block")],
+			undeclared: [],
+			symlinks: [],
+			errors: [],
+		});
+		const verdictRefusal = await installPlugin("org/repo", { force: true });
+		expect(verdictRefusal.success).toBe(false);
+		expect(verdictRefusal.refused).toBe(true);
+
+		// Manifest-integrity refusal (symlink) → refused flag set.
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "pass")],
+			undeclared: [],
+			symlinks: ["/tmp/plugins/.tmp/install-1/linked/SKILL.md"],
+			errors: [],
+		});
+		const integrityRefusal = await installPlugin("org/repo", {
+			force: true,
+		});
+		expect(integrityRefusal.success).toBe(false);
+		expect(integrityRefusal.refused).toBe(true);
+
+		// Scanner-error deny → refused flag set.
+		mockScanner.mockRejectedValue(new Error("boom"));
+		const scanDeny = await installPlugin("org/repo");
+		expect(scanDeny.success).toBe(false);
+		expect(scanDeny.refused).toBe(true);
+	});
+
+	it("leaves refused unset on success and on non-gate failures (FU-1/R4-002)", async () => {
+		// Clean install → success, no refusal marker.
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "pass")],
+			undeclared: [],
+			symlinks: [],
+			errors: [],
+		});
+		const ok = await installPlugin("org/repo");
+		expect(ok.success).toBe(true);
+		expect(ok.refused).toBeUndefined();
+
+		// Plain validation failure (pre-gate) → NOT a skillguard refusal.
+		mockFs.readJson.mockResolvedValue({ name: "bad" } as never);
+		const invalid = await installPlugin("org/repo");
+		expect(invalid.success).toBe(false);
+		expect(invalid.error).toContain("validation failed");
+		expect(invalid.refused).toBeUndefined();
 	});
 });
 

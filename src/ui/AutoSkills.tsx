@@ -40,10 +40,20 @@ export default function AutoSkills({
 			force,
 		})
 			.then((r) => {
+				// FU-1 (R4-002): a refused batch (gate-blocked skills) must exit
+				// non-zero so scripted consumers can tell a refusal from success;
+				// `process.exitCode` (not `process.exit`) keeps Ink rendering.
+				// A clean run resets to 0 so an interactive re-scan (r) after a
+				// refusal can still exit 0. Force-lifted unscannable installs are
+				// NOT blocked — they keep exit 0.
+				process.exitCode = r.blocked.length > 0 ? 1 : 0;
 				setResult(r);
 				setLoading(false);
 			})
 			.catch((e) => {
+				// A scan throw is a gate deny (D7) — nothing was copied; exit
+				// non-zero like any other refusal.
+				process.exitCode = 1;
 				setError(String(e));
 				setLoading(false);
 			});

@@ -13,8 +13,12 @@ import type {
 	InstalledPlugin,
 	PluginManifest,
 } from "../types/index.js";
-import { evaluateInstallGate } from "./skill-install-gate.js";
-import { formatBatchReport, scanSkillsWithCoverage } from "./skill-scanner.js";
+import {
+	evaluateCoverageGate,
+	scanFailureMessage,
+} from "./skill-install-gate.js";
+import type { SkillCoverageScan } from "./skill-scanner.js";
+import { checkPathContained, scanSkillsWithCoverage } from "./skill-scanner.js";
 
 // ── Conversion ─────────────────────────────────────────────────────────────
 
@@ -107,7 +111,19 @@ export async function exportPluginAsAgentSkills(
 export async function importAgentSkillsPackage(
 	sourceDir: string,
 	options: { dryRun?: boolean; force?: boolean } = {},
-): Promise<{ success: boolean; name?: string; error?: string }> {
+): Promise<{
+	success: boolean;
+	name?: string;
+	error?: string;
+	/**
+	 * FU-1 (R4-002): true when the failure is a skillguard gate refusal
+	 * (manifest-integrity — invalid name, empty/missing skills, containment
+	 * escape, walk errors/symlinks/undeclared — or verdict refusal, incl. a
+	 * scanner-error deny). The CLI layer turns this into a non-zero exit
+	 * code. Plain input errors (skills.json missing/invalid) leave it unset.
+	 */
+	refused?: boolean;
+}> {
 	const { dryRun = false, force = false } = options;
 	const skillsPath = path.join(sourceDir, AGENT_SKILLS_MANIFEST_FILE);
 
@@ -154,6 +170,7 @@ export async function importAgentSkillsPackage(
 	if (typeof pluginName !== "string") {
 		return {
 			success: false,
+			refused: true,
 			error: `skillguard: install refused — invalid manifest name "${pluginName}" (manifest-integrity, force never lifts)`,
 		};
 	}
@@ -167,6 +184,7 @@ export async function importAgentSkillsPackage(
 	) {
 		return {
 			success: false,
+			refused: true,
 			error: `skillguard: install refused — invalid manifest name "${pluginName}" (manifest-integrity, force never lifts)`,
 		};
 	}
@@ -181,6 +199,7 @@ export async function importAgentSkillsPackage(
 	) {
 		return {
 			success: false,
+			refused: true,
 			error:
 				"skills.json must declare a non-empty skills array (every skill-shaped file must be declared)",
 		};
@@ -194,12 +213,14 @@ export async function importAgentSkillsPackage(
 		if (!entry || typeof entry.name !== "string" || !entry.name) {
 			return {
 				success: false,
+				refused: true,
 				error: "skills.json skills entry missing name",
 			};
 		}
 		if (typeof entry.path !== "string" || !entry.path) {
 			return {
 				success: false,
+				refused: true,
 				error: `skills.json skills entry "${entry.name}" missing path`,
 			};
 		}
@@ -211,6 +232,7 @@ export async function importAgentSkillsPackage(
 		if (!contained.ok) {
 			return {
 				success: false,
+				refused: true,
 				error: `skills.json skills entry "${entry.name}" path escapes package root (${contained.reason}) — refusing`,
 			};
 		}
@@ -227,53 +249,25 @@ export async function importAgentSkillsPackage(
 	// Runs BEFORE the existing-install remove and fs.copy: a refusal preserves
 	// an existing install and installs nothing. dryRun early-returns above, so
 	// no scan happens on dry-run. Scanner/eval errors deny unconditionally (D7).
+	// The refusal policy + message-building is shared with plugin add via
+	// evaluateCoverageGate (R2-001).
+	let coverage: SkillCoverageScan;
 	try {
-		const coverage = await scanSkillsWithCoverage(sourceDir, declaredPaths);
-
-		// Manifest-integrity refusals — block-level, force NEVER lifts
-		// (JD-007: ANY symlink; JD-006: undeclared SKILL.md incl. node_modules).
-		// A walk with I/O errors cannot certify the copied footprint — refuse
-		// first, because the broken subtree may hide symlinks or undeclared
-		// files (JD-013).
-		if (coverage.errors.length > 0) {
-			return {
-				success: false,
-				error: `skillguard: install refused — ${coverage.errors.length} path(s) could not be read (walk incomplete; manifest-integrity, force never lifts):\n${coverage.errors.map((p) => `  ${p}`).join("\n")}`,
-			};
-		}
-		if (coverage.symlinks.length > 0) {
-			return {
-				success: false,
-				error: `skillguard: install refused — symlink(s) in tree (manifest-integrity, force never lifts):\n${coverage.symlinks.map((p) => `  ${p}`).join("\n")}`,
-			};
-		}
-		if (coverage.undeclared.length > 0) {
-			return {
-				success: false,
-				error: `skillguard: install refused — undeclared SKILL.md(s) in tree (every skill-shaped file must be declared; force never lifts):\n${coverage.undeclared.map((p) => `  ${p}`).join("\n")}`,
-			};
-		}
-
-		const gate = evaluateInstallGate(coverage.declared, { force });
-		if (!gate.allowed) {
-			const blocked = gate.rejected.filter((r) => r.verdict === "block").length;
-			const unscannable = gate.rejected.filter(
-				(r) => r.verdict === "unscannable",
-			).length;
-			return {
-				success: false,
-				// Lead line names the rejected count; the batch report renders
-				// the FULL declared set so the header/rows reflect every scanned
-				// skill (D6, JD-014).
-				error: `skillguard: install refused — ${gate.rejected.length} rejected (${blocked} blocked, ${unscannable} unscannable)\n${formatBatchReport(coverage.declared)}`,
-			};
-		}
+		coverage = await scanSkillsWithCoverage(sourceDir, declaredPaths);
 	} catch (scanError) {
-		const msg =
-			scanError instanceof Error ? scanError.message : String(scanError);
 		return {
 			success: false,
-			error: `skillguard scan failed — ${msg}`,
+			refused: true,
+			error: scanFailureMessage(scanError),
+		};
+	}
+
+	const decision = evaluateCoverageGate(coverage, { force });
+	if (decision.refusalError) {
+		return {
+			success: false,
+			refused: true,
+			error: decision.refusalError,
 		};
 	}
 
@@ -310,39 +304,22 @@ export async function importAgentSkillsPackage(
  * Verify a declared skill entry path stays inside the package root — both
  * lexically (`../../x`, absolute paths) and by realpath, so an in-tree symlink
  * cannot redirect the import read outside the staged clone (JD-003/JD-006).
- * Realpath resolution is best-effort: a missing declared dir has no realpath
- * yet, in which case lexical containment is the whole guard (the coverage walk
- * will later report it as a missing/unscannable declared skill).
+ * Non-throwing `{ ok, reason }` surface over the shared containment core
+ * (`checkPathContained`, R2-002) — the import gate refuses gracefully instead
+ * of throwing.
  */
 async function skillPathContained(
 	rootAbs: string,
 	rootReal: string,
 	entryPath: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-	const entryAbs = path.resolve(rootAbs, entryPath);
-
-	const rel = path.relative(rootAbs, entryAbs);
-	if (rel.startsWith("..") || path.isAbsolute(rel)) {
+	const check = await checkPathContained(rootAbs, rootReal, entryPath);
+	if (!check.ok) {
 		return {
 			ok: false,
-			reason: `path "${entryPath}" resolves outside the package root`,
+			reason: `path "${entryPath}" resolves outside the package root${check.violation === "realpath" ? " (realpath)" : ""}`,
 		};
 	}
-
-	try {
-		const entryReal = await fs.realpath(entryAbs);
-		const relReal = path.relative(rootReal, entryReal);
-		if (relReal.startsWith("..") || path.isAbsolute(relReal)) {
-			return {
-				ok: false,
-				reason: `path "${entryPath}" resolves outside the package root (realpath)`,
-			};
-		}
-	} catch {
-		// Declared dir does not exist yet — lexical containment stands; the
-		// coverage walk reports it as a missing declared skill later.
-	}
-
 	return { ok: true };
 }
 

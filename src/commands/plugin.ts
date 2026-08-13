@@ -53,6 +53,11 @@ export async function runPluginAdd(
 		);
 	} else {
 		report(onStep, stepId, `Install plugin: ${source}`, "error", result.error);
+		// FU-1 (R4-002): a skillguard refusal must be distinguishable from
+		// success by scripted consumers — exit non-zero. `process.exitCode`
+		// (not `process.exit`) so the Ink tree keeps rendering/unmounting
+		// normally. Non-gate failures (validation, clone errors) keep exit 0.
+		if (result.refused) process.exitCode = 1;
 	}
 }
 
@@ -290,7 +295,7 @@ export async function runPluginImport(
 	sourceDir: string,
 	dryRun: boolean,
 	onStep: StepCallback,
-	force = false,
+	options: { force?: boolean } = {},
 ): Promise<void> {
 	const stepId = "plugin-import";
 	report(
@@ -300,7 +305,10 @@ export async function runPluginImport(
 		"running",
 	);
 
-	const result = await importAgentSkillsPackage(sourceDir, { dryRun, force });
+	const result = await importAgentSkillsPackage(sourceDir, {
+		dryRun,
+		force: options.force,
+	});
 
 	if (result.success) {
 		report(
@@ -320,6 +328,10 @@ export async function runPluginImport(
 			"error",
 			result.error,
 		);
+		// FU-1 (R4-002): same exit-code contract as runPluginAdd — a skillguard
+		// refusal (manifest-integrity or verdict) exits non-zero; plain input
+		// errors (skills.json missing/invalid) keep exit 0.
+		if (result.refused) process.exitCode = 1;
 	}
 }
 

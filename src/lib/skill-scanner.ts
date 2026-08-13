@@ -576,6 +576,20 @@ export interface SkillCoverageScan {
 	 * proceed un-scanned.
 	 */
 	errors: string[];
+	/**
+	 * Distinct real on-disk dirs that case-collide with a DECLARED dir (FU-5,
+	 * F3 residual): two or more on-disk dirs whose lowercased paths are equal
+	 * AND match a declared dir — e.g. declared `skills/alpha` with on-disk
+	 * siblings `skills/alpha` + `skills/Alpha` on a case-sensitive FS.
+	 * Lowercased declared-dir membership (R1-F2-N1) cannot tell the twins
+	 * apart: both pass membership (neither SKILL.md lands in `undeclared`)
+	 * while the declared scan reads only one of them — the other installs
+	 * un-scanned. The caller refuses on this (manifest-integrity, block-
+	 * level, force never lifts). Absent or empty when no declared dir
+	 * case-collides; a single case-folded on-disk dir (no twin) is NOT
+	 * ambiguous — it resolves via the normal case-fold lookup.
+	 */
+	ambiguousDeclaredDirs?: string[];
 }
 
 /**
@@ -724,6 +738,34 @@ export async function scanSkillsWithCoverage(
 	// and consistent with the gate's realpath expectations.
 	await walk(rootAbs);
 
+	// FU-5 (F3 residual): a declared dir whose lowercased path maps to MORE
+	// THAN ONE distinct real on-disk dir is ambiguous. Declared-dir
+	// membership is lowercased on both sides (R1-F2-N1), so a case-colliding
+	// TWIN (declared `skills/alpha` + on-disk siblings `skills/alpha` and
+	// `skills/Alpha` on a case-sensitive FS) passes membership for BOTH
+	// dirs — neither SKILL.md lands in `undeclared` — while the declared
+	// scan below reads only one of them; the other would install un-scanned.
+	// Surface the colliding dirs as a refusal-class condition (the gate
+	// refuses, manifest-integrity, force never lifts). A single case-folded
+	// dir (no twin) is unaffected — the two-tier lookup resolves it.
+	const dirsByLower = new Map<string, string[]>();
+	for (const d of walkDirs) {
+		const key = d.toLowerCase();
+		const group = dirsByLower.get(key);
+		if (group) {
+			group.push(d);
+		} else {
+			dirsByLower.set(key, [d]);
+		}
+	}
+	const ambiguousDeclaredDirs: string[] = [];
+	for (const [key, group] of dirsByLower) {
+		if (group.length > 1 && declaredDirAbsLower.has(key)) {
+			// Sorted for deterministic output (readdir order is OS-dependent).
+			ambiguousDeclaredDirs.push(...[...group].sort());
+		}
+	}
+
 	// Content-scanned results for declared entries only (JD-005), in declared
 	// order so reports are deterministic. A declared file that is a symlink is
 	// already in `symlinks` — reading through it would escape the tree (JD-003),
@@ -758,7 +800,7 @@ export async function scanSkillsWithCoverage(
 		declared.push(await scanSkillFile(file));
 	}
 
-	return { declared, undeclared, symlinks, errors };
+	return { declared, undeclared, symlinks, errors, ambiguousDeclaredDirs };
 }
 
 /**
@@ -791,25 +833,40 @@ async function declaredSkillFileOnDisk(absDir: string): Promise<string> {
 	return canonical;
 }
 
+export interface PathContainmentCheck {
+	/** True when the entry stays inside the root lexically AND by realpath. */
+	ok: boolean;
+	/** Absolute lexical resolution of `entry` under `rootAbs`. */
+	entryAbs: string;
+	/** Which containment check failed when `!ok`. */
+	violation?: "lexical" | "realpath";
+}
+
 /**
- * Resolve a declared skill entry to an absolute directory and verify it stays
- * inside the scan root — both lexically (`../../x`, absolute paths) and by
- * realpath, so an in-tree symlink cannot redirect the declared read outside the
- * staged clone (JD-003). Throws when the entry escapes; the caller denies.
+ * Containment core (R2-002) — the ONE implementation of the lexical +
+ * realpath containment policy (JD-003): an entry must stay inside the root
+ * both lexically (`../../x`, absolute paths) and by realpath, so an in-tree
+ * symlink cannot redirect a read outside the staged clone. Realpath
+ * resolution is best-effort: a missing declared dir has no realpath yet, in
+ * which case lexical containment is the whole guard (the coverage walk later
+ * reports it as a missing/unscannable declared skill).
+ *
+ * Two surfaces wrap this core with their own error shapes (both bound by
+ * tests — keep the messages distinct): {@link resolveContained} (throwing;
+ * used by the coverage walk) and `skillPathContained` in agent-skills.ts
+ * (non-throwing `{ ok, reason }`; the import gate refuses gracefully).
  */
-async function resolveContained(
+export async function checkPathContained(
 	rootAbs: string,
 	rootReal: string,
 	entry: string,
-): Promise<string> {
+): Promise<PathContainmentCheck> {
 	const entryAbs = path.resolve(rootAbs, entry);
 
 	// Lexical containment — catches `../outside` and absolute entries.
 	const rel = path.relative(rootAbs, entryAbs);
 	if (rel.startsWith("..") || path.isAbsolute(rel)) {
-		throw new Error(
-			`skillguard: declared skill path escapes scan root — ${entry}`,
-		);
+		return { ok: false, entryAbs, violation: "lexical" };
 	}
 
 	// Realpath containment — catches a directory inside the tree whose real
@@ -819,16 +876,35 @@ async function resolveContained(
 	try {
 		real = await fs.realpath(entryAbs);
 	} catch {
-		return entryAbs;
+		return { ok: true, entryAbs };
 	}
 	const relReal = path.relative(rootReal, real);
 	if (relReal.startsWith("..") || path.isAbsolute(relReal)) {
+		return { ok: false, entryAbs, violation: "realpath" };
+	}
+
+	return { ok: true, entryAbs };
+}
+
+/**
+ * Resolve a declared skill entry to an absolute directory and verify it stays
+ * inside the scan root — both lexically (`../../x`, absolute paths) and by
+ * realpath, so an in-tree symlink cannot redirect the declared read outside the
+ * staged clone (JD-003). Throws when the entry escapes; the caller denies.
+ * Thin throwing surface over the shared containment core (R2-002).
+ */
+async function resolveContained(
+	rootAbs: string,
+	rootReal: string,
+	entry: string,
+): Promise<string> {
+	const check = await checkPathContained(rootAbs, rootReal, entry);
+	if (!check.ok) {
 		throw new Error(
 			`skillguard: declared skill path escapes scan root — ${entry}`,
 		);
 	}
-
-	return entryAbs;
+	return check.entryAbs;
 }
 
 // =============================================================================

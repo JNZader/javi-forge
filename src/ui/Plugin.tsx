@@ -147,7 +147,7 @@ export default function Plugin({
 							});
 							break;
 						}
-						await runPluginImport(target, dryRun, onStep, force);
+						await runPluginImport(target, dryRun, onStep, { force });
 						break;
 					case "export-skills":
 						if (target === "global") {

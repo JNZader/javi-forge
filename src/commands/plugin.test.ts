@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InitStep } from "../types/index.js";
 
 // ── Mock plugin lib ──────────────────────────────────────────────────────────
@@ -418,17 +418,17 @@ describe("runPluginImport", () => {
 		expect(steps[1]!.detail).toContain("skills.json not found");
 	});
 
-	it("threads force to importAgentSkillsPackage (defaults false)", async () => {
+	it("threads force to importAgentSkillsPackage (options object, R2-003)", async () => {
 		mockImport.mockResolvedValue({ success: true, name: "imported-skill" });
 		const { onStep } = collectSteps();
 
 		await runPluginImport("/path/to/package", false, onStep);
 		expect(mockImport).toHaveBeenLastCalledWith("/path/to/package", {
 			dryRun: false,
-			force: false,
+			force: undefined,
 		});
 
-		await runPluginImport("/path/to/package", false, onStep, true);
+		await runPluginImport("/path/to/package", false, onStep, { force: true });
 		expect(mockImport).toHaveBeenLastCalledWith("/path/to/package", {
 			dryRun: false,
 			force: true,
@@ -480,5 +480,79 @@ describe("runPluginExportCodex", () => {
 		expect(steps[1]!.detail).toContain(
 			"no skills with valid frontmatter found",
 		);
+	});
+});
+
+// ── skillguard refusal exit code (FU-1 / R4-002) ────────────────────────────
+
+describe("skillguard refusal exit code (FU-1/R4-002)", () => {
+	beforeEach(() => {
+		process.exitCode = undefined;
+	});
+
+	afterEach(() => {
+		process.exitCode = undefined;
+	});
+
+	it("runPluginAdd: a refused install exits non-zero", async () => {
+		mockInstall.mockResolvedValue({
+			success: false,
+			refused: true,
+			error:
+				"skillguard: install refused — 1 rejected (1 blocked, 0 unscannable)",
+		});
+		const { steps, onStep } = collectSteps();
+
+		await runPluginAdd("org/repo", false, onStep);
+
+		expect(steps[1]!.status).toBe("error");
+		expect(process.exitCode).toBe(1);
+	});
+
+	it("runPluginAdd: success and non-gate failures keep exit 0", async () => {
+		const { onStep } = collectSteps();
+
+		mockInstall.mockResolvedValue({ success: true, name: "my-plugin" });
+		await runPluginAdd("org/repo", false, onStep);
+		expect(process.exitCode).toBeUndefined();
+
+		// A plain (non-skillguard) failure — e.g. validation — is NOT a
+		// refusal: pre-FU-1 exit behavior preserved.
+		mockInstall.mockResolvedValue({
+			success: false,
+			error: "validation failed:\n  name: name is required",
+		});
+		await runPluginAdd("org/repo", false, onStep);
+		expect(process.exitCode).toBeUndefined();
+	});
+
+	it("runPluginImport: a refused import exits non-zero", async () => {
+		mockImport.mockResolvedValue({
+			success: false,
+			refused: true,
+			error:
+				"skillguard: install refused — undeclared SKILL.md(s) in tree (every skill-shaped file must be declared; force never lifts)",
+		});
+		const { steps, onStep } = collectSteps();
+
+		await runPluginImport("/path/to/package", false, onStep);
+
+		expect(steps[1]!.status).toBe("error");
+		expect(process.exitCode).toBe(1);
+	});
+
+	it("runPluginImport: success and non-gate failures keep exit 0", async () => {
+		const { onStep } = collectSteps();
+
+		mockImport.mockResolvedValue({ success: true, name: "imported-skill" });
+		await runPluginImport("/path/to/package", false, onStep);
+		expect(process.exitCode).toBeUndefined();
+
+		mockImport.mockResolvedValue({
+			success: false,
+			error: "skills.json not found",
+		});
+		await runPluginImport("/bad/path", false, onStep);
+		expect(process.exitCode).toBeUndefined();
 	});
 });

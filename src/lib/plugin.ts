@@ -140,7 +140,19 @@ export async function validatePlugin(
 export async function installPlugin(
 	source: string,
 	options: { dryRun?: boolean; force?: boolean } = {},
-): Promise<{ success: boolean; name?: string; error?: string }> {
+): Promise<{
+	success: boolean;
+	name?: string;
+	error?: string;
+	/**
+	 * FU-1 (R4-002): true when the failure is a skillguard gate refusal
+	 * (manifest-integrity or verdict refusal, incl. a scanner-error deny).
+	 * The CLI layer turns this into a non-zero exit code so scripted
+	 * consumers can tell a refusal apart from success. Plain usage errors
+	 * (invalid source, validation failed) leave it unset.
+	 */
+	refused?: boolean;
+}> {
 	const { dryRun = false, force = false } = options;
 
 	// Normalize source to a git URL
@@ -215,18 +227,21 @@ export async function installPlugin(
 				if (coverage.errors.length > 0) {
 					return {
 						success: false,
+						refused: true,
 						error: `skillguard: install refused — ${coverage.errors.length} path(s) could not be read (walk incomplete; manifest-integrity, force never lifts):\n${coverage.errors.map((p) => `  ${p}`).join("\n")}`,
 					};
 				}
 				if (coverage.symlinks.length > 0) {
 					return {
 						success: false,
+						refused: true,
 						error: `skillguard: install refused — symlink(s) in tree (manifest-integrity, force never lifts):\n${coverage.symlinks.map((p) => `  ${p}`).join("\n")}`,
 					};
 				}
 				if (coverage.undeclared.length > 0) {
 					return {
 						success: false,
+						refused: true,
 						error: `skillguard: install refused — undeclared SKILL.md(s) in tree (every skill-shaped file must be declared; force never lifts):\n${coverage.undeclared.map((p) => `  ${p}`).join("\n")}`,
 					};
 				}
@@ -238,6 +253,7 @@ export async function installPlugin(
 					scanError instanceof Error ? scanError.message : String(scanError);
 				return {
 					success: false,
+					refused: true,
 					error: `skillguard scan failed — ${msg}`,
 				};
 			}
@@ -251,6 +267,7 @@ export async function installPlugin(
 				).length;
 				return {
 					success: false,
+					refused: true,
 					error: `skillguard: install refused — ${gate.rejected.length} rejected (${blocked} blocked, ${unscannable} unscannable)\n${formatBatchReport(declaredResults)}`,
 				};
 			}

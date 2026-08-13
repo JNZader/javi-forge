@@ -107,7 +107,19 @@ export async function exportPluginAsAgentSkills(
 export async function importAgentSkillsPackage(
 	sourceDir: string,
 	options: { dryRun?: boolean; force?: boolean } = {},
-): Promise<{ success: boolean; name?: string; error?: string }> {
+): Promise<{
+	success: boolean;
+	name?: string;
+	error?: string;
+	/**
+	 * FU-1 (R4-002): true when the failure is a skillguard gate refusal
+	 * (manifest-integrity — invalid name, empty/missing skills, containment
+	 * escape, walk errors/symlinks/undeclared — or verdict refusal, incl. a
+	 * scanner-error deny). The CLI layer turns this into a non-zero exit
+	 * code. Plain input errors (skills.json missing/invalid) leave it unset.
+	 */
+	refused?: boolean;
+}> {
 	const { dryRun = false, force = false } = options;
 	const skillsPath = path.join(sourceDir, AGENT_SKILLS_MANIFEST_FILE);
 
@@ -154,6 +166,7 @@ export async function importAgentSkillsPackage(
 	if (typeof pluginName !== "string") {
 		return {
 			success: false,
+			refused: true,
 			error: `skillguard: install refused — invalid manifest name "${pluginName}" (manifest-integrity, force never lifts)`,
 		};
 	}
@@ -167,6 +180,7 @@ export async function importAgentSkillsPackage(
 	) {
 		return {
 			success: false,
+			refused: true,
 			error: `skillguard: install refused — invalid manifest name "${pluginName}" (manifest-integrity, force never lifts)`,
 		};
 	}
@@ -181,6 +195,7 @@ export async function importAgentSkillsPackage(
 	) {
 		return {
 			success: false,
+			refused: true,
 			error:
 				"skills.json must declare a non-empty skills array (every skill-shaped file must be declared)",
 		};
@@ -194,12 +209,14 @@ export async function importAgentSkillsPackage(
 		if (!entry || typeof entry.name !== "string" || !entry.name) {
 			return {
 				success: false,
+				refused: true,
 				error: "skills.json skills entry missing name",
 			};
 		}
 		if (typeof entry.path !== "string" || !entry.path) {
 			return {
 				success: false,
+				refused: true,
 				error: `skills.json skills entry "${entry.name}" missing path`,
 			};
 		}
@@ -211,6 +228,7 @@ export async function importAgentSkillsPackage(
 		if (!contained.ok) {
 			return {
 				success: false,
+				refused: true,
 				error: `skills.json skills entry "${entry.name}" path escapes package root (${contained.reason}) — refusing`,
 			};
 		}
@@ -238,18 +256,21 @@ export async function importAgentSkillsPackage(
 		if (coverage.errors.length > 0) {
 			return {
 				success: false,
+				refused: true,
 				error: `skillguard: install refused — ${coverage.errors.length} path(s) could not be read (walk incomplete; manifest-integrity, force never lifts):\n${coverage.errors.map((p) => `  ${p}`).join("\n")}`,
 			};
 		}
 		if (coverage.symlinks.length > 0) {
 			return {
 				success: false,
+				refused: true,
 				error: `skillguard: install refused — symlink(s) in tree (manifest-integrity, force never lifts):\n${coverage.symlinks.map((p) => `  ${p}`).join("\n")}`,
 			};
 		}
 		if (coverage.undeclared.length > 0) {
 			return {
 				success: false,
+				refused: true,
 				error: `skillguard: install refused — undeclared SKILL.md(s) in tree (every skill-shaped file must be declared; force never lifts):\n${coverage.undeclared.map((p) => `  ${p}`).join("\n")}`,
 			};
 		}
@@ -262,6 +283,7 @@ export async function importAgentSkillsPackage(
 			).length;
 			return {
 				success: false,
+				refused: true,
 				// Lead line names the rejected count; the batch report renders
 				// the FULL declared set so the header/rows reflect every scanned
 				// skill (D6, JD-014).
@@ -273,6 +295,7 @@ export async function importAgentSkillsPackage(
 			scanError instanceof Error ? scanError.message : String(scanError);
 		return {
 			success: false,
+			refused: true,
 			error: `skillguard scan failed — ${msg}`,
 		};
 	}

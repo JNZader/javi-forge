@@ -99,6 +99,9 @@ export const HELP_TEXT = `
     - Symlinks anywhere in the tree and SKILL.md files outside the declared
       set are manifest-integrity refusals — they are refused even with --force.
     - Empty or missing skills.json \`skills\` array on import is refused.
+    A refused install/auto-install exits non-zero (exit 1) so scripts and CI
+    can tell a refusal apart from success; clean installs — including
+    --force-lifted unscannable ones — exit 0.
 
   Examples
     $ javi-forge

@@ -692,10 +692,60 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 
 		const result = await importAgentSkillsPackage("/fake/source");
 		expect(result.success).toBe(true);
+		expect(result.refused).toBeUndefined();
 		expect(mockFs.copy).toHaveBeenCalledWith(
 			"/fake/source",
 			expect.any(String),
 		);
+	});
+
+	it("marks gate refusals with refused: true — the CLI exit-code signal (FU-1/R4-002)", async () => {
+		// Verdict refusal (block) → refused flag set.
+		mockSuccessfulImport();
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("alpha", "block")],
+			undeclared: [],
+			symlinks: [],
+			errors: [],
+		});
+		const verdictRefusal = await importAgentSkillsPackage("/fake/source");
+		expect(verdictRefusal.success).toBe(false);
+		expect(verdictRefusal.refused).toBe(true);
+
+		// Manifest-integrity refusal BEFORE the walk (invalid name) → refused.
+		mockFs.readJson.mockResolvedValue({
+			...validManifest,
+			name: "../../escape",
+		} as never);
+		const nameRefusal = await importAgentSkillsPackage("/fake/source");
+		expect(nameRefusal.success).toBe(false);
+		expect(nameRefusal.refused).toBe(true);
+
+		// Containment refusal → refused (and the gate never ran).
+		mockFs.readJson.mockResolvedValue({
+			...validManifest,
+			skills: [{ name: "alpha", description: "Alpha", path: "../../outside" }],
+		} as never);
+		const containmentRefusal = await importAgentSkillsPackage("/fake/source");
+		expect(containmentRefusal.success).toBe(false);
+		expect(containmentRefusal.refused).toBe(true);
+
+		// Scanner-error deny → refused.
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+		mockScanner.mockRejectedValue(new Error("boom"));
+		const scanDeny = await importAgentSkillsPackage("/fake/source");
+		expect(scanDeny.success).toBe(false);
+		expect(scanDeny.refused).toBe(true);
+	});
+
+	it("leaves refused unset on plain input errors (FU-1/R4-002)", async () => {
+		// skills.json missing — a usage error, NOT a skillguard refusal.
+		mockFs.pathExists.mockResolvedValue(false as never);
+		const missing = await importAgentSkillsPackage("/fake/source");
+		expect(missing.success).toBe(false);
+		expect(missing.error).toContain("skills.json not found");
+		expect(missing.refused).toBeUndefined();
 	});
 });
 

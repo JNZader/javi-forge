@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	checkProvenance,
 	computeScanSummary,
@@ -1064,6 +1064,102 @@ describe("scanSkillsWithCoverage", () => {
 		expect(scan.declared).toEqual([]);
 		expect(scan.undeclared).toHaveLength(2);
 		expect(scan.symlinks).toEqual([]);
+	});
+
+	it("treats a declared lowercase skill.md as declared and scans it — not undeclared (JD-011)", async () => {
+		// The declared-set membership must not be exact-case: a declared skill
+		// whose on-disk file is lowercase `skill.md` is collected by the walk
+		// (case-insensitive) and must match the declared set — otherwise it
+		// lands in `undeclared`, a block-level refusal `--force` never lifts,
+		// while its declared scan reports `unscannable` (hard lockout).
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "skill.md"),
+			SAFE_SKILL,
+		);
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.symlinks).toEqual([]);
+		expect(scan.errors).toEqual([]);
+		// Scanned as a real verdict — not reported as a missing/unscannable
+		// exact-case `SKILL.md`.
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.declared[0].verdict).toBe("pass");
+	});
+
+	it("records readdir failures as errors instead of treating the subtree as empty (JD-013)", async () => {
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.ensureDir(path.join(tmpDir, "locked"));
+
+		// chmod-000 is not reliable in every environment (privileged runners,
+		// ACLs), so simulate the EACCES deterministically with a spy on the
+		// walk's fs call. The walk must surface the failing path in `errors`
+		// (call sites refuse on it) instead of silently returning.
+		const realReaddir = fs.readdir.bind(fs);
+		const readdirSpy = vi.spyOn(fs, "readdir").mockImplementation(((
+			p: string | URL,
+		) => {
+			if (typeof p === "string" && p.includes("locked")) {
+				const err = new Error(
+					"EACCES: permission denied",
+				) as NodeJS.ErrnoException;
+				err.code = "EACCES";
+				throw err;
+			}
+			return realReaddir(p);
+		}) as typeof fs.readdir);
+		try {
+			const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+			expect(scan.errors).toEqual([path.join(tmpDir, "locked")]);
+			// The rest of the tree was still walked and scanned.
+			expect(scan.declared).toHaveLength(1);
+			expect(scan.declared[0].verdict).toBe("pass");
+			expect(scan.undeclared).toEqual([]);
+			expect(scan.symlinks).toEqual([]);
+		} finally {
+			readdirSpy.mockRestore();
+		}
+	});
+
+	it("records lstat failures per-path and keeps walking the rest (JD-013)", async () => {
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.writeFile(path.join(tmpDir, "plain.txt"), "not a skill");
+
+		const realLstat = fs.lstat.bind(fs);
+		const lstatSpy = vi.spyOn(fs, "lstat").mockImplementation(((
+			p: string | URL,
+		) => {
+			if (typeof p === "string" && p.endsWith("plain.txt")) {
+				const err = new Error(
+					"EACCES: permission denied",
+				) as NodeJS.ErrnoException;
+				err.code = "EACCES";
+				throw err;
+			}
+			return realLstat(p);
+		}) as typeof fs.lstat);
+		try {
+			const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+			expect(scan.errors).toEqual([path.join(tmpDir, "plain.txt")]);
+			expect(scan.declared).toHaveLength(1);
+			expect(scan.declared[0].verdict).toBe("pass");
+			expect(scan.undeclared).toEqual([]);
+			expect(scan.symlinks).toEqual([]);
+		} finally {
+			lstatSpy.mockRestore();
+		}
 	});
 
 	it("refuses a declared path escaping the scan root (../outside, JD-003)", async () => {

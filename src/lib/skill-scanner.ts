@@ -567,6 +567,15 @@ export interface SkillCoverageScan {
 	 * never dereferences them (JD-003).
 	 */
 	symlinks: string[];
+	/**
+	 * Paths the walk could not enumerate or stat (realpath/readdir/lstat I/O
+	 * failure — e.g. an unreadable subtree). An incomplete walk cannot certify
+	 * the installed footprint, so the caller refuses on this (manifest-
+	 * integrity, block-level, force never lifts — JD-013); a silent `return`/
+	 * `continue` would treat the broken subtree as empty and let the install
+	 * proceed un-scanned.
+	 */
+	errors: string[];
 }
 
 /**
@@ -601,11 +610,21 @@ export async function scanSkillsWithCoverage(
 
 	const declaredFiles = new Set<string>();
 	for (const absDir of declaredDirs.values()) {
+		// Seed BOTH basenames the walk recognizes as skill-shaped. The walk
+		// collects case-insensitively (`entry.toLowerCase() === "skill.md"`),
+		// so a declared skill whose on-disk file is lowercase `skill.md` must
+		// match membership — otherwise it is collected, fails membership, and
+		// lands in `undeclared`, a block-level refusal `--force` never lifts
+		// (JD-011: permanent lockout for a declared skill). Files NOT inside a
+		// declared dir still miss the set — the lowercase-as-undeclared
+		// refusal for undeclared files is preserved.
 		declaredFiles.add(path.join(absDir, "SKILL.md"));
+		declaredFiles.add(path.join(absDir, "skill.md"));
 	}
 
 	const undeclared: string[] = [];
 	const symlinks: string[] = [];
+	const errors: string[] = [];
 	const visited = new Set<string>();
 
 	async function walk(currentDir: string): Promise<void> {
@@ -616,6 +635,9 @@ export async function scanSkillsWithCoverage(
 		try {
 			real = await fs.realpath(currentDir);
 		} catch {
+			// Fail-closed (JD-013): an unlistable subtree must surface as an
+			// error the caller refuses on, not silently read as empty.
+			errors.push(currentDir);
 			return;
 		}
 		if (visited.has(real)) return;
@@ -625,6 +647,9 @@ export async function scanSkillsWithCoverage(
 		try {
 			entries = await fs.readdir(currentDir);
 		} catch {
+			// Fail-closed (JD-013): same as realpath above — record, do not
+			// swallow, so the caller can refuse an incomplete walk.
+			errors.push(currentDir);
 			return;
 		}
 
@@ -634,6 +659,10 @@ export async function scanSkillsWithCoverage(
 			try {
 				lst = await fs.lstat(fullPath);
 			} catch {
+				// Fail-closed (JD-013): a path we cannot stat (race, I/O, or
+				// permission) must not silently vanish from the footprint
+				// inventory — record it and keep walking the rest.
+				errors.push(fullPath);
 				continue;
 			}
 
@@ -672,12 +701,34 @@ export async function scanSkillsWithCoverage(
 	// Iterating the map keeps declared order (insertion order == declaredPaths)
 	// and guarantees an entry cannot be absent once resolved.
 	for (const absDir of declaredDirs.values()) {
-		const file = path.join(absDir, "SKILL.md");
-		if (symlinkSet.has(file)) continue;
+		// Case-tolerant resolution (JD-011): a declared skill whose on-disk
+		// file is lowercase `skill.md` is the same declared entry — scan the
+		// file that actually exists instead of reporting the exact-case path
+		// as a missing/unscannable file.
+		const file = await declaredSkillFileOnDisk(absDir);
+		// Whether the canonical or the lowercase variant, a symlinked declared
+		// file is already in `symlinks` — never read through it (JD-003/JD-007).
+		if (symlinkSet.has(path.resolve(file))) continue;
 		declared.push(await scanSkillFile(file));
 	}
 
-	return { declared, undeclared, symlinks };
+	return { declared, undeclared, symlinks, errors };
+}
+
+/**
+ * Resolve the on-disk skill file for a declared skill directory. The coverage
+ * walk recognizes both `SKILL.md` and `skill.md` basenames (case-insensitive
+ * collection), so a declared entry may legitimately carry either; favor the
+ * conventional exact-case name, fall back to the lowercase variant (JD-011).
+ * When neither exists, return the canonical path so `scanSkillFile` reports
+ * the declared skill as `unscannable` (fail-closed, unchanged behavior).
+ */
+async function declaredSkillFileOnDisk(absDir: string): Promise<string> {
+	const canonical = path.join(absDir, "SKILL.md");
+	if (await fs.pathExists(canonical)) return canonical;
+	const lower = path.join(absDir, "skill.md");
+	if (await fs.pathExists(lower)) return lower;
+	return canonical;
 }
 
 /**

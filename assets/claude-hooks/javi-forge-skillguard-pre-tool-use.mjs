@@ -100,24 +100,30 @@ export function canonicalizePolicyPath(input, options = {}) {
 			expanded = path.resolve(options.base, expanded);
 		}
 	}
-	const native = platform === process.platform && path.isAbsolute(expanded)
-		? nativeRealpath(expanded)
-		: expanded;
+	const native = platform === process.platform && path.isAbsolute(expanded) ? nativeRealpath(expanded) : expanded;
 	return lexicalNormalize(native, platform);
+}
+
+function policyPathKeys(input, options = {}) {
+	const platform = options.platform ?? process.platform;
+	const lexical = lexicalNormalize(input, platform);
+	if (platform !== process.platform || !path.isAbsolute(input)) return [lexical];
+	const real = canonicalizePolicyPath(input, options);
+	return real === lexical ? [lexical] : [lexical, real];
 }
 
 function isAbsolutePolicyPath(value) {
 	return POSIX_ABSOLUTE.test(value) || WINDOWS_DRIVE.test(value) || WINDOWS_UNC.test(value) || /^\\(?:\\\?|\?\?|\\\.)\\/i.test(value);
 }
 
-function isSensitive(key) {
+export function isSensitivePolicyKey(key, platform = process.platform) {
 	const parts = key.split("/").filter(Boolean);
 	const basename = parts.at(-1) ?? "";
 	if (/^\.env(?:\..+)?$/i.test(basename) && !/^\.env\.(?:example|sample|template)$/i.test(basename)) return true;
 	if ([".npmrc", ".pypirc", ".netrc", ".git-credentials"].includes(basename.toLowerCase())) return true;
 	if (parts.some((part) => part === ".ssh" || part === ".gnupg")) return true;
 	if (key.endsWith("/.aws/credentials") || key.endsWith("/.kube/config") || key.endsWith("/.config/gcloud/application_default_credentials.json")) return true;
-	return process.platform === "win32" ? basename.toLowerCase() === "serviceaccountkey.json" : basename === "serviceAccountKey.json";
+	return platform === "win32" || platform === "darwin" ? basename.toLowerCase() === "serviceaccountkey.json" : basename === "serviceAccountKey.json";
 }
 
 function isManaged(key) {
@@ -128,34 +134,58 @@ function isManaged(key) {
 }
 
 function evaluateFile(toolName, filePath) {
-	const key = canonicalizePolicyPath(filePath);
-	if (isSensitive(key)) return { allowed: false, ruleId: "path.sensitive" };
-	if (toolName !== "Read" && isManaged(key)) return { allowed: false, ruleId: "path.managed-config" };
+	const keys = policyPathKeys(filePath);
+	if (keys.some((key) => isSensitivePolicyKey(key))) return { allowed: false, ruleId: "path.sensitive" };
+	if (toolName !== "Read" && keys.some(isManaged)) return { allowed: false, ruleId: "path.managed-config" };
 	return { allowed: true };
 }
 
-function shellSegments(command) {
-	const nested = [...command.matchAll(/\$\(([^()]*)\)|`([^`]*)`/g)].map((match) => match[1] ?? match[2]);
-	return [...command.split(/(?:\r?\n|&&|\|\||;)/), ...nested].map((part) => part.trim()).filter(Boolean);
+function lex(command, powershell = false) {
+	const commands = [[]];
+	const separators = [];
+	let token = "", quote = "", escaped = false;
+	const pushToken = () => { if (token) commands.at(-1).push(token); token = ""; };
+	const split = (separator) => { pushToken(); if (commands.at(-1).length) { separators.push(separator); commands.push([]); } };
+	for (let index = 0; index < command.length; index++) {
+		const char = command[index];
+		if (escaped) { token += char; escaped = false; continue; }
+		if (char === "\\" && quote !== "'" && !powershell) { escaped = true; continue; }
+		if (quote) { if (char === quote) quote = ""; else token += char; continue; }
+		if (char === "'" || char === '"') { quote = char; continue; }
+		if (char === "|" && command[index + 1] === "|") { split("||"); index++; continue; }
+		if (char === "&" && command[index + 1] === "&") { split("&&"); index++; continue; }
+		if (char === "|" || char === ";" || char === "\n" || char === "\r") { split(char === "|" ? "|" : ";"); continue; }
+		if (char === ">" || char === "<") { pushToken(); commands.at(-1).push(char); continue; }
+		if (/\s/.test(char)) { pushToken(); continue; }
+		token += char;
+	}
+	if (quote || escaped) fail("unlexable-command");
+	pushToken();
+	if (!commands.at(-1).length) commands.pop();
+	return { commands, separators };
 }
 
-function words(segment) {
-	return [...segment.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)'|([^\s<>|]+)/g)].map((match) => (match[1] ?? match[2] ?? match[3]).replace(/\\([\s"'\\])/g, "$1"));
-}
-
-function commandWords(segment, powershell = false) {
-	const tokens = words(segment);
-	while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) tokens.shift();
-	while (["sudo", "command", "builtin", "nohup", "env"].includes((tokens[0] ?? "").toLowerCase())) tokens.shift();
-	if (powershell && tokens[0] === "&") tokens.shift();
+function commandWords(input, powershell = false) {
+	const tokens = [...input];
+	if (powershell) while (tokens[0] === "&") tokens.shift();
+	for (;;) {
+		while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) tokens.shift();
+		const wrapper = (tokens[0] ?? "").toLowerCase();
+		if (!["sudo", "command", "builtin", "nohup", "env"].includes(wrapper)) break;
+		tokens.shift();
+		for (;;) {
+			if (tokens[0] === "--" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) { tokens.shift(); continue; } if ((wrapper === "sudo" && /^(?:-u|-g|-h|-p|-C|-T|-r|-t|--user|--group|--host|--prompt|--chdir|--command-timeout|--role|--type)$/.test(tokens[0] ?? "")) || (wrapper === "env" && /^(?:-u|-C|--unset|--chdir)$/.test(tokens[0] ?? ""))) { tokens.splice(0, 2); continue; } if (tokens[0]?.startsWith("-") && tokens[0] !== "--") { tokens.shift(); continue; }
+			break;
+		}
+	}
 	return tokens;
 }
 
 function hasSensitiveLiteral(tokens, cwd) {
 	return tokens.some((token) => {
-		if (token.startsWith("-") || !/[\\/.~$]/.test(token)) return false;
+		if ((token.startsWith("-") && !/^-(?:LiteralPath|Path):/i.test(token)) || !/[\\/.~$]/.test(token)) return false;
 		try {
-			return isSensitive(canonicalizePolicyPath(token.replace(/[;,]$/, ""), { base: cwd, projectRoot: PROJECT_ROOT }));
+			return isSensitivePolicyKey(canonicalizePolicyPath(token.replace(/^(?:-LiteralPath:|-Path:)/i, "").replace(/[;,]$/, ""), { base: cwd, projectRoot: PROJECT_ROOT }));
 		} catch {
 			return false;
 		}
@@ -164,44 +194,55 @@ function hasSensitiveLiteral(tokens, cwd) {
 
 function hasManagedLiteral(tokens, cwd) {
 	return tokens.some((token) => {
-		if (token.startsWith("-") || !/[\\/.]/.test(token)) return false;
+		if ((token.startsWith("-") && !/^-(?:LiteralPath|Path):/i.test(token)) || !/[\\/.]/.test(token)) return false;
 		try {
-			return isManaged(canonicalizePolicyPath(token.replace(/[;,]$/, ""), { base: cwd, projectRoot: PROJECT_ROOT }));
+			return isManaged(canonicalizePolicyPath(token.replace(/^(?:-LiteralPath:|-Path:)/i, "").replace(/[;,]$/, ""), { base: cwd, projectRoot: PROJECT_ROOT }));
 		} catch {
 			return false;
 		}
 	});
 }
 
-function evaluateBash(command, cwd) {
-	const segments = shellSegments(command);
-	for (const segment of segments) {
-		const tokens = commandWords(segment);
+function evaluateBash(command, cwd, depth = 0) {
+	if (depth > 4) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
+	if (/^\s*:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:\s*$/.test(command)) return { allowed: false, ruleId: "shell.destructive-root" };
+	let parsed;
+	try { parsed = lex(command); } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
+	for (let index = 0; index < parsed.commands.length; index++) {
+		const tokens = commandWords(parsed.commands[index]);
 		const executable = (tokens[0] ?? "").toLowerCase();
 		const rmOptions = tokens.filter((token) => token.startsWith("-")).join("");
 		if ((executable === "rm" && /r/i.test(rmOptions) && /f/i.test(rmOptions) && tokens.some((token) => ["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT].includes(token))) || /^mkfs/.test(executable) || (executable === "dd" && tokens.some((token) => /^of=\/dev\/(?:sd|nvme|vd|disk)/.test(token)))) return { allowed: false, ruleId: "shell.destructive-root" };
-		if (/^(?:curl|wget|base64)\b[^|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|dash|ksh)\b/i.test(segment)) return { allowed: false, ruleId: "shell.pipe-to-shell" };
+		if (executable === "chmod" && (tokens.some((token) => /^-(?:[^-]*R|recursive)$/i.test(token)) || tokens.some((token) => /^(?:0?777)$/.test(token))) && tokens.some((token) => ["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT].includes(token))) return { allowed: false, ruleId: "shell.destructive-root" };
+		if (parsed.separators[index] === "|") {
+			const downstream = commandWords(parsed.commands[index + 1] ?? []);
+			const producer = executable === "base64" ? tokens.some((token) => /^(?:-d|--decode)$/.test(token)) : /^(?:curl|wget)$/.test(executable);
+			if (producer && /^(?:sh|bash|zsh|dash|ksh)$/.test((downstream[0] ?? "").toLowerCase())) return { allowed: false, ruleId: "shell.pipe-to-shell" };
+		}
 		if (["cat", "less", "more", "head", "tail", "bat", "grep", "rg", "sed", "awk", "source", ".", "cp", "install"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "shell.sensitive-read" };
-		if (/<\s*[^\s]+/.test(segment) && hasSensitiveLiteral(tokens, cwd)) return { allowed: false, ruleId: "shell.sensitive-read" };
+		if (tokens.some((token) => token === "<") && hasSensitiveLiteral(tokens, cwd)) return { allowed: false, ruleId: "shell.sensitive-read" };
 		if (executable === "git" && tokens[1]?.toLowerCase() === "push" && tokens.some((token) => ["-f", "--force", "--force-with-lease"].includes(token.toLowerCase()))) return { allowed: false, ruleId: "shell.force-push" };
 		if (["rm", "mv", "cp", "install", "truncate", "touch", "chmod", "chown", "tee"].includes(executable) && hasManagedLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "shell.managed-config-tamper" };
-		if ((/^(?:sed|perl)$/.test(executable) && tokens.some((token) => token.startsWith("-i")) && hasManagedLiteral(tokens, cwd)) || (/>/.test(segment) && hasManagedLiteral(tokens, cwd))) return { allowed: false, ruleId: "shell.managed-config-tamper" };
+		if ((/^(?:sed|perl)$/.test(executable) && tokens.some((token) => token.startsWith("-i")) && hasManagedLiteral(tokens, cwd)) || (tokens.includes(">") && hasManagedLiteral(tokens, cwd))) return { allowed: false, ruleId: "shell.managed-config-tamper" };
 		if (/^(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) && tokens.some((token) => /^-(?:enc|encodedcommand)$/i.test(token))) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
-		if (/^(?:bash|sh|zsh|dash|ksh)$/.test(executable) && tokens.some((token) => token === "-c") && /[$`]/.test(tokens.at(-1) ?? "")) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
+		if (/^(?:bash|sh|zsh|dash|ksh)$/.test(executable)) {
+			const flag = tokens.findIndex((token) => token === "-c");
+			if (flag >= 0) { const body = tokens[flag + 1]; if (!body || /[$`]/.test(body)) return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; const nested = evaluateBash(body, cwd, depth + 1); if (!nested.allowed) return nested; }
+		}
 	}
 	return { allowed: true };
 }
 
 function evaluatePowerShell(command, cwd) {
-	for (const segment of shellSegments(command)) {
-		const tokens = commandWords(segment, true);
+	const parsed = lex(command, true);
+	for (let index = 0; index < parsed.commands.length; index++) {
+		const tokens = commandWords(parsed.commands[index], true);
 		const executable = (tokens[0] ?? "").toLowerCase();
 		if ((["remove-item", "rm", "del", "erase", "rmdir", "rd"].includes(executable) && tokens.some((token) => /^-(?:r|recurse)$/i.test(token)) && tokens.some((token) => /^-(?:fo|force)$/i.test(token)) && tokens.some((token) => /^(?:[a-z]:\\?|[/~]|\$HOME)$/i.test(token))) || ["format-volume", "clear-disk", "initialize-disk"].includes(executable)) return { allowed: false, ruleId: "powershell.destructive-root" };
-		if (/^(?:invoke-webrequest|iwr|curl|wget|invoke-restmethod|irm)\b[^|]*\|\s*(?:invoke-expression|iex)\b/i.test(segment)) return { allowed: false, ruleId: "powershell.pipe-to-shell" };
+		if (parsed.separators[index] === "|" && /^(?:invoke-webrequest|iwr|curl|wget|invoke-restmethod|irm)$/.test(executable) && /^(?:invoke-expression|iex)$/.test((commandWords(parsed.commands[index + 1] ?? [], true)[0] ?? "").toLowerCase())) return { allowed: false, ruleId: "powershell.pipe-to-shell" };
 		if (["get-content", "gc", "cat", "type", "select-string", "copy-item", "cp", "copy"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "powershell.sensitive-read" };
 		if (executable === "git" && tokens[1]?.toLowerCase() === "push" && tokens.some((token) => ["-f", "--force", "--force-with-lease"].includes(token.toLowerCase()))) return { allowed: false, ruleId: "powershell.force-push" };
 		if (["set-content", "add-content", "out-file", "clear-content", "remove-item", "move-item", "copy-item", "rename-item", "new-item"].includes(executable) && hasManagedLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "powershell.managed-config-tamper" };
-		if (/>/.test(segment) && hasManagedLiteral(tokens, cwd)) return { allowed: false, ruleId: "powershell.managed-config-tamper" };
 		if (/^(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) && tokens.some((token) => /^-(?:enc|encodedcommand)$/i.test(token))) return { allowed: false, ruleId: "powershell.obfuscated-interpreter" };
 	}
 	return { allowed: true };

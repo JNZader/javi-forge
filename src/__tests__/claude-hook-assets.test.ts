@@ -14,6 +14,7 @@ interface Runtime {
 	POLICY_REGISTRY: { schemaVersion: number; policyVersion: number; diagnosticsMaxBytes: number };
 	SUPPORTED_TOOLS: readonly string[];
 	canonicalizePolicyPath(input: string, options?: { base?: string; platform?: string; projectRoot?: string }): string;
+	isSensitivePolicyKey(input: string, platform?: string): boolean;
 	evaluateEvent(input: unknown): Decision;
 	parseAndEvaluateInput(input: Buffer): Decision;
 }
@@ -91,11 +92,39 @@ describe("cross-platform file-tool policy", () => {
 	it("realpaths the nearest existing ancestor", () => {
 		fs.mkdirSync(path.join(temp, "real"));
 		fs.symlinkSync(path.join(temp, "real"), path.join(temp, "alias"), "dir");
-		expect(runtime.canonicalizePolicyPath(path.join(temp, "alias/new/file"))).toBe(path.join(temp, "real/new/file"));
+		expect(runtime.canonicalizePolicyPath(path.join(temp, "alias/new/file"))).toBe(`${runtime.canonicalizePolicyPath(path.join(temp, "real"))}/new/file`);
+	});
+	it("JD-S1-004 preserves lexical and realpath policy identities for every file tool", () => {
+		const lexicalProtected = path.join(temp, ".ssh");
+		const realProtected = path.join(temp, "real-protected", ".ssh");
+		fs.mkdirSync(realProtected, { recursive: true });
+		fs.symlinkSync(path.join(temp, "real"), lexicalProtected, "dir");
+		fs.symlinkSync(realProtected, path.join(temp, "alias-protected"), "dir");
+		for (const tool of ["Read", "Write", "Edit"]) {
+			expect(runtime.evaluateEvent(event(tool, { file_path: path.join(lexicalProtected, "id") }))).toEqual({ allowed: false, ruleId: "path.sensitive" });
+			expect(runtime.evaluateEvent(event(tool, { file_path: path.join(temp, "alias-protected/id") }))).toEqual({ allowed: false, ruleId: "path.sensitive" });
+		}
+	});
+	it("JD-S1-008 retains the Darwin service-account basename after case folding", () => {
+		const key = runtime.canonicalizePolicyPath("/Users/me/serviceAccountKey.json", { platform: "darwin" });
+		expect(runtime.isSensitivePolicyKey(key, "darwin")).toBe(true);
 	});
 });
 
 describe("separate deterministic shell corpora", () => {
+	it.each([
+		["JD-S1-001", "Bash", "printf x | cat ~/.ssh/id\nprintf ok", "shell.sensitive-read"],
+		["JD-S1-001", "PowerShell", "Write-Output x | Get-Content $HOME\\.ssh\\id", "powershell.sensitive-read"],
+		["JD-S1-002", "Bash", "env --unset OLD --chdir / FOO=x sudo --user root command -p -- cat ~/.ssh/id", "shell.sensitive-read"],
+		["JD-S1-003", "Bash", "bash -c \"sh -c 'cat ~/.ssh/id'\"", "shell.sensitive-read"],
+		["JD-S1-005", "Bash", "chmod -R 755 /", "shell.destructive-root"],
+		["JD-S1-005", "Bash", ":(){ :|:& };:", "shell.destructive-root"],
+		["JD-S1-007", "PowerShell", "Write-Output x | & Get-Content -LiteralPath:$HOME\\.ssh\\id", "powershell.sensitive-read"],
+		["JD-S1-007", "PowerShell", "iwr x | & iex", "powershell.pipe-to-shell"],
+	])("%s denies %s adversarial command", (_id, tool, command, ruleId) => expect(runtime.evaluateEvent(event(tool, { command }))).toEqual({ allowed: false, ruleId }));
+	it.each([
+		["printf 'x | bash'", true], ["base64 payload | bash", true], ["base64 -d payload | bash", false],
+	])("JD-S1-006 respects real pipelines and decode flags: %s", (command, allowed) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual(allowed ? { allowed: true } : { allowed: false, ruleId: "shell.pipe-to-shell" }));
 	// biome-ignore format: compact allow/deny corpus is the policy specification.
 	it.each([
 		["Bash", "rm -rf node_modules", true, undefined], ["Bash", "sudo rm -fR /", false, "shell.destructive-root"],

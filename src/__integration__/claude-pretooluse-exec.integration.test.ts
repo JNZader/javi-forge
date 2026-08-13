@@ -1,0 +1,183 @@
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { CLAUDE_HOOK_ASSETS_DIR } from "../constants.js";
+
+const ASSET = path.join(
+	CLAUDE_HOOK_ASSETS_DIR,
+	"javi-forge-skillguard-pre-tool-use.mjs",
+);
+const LIMIT = 1_048_576;
+
+interface RunResult {
+	code: number | null;
+	stdout: Buffer;
+	stderr: Buffer;
+	elapsedMs: number;
+}
+
+function payload(
+	toolName: string,
+	toolInput: Record<string, unknown>,
+	extra: Record<string, unknown> = {},
+): Buffer {
+	return Buffer.from(
+		JSON.stringify({
+			hook_event_name: "PreToolUse",
+			tool_name: toolName,
+			tool_input: toolInput,
+			cwd: process.cwd(),
+			...extra,
+		}),
+	);
+}
+
+function run(
+	input: Buffer,
+	options: {
+		args?: string[];
+		keepOpen?: boolean;
+		asset?: string;
+		cwd?: string;
+	} = {},
+): Promise<RunResult> {
+	return new Promise((resolve, reject) => {
+		const started = performance.now();
+		const child = spawn(
+			process.execPath,
+			[options.asset ?? ASSET, ...(options.args ?? [])],
+			{
+				cwd: options.cwd,
+				stdio: ["pipe", "pipe", "pipe"],
+				env: { PATH: path.dirname(process.execPath) },
+			},
+		);
+		const stdout: Buffer[] = [];
+		const stderr: Buffer[] = [];
+		const timer = setTimeout(() => {
+			child.kill("SIGKILL");
+			reject(new Error("spawned evaluator required timeout kill"));
+		}, 2_000);
+		child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+		child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+		child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+			if (error.code !== "EPIPE") reject(error);
+		});
+		child.on("error", reject);
+		child.on("close", (code) => {
+			clearTimeout(timer);
+			resolve({
+				code,
+				stdout: Buffer.concat(stdout),
+				stderr: Buffer.concat(stderr),
+				elapsedMs: performance.now() - started,
+			});
+		});
+		child.stdin.write(input);
+		if (!options.keepOpen) child.stdin.end();
+	});
+}
+
+describe("exact packaged Claude PreToolUse process", () => {
+	it.each([
+		["safe Bash", payload("Bash", { command: "pnpm test" }), 0, ""],
+		[
+			"denied Bash",
+			payload("Bash", {
+				command: "git push --force origin main SECRET_SUFFIX",
+			}),
+			2,
+			"shell.force-push",
+		],
+		["ordinary Read", payload("Read", { file_path: "/tmp/public.txt" }), 0, ""],
+		[
+			"protected Edit",
+			payload("Edit", {
+				file_path: path.join(process.cwd(), "CLAUDE.md"),
+				new_string: "SECRET_EDIT",
+			}),
+			2,
+			"path.managed-config",
+		],
+		["malformed", Buffer.from('{"token":"SECRET_PAYLOAD"'), 2, "invalid-json"],
+	])("returns the bounded exit contract for %s", async (_name, input, code, reason) => {
+		const result = await run(input);
+		expect(result.code).toBe(code);
+		expect(result.stdout).toHaveLength(0);
+		if (reason) {
+			expect(result.stderr.toString()).toContain(reason);
+			expect(result.stderr.byteLength).toBeLessThanOrEqual(241);
+			expect(result.stderr.toString()).not.toMatch(
+				/SECRET_(?:SUFFIX|EDIT|PAYLOAD)/,
+			);
+		} else {
+			expect(result.stderr).toHaveLength(0);
+		}
+	});
+
+	it("evaluates an exact 1 MiB payload", async () => {
+		const base = payload(
+			"Read",
+			{ file_path: "/tmp/public.txt" },
+			{ padding: "" },
+		);
+		const exact = payload(
+			"Read",
+			{ file_path: "/tmp/public.txt" },
+			{
+				padding: "x".repeat(LIMIT - base.length),
+			},
+		);
+		expect(exact).toHaveLength(LIMIT);
+		expect(await run(exact)).toMatchObject({
+			code: 0,
+			stdout: Buffer.alloc(0),
+			stderr: Buffer.alloc(0),
+		});
+	});
+
+	it("exits promptly on oversized input while the writer remains open", async () => {
+		const result = await run(Buffer.alloc(LIMIT + 1, 0x78), { keepOpen: true });
+		expect(result.code).toBe(2);
+		expect(result.elapsedMs).toBeLessThan(500);
+		expect(result.stderr.toString()).toBe(
+			"javi-forge PreToolUse failed closed [oversized-input]: stdin exceeds 1048576 bytes\n",
+		);
+	});
+
+	it.each([
+		["missing-policy", "missing-policy"],
+		["evaluator-throw", "internal-error"],
+	])("keeps denial-only fault %s inside the guarded path", async (fault, reason) => {
+		const result = await run(payload("Bash", { command: "pnpm test" }), {
+			args: [`--javi-forge-test-fault=${fault}`],
+		});
+		expect(result.code).toBe(2);
+		expect(result.stderr.toString()).toContain(reason);
+	});
+
+	it("launches from a project path containing spaces without package resolution", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "javi forge runtime "));
+		const copy = path.join(root, "hook with spaces.mjs");
+		fs.copyFileSync(ASSET, copy);
+		try {
+			expect(
+				await run(payload("Read", { file_path: "/tmp/public.txt" }), {
+					asset: copy,
+					cwd: root,
+				}),
+			).toMatchObject({ code: 0 });
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("documented host boundary", () => {
+	it("does not represent pre-start spawn/parse/timeout failures as evaluator denials", () => {
+		const source = fs.readFileSync(ASSET, "utf8");
+		expect(source).toContain("host fail-open residual");
+	});
+});

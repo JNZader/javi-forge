@@ -1,0 +1,29 @@
+name: Claude Hook Windows Runtime
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Validate standalone runtime
+        shell: pwsh
+        run: |
+          pnpm typecheck; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          pnpm typecheck:test; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          pnpm vitest run src/__tests__/claude-hook-assets.test.ts src/__integration__/claude-pretooluse-exec.integration.test.ts

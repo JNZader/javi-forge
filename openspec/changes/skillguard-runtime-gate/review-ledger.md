@@ -74,3 +74,28 @@ Info notes carried into sdd-tasks as implementation-time cautions (never block, 
 ### Implementation verdict
 
 **JUDGMENT: APPROVED** — no CRITICAL/BLOCKER. Warnings/suggestions (JD-011, JD-012, JD-013, JD-014, JD-103) reported once as info per protocol. Candidate user-authorizable fixes (like JD-002/003 in design round): JD-011 (case-mismatch lockout — real user impact, cheap), JD-012 (add containment + sameDir tests, fix apply-progress claim), JD-013 (errors[] refusal on walk I/O failure), JD-014 (report undercount), JD-103 (bind existing-install-preserved). None block apply→verify.
+
+## Fix Round F1 (user-authorized override — all 5 info findings fixed) + re-review
+
+**User decision**: "fix a todo" — authorize fixing JD-011, JD-012, JD-013, JD-014, JD-103. Fix agent applied 3 commits on `feat/skillguard-runtime-gate`: `e7e8f408`, `0d84d845`, `35d77446` (10 commits total on branch). Ledger statuses above set to `fixed`; apply-progress.md corrected (§5.3 false containment claim → tests actually added in F1) and merged with F1 results; engram apply-progress upserted.
+
+**F1 test results (real exit codes)**: `pnpm test` 96 files, 1772 pass / 2 pre-existing skips (+9 new tests); `pnpm typecheck` 0; `pnpm typecheck:test` 0; `pnpm lint` 0 (1 pre-existing unrelated warning `ci-hooks.test.ts:1171`); pre-commit CI on all 3 commits.
+
+**Re-review (post-F1, both judges, parallel, scoped to `git diff 97abbfcc..HEAD` only — full implementation diff forbidden):**
+
+**VERDICT: CLEAN — all five F1 findings verified fixed; zero new BLOCKER/CRITICAL on fix-touched lines.** Per-finding verification (both judges independently, live repro by B):
+- JD-011 verified: seeded both basenames + `declaredSkillFileOnDisk` case-tolerant resolution (`skill-scanner.ts:621-622`, `:708`, `:726-732`); declared lowercase `skill.md` → `declared[pass]`, `undeclared=[]` (live repro); undeclared lowercase still refused (CASE3 preserved).
+- JD-012 verified: `it.each(["../../outside","/absolute/outside"])` import-entrypoint refusals asserted scanner+copy never called; realpath branch exercised with non-identity mock; sameDir "scanner not called" asserted; false apply-progress claim corrected.
+- JD-013 verified: `SkillCoverageScan.errors: string[]` (`:578`) recorded on realpath/readdir/lstat failures (`:637-666`); both gate call sites refuse on `errors.length > 0` FIRST, before symlink/undeclared/gate — unconditional, force never lifts (`plugin.ts:215-220`, `agent-skills.ts:202-207`); spy-based EACCES tests bind recording + call-site `force:true` refusal.
+- JD-014 verified: `formatBatchReport` receives full declared set (`plugin.ts:203/234/254` hoisted `declaredResults`; `agent-skills.ts:232` `coverage.declared`); lead line still names rejected count.
+- JD-103 verified: `pathExists(destDir)→true` refusal test asserts both `fs.remove` and `fs.copy` never called (`agent-skills.test.ts:412-440`).
+
+### F1 info registrations (never block, no round)
+
+| id | location | severity | assessment | evidence |
+|----|----------|----------|------------|----------|
+| JD-F1-N1 | `src/lib/skill-scanner.ts:621-622,708` | WARNING | real-ish, inert | A declared dir shipping BOTH `SKILL.md` (clean) and lowercase `skill.md` (malicious): only the canonical is content-scanned; the lowercase variant installs un-scanned. Pre-fix this exact state was refused — but that refusal WAS the JD-011 lockout defect, so the trade is deliberate (canonical preferred; P-1 residual class). Inert: no runtime consumer loads lowercase `skill.md` from PLUGINS_DIR (discoverSkills parsing.ts:178, codex-export.ts:96, skill-publish.ts:56, claudemd.ts:88/154, auto-wire.ts:122, manifest generation agent-skills.ts:63-85 read exact-case only), so JD-006/JD-007 "activatable malicious skill" harm is not reachable through this corner. `node_modules`/undeclared-dir smuggling still fully refused (CASE3 live verified). |
+
+### F1 re-review verdict
+
+**JUDGMENT: CLEAN / APPROVED** — zero BLOCKER/CRITICAL confirmed after adversarial re-review of F1; the fix loop closes on round 1 of the implementation judgment (no confirmed findings survived). JD-F1-N1 persists as info only. Next: sdd-verify against spec (12 scenarios), then single PR to main (size:exception) with gates.

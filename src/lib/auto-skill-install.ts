@@ -1,6 +1,9 @@
 import path from "node:path";
 import fs from "fs-extra";
 import { DEFAULT_SKILLS_DIR } from "../commands/skills/constants.js";
+import { evaluateInstallGate } from "./skill-install-gate.js";
+import type { SkillScanResult } from "./skill-scanner.js";
+import { scanSkillFile } from "./skill-scanner.js";
 import type { StackDetectionResult } from "./stack-detector.js";
 import { detectProjectStack } from "./stack-detector.js";
 
@@ -13,6 +16,8 @@ export interface SkillInstallResult {
 	skipped: string[];
 	/** Skills that were recommended but not found in the source */
 	notFound: string[];
+	/** Skills refused by the skillguard gate (block / unscannable w/o force) */
+	blocked: SkillScanResult[];
 	/** The full detection result for reporting */
 	detection: StackDetectionResult;
 }
@@ -26,6 +31,8 @@ export interface AutoInstallOptions {
 	skillsTargetDir?: string;
 	/** If true, skip actually copying files */
 	dryRun?: boolean;
+	/** Bypass the gate for unscannable sources ONLY — block always refuses (D2) */
+	force?: boolean;
 }
 
 // ── Core ───────────────────────────────────────────────────────────────────
@@ -48,6 +55,7 @@ export async function autoInstallSkills(
 		skillsSourceDir = DEFAULT_SKILLS_DIR,
 		skillsTargetDir = DEFAULT_SKILLS_DIR,
 		dryRun = false,
+		force = false,
 	} = options;
 
 	// 1. Detect project stack
@@ -58,6 +66,7 @@ export async function autoInstallSkills(
 			installed: [],
 			skipped: [],
 			notFound: [],
+			blocked: [],
 			detection,
 		};
 	}
@@ -69,6 +78,10 @@ export async function autoInstallSkills(
 	const sameDir =
 		path.resolve(skillsSourceDir) === path.resolve(skillsTargetDir);
 
+	// 2. Classify: notFound / sameDir-skipped / target-skipped / copyable.
+	// Predicates unchanged from pre-gate behavior; sameDir short-circuits
+	// BEFORE any scanning (D4).
+	const copyable: string[] = [];
 	for (const skillName of detection.recommendedSkills) {
 		const sourcePath = path.join(skillsSourceDir, skillName);
 		const targetPath = path.join(skillsTargetDir, skillName);
@@ -93,6 +106,36 @@ export async function autoInstallSkills(
 			continue;
 		}
 
+		copyable.push(skillName);
+	}
+
+	// 3. SkillGuard gate (D4, JD-009): scan-gate every copyable source via its
+	// folder-root SKILL.md. dryRun still scans (read-only) but copies nothing.
+	// A scan THROW rejects the whole function — nothing copied, matching the
+	// UI error path (AutoSkills.tsx:41-44).
+	const scans: SkillScanResult[] = [];
+	for (const skillName of copyable) {
+		const sourceSkillMd = path.join(skillsSourceDir, skillName, "SKILL.md");
+		scans.push(await scanSkillFile(sourceSkillMd));
+	}
+
+	const gate = evaluateInstallGate(scans, { force });
+	if (!gate.allowed) {
+		// Any block (or unscannable without force) ⇒ copy NOTHING.
+		return {
+			installed: [],
+			skipped,
+			notFound,
+			blocked: gate.rejected,
+			detection,
+		};
+	}
+
+	// 4. Copy every copyable skill — nothing was refused.
+	for (const skillName of copyable) {
+		const sourcePath = path.join(skillsSourceDir, skillName);
+		const targetPath = path.join(skillsTargetDir, skillName);
+
 		// Copy skill to target
 		if (!dryRun) {
 			await fs.ensureDir(targetPath);
@@ -105,7 +148,7 @@ export async function autoInstallSkills(
 		installed.push(skillName);
 	}
 
-	return { installed, skipped, notFound, detection };
+	return { installed, skipped, notFound, blocked: [], detection };
 }
 
 /**
@@ -138,6 +181,13 @@ export function formatAutoInstallSummary(result: SkillInstallResult): string {
 	}
 	if (result.notFound.length > 0) {
 		lines.push(`  Not found: ${result.notFound.join(", ")}`);
+	}
+	if (result.blocked.length > 0) {
+		lines.push(
+			`  Blocked: ${result.blocked
+				.map((b) => `${b.skillName} [${b.verdict.toUpperCase()}]`)
+				.join(", ")}`,
+		);
 	}
 
 	return lines.join("\n");

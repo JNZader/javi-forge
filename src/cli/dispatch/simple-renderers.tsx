@@ -83,6 +83,7 @@ export function handlePlugin(cli: CLI, ctx: RendererCtx): void {
 				target={target}
 				dryRun={cli.flags.dryRun}
 				codex={cli.flags.codex}
+				force={cli.flags.force}
 			/>
 		</CIContextProvider>,
 		{ stdin: ctx.inkStdin },

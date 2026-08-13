@@ -13,6 +13,8 @@ import type {
 	InstalledPlugin,
 	PluginManifest,
 } from "../types/index.js";
+import { evaluateInstallGate } from "./skill-install-gate.js";
+import { formatBatchReport, scanSkillsWithCoverage } from "./skill-scanner.js";
 
 // ── Conversion ─────────────────────────────────────────────────────────────
 
@@ -104,9 +106,9 @@ export async function exportPluginAsAgentSkills(
  */
 export async function importAgentSkillsPackage(
 	sourceDir: string,
-	options: { dryRun?: boolean } = {},
+	options: { dryRun?: boolean; force?: boolean } = {},
 ): Promise<{ success: boolean; name?: string; error?: string }> {
-	const { dryRun = false } = options;
+	const { dryRun = false, force = false } = options;
 	const skillsPath = path.join(sourceDir, AGENT_SKILLS_MANIFEST_FILE);
 
 	if (!(await fs.pathExists(skillsPath))) {
@@ -131,13 +133,149 @@ export async function importAgentSkillsPackage(
 		};
 	}
 
+	// R1-002: `name` becomes the import destination (`destDir = path.join(
+	// PLUGINS_DIR, name)`) and is handed to `fs.remove` + `fs.copy` below with
+	// NO path validation — a hostile skills.json name (e.g. `"../../.bashrc"`,
+	// an absolute path, or a separator-bearing name) would delete/copy
+	// ARBITRARY paths outside PLUGINS_DIR. The gate validates declared
+	// `skills[].path` escapes but never the name that determines the
+	// write/delete destination. Same-trust note: `name` is attacker-influenced
+	// when installing from a registry package, not a typed-in label — refuse
+	// BEFORE any `fs.remove`/`fs.copy`/`destDir` use, so an existing install
+	// is preserved (style-consistent with the gate's manifest-integrity
+	// refusals, block-level, force never lifts).
 	const pluginName = agentManifest.name;
+	// R1-F2-N2: `name` is attacker-influenced JSON — it need not be a string at
+	// all (`{"name": 123}` is truthy, so it sails past the required-fields
+	// check above). Guard the type BEFORE the `.trim()` check: a non-string
+	// name refuses cleanly with the same manifest-integrity message instead of
+	// throwing a TypeError out of `.trim()` (which propagated to the UI as a
+	// "Fatal error").
+	if (typeof pluginName !== "string") {
+		return {
+			success: false,
+			error: `skillguard: install refused — invalid manifest name "${pluginName}" (manifest-integrity, force never lifts)`,
+		};
+	}
+	if (
+		pluginName.trim() === "" ||
+		pluginName === "." ||
+		pluginName.includes("..") ||
+		pluginName.includes("/") ||
+		pluginName.includes("\\") ||
+		path.isAbsolute(pluginName)
+	) {
+		return {
+			success: false,
+			error: `skillguard: install refused — invalid manifest name "${pluginName}" (manifest-integrity, force never lifts)`,
+		};
+	}
+
+	// JD-006: import requires a non-empty, well-formed skills array. Each entry
+	// must carry a `name` and a `path` that resolves INSIDE sourceDir (normalized
+	// + realpath containment — "../../x" or an absolute path refuses; the gate
+	// never reads outside the staged clone, JD-003).
+	if (
+		!Array.isArray(agentManifest.skills) ||
+		agentManifest.skills.length === 0
+	) {
+		return {
+			success: false,
+			error:
+				"skills.json must declare a non-empty skills array (every skill-shaped file must be declared)",
+		};
+	}
+
+	const sourceRootAbs = path.resolve(sourceDir);
+	const sourceRootReal = await fs.realpath(sourceRootAbs);
+
+	const declaredPaths: string[] = [];
+	for (const entry of agentManifest.skills) {
+		if (!entry || typeof entry.name !== "string" || !entry.name) {
+			return {
+				success: false,
+				error: "skills.json skills entry missing name",
+			};
+		}
+		if (typeof entry.path !== "string" || !entry.path) {
+			return {
+				success: false,
+				error: `skills.json skills entry "${entry.name}" missing path`,
+			};
+		}
+		const contained = await skillPathContained(
+			sourceRootAbs,
+			sourceRootReal,
+			entry.path,
+		);
+		if (!contained.ok) {
+			return {
+				success: false,
+				error: `skills.json skills entry "${entry.name}" path escapes package root (${contained.reason}) — refusing`,
+			};
+		}
+		declaredPaths.push(entry.path);
+	}
 
 	if (dryRun) {
 		return { success: true, name: pluginName };
 	}
 
 	const destDir = path.join(PLUGINS_DIR, pluginName);
+
+	// ── SkillGuard runtime gate (D8, JD-001/JD-003/JD-006/JD-007) ──────────
+	// Runs BEFORE the existing-install remove and fs.copy: a refusal preserves
+	// an existing install and installs nothing. dryRun early-returns above, so
+	// no scan happens on dry-run. Scanner/eval errors deny unconditionally (D7).
+	try {
+		const coverage = await scanSkillsWithCoverage(sourceDir, declaredPaths);
+
+		// Manifest-integrity refusals — block-level, force NEVER lifts
+		// (JD-007: ANY symlink; JD-006: undeclared SKILL.md incl. node_modules).
+		// A walk with I/O errors cannot certify the copied footprint — refuse
+		// first, because the broken subtree may hide symlinks or undeclared
+		// files (JD-013).
+		if (coverage.errors.length > 0) {
+			return {
+				success: false,
+				error: `skillguard: install refused — ${coverage.errors.length} path(s) could not be read (walk incomplete; manifest-integrity, force never lifts):\n${coverage.errors.map((p) => `  ${p}`).join("\n")}`,
+			};
+		}
+		if (coverage.symlinks.length > 0) {
+			return {
+				success: false,
+				error: `skillguard: install refused — symlink(s) in tree (manifest-integrity, force never lifts):\n${coverage.symlinks.map((p) => `  ${p}`).join("\n")}`,
+			};
+		}
+		if (coverage.undeclared.length > 0) {
+			return {
+				success: false,
+				error: `skillguard: install refused — undeclared SKILL.md(s) in tree (every skill-shaped file must be declared; force never lifts):\n${coverage.undeclared.map((p) => `  ${p}`).join("\n")}`,
+			};
+		}
+
+		const gate = evaluateInstallGate(coverage.declared, { force });
+		if (!gate.allowed) {
+			const blocked = gate.rejected.filter((r) => r.verdict === "block").length;
+			const unscannable = gate.rejected.filter(
+				(r) => r.verdict === "unscannable",
+			).length;
+			return {
+				success: false,
+				// Lead line names the rejected count; the batch report renders
+				// the FULL declared set so the header/rows reflect every scanned
+				// skill (D6, JD-014).
+				error: `skillguard: install refused — ${gate.rejected.length} rejected (${blocked} blocked, ${unscannable} unscannable)\n${formatBatchReport(coverage.declared)}`,
+			};
+		}
+	} catch (scanError) {
+		const msg =
+			scanError instanceof Error ? scanError.message : String(scanError);
+		return {
+			success: false,
+			error: `skillguard scan failed — ${msg}`,
+		};
+	}
 
 	// Remove existing version if present
 	if (await fs.pathExists(destDir)) {
@@ -166,6 +304,46 @@ export async function importAgentSkillsPackage(
 	});
 
 	return { success: true, name: pluginName };
+}
+
+/**
+ * Verify a declared skill entry path stays inside the package root — both
+ * lexically (`../../x`, absolute paths) and by realpath, so an in-tree symlink
+ * cannot redirect the import read outside the staged clone (JD-003/JD-006).
+ * Realpath resolution is best-effort: a missing declared dir has no realpath
+ * yet, in which case lexical containment is the whole guard (the coverage walk
+ * will later report it as a missing/unscannable declared skill).
+ */
+async function skillPathContained(
+	rootAbs: string,
+	rootReal: string,
+	entryPath: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+	const entryAbs = path.resolve(rootAbs, entryPath);
+
+	const rel = path.relative(rootAbs, entryAbs);
+	if (rel.startsWith("..") || path.isAbsolute(rel)) {
+		return {
+			ok: false,
+			reason: `path "${entryPath}" resolves outside the package root`,
+		};
+	}
+
+	try {
+		const entryReal = await fs.realpath(entryAbs);
+		const relReal = path.relative(rootReal, entryReal);
+		if (relReal.startsWith("..") || path.isAbsolute(relReal)) {
+			return {
+				ok: false,
+				reason: `path "${entryPath}" resolves outside the package root (realpath)`,
+			};
+		}
+	} catch {
+		// Declared dir does not exist yet — lexical containment stands; the
+		// coverage walk reports it as a missing declared skill later.
+	}
+
+	return { ok: true };
 }
 
 // ── Aggregation ──────────────────────────────────────────────────────────

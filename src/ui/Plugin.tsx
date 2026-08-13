@@ -31,6 +31,8 @@ interface PluginProps {
 	target?: string;
 	dryRun: boolean;
 	codex?: boolean;
+	/** Bypass the skillguard gate for unscannable sources ONLY — block always refuses (D5) */
+	force?: boolean;
 }
 
 const STATUS_ICON: Record<string, string> = {
@@ -53,6 +55,7 @@ export default function Plugin({
 	target,
 	dryRun,
 	codex = false,
+	force = false,
 }: PluginProps) {
 	const [steps, setSteps] = useState<InitStep[]>([]);
 	const [done, setDone] = useState(false);
@@ -83,7 +86,7 @@ export default function Plugin({
 							});
 							break;
 						}
-						await runPluginAdd(target, dryRun, onStep);
+						await runPluginAdd(target, dryRun, onStep, { force });
 						break;
 					case "remove":
 						if (!target) {
@@ -144,7 +147,7 @@ export default function Plugin({
 							});
 							break;
 						}
-						await runPluginImport(target, dryRun, onStep);
+						await runPluginImport(target, dryRun, onStep, force);
 						break;
 					case "export-skills":
 						if (target === "global") {
@@ -169,7 +172,7 @@ export default function Plugin({
 			setDone(true);
 		};
 		run();
-	}, [action, target, dryRun]);
+	}, [action, target, dryRun, force]);
 
 	return (
 		<Box flexDirection="column" padding={1}>

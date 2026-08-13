@@ -544,6 +544,294 @@ export async function scanSkillsDirectory(
 }
 
 // =============================================================================
+// Coverage walk — install-footprint integrity (JD-002, JD-003, JD-005, JD-007)
+// =============================================================================
+
+export interface SkillCoverageScan {
+	/**
+	 * Scan results for the declared-entry SKILL.md files — the ONLY files the
+	 * walk content-scans (JD-005). A declared file that is a symlink is never
+	 * read through (it is already in {@link symlinks}); a missing declared
+	 * SKILL.md fails closed as `unscannable`.
+	 */
+	declared: SkillScanResult[];
+	/**
+	 * Skill-shaped files (basename `SKILL.md`/`skill.md`) found in the tree
+	 * OUTSIDE the declared set — including under `node_modules`/`.git` (JD-007).
+	 * Paths only; content is never read during the walk (JD-005).
+	 */
+	undeclared: string[];
+	/**
+	 * ANY symlink (file or dir) found in the tree. The caller refuses on this
+	 * (manifest-integrity, block-level, force never lifts — JD-007); the walk
+	 * never dereferences them (JD-003).
+	 */
+	symlinks: string[];
+	/**
+	 * Paths the walk could not enumerate or stat (realpath/readdir/lstat I/O
+	 * failure — e.g. an unreadable subtree). An incomplete walk cannot certify
+	 * the installed footprint, so the caller refuses on this (manifest-
+	 * integrity, block-level, force never lifts — JD-013); a silent `return`/
+	 * `continue` would treat the broken subtree as empty and let the install
+	 * proceed un-scanned.
+	 */
+	errors: string[];
+}
+
+/**
+ * SKILL.md-only coverage walk for the install gates (JD-006/JD-007).
+ *
+ * Visits the ENTIRE tree with NO `node_modules`/`.git` exemption, so the visit
+ * set is exactly the footprint `fs.move`/`fs.copy` will place (JD-007). Collects
+ * only basename `SKILL.md`/`skill.md` files — never `PLUGIN.md`/README content
+ * (JD-002) — and flags ANY symlink (file or dir) without dereferencing it
+ * (JD-007/JD-003). A realpath visited-set terminates cycles defensively even if
+ * a future caller ever recurses through a link (JD-003). The walk itself does NO
+ * content reads: only the declared-entry files are handed to
+ * {@link scanSkillFile} afterwards (JD-005).
+ */
+export async function scanSkillsWithCoverage(
+	dir: string,
+	declaredPaths: string[],
+): Promise<SkillCoverageScan> {
+	// Resolve the scan root once. Declared entries must stay inside it — a
+	// hostile manifest can never make the gate read outside the staged clone
+	// (JD-003: "no read outside the staged clone"; the interface contract names
+	// declared paths realpath-contained).
+	const rootAbs = path.resolve(dir);
+	const rootReal = await fs.realpath(rootAbs);
+
+	// Resolve each declared entry once (containment-verified) and reuse it for
+	// both the coverage set and the content scan — never twice.
+	const declaredDirs = new Map<string, string>();
+	for (const entry of declaredPaths) {
+		declaredDirs.set(entry, await resolveContained(rootAbs, rootReal, entry));
+	}
+
+	// Declared skill DIRECTORIES — membership is case-insensitive by declared
+	// directory, never by file-basename spelling (R1-001/R3-001/R4-001). The
+	// walk collects ANY entry whose lowercased basename is `skill.md`, because
+	// the installed footprint is the on-disk tree whether the author wrote
+	// `SKILL.md`, `Skill.md`, `SKILL.MD` or any other fold — a declared skill's
+	// file must be recognized as declared no matter its case. Seeding exact-case
+	// basenames (F1/JD-011 seeded `SKILL.md` + `skill.md`) still missed every
+	// other fold: the file was collected, failed membership, and landed in
+	// `undeclared` — a block-level refusal `--force` never lifts — while the
+	// declared scan reported `unscannable` (permanent lockout for a legit
+	// declared skill). Membership by declared DIRECTORY keeps the smuggling
+	// refusal intact: a skill-shaped file whose parent dir is NOT a declared
+	// dir still misses the set and refuses as undeclared (CASE3).
+	const declaredDirAbs = new Set(declaredDirs.values());
+	// R1-F2-N1: declared-dir membership must ALSO fold case on the DIRECTORY
+	// name. `declaredDirAbs` retains MANIFEST case (`resolveContained` returns
+	// the manifest-spelled `entryAbs`); a package authored on a case-
+	// insensitive FS can declare `skills/Alpha` while the disk tree carries
+	// `skills/alpha` — the on-disk footprint the walk actually sees. Exact-
+	// case membership left the walk's dirname check missing the set → the file
+	// landed `undeclared` (block-level, force never lifts) while the declared
+	// scan reported the manifest-case path `unscannable` — the third instance
+	// of the case-lockout class (JD-011 file, R1-001 file-fold, dir-name
+	// fold). Compare lowercased on BOTH sides; the real on-disk path is still
+	// the one scanned below (never invent casing for file access).
+	const declaredDirAbsLower = new Set(
+		[...declaredDirAbs].map((d) => d.toLowerCase()),
+	);
+
+	const undeclared: string[] = [];
+	const symlinks: string[] = [];
+	const errors: string[] = [];
+	// Real on-disk dirs the walk actually visited (readdir-spelled casing) —
+	// used AFTER the walk to resolve declared dirs whose manifest spelling
+	// differs in case from the disk (R1-F2-N1); see the declared scan below.
+	const walkDirs: string[] = [];
+	const visited = new Set<string>();
+
+	async function walk(currentDir: string): Promise<void> {
+		// realpath visited-set: a defensive cycle invariant (JD-003). Symlinks are
+		// never recursed into, so no cycle can form through the walk itself; the
+		// set guarantees termination even if that ever changes.
+		let real: string;
+		try {
+			real = await fs.realpath(currentDir);
+		} catch {
+			// Fail-closed (JD-013): an unlistable subtree must surface as an
+			// error the caller refuses on, not silently read as empty.
+			errors.push(currentDir);
+			return;
+		}
+		if (visited.has(real)) return;
+		visited.add(real);
+		walkDirs.push(currentDir);
+
+		let entries: string[];
+		try {
+			entries = await fs.readdir(currentDir);
+		} catch {
+			// Fail-closed (JD-013): same as realpath above — record, do not
+			// swallow, so the caller can refuse an incomplete walk.
+			errors.push(currentDir);
+			return;
+		}
+
+		for (const entry of entries) {
+			const fullPath = path.join(currentDir, entry);
+			let lst: fs.Stats;
+			try {
+				lst = await fs.lstat(fullPath);
+			} catch {
+				// Fail-closed (JD-013): a path we cannot stat (race, I/O, or
+				// permission) must not silently vanish from the footprint
+				// inventory — record it and keep walking the rest.
+				errors.push(fullPath);
+				continue;
+			}
+
+			// Symlinks are never dereferenced: flagged for the caller's
+			// manifest-integrity refusal, never recursed into, never scanned
+			// (JD-007/JD-003).
+			if (lst.isSymbolicLink()) {
+				symlinks.push(fullPath);
+				continue;
+			}
+
+			if (lst.isDirectory()) {
+				await walk(fullPath);
+				continue;
+			}
+
+			// SKILL.md-only collection: basename SKILL.md/skill.md (any case
+			// fold), never PLUGIN.md or README (JD-002). Declared-ness is
+			// decided by the parent DIRECTORY being declared (R1-001): any case
+			// fold of the file inside a declared dir is declared, so the file
+			// is scanned — never flagged undeclared (block-level, force never
+			// lifts) for the exact-case spelling it happens to carry on disk.
+			if (entry.toLowerCase() === "skill.md") {
+				const resolved = path.resolve(fullPath);
+				if (!declaredDirAbsLower.has(path.dirname(resolved).toLowerCase())) {
+					undeclared.push(fullPath);
+				}
+			}
+		}
+	}
+
+	// R3-F3-N1: walk the ABSOLUTE root, never the caller's raw `dir`. With a
+	// relative invocation (`javi-forge plugin import <relative-dir>`), the
+	// walkDirs two-tier lookup below compares walk-visited paths against
+	// `declaredAbs` (always absolute) — a relative walk made every declared dir
+	// fall back to the manifest path, reporting an existing declared file as
+	// `unscannable` (force would lift it and install un-scanned content).
+	// Starting from `rootAbs` also keeps undeclared/symlinks/errors absolute
+	// and consistent with the gate's realpath expectations.
+	await walk(rootAbs);
+
+	// Content-scanned results for declared entries only (JD-005), in declared
+	// order so reports are deterministic. A declared file that is a symlink is
+	// already in `symlinks` — reading through it would escape the tree (JD-003),
+	// so it is skipped here (the caller refuses on `symlinks` first anyway).
+	const symlinkSet = new Set(symlinks.map((p) => path.resolve(p)));
+	const declared: SkillScanResult[] = [];
+	// Iterating the map keeps declared order (insertion order == declaredPaths)
+	// and guarantees an entry cannot be absent once resolved.
+	for (const declaredAbs of declaredDirs.values()) {
+		// R1-F2-N1: the declared scan reads the REAL on-disk dir the walk saw —
+		// a manifest spelling `skills/Alpha` against a disk tree `skills/alpha`
+		// must scan the lowercase dir that exists. The two-tier lookup prefers
+		// the exact-case real dir when present, then a case-fold match; a truly
+		// missing declared dir (no real dir matches) falls back to the manifest
+		// path so it still fails closed as `unscannable` (unchanged). Only
+		// the real on-disk path is ever handed to
+		// `declaredSkillFileOnDisk`/`scanSkillFile` — no casing is invented for
+		// file access.
+		const realDir =
+			walkDirs.find((d) => d === declaredAbs) ??
+			walkDirs.find((d) => d.toLowerCase() === declaredAbs.toLowerCase()) ??
+			declaredAbs;
+		// Case-tolerant resolution (JD-011/R1-001): a declared skill whose
+		// on-disk file is lowercase `skill.md` — or any other case fold
+		// (`Skill.md`, `SKILL.MD`, …) — is the same declared entry; scan the
+		// file that actually exists instead of reporting the exact-case path
+		// as a missing/unscannable file.
+		const file = await declaredSkillFileOnDisk(realDir);
+		// Whether the canonical or the lowercase variant, a symlinked declared
+		// file is already in `symlinks` — never read through it (JD-003/JD-007).
+		if (symlinkSet.has(path.resolve(file))) continue;
+		declared.push(await scanSkillFile(file));
+	}
+
+	return { declared, undeclared, symlinks, errors };
+}
+
+/**
+ * Resolve the on-disk skill file for a declared skill directory. The coverage
+ * walk recognizes ANY case fold of the `skill.md`/`SKILL.md` basename in a
+ * declared dir as the declared file (R1-001), so a declared entry may
+ * legitimately carry any fold on disk; favor the conventional exact-case name,
+ * fall back to the lowercase variant (JD-011), then to any other case fold via
+ * a case-insensitive readdir. When no skill-shaped file exists at all, return
+ * the canonical path so `scanSkillFile` reports the declared skill as
+ * `unscannable` (fail-closed, unchanged behavior).
+ */
+async function declaredSkillFileOnDisk(absDir: string): Promise<string> {
+	const canonical = path.join(absDir, "SKILL.md");
+	if (await fs.pathExists(canonical)) return canonical;
+	const lower = path.join(absDir, "skill.md");
+	if (await fs.pathExists(lower)) return lower;
+	// Any other case fold (`Skill.md`, `SKILL.MD`, `skill.MD`, …) is the same
+	// declared file (R1-001): the declared scan must read what actually exists
+	// or the declared entry reports `unscannable` while the walk collects it as
+	// declared. Prefer the canonical name when both exist (JD-F1-N1 residual).
+	try {
+		const entries = await fs.readdir(absDir);
+		const fold = entries.find((e) => e.toLowerCase() === "skill.md");
+		if (fold) return path.join(absDir, fold);
+	} catch {
+		// Unreadable declared dir → return the canonical path so scanSkillFile
+		// fails closed as `unscannable` (no new behavior).
+	}
+	return canonical;
+}
+
+/**
+ * Resolve a declared skill entry to an absolute directory and verify it stays
+ * inside the scan root — both lexically (`../../x`, absolute paths) and by
+ * realpath, so an in-tree symlink cannot redirect the declared read outside the
+ * staged clone (JD-003). Throws when the entry escapes; the caller denies.
+ */
+async function resolveContained(
+	rootAbs: string,
+	rootReal: string,
+	entry: string,
+): Promise<string> {
+	const entryAbs = path.resolve(rootAbs, entry);
+
+	// Lexical containment — catches `../outside` and absolute entries.
+	const rel = path.relative(rootAbs, entryAbs);
+	if (rel.startsWith("..") || path.isAbsolute(rel)) {
+		throw new Error(
+			`skillguard: declared skill path escapes scan root — ${entry}`,
+		);
+	}
+
+	// Realpath containment — catches a directory inside the tree whose real
+	// location is outside it. A missing declared dir (later `unscannable`) has
+	// no realpath yet; its lexical containment above is then the whole guard.
+	let real: string;
+	try {
+		real = await fs.realpath(entryAbs);
+	} catch {
+		return entryAbs;
+	}
+	const relReal = path.relative(rootReal, real);
+	if (relReal.startsWith("..") || path.isAbsolute(relReal)) {
+		throw new Error(
+			`skillguard: declared skill path escapes scan root — ${entry}`,
+		);
+	}
+
+	return entryAbs;
+}
+
+// =============================================================================
 // Report formatting
 // =============================================================================
 

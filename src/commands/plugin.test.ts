@@ -95,6 +95,23 @@ describe("runPluginAdd", () => {
 		expect(steps[1]!.status).toBe("error");
 		expect(steps[1]!.detail).toContain("clone failed");
 	});
+
+	it("threads force to installPlugin options (defaults false)", async () => {
+		mockInstall.mockResolvedValue({ success: true, name: "my-plugin" });
+		const { onStep } = collectSteps();
+
+		await runPluginAdd("org/repo", false, onStep);
+		expect(mockInstall).toHaveBeenLastCalledWith("org/repo", {
+			dryRun: false,
+			force: undefined,
+		});
+
+		await runPluginAdd("org/repo", false, onStep, { force: true });
+		expect(mockInstall).toHaveBeenLastCalledWith("org/repo", {
+			dryRun: false,
+			force: true,
+		});
+	});
 });
 
 // ── runPluginRemove ──────────────────────────────────────────────────────────
@@ -399,6 +416,23 @@ describe("runPluginImport", () => {
 
 		expect(steps[1]!.status).toBe("error");
 		expect(steps[1]!.detail).toContain("skills.json not found");
+	});
+
+	it("threads force to importAgentSkillsPackage (defaults false)", async () => {
+		mockImport.mockResolvedValue({ success: true, name: "imported-skill" });
+		const { onStep } = collectSteps();
+
+		await runPluginImport("/path/to/package", false, onStep);
+		expect(mockImport).toHaveBeenLastCalledWith("/path/to/package", {
+			dryRun: false,
+			force: false,
+		});
+
+		await runPluginImport("/path/to/package", false, onStep, true);
+		expect(mockImport).toHaveBeenLastCalledWith("/path/to/package", {
+			dryRun: false,
+			force: true,
+		});
 	});
 });
 

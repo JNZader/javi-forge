@@ -32,6 +32,19 @@ vi.mock("./auto-wire.js", () => ({
 		.mockResolvedValue({ wired: [], unwired: [], errors: [] }),
 }));
 
+// ── Mock skill-scanner (importOriginal: real exports kept, walk doubled) ─────
+vi.mock("./skill-scanner.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./skill-scanner.js")>();
+	return {
+		...actual,
+		scanSkillsWithCoverage: vi.fn().mockResolvedValue({
+			declared: [],
+			undeclared: [],
+			symlinks: [],
+		}),
+	};
+});
+
 import fs from "fs-extra";
 import {
 	detectProjectPlugins,
@@ -43,6 +56,8 @@ import {
 	syncPlugins,
 	validatePlugin,
 } from "./plugin.js";
+import type { SkillScanResult } from "./skill-scanner.js";
+import { scanSkillsWithCoverage } from "./skill-scanner.js";
 
 const mockFs = vi.mocked(fs);
 
@@ -340,6 +355,192 @@ describe("installPlugin", () => {
 		const result = await installPlugin("org/repo");
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("validation failed");
+	});
+});
+
+// ── installPlugin — skillguard runtime gate (D1, D3, JD-006/JD-007) ──────────
+
+describe("installPlugin — skillguard gate", () => {
+	const mockScanner = vi.mocked(scanSkillsWithCoverage);
+
+	function scanResult(
+		skillName: string,
+		verdict: SkillScanResult["verdict"],
+	): SkillScanResult {
+		return {
+			skillPath: `/tmp/plugins/.tmp/install-1/skills/${skillName}/SKILL.md`,
+			skillName,
+			verdict,
+			threats: [],
+			summary: { total: 0, critical: 0, high: 0, moderate: 0, low: 0 },
+		};
+	}
+
+	// Default happy path: validation passes, walk clean, install proceeds.
+	function mockSuccessfulInstall() {
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				if (typeof p !== "string") return false;
+				// plugin.json + declared asset dir + declared skill exist →
+				// validation passes; destDir (PLUGINS_DIR/my-plugin) does not.
+				// tmpDir (PLUGINS_DIR/.tmp/install-*) exists → `finally` cleanup runs.
+				return (
+					p.includes("plugin.json") ||
+					p.includes(".tmp") ||
+					p.endsWith("/skills") ||
+					p.endsWith("/skills/my-skill")
+				);
+			},
+		);
+		mockFs.readJson.mockResolvedValue({
+			name: "my-plugin",
+			version: "1.0.0",
+			description: "A valid plugin description for testing",
+			skills: ["my-skill"],
+		} as never);
+		mockFs.ensureDir.mockResolvedValue(undefined as never);
+		mockFs.remove.mockResolvedValue(undefined as never);
+		mockFs.move.mockResolvedValue(undefined as never);
+		mockFs.writeJson.mockResolvedValue(undefined as never);
+	}
+
+	beforeEach(() => {
+		mockScanner.mockReset();
+	});
+
+	it("refuses when a declared skill blocks — nothing lands, staging removed", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "block")],
+			undeclared: [],
+			symlinks: [],
+		});
+
+		const result = await installPlugin("org/repo");
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(result.error).toContain("1 rejected");
+		expect(result.error).toContain("1 blocked");
+		expect(result.error).toContain("[BLOCK]");
+		expect(mockFs.move).not.toHaveBeenCalled();
+		// staging cleanup still runs
+		expect(mockFs.remove).toHaveBeenCalled();
+	});
+
+	it("refuses on unscannable declared skill; force lifts unscannable", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "unscannable")],
+			undeclared: [],
+			symlinks: [],
+		});
+
+		const refused = await installPlugin("org/repo");
+		expect(refused.success).toBe(false);
+		expect(refused.error).toContain("skillguard: install refused");
+		expect(refused.error).toContain("1 unscannable");
+		expect(mockFs.move).not.toHaveBeenCalled();
+
+		mockScanner.mockClear();
+		const forced = await installPlugin("org/repo", { force: true });
+		expect(forced.success).toBe(true);
+		expect(mockFs.move).toHaveBeenCalled();
+	});
+
+	it("force does NOT lift a block verdict", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "block")],
+			undeclared: [],
+			symlinks: [],
+		});
+
+		const result = await installPlugin("org/repo", { force: true });
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(mockFs.move).not.toHaveBeenCalled();
+	});
+
+	it("denies when the scan throws — even with force (D7)", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockRejectedValue(new Error("boom"));
+
+		const result = await installPlugin("org/repo", { force: true });
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard scan failed");
+		expect(mockFs.move).not.toHaveBeenCalled();
+	});
+
+	it("installs byte-identically when declared skills pass and coverage is clean", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "pass")],
+			undeclared: [],
+			symlinks: [],
+		});
+
+		const result = await installPlugin("org/repo");
+		expect(result.success).toBe(true);
+		expect(result.name).toBe("my-plugin");
+		expect(mockFs.move).toHaveBeenCalled();
+	});
+
+	it("refuses an undeclared SKILL.md anywhere in the tree — force never lifts (JD-006/JD-007)", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "pass")],
+			undeclared: ["/tmp/plugins/.tmp/install-1/evil/SKILL.md"],
+			symlinks: [],
+		});
+
+		const result = await installPlugin("org/repo", { force: true });
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(result.error).toContain("undeclared");
+		expect(result.error).toContain("evil/SKILL.md");
+		expect(mockFs.move).not.toHaveBeenCalled();
+	});
+
+	it("refuses ANY symlink in the tree — manifest-integrity, force never lifts (JD-007)", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "pass")],
+			undeclared: [],
+			symlinks: ["/tmp/plugins/.tmp/install-1/linked/SKILL.md"],
+		});
+
+		const result = await installPlugin("org/repo", { force: true });
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(result.error).toContain("symlink");
+		expect(result.error).toContain("linked/SKILL.md");
+		expect(mockFs.move).not.toHaveBeenCalled();
+	});
+
+	it("declared pass/warn + coverage clean → installs (JD-002 rebind, testing 14/16(e))", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [
+				scanResult("my-skill", "pass"),
+				scanResult("other-skill", "warn"),
+			],
+			undeclared: [],
+			symlinks: [],
+		});
+
+		const result = await installPlugin("org/repo");
+		expect(result.success).toBe(true);
+		expect(mockFs.move).toHaveBeenCalled();
+	});
+
+	it("does not run the gate in dry-run — scan not called (D3)", async () => {
+		mockFs.pathExists.mockResolvedValue(false as never);
+		mockFs.ensureDir.mockResolvedValue(undefined as never);
+		mockFs.remove.mockResolvedValue(undefined as never);
+
+		const result = await installPlugin("org/repo", { dryRun: true });
+		expect(result.success).toBe(true);
+		expect(mockScanner).not.toHaveBeenCalled();
 	});
 });
 

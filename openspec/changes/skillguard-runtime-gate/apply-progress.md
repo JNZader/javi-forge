@@ -9,13 +9,13 @@ Branch `feat/skillguard-runtime-gate` (base `main` @ `24661957`). Strict TDD mod
 | 2.1 `evaluateInstallGate` pure module | DONE | RED: 9 tests failed (module missing); GREEN: 9 pass; TRIANGULATE: +1 force-lift test; final 10/10. Commit `d861351b` |
 | 2.2 shared-gate suite | DONE | 10 tests (real fs fixtures, no safe-read mock): gate rule `allowed = !hasBlock && (rejected.length === 0 \|\| force)`; block always refuses; force lifts only unscannable |
 
-## Phase 3 — Install gates (3/3 done)
+## Phase 3 — Install gates (DONE)
 
 | Task | Status | Evidence |
 |------|--------|----------|
 | 3.1 plugin.ts add gate | DONE | RED: 8 gate tests + scanner double (importOriginal); GREEN: 59/59; gate before existing-remove/`fs.move`; force on options; dryRun skips. Commit `1fedc2ab` |
 | 3.2 agent-skills.ts import gate | DONE | RED: 7 gate tests (2 JD-006 validation + 5 gate), 1 existing `skills: []`→success test updated to refusal contract; GREEN: 47/47; `skillPathContained` helper (lexical+realpath); gate before `fs.remove`/`fs.copy`; refused imports preserve install. Commit `9a089281` |
-| 3.3 auto-skill-install.ts gate | PENDING | — |
+| 3.3 auto-skill-install.ts gate | DONE | RED: 5 gate tests + 1 blocked-summary test (14 total); GREEN: 14/14; classify→scan→copy split; `blocked: SkillScanResult[]` + `force` on options; dryRun still scans; sameDir short-circuits before scan. Commit `c7d560fd` |
 
 ## Phase 1 — Scanner foundation (DONE)
 

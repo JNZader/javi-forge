@@ -62,6 +62,7 @@ export async function handleSkillsCmd(
 					projectDir={process.cwd()}
 					skillsDir={cli.flags.skillsDir || undefined}
 					dryRun={cli.flags.dryRun}
+					force={cli.flags.force}
 				/>
 			</CIContextProvider>,
 			{ stdin: ctx.inkStdin },

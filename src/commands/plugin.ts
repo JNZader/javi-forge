@@ -34,11 +34,12 @@ export async function runPluginAdd(
 	source: string,
 	dryRun: boolean,
 	onStep: StepCallback,
+	options: { force?: boolean } = {},
 ): Promise<void> {
 	const stepId = "plugin-add";
 	report(onStep, stepId, `Install plugin: ${source}`, "running");
 
-	const result = await installPlugin(source, { dryRun });
+	const result = await installPlugin(source, { dryRun, force: options.force });
 
 	if (result.success) {
 		report(
@@ -289,6 +290,7 @@ export async function runPluginImport(
 	sourceDir: string,
 	dryRun: boolean,
 	onStep: StepCallback,
+	force = false,
 ): Promise<void> {
 	const stepId = "plugin-import";
 	report(
@@ -298,7 +300,7 @@ export async function runPluginImport(
 		"running",
 	);
 
-	const result = await importAgentSkillsPackage(sourceDir, { dryRun });
+	const result = await importAgentSkillsPackage(sourceDir, { dryRun, force });
 
 	if (result.success) {
 		report(

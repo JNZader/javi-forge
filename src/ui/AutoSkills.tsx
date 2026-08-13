@@ -3,6 +3,7 @@ import Spinner from "ink-spinner";
 import React, { useCallback, useEffect, useState } from "react";
 import type { SkillInstallResult } from "../lib/auto-skill-install.js";
 import { autoInstallSkills } from "../lib/auto-skill-install.js";
+import { formatScanReport } from "../lib/skill-scanner.js";
 import { useCIMode } from "./CIContext.js";
 import Header from "./Header.js";
 import { theme } from "./theme.js";
@@ -11,12 +12,15 @@ interface AutoSkillsProps {
 	projectDir: string;
 	skillsDir?: string;
 	dryRun?: boolean;
+	/** Bypass the skillguard gate for unscannable sources ONLY — block always refuses (D5) */
+	force?: boolean;
 }
 
 export default function AutoSkills({
 	projectDir,
 	skillsDir,
 	dryRun,
+	force = false,
 }: AutoSkillsProps) {
 	const { exit } = useApp();
 	const isCI = useCIMode();
@@ -33,6 +37,7 @@ export default function AutoSkills({
 			skillsSourceDir: skillsDir,
 			skillsTargetDir: skillsDir,
 			dryRun: dryRun ?? false,
+			force,
 		})
 			.then((r) => {
 				setResult(r);
@@ -42,7 +47,7 @@ export default function AutoSkills({
 				setError(String(e));
 				setLoading(false);
 			});
-	}, [projectDir, skillsDir, dryRun]);
+	}, [projectDir, skillsDir, dryRun, force]);
 
 	useEffect(() => {
 		runDetection();
@@ -173,6 +178,29 @@ export default function AutoSkills({
 										<Text dimColor color={theme.warning}>
 											{"  "}not found in source
 										</Text>
+									</Box>
+								))}
+							</Box>
+						)}
+
+						{result.blocked.length > 0 && (
+							<Box flexDirection="column">
+								{result.blocked.map((scan) => (
+									<Box key={`blocked-${scan.skillName}`} flexDirection="column">
+										<Box marginLeft={4}>
+											<Text color={theme.error}>
+												{"\u2717"} {scan.skillName} — refused
+											</Text>
+										</Box>
+										<Box marginLeft={6}>
+											<Text color={theme.muted} dimColor>
+												{formatScanReport(scan)
+													.split("\n")
+													.map((l) => l.trim())
+													.filter(Boolean)
+													.join(" | ")}
+											</Text>
+										</Box>
 									</Box>
 								))}
 							</Box>

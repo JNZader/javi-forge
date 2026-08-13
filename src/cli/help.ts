@@ -90,6 +90,16 @@ export const HELP_TEXT = `
                     cannot be written, the hook is left untouched. Symlinked
                     hook paths are refused even with --force.
 
+  SkillGuard install gate (plugin add / plugin import / skills auto)
+    Every install is scanned before anything is written. Refusals are
+    fail-closed and name the offending files:
+    - SKILL.md files that block (critical threats) are refused — always.
+    - Unscannable files (binary, oversized, unreadable) are refused unless
+      --force is given.
+    - Symlinks anywhere in the tree and SKILL.md files outside the declared
+      set are manifest-integrity refusals — they are refused even with --force.
+    - Empty or missing skills.json \`skills\` array on import is refused.
+
   Examples
     $ javi-forge
     $ javi-forge init --dry-run
@@ -97,6 +107,8 @@ export const HELP_TEXT = `
     $ javi-forge ci
     $ javi-forge ci init
     $ javi-forge ci init --force
+    $ javi-forge plugin add org/repo
+    $ javi-forge plugin add org/repo --force
     $ javi-forge tdd init
     $ javi-forge ci --quick
     $ javi-forge ci --no-ci-ghagga --no-security

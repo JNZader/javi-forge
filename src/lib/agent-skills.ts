@@ -145,6 +145,18 @@ export async function importAgentSkillsPackage(
 	// is preserved (style-consistent with the gate's manifest-integrity
 	// refusals, block-level, force never lifts).
 	const pluginName = agentManifest.name;
+	// R1-F2-N2: `name` is attacker-influenced JSON — it need not be a string at
+	// all (`{"name": 123}` is truthy, so it sails past the required-fields
+	// check above). Guard the type BEFORE the `.trim()` check: a non-string
+	// name refuses cleanly with the same manifest-integrity message instead of
+	// throwing a TypeError out of `.trim()` (which propagated to the UI as a
+	// "Fatal error").
+	if (typeof pluginName !== "string") {
+		return {
+			success: false,
+			error: `skillguard: install refused — invalid manifest name "${pluginName}" (manifest-integrity, force never lifts)`,
+		};
+	}
 	if (
 		pluginName.trim() === "" ||
 		pluginName === "." ||

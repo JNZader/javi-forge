@@ -384,6 +384,32 @@ describe("importAgentSkillsPackage", () => {
 		expect(mockFs.remove).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
+
+	it("refuses a non-string manifest name (a number) cleanly — no TypeError, no remove/copy (R1-F2-N2)", async () => {
+		// `{"name": 123}` is truthy and passes the required-fields check, then
+		// crashed with a TypeError on `.trim()` (surfacing as a UI "Fatal
+		// error") instead of the clean manifest-integrity refusal. The typeof
+		// guard must refuse with the same `invalid manifest name` message and
+		// never reach remove/copy.
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.readJson.mockResolvedValue({
+			name: 123,
+			version: "1.0.0",
+			description: "An imported agent skills package",
+			skills: [{ name: "alpha", description: "Alpha", path: "skills/alpha" }],
+		} as never);
+		mockFs.remove.mockResolvedValue(undefined as never);
+		mockFs.copy.mockResolvedValue(undefined as never);
+
+		const result = await importAgentSkillsPackage("/fake/source");
+
+		expect(result.success).toBe(false);
+		// Gate-style manifest-integrity refusal, not a thrown TypeError.
+		expect(result.error).toContain("invalid manifest name");
+		expect(result.error).toContain("manifest-integrity");
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
 });
 
 // ── importAgentSkillsPackage — skillguard gate (D8, JD-001/JD-006/JD-007) ────

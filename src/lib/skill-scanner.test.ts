@@ -1164,6 +1164,37 @@ describe("scanSkillsWithCoverage", () => {
 		}
 	});
 
+	it("resolves a declared dir through a RELATIVE scan root — no unscannable fallback (R3-F3-N1)", async () => {
+		// `javi-forge plugin import <relative-dir>` passes the scan root as the
+		// user typed it (relative). Pre-F4 the walk recorded RELATIVE dirs in
+		// `walkDirs` while declared paths (`declaredAbs`) were absolute — the
+		// two-tier real-dir lookup never matched, every declared dir fell back
+		// to its manifest path, and an EXISTING declared file reported
+		// `unscannable` (force would lift it and install un-scanned content).
+		// The walk must start from the resolved ABSOLUTE root (`rootAbs`).
+		await fs.ensureDir(path.join(tmpDir, "skills", "Alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "Alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+
+		const relativeRoot = path.relative(process.cwd(), tmpDir);
+		// Sanity: the invocation is genuinely relative to the test cwd.
+		expect(path.isAbsolute(relativeRoot)).toBe(false);
+		const scan = await scanSkillsWithCoverage(relativeRoot, ["skills/Alpha"]);
+
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.symlinks).toEqual([]);
+		expect(scan.errors).toEqual([]);
+		// Declared scan reads the REAL on-disk file — never `unscannable`.
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.declared[0].verdict).toBe("pass");
+		expect(scan.declared[0].skillPath).toBe(
+			path.join(tmpDir, "skills", "Alpha", "SKILL.md"),
+		);
+		expect(fs.existsSync(scan.declared[0].skillPath)).toBe(true);
+	});
+
 	it("still refuses a non-canonical-case skill.md OUTSIDE a declared dir as undeclared (CASE3 preserved)", async () => {
 		// The case-insensitive membership fix must not weaken the smuggling
 		// refusal: an undeclared dir's case-folded `Skill.md` still misses the

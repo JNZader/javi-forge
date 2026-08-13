@@ -714,7 +714,15 @@ export async function scanSkillsWithCoverage(
 		}
 	}
 
-	await walk(dir);
+	// R3-F3-N1: walk the ABSOLUTE root, never the caller's raw `dir`. With a
+	// relative invocation (`javi-forge plugin import <relative-dir>`), the
+	// walkDirs two-tier lookup below compares walk-visited paths against
+	// `declaredAbs` (always absolute) — a relative walk made every declared dir
+	// fall back to the manifest path, reporting an existing declared file as
+	// `unscannable` (force would lift it and install un-scanned content).
+	// Starting from `rootAbs` also keeps undeclared/symlinks/errors absolute
+	// and consistent with the gate's realpath expectations.
+	await walk(rootAbs);
 
 	// Content-scanned results for declared entries only (JD-005), in declared
 	// order so reports are deterministic. A declared file that is a symlink is

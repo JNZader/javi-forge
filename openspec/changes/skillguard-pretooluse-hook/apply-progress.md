@@ -9,6 +9,7 @@
 
 - `213afff9 feat(skillguard): add standalone PreToolUse protocol and path policy`
 - `194ca3d2 feat(skillguard): enforce shell policy in the shipped evaluator`
+- Fix Round 1: closes `JD-S1-001` through `JD-S1-009` with adversarial unit and spawned-process regressions.
 
 ## Files Changed
 
@@ -28,13 +29,14 @@
 | 1.1-1.2 | Unit | Missing constant/asset failed before production existed | 27 protocol/path tests passed; triangulated into final unit corpus |
 | 1.7 | Unit | Shell corpus produced 33 expected failures | 67/67 unit tests passed after distinct Bash/PowerShell rules |
 | 1.9 | Integration | Exact spawned asset produced 7 expected process-contract failures | 11/11 integration tests passed, including open-writer oversize and fault flags |
+| JD Fix Round 1 | Unit + integration | 18 adversarial failures reproduced | 101/101 focused tests passed after runtime fixes |
 
 ## Verification
 
 | Gate | Result |
 |---|---|
-| Focused runtime suites | PASS — 78/78 |
-| `pnpm test` | PASS — 99 files, 1888 passed, 2 skipped |
+| Focused runtime suites | PASS — 101/101 |
+| `pnpm test` | PASS — 99 files, 1910 passed, 2 skipped |
 | `pnpm typecheck` | PASS |
 | `pnpm typecheck:test` | PASS |
 | `pnpm lint` | PASS with one pre-existing unused-suppression warning in `src/commands/ci-hooks.test.ts:1171` |
@@ -44,7 +46,7 @@
 
 ## Review Budget
 
-- Actual complete Slice 1 diff against `feat/skillguard-pretooluse-hook`: **752 changed lines** (**739 additions + 13 deletions**), within the 800-line hard limit.
+- Actual complete Slice 1 diff against `feat/skillguard-pretooluse-hook`: **800 changed lines** (**787 additions + 13 deletions**), at the 800-line hard limit.
 - Delivery remains the selected feature-branch chain; this child targets `feat/skillguard-pretooluse-hook` exactly.
 
 ## Discovered Patterns

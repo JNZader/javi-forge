@@ -70,3 +70,28 @@ Design/spec artifacts only; no production files were changed.
 - Linux/macOS ACL handling is mandatory and fail-closed; extended/inherited/default/unavailable/inconclusive ACLs refuse before mutation, with no mode-only fallback.
 
 **Design judgment:** APPROVED. Planning may proceed to `sdd-tasks` while preserving the four review-bounded delivery slices.
+
+## Slice 1 Implementation Judgment — Round 1
+
+**Verdict:** CHANGES_REQUIRED. Both blind judges executed live adversarial probes against the shipped MJS runtime. Existing tests and all normal gates passed, but the corpus did not bind the bypasses below.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JD-S1-001 | judgment-day | runtime lexer/evaluators; focused unit + spawned corpus | CRITICAL | fixed | Quote-aware segmentation now evaluates every pipeline/control/newline command; Bash and PowerShell downstream sensitive reads exit 2. |
+| JD-S1-002 | judgment-day | runtime `commandWords`; focused unit + spawned corpus | CRITICAL | fixed | Wrapper normalization consumes assignments, options/values, and `--` across `env`, `sudo`, and `command`. |
+| JD-S1-003 | judgment-day | runtime `evaluateBash`; focused unit + spawned corpus | CRITICAL | fixed | Static `sh|bash|zsh|dash|ksh -c` bodies recurse to depth 4; dynamic/unlexable bodies remain denied residuals. |
+| JD-S1-004 | judgment-day | runtime `policyPathKeys`; real symlink unit/process fixtures | CRITICAL | fixed | File tools deny when either lexical or native realpath-derived identity is protected; Read/Write/Edit symlink probes pass. |
+| JD-S1-005 | judgment-day | runtime destructive rule; focused unit + spawned corpus | CRITICAL | fixed | Critical-root recursive/mode-777 chmod and canonical fork bomb now deny. |
+| JD-S1-006 | judgment-day | runtime lexer/pipe rule; focused unit + spawned corpus | CRITICAL | fixed | Only real unquoted pipelines count; base64 requires `-d`/`--decode`; quoted pipes and undecoded base64 remain allowed. |
+| JD-S1-007 | judgment-day | PowerShell lexer/evaluator; focused unit + spawned corpus | CRITICAL | fixed | Downstream pipelines, `&`, approved aliases, and `-Path`/`-LiteralPath` colon/value forms now reach policy. |
+| JD-S1-008 | judgment-day | sensitive-key classifier; Darwin unit + spawned file probe | CRITICAL | fixed | Darwin-folded `serviceAccountKey.json` compares case-insensitively after canonicalization. |
+| JD-S1-009 | judgment-day | portable canonical-path unit assertion + spawned Windows-path probe | CRITICAL | fixed | Nearest-ancestor expectation now uses the runtime canonical contract rather than host-native `path.join` output. |
+| JD-S1-010 | judgment-day | commit `194ca3d2` | WARNING | info | Work Unit 1B is about 504 changed lines, above its internal `<400` contract. The full Slice 1 child remains within its separate 800-line cap at 752 lines. |
+
+Fix Round 1 must close JD-S1-001 through JD-S1-009 with spawned/live regression probes while keeping the child diff at or below 800 lines. JD-S1-010 remains information only and does not enter the fix loop.
+
+### Slice 1 Fix Round 1 Evidence
+
+- RED: focused adversarial run produced 18 failures across all nine findings.
+- GREEN: focused runtime suites pass 101/101, including real spawned-process, PowerShell parser, and real symlink probes.
+- Budget: 800 changed lines (787 additions + 13 deletions) against `feat/skillguard-pretooluse-hook`; no split required.

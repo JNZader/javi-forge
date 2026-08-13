@@ -93,20 +93,61 @@ describe("parseGitLog", () => {
 	});
 });
 
-// ── recoverFromGit (integration) ──
+// ── recoverFromGit (integration — hermetic git fixture) ──
+// These tests MUST NOT read the host repo's history: in GitHub Actions the
+// checkout is a shallow clone (fetch-depth: 1) in detached HEAD, so
+// `git branch --show-current` returns "" and the only visible commit is the
+// synthetic merge commit (not conventional). They never ran in CI between
+// their creation (2026-05-18) and the CI workflow re-enable (2026-08-13).
+// Build a throwaway repo with conventional commits instead.
+
+import { execFile } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import fs from "fs-extra";
+
+const execFileAsyncLocal = promisify(execFile);
+
+let gitRepoDir: string;
+
+beforeEach(async () => {
+	gitRepoDir = await fs.mkdtemp(
+		path.join(os.tmpdir(), "javi-forge-crash-rec-"),
+	);
+	const git = (args: string[]) =>
+		execFileAsyncLocal("git", args, { cwd: gitRepoDir });
+	await git(["init", "-b", "main"]);
+	await git(["config", "user.email", "test@example.com"]);
+	await git(["config", "user.name", "Test User"]);
+	await fs.writeFile(path.join(gitRepoDir, "auth.ts"), "export {};\n");
+	await git(["add", "auth.ts"]);
+	await git(["commit", "-m", "feat: add login (#1)"]);
+	await fs.writeFile(path.join(gitRepoDir, "db.ts"), "export {};\n");
+	await git(["add", "db.ts"]);
+	await git(["commit", "-m", "fix(db): connection pool"]);
+	await fs.writeFile(path.join(gitRepoDir, "auth.test.ts"), "export {};\n");
+	await git(["add", "auth.test.ts"]);
+	await git(["commit", "-m", "test: add auth tests"]);
+});
+
+afterEach(async () => {
+	await fs.remove(gitRepoDir);
+});
 
 describe("recoverFromGit", () => {
-	it("recovers from current project git history", async () => {
-		const report = await recoverFromGit(".", { maxCommits: 5 });
-		expect(report.branch).toBeTruthy();
-		expect(report.totalCommits).toBeGreaterThan(0);
-		expect(report.tasks.length).toBeGreaterThan(0);
+	it("recovers from a git repository's history", async () => {
+		const report = await recoverFromGit(gitRepoDir, { maxCommits: 5 });
+		expect(report.branch).toBe("main");
+		expect(report.totalCommits).toBe(3);
+		expect(report.tasks.length).toBe(3);
 		expect(report.tasks[0]!.commitHash).toHaveLength(7);
 	});
 
 	it("populates phases from conventional commits", async () => {
-		const report = await recoverFromGit(".", { maxCommits: 20 });
+		const report = await recoverFromGit(gitRepoDir, { maxCommits: 20 });
 		expect(Object.keys(report.phases).length).toBeGreaterThan(0);
+		expect(report.phases).toEqual({ feat: 1, fix: 1, test: 1 });
 	});
 });
 
@@ -114,10 +155,11 @@ describe("recoverFromGit", () => {
 
 describe("formatRecovery", () => {
 	it("formats report with commits", async () => {
-		const report = await recoverFromGit(".", { maxCommits: 3 });
+		const report = await recoverFromGit(gitRepoDir, { maxCommits: 3 });
 		const text = formatRecovery(report);
 		expect(text).toContain("Crash Recovery Report");
 		expect(text).toContain("**Branch**:");
 		expect(text).toContain("**Commits**:");
+		expect(text).toContain("[feat]");
 	});
 });

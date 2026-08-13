@@ -16,8 +16,24 @@ vi.mock("fs-extra", () => {
 		remove: vi.fn(),
 		move: vi.fn(),
 		copy: vi.fn(),
+		// Gate containment uses realpath; identity default keeps declared
+		// `skills/<name>` paths contained unless a test overrides it.
+		realpath: vi.fn(async (p: string) => p),
 	};
 	return { default: mockFs, ...mockFs };
+});
+
+// ── Mock skill-scanner (importOriginal: real exports kept, walk doubled) ─────
+vi.mock("./skill-scanner.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("./skill-scanner.js")>();
+	return {
+		...actual,
+		scanSkillsWithCoverage: vi.fn().mockResolvedValue({
+			declared: [],
+			undeclared: [],
+			symlinks: [],
+		}),
+	};
 });
 
 import fs from "fs-extra";
@@ -31,6 +47,8 @@ import {
 	importAgentSkillsPackage,
 	pluginToAgentSkills,
 } from "./agent-skills.js";
+import type { SkillScanResult } from "./skill-scanner.js";
+import { scanSkillsWithCoverage } from "./skill-scanner.js";
 
 const mockFs = vi.mocked(fs);
 
@@ -293,7 +311,7 @@ describe("importAgentSkillsPackage", () => {
 		expect(mockFs.writeJson).toHaveBeenCalledTimes(2);
 	});
 
-	it("removes existing plugin dir before importing", async () => {
+	it("refuses empty skills array at validation — nothing removed or copied (JD-006)", async () => {
 		mockFs.pathExists.mockResolvedValue(true as never);
 		mockFs.readJson.mockResolvedValue({
 			name: "imported-skill",
@@ -306,8 +324,196 @@ describe("importAgentSkillsPackage", () => {
 		mockFs.writeJson.mockResolvedValue(undefined as never);
 
 		const result = await importAgentSkillsPackage("/fake/source");
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skills");
+		// existing install preserved — neither remove nor copy ran
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+
+	it("refuses missing skills array at validation (JD-006)", async () => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.readJson.mockResolvedValue({
+			name: "imported-skill",
+			version: "1.0.0",
+			description: "An imported agent skills package",
+		} as never);
+
+		const result = await importAgentSkillsPackage("/fake/source");
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skills");
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+});
+
+// ── importAgentSkillsPackage — skillguard gate (D8, JD-001/JD-006/JD-007) ────
+
+describe("importAgentSkillsPackage — skillguard gate", () => {
+	const mockScanner = vi.mocked(scanSkillsWithCoverage);
+
+	const validManifest = {
+		name: "imported-skill",
+		version: "1.0.0",
+		description: "An imported agent skills package",
+		skills: [{ name: "alpha", description: "Alpha", path: "skills/alpha" }],
+	};
+
+	function scanResult(
+		skillName: string,
+		verdict: SkillScanResult["verdict"],
+	): SkillScanResult {
+		return {
+			skillPath: `/fake/source/skills/${skillName}/SKILL.md`,
+			skillName,
+			verdict,
+			threats: [],
+			summary: { total: 0, critical: 0, high: 0, moderate: 0, low: 0 },
+		};
+	}
+
+	function mockSuccessfulImport() {
+		mockFs.pathExists.mockImplementation(
+			async (p: string | URL, _opts?: unknown) => {
+				// skills.json exists; dest dir does not
+				if (typeof p === "string" && p.includes("skills.json")) return true;
+				return false;
+			},
+		);
+		mockFs.remove.mockResolvedValue(undefined as never);
+		mockFs.copy.mockResolvedValue(undefined as never);
+		mockFs.writeJson.mockResolvedValue(undefined as never);
+	}
+
+	beforeEach(() => {
+		mockScanner.mockReset();
+	});
+
+	it("refuses a block-scanning source BEFORE fs.remove/fs.copy — existing install preserved", async () => {
+		mockSuccessfulImport();
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("alpha", "block")],
+			undeclared: [],
+			symlinks: [],
+		});
+
+		const result = await importAgentSkillsPackage("/fake/source");
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(result.error).toContain("1 rejected");
+		expect(result.error).toContain("[BLOCK]");
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+
+	it("refuses undeclared SKILL.md anywhere in the tree — force never lifts (JD-006/JD-007)", async () => {
+		mockSuccessfulImport();
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("alpha", "pass")],
+			undeclared: ["/fake/source/node_modules/evil/SKILL.md"],
+			symlinks: [],
+		});
+
+		const result = await importAgentSkillsPackage("/fake/source", {
+			force: true,
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("undeclared");
+		expect(result.error).toContain("node_modules/evil/SKILL.md");
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+
+	it("refuses ANY symlink — manifest-integrity, force never lifts (JD-007)", async () => {
+		mockSuccessfulImport();
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("alpha", "pass")],
+			undeclared: [],
+			symlinks: ["/fake/source/skills/alpha/SKILL.md"],
+		});
+
+		const result = await importAgentSkillsPackage("/fake/source", {
+			force: true,
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("symlink");
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+
+	it("allows unscannable with force, refuses block with force", async () => {
+		mockSuccessfulImport();
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+
+		// unscannable + force → proceeds
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("alpha", "unscannable")],
+			undeclared: [],
+			symlinks: [],
+		});
+		const forced = await importAgentSkillsPackage("/fake/source", {
+			force: true,
+		});
+		expect(forced.success).toBe(true);
+		expect(mockFs.copy).toHaveBeenCalled();
+
+		// block + force → still refused
+		mockFs.copy.mockClear();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("alpha", "block")],
+			undeclared: [],
+			symlinks: [],
+		});
+		const refused = await importAgentSkillsPackage("/fake/source", {
+			force: true,
+		});
+		expect(refused.success).toBe(false);
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+
+	it("denies when the scan throws — even with force (D7)", async () => {
+		mockSuccessfulImport();
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+		mockScanner.mockRejectedValue(new Error("boom"));
+
+		const result = await importAgentSkillsPackage("/fake/source", {
+			force: true,
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard scan failed");
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+
+	it("does not run the gate in dry-run — scan not called (D8)", async () => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+
+		const result = await importAgentSkillsPackage("/fake/source", {
+			dryRun: true,
+		});
 		expect(result.success).toBe(true);
-		expect(mockFs.remove).toHaveBeenCalled();
+		expect(mockScanner).not.toHaveBeenCalled();
+	});
+
+	it("installs byte-identically when declared skills pass and coverage is clean", async () => {
+		mockSuccessfulImport();
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("alpha", "pass")],
+			undeclared: [],
+			symlinks: [],
+		});
+
+		const result = await importAgentSkillsPackage("/fake/source");
+		expect(result.success).toBe(true);
+		expect(mockFs.copy).toHaveBeenCalledWith(
+			"/fake/source",
+			expect.any(String),
+		);
 	});
 });
 

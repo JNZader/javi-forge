@@ -346,6 +346,44 @@ describe("importAgentSkillsPackage", () => {
 		expect(mockFs.remove).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
+
+	// ── Manifest `name` validation (R1-002) ────────────────────────────────
+	// `name` determines the import destination (`PLUGINS_DIR/<name>`) and feeds
+	// `fs.remove` + `fs.copy` — a hostile name (traversal, absolute, separator-
+	// bearing, `.`/`..`-shaped) performs arbitrary-path delete/copy outside
+	// PLUGINS_DIR. `pathExists` returns true for EVERYTHING below (skills.json
+	// AND the would-be destDir), so if the validation ever regressed, `remove`
+	// would genuinely fire and the test fails — the refusal is proven to happen
+	// BEFORE any destructive step, preserving an existing install.
+
+	it.each([
+		["../../escape", "path traversal"],
+		["/abs/path", "absolute path"],
+		["a/b", "forward-slash separator"],
+		["a\\b", "backslash separator"],
+		["..", "dot-dot"],
+		[".", "dot"],
+		["   ", "whitespace-only"],
+	])("refuses hostile manifest name %s (%s) BEFORE any remove/copy (R1-002)", async (name) => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.readJson.mockResolvedValue({
+			name,
+			version: "1.0.0",
+			description: "An imported agent skills package",
+			skills: [{ name: "alpha", description: "Alpha", path: "skills/alpha" }],
+		} as never);
+		mockFs.remove.mockResolvedValue(undefined as never);
+		mockFs.copy.mockResolvedValue(undefined as never);
+
+		const result = await importAgentSkillsPackage("/fake/source");
+
+		expect(result.success).toBe(false);
+		// Gate-style manifest-integrity refusal, not a generic error.
+		expect(result.error).toContain("invalid manifest name");
+		expect(result.error).toContain("manifest-integrity");
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
 });
 
 // ── importAgentSkillsPackage — skillguard gate (D8, JD-001/JD-006/JD-007) ────

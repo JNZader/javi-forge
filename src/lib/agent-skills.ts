@@ -133,6 +133,32 @@ export async function importAgentSkillsPackage(
 		};
 	}
 
+	// R1-002: `name` becomes the import destination (`destDir = path.join(
+	// PLUGINS_DIR, name)`) and is handed to `fs.remove` + `fs.copy` below with
+	// NO path validation — a hostile skills.json name (e.g. `"../../.bashrc"`,
+	// an absolute path, or a separator-bearing name) would delete/copy
+	// ARBITRARY paths outside PLUGINS_DIR. The gate validates declared
+	// `skills[].path` escapes but never the name that determines the
+	// write/delete destination. Same-trust note: `name` is attacker-influenced
+	// when installing from a registry package, not a typed-in label — refuse
+	// BEFORE any `fs.remove`/`fs.copy`/`destDir` use, so an existing install
+	// is preserved (style-consistent with the gate's manifest-integrity
+	// refusals, block-level, force never lifts).
+	const pluginName = agentManifest.name;
+	if (
+		pluginName.trim() === "" ||
+		pluginName === "." ||
+		pluginName.includes("..") ||
+		pluginName.includes("/") ||
+		pluginName.includes("\\") ||
+		path.isAbsolute(pluginName)
+	) {
+		return {
+			success: false,
+			error: `skillguard: install refused — invalid manifest name "${pluginName}" (manifest-integrity, force never lifts)`,
+		};
+	}
+
 	// JD-006: import requires a non-empty, well-formed skills array. Each entry
 	// must carry a `name` and a `path` that resolves INSIDE sourceDir (normalized
 	// + realpath containment — "../../x" or an absolute path refuses; the gate
@@ -178,8 +204,6 @@ export async function importAgentSkillsPackage(
 		}
 		declaredPaths.push(entry.path);
 	}
-
-	const pluginName = agentManifest.name;
 
 	if (dryRun) {
 		return { success: true, name: pluginName };

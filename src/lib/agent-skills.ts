@@ -18,7 +18,7 @@ import {
 	scanFailureMessage,
 } from "./skill-install-gate.js";
 import type { SkillCoverageScan } from "./skill-scanner.js";
-import { scanSkillsWithCoverage } from "./skill-scanner.js";
+import { checkPathContained, scanSkillsWithCoverage } from "./skill-scanner.js";
 
 // ── Conversion ─────────────────────────────────────────────────────────────
 
@@ -304,39 +304,22 @@ export async function importAgentSkillsPackage(
  * Verify a declared skill entry path stays inside the package root — both
  * lexically (`../../x`, absolute paths) and by realpath, so an in-tree symlink
  * cannot redirect the import read outside the staged clone (JD-003/JD-006).
- * Realpath resolution is best-effort: a missing declared dir has no realpath
- * yet, in which case lexical containment is the whole guard (the coverage walk
- * will later report it as a missing/unscannable declared skill).
+ * Non-throwing `{ ok, reason }` surface over the shared containment core
+ * (`checkPathContained`, R2-002) — the import gate refuses gracefully instead
+ * of throwing.
  */
 async function skillPathContained(
 	rootAbs: string,
 	rootReal: string,
 	entryPath: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-	const entryAbs = path.resolve(rootAbs, entryPath);
-
-	const rel = path.relative(rootAbs, entryAbs);
-	if (rel.startsWith("..") || path.isAbsolute(rel)) {
+	const check = await checkPathContained(rootAbs, rootReal, entryPath);
+	if (!check.ok) {
 		return {
 			ok: false,
-			reason: `path "${entryPath}" resolves outside the package root`,
+			reason: `path "${entryPath}" resolves outside the package root${check.violation === "realpath" ? " (realpath)" : ""}`,
 		};
 	}
-
-	try {
-		const entryReal = await fs.realpath(entryAbs);
-		const relReal = path.relative(rootReal, entryReal);
-		if (relReal.startsWith("..") || path.isAbsolute(relReal)) {
-			return {
-				ok: false,
-				reason: `path "${entryPath}" resolves outside the package root (realpath)`,
-			};
-		}
-	} catch {
-		// Declared dir does not exist yet — lexical containment stands; the
-		// coverage walk reports it as a missing declared skill later.
-	}
-
 	return { ok: true };
 }
 

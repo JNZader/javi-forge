@@ -791,25 +791,40 @@ async function declaredSkillFileOnDisk(absDir: string): Promise<string> {
 	return canonical;
 }
 
+export interface PathContainmentCheck {
+	/** True when the entry stays inside the root lexically AND by realpath. */
+	ok: boolean;
+	/** Absolute lexical resolution of `entry` under `rootAbs`. */
+	entryAbs: string;
+	/** Which containment check failed when `!ok`. */
+	violation?: "lexical" | "realpath";
+}
+
 /**
- * Resolve a declared skill entry to an absolute directory and verify it stays
- * inside the scan root — both lexically (`../../x`, absolute paths) and by
- * realpath, so an in-tree symlink cannot redirect the declared read outside the
- * staged clone (JD-003). Throws when the entry escapes; the caller denies.
+ * Containment core (R2-002) — the ONE implementation of the lexical +
+ * realpath containment policy (JD-003): an entry must stay inside the root
+ * both lexically (`../../x`, absolute paths) and by realpath, so an in-tree
+ * symlink cannot redirect a read outside the staged clone. Realpath
+ * resolution is best-effort: a missing declared dir has no realpath yet, in
+ * which case lexical containment is the whole guard (the coverage walk later
+ * reports it as a missing/unscannable declared skill).
+ *
+ * Two surfaces wrap this core with their own error shapes (both bound by
+ * tests — keep the messages distinct): {@link resolveContained} (throwing;
+ * used by the coverage walk) and `skillPathContained` in agent-skills.ts
+ * (non-throwing `{ ok, reason }`; the import gate refuses gracefully).
  */
-async function resolveContained(
+export async function checkPathContained(
 	rootAbs: string,
 	rootReal: string,
 	entry: string,
-): Promise<string> {
+): Promise<PathContainmentCheck> {
 	const entryAbs = path.resolve(rootAbs, entry);
 
 	// Lexical containment — catches `../outside` and absolute entries.
 	const rel = path.relative(rootAbs, entryAbs);
 	if (rel.startsWith("..") || path.isAbsolute(rel)) {
-		throw new Error(
-			`skillguard: declared skill path escapes scan root — ${entry}`,
-		);
+		return { ok: false, entryAbs, violation: "lexical" };
 	}
 
 	// Realpath containment — catches a directory inside the tree whose real
@@ -819,16 +834,35 @@ async function resolveContained(
 	try {
 		real = await fs.realpath(entryAbs);
 	} catch {
-		return entryAbs;
+		return { ok: true, entryAbs };
 	}
 	const relReal = path.relative(rootReal, real);
 	if (relReal.startsWith("..") || path.isAbsolute(relReal)) {
+		return { ok: false, entryAbs, violation: "realpath" };
+	}
+
+	return { ok: true, entryAbs };
+}
+
+/**
+ * Resolve a declared skill entry to an absolute directory and verify it stays
+ * inside the scan root — both lexically (`../../x`, absolute paths) and by
+ * realpath, so an in-tree symlink cannot redirect the declared read outside the
+ * staged clone (JD-003). Throws when the entry escapes; the caller denies.
+ * Thin throwing surface over the shared containment core (R2-002).
+ */
+async function resolveContained(
+	rootAbs: string,
+	rootReal: string,
+	entry: string,
+): Promise<string> {
+	const check = await checkPathContained(rootAbs, rootReal, entry);
+	if (!check.ok) {
 		throw new Error(
 			`skillguard: declared skill path escapes scan root — ${entry}`,
 		);
 	}
-
-	return entryAbs;
+	return check.entryAbs;
 }
 
 // =============================================================================

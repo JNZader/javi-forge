@@ -197,6 +197,10 @@ export async function installPlugin(
 				allowed: boolean;
 				rejected: import("./skill-scanner.js").SkillScanResult[];
 			};
+			// Declared results, hoisted for the refusal report: the batch report
+			// renders the FULL declared set (header "Scanned: N" + per-skill rows,
+			// D6) while the lead line still names the rejected count (JD-014).
+			let declaredResults: import("./skill-scanner.js").SkillScanResult[] = [];
 			try {
 				const declaredPaths = (validation.manifest.skills ?? []).map((skill) =>
 					path.join("skills", skill),
@@ -204,8 +208,16 @@ export async function installPlugin(
 				const coverage = await scanSkillsWithCoverage(tmpDir, declaredPaths);
 
 				// Manifest-integrity refusals — block-level, force NEVER lifts
-				// (JD-006: undeclared SKILL.md anywhere in the tree, incl.
-				// node_modules/.git; JD-007: ANY symlink, file or dir).
+				// (JD-007: ANY symlink; JD-006: undeclared SKILL.md incl.
+				// node_modules/.git). A walk with I/O errors cannot certify the
+				// installed footprint — refuse first, before symlink/undeclared
+				// checks, because the broken subtree may hide either (JD-013).
+				if (coverage.errors.length > 0) {
+					return {
+						success: false,
+						error: `skillguard: install refused — ${coverage.errors.length} path(s) could not be read (walk incomplete; manifest-integrity, force never lifts):\n${coverage.errors.map((p) => `  ${p}`).join("\n")}`,
+					};
+				}
 				if (coverage.symlinks.length > 0) {
 					return {
 						success: false,
@@ -219,6 +231,7 @@ export async function installPlugin(
 					};
 				}
 
+				declaredResults = coverage.declared;
 				gate = evaluateInstallGate(coverage.declared, { force });
 			} catch (scanError) {
 				const msg =
@@ -238,7 +251,7 @@ export async function installPlugin(
 				).length;
 				return {
 					success: false,
-					error: `skillguard: install refused — ${gate.rejected.length} rejected (${blocked} blocked, ${unscannable} unscannable)\n${formatBatchReport(gate.rejected)}`,
+					error: `skillguard: install refused — ${gate.rejected.length} rejected (${blocked} blocked, ${unscannable} unscannable)\n${formatBatchReport(declaredResults)}`,
 				};
 			}
 

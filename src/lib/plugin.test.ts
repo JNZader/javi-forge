@@ -41,6 +41,7 @@ vi.mock("./skill-scanner.js", async (importOriginal) => {
 			declared: [],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		}),
 	};
 });
@@ -414,6 +415,7 @@ describe("installPlugin — skillguard gate", () => {
 			declared: [scanResult("my-skill", "block")],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		});
 
 		const result = await installPlugin("org/repo");
@@ -427,12 +429,30 @@ describe("installPlugin — skillguard gate", () => {
 		expect(mockFs.remove).toHaveBeenCalled();
 	});
 
+	it("refuses when the coverage walk could not read paths — force never lifts (JD-013)", async () => {
+		mockSuccessfulInstall();
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("my-skill", "pass")],
+			undeclared: [],
+			symlinks: [],
+			errors: ["/tmp/plugins/.tmp/install-1/locked"],
+		});
+
+		const result = await installPlugin("org/repo", { force: true });
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(result.error).toContain("could not be read");
+		expect(result.error).toContain("locked");
+		expect(mockFs.move).not.toHaveBeenCalled();
+	});
+
 	it("refuses on unscannable declared skill; force lifts unscannable", async () => {
 		mockSuccessfulInstall();
 		mockScanner.mockResolvedValue({
 			declared: [scanResult("my-skill", "unscannable")],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		});
 
 		const refused = await installPlugin("org/repo");
@@ -453,6 +473,7 @@ describe("installPlugin — skillguard gate", () => {
 			declared: [scanResult("my-skill", "block")],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		});
 
 		const result = await installPlugin("org/repo", { force: true });
@@ -477,6 +498,7 @@ describe("installPlugin — skillguard gate", () => {
 			declared: [scanResult("my-skill", "pass")],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		});
 
 		const result = await installPlugin("org/repo");
@@ -491,6 +513,7 @@ describe("installPlugin — skillguard gate", () => {
 			declared: [scanResult("my-skill", "pass")],
 			undeclared: ["/tmp/plugins/.tmp/install-1/evil/SKILL.md"],
 			symlinks: [],
+			errors: [],
 		});
 
 		const result = await installPlugin("org/repo", { force: true });
@@ -507,6 +530,7 @@ describe("installPlugin — skillguard gate", () => {
 			declared: [scanResult("my-skill", "pass")],
 			undeclared: [],
 			symlinks: ["/tmp/plugins/.tmp/install-1/linked/SKILL.md"],
+			errors: [],
 		});
 
 		const result = await installPlugin("org/repo", { force: true });
@@ -526,6 +550,7 @@ describe("installPlugin — skillguard gate", () => {
 			],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		});
 
 		const result = await installPlugin("org/repo");

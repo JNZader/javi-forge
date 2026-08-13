@@ -196,6 +196,15 @@ export async function importAgentSkillsPackage(
 
 		// Manifest-integrity refusals — block-level, force NEVER lifts
 		// (JD-007: ANY symlink; JD-006: undeclared SKILL.md incl. node_modules).
+		// A walk with I/O errors cannot certify the copied footprint — refuse
+		// first, because the broken subtree may hide symlinks or undeclared
+		// files (JD-013).
+		if (coverage.errors.length > 0) {
+			return {
+				success: false,
+				error: `skillguard: install refused — ${coverage.errors.length} path(s) could not be read (walk incomplete; manifest-integrity, force never lifts):\n${coverage.errors.map((p) => `  ${p}`).join("\n")}`,
+			};
+		}
 		if (coverage.symlinks.length > 0) {
 			return {
 				success: false,
@@ -217,7 +226,10 @@ export async function importAgentSkillsPackage(
 			).length;
 			return {
 				success: false,
-				error: `skillguard: install refused — ${gate.rejected.length} rejected (${blocked} blocked, ${unscannable} unscannable)\n${formatBatchReport(gate.rejected)}`,
+				// Lead line names the rejected count; the batch report renders
+				// the FULL declared set so the header/rows reflect every scanned
+				// skill (D6, JD-014).
+				error: `skillguard: install refused — ${gate.rejected.length} rejected (${blocked} blocked, ${unscannable} unscannable)\n${formatBatchReport(coverage.declared)}`,
 			};
 		}
 	} catch (scanError) {

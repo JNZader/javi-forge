@@ -32,6 +32,7 @@ vi.mock("./skill-scanner.js", async (importOriginal) => {
 			declared: [],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		}),
 	};
 });
@@ -396,6 +397,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 			declared: [scanResult("alpha", "block")],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		});
 
 		const result = await importAgentSkillsPackage("/fake/source");
@@ -407,6 +409,38 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
+	it("preserves an EXISTING install on refused import — pathExists(destDir) true, remove+copy never called (JD-103)", async () => {
+		// Every other refusal test has pathExists(destDir) false, which makes
+		// `remove` vacuously uncalled. Here a prior install genuinely EXISTS at
+		// PLUGINS_DIR/imported-skill: if the gate ever regressed to run after
+		// the remove step, BOTH remove and copy would fire.
+		mockFs.pathExists.mockImplementation(async (p: string | URL) => {
+			if (
+				typeof p === "string" &&
+				(p.includes("skills.json") || p.includes("imported-skill"))
+			) {
+				return true;
+			}
+			return false;
+		});
+		mockFs.remove.mockResolvedValue(undefined as never);
+		mockFs.copy.mockResolvedValue(undefined as never);
+		mockFs.writeJson.mockResolvedValue(undefined as never);
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("alpha", "block")],
+			undeclared: [],
+			symlinks: [],
+			errors: [],
+		});
+
+		const result = await importAgentSkillsPackage("/fake/source");
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+
 	it("refuses undeclared SKILL.md anywhere in the tree — force never lifts (JD-006/JD-007)", async () => {
 		mockSuccessfulImport();
 		mockFs.readJson.mockResolvedValue(validManifest as never);
@@ -414,6 +448,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 			declared: [scanResult("alpha", "pass")],
 			undeclared: ["/fake/source/node_modules/evil/SKILL.md"],
 			symlinks: [],
+			errors: [],
 		});
 
 		const result = await importAgentSkillsPackage("/fake/source", {
@@ -433,6 +468,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 			declared: [scanResult("alpha", "pass")],
 			undeclared: [],
 			symlinks: ["/fake/source/skills/alpha/SKILL.md"],
+			errors: [],
 		});
 
 		const result = await importAgentSkillsPackage("/fake/source", {
@@ -440,6 +476,27 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		});
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("symlink");
+		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+
+	it("refuses when the coverage walk could not read paths — force never lifts (JD-013)", async () => {
+		mockSuccessfulImport();
+		mockFs.readJson.mockResolvedValue(validManifest as never);
+		mockScanner.mockResolvedValue({
+			declared: [scanResult("alpha", "pass")],
+			undeclared: [],
+			symlinks: [],
+			errors: ["/fake/source/locked"],
+		});
+
+		const result = await importAgentSkillsPackage("/fake/source", {
+			force: true,
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("skillguard: install refused");
+		expect(result.error).toContain("could not be read");
+		expect(result.error).toContain("locked");
 		expect(mockFs.remove).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
@@ -453,6 +510,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 			declared: [scanResult("alpha", "unscannable")],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		});
 		const forced = await importAgentSkillsPackage("/fake/source", {
 			force: true,
@@ -466,6 +524,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 			declared: [scanResult("alpha", "block")],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		});
 		const refused = await importAgentSkillsPackage("/fake/source", {
 			force: true,
@@ -488,6 +547,64 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
+	// ── Import-entrypoint containment (JD-012) ─────────────────────────────
+	// skillPathContained's lexical branch has ZERO direct tests at the import
+	// entrypoint: a declared `path` that escapes the package root must refuse
+	// BEFORE any scan or copy — no read outside the staged clone (JD-003).
+
+	it.each([
+		["../../outside"],
+		["/absolute/outside"],
+	])("refuses a declared path escaping the package root — %s (JD-012)", async (escPath) => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.readJson.mockResolvedValue({
+			name: "imported-skill",
+			version: "1.0.0",
+			description: "An imported agent skills package",
+			skills: [{ name: "alpha", description: "Alpha", path: escPath }],
+		} as never);
+
+		const result = await importAgentSkillsPackage("/fake/source");
+
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("escapes");
+		// The gate never ran and nothing was copied: refusal happens in
+		// validation, before the coverage walk (no read outside the staged
+		// clone, JD-003) and before any placement.
+		expect(mockScanner).not.toHaveBeenCalled();
+		expect(mockFs.copy).not.toHaveBeenCalled();
+	});
+
+	it("refuses a declared path whose realpath escapes the package root — realpath branch (JD-012)", async () => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.readJson.mockResolvedValue({
+			name: "imported-skill",
+			version: "1.0.0",
+			description: "An imported agent skills package",
+			skills: [{ name: "alpha", description: "Alpha", path: "skills/alpha" }],
+		} as never);
+		// Lexically contained, but the realpath lands OUTSIDE the package root
+		// (an in-tree symlink would do this in real life) — the realpath
+		// containment branch must catch it. The default realpath mock is
+		// identity, which would never exercise this branch.
+		mockFs.realpath.mockImplementation((async (p: string) => {
+			if (typeof p === "string" && p.includes("skills/alpha"))
+				return "/outside/alpha";
+			return p;
+		}) as never);
+		try {
+			const result = await importAgentSkillsPackage("/fake/source");
+
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("escapes");
+			expect(result.error).toContain("realpath");
+			expect(mockScanner).not.toHaveBeenCalled();
+			expect(mockFs.copy).not.toHaveBeenCalled();
+		} finally {
+			mockFs.realpath.mockImplementation((async (p: string) => p) as never);
+		}
+	});
+
 	it("does not run the gate in dry-run — scan not called (D8)", async () => {
 		mockFs.pathExists.mockResolvedValue(true as never);
 		mockFs.readJson.mockResolvedValue(validManifest as never);
@@ -506,6 +623,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 			declared: [scanResult("alpha", "pass")],
 			undeclared: [],
 			symlinks: [],
+			errors: [],
 		});
 
 		const result = await importAgentSkillsPackage("/fake/source");

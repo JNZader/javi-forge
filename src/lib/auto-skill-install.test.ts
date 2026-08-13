@@ -83,6 +83,9 @@ describe("autoInstallSkills", () => {
 		expect(result.skipped).toEqual(["react-19", "typescript"]);
 		expect(result.installed).toEqual([]);
 		expect(result.notFound).toEqual([]);
+		// sameDir short-circuits BEFORE any scanning (D4) — the scanner is
+		// never called (JD-012).
+		expect(mockScanSkillFile).not.toHaveBeenCalled();
 	});
 
 	it("reports skills as notFound when source does not have them", async () => {

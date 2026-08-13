@@ -13,8 +13,12 @@ import type {
 	InstalledPlugin,
 	PluginManifest,
 } from "../types/index.js";
-import { evaluateInstallGate } from "./skill-install-gate.js";
-import { formatBatchReport, scanSkillsWithCoverage } from "./skill-scanner.js";
+import {
+	evaluateCoverageGate,
+	scanFailureMessage,
+} from "./skill-install-gate.js";
+import type { SkillCoverageScan } from "./skill-scanner.js";
+import { scanSkillsWithCoverage } from "./skill-scanner.js";
 
 // ── Conversion ─────────────────────────────────────────────────────────────
 
@@ -245,58 +249,25 @@ export async function importAgentSkillsPackage(
 	// Runs BEFORE the existing-install remove and fs.copy: a refusal preserves
 	// an existing install and installs nothing. dryRun early-returns above, so
 	// no scan happens on dry-run. Scanner/eval errors deny unconditionally (D7).
+	// The refusal policy + message-building is shared with plugin add via
+	// evaluateCoverageGate (R2-001).
+	let coverage: SkillCoverageScan;
 	try {
-		const coverage = await scanSkillsWithCoverage(sourceDir, declaredPaths);
-
-		// Manifest-integrity refusals — block-level, force NEVER lifts
-		// (JD-007: ANY symlink; JD-006: undeclared SKILL.md incl. node_modules).
-		// A walk with I/O errors cannot certify the copied footprint — refuse
-		// first, because the broken subtree may hide symlinks or undeclared
-		// files (JD-013).
-		if (coverage.errors.length > 0) {
-			return {
-				success: false,
-				refused: true,
-				error: `skillguard: install refused — ${coverage.errors.length} path(s) could not be read (walk incomplete; manifest-integrity, force never lifts):\n${coverage.errors.map((p) => `  ${p}`).join("\n")}`,
-			};
-		}
-		if (coverage.symlinks.length > 0) {
-			return {
-				success: false,
-				refused: true,
-				error: `skillguard: install refused — symlink(s) in tree (manifest-integrity, force never lifts):\n${coverage.symlinks.map((p) => `  ${p}`).join("\n")}`,
-			};
-		}
-		if (coverage.undeclared.length > 0) {
-			return {
-				success: false,
-				refused: true,
-				error: `skillguard: install refused — undeclared SKILL.md(s) in tree (every skill-shaped file must be declared; force never lifts):\n${coverage.undeclared.map((p) => `  ${p}`).join("\n")}`,
-			};
-		}
-
-		const gate = evaluateInstallGate(coverage.declared, { force });
-		if (!gate.allowed) {
-			const blocked = gate.rejected.filter((r) => r.verdict === "block").length;
-			const unscannable = gate.rejected.filter(
-				(r) => r.verdict === "unscannable",
-			).length;
-			return {
-				success: false,
-				refused: true,
-				// Lead line names the rejected count; the batch report renders
-				// the FULL declared set so the header/rows reflect every scanned
-				// skill (D6, JD-014).
-				error: `skillguard: install refused — ${gate.rejected.length} rejected (${blocked} blocked, ${unscannable} unscannable)\n${formatBatchReport(coverage.declared)}`,
-			};
-		}
+		coverage = await scanSkillsWithCoverage(sourceDir, declaredPaths);
 	} catch (scanError) {
-		const msg =
-			scanError instanceof Error ? scanError.message : String(scanError);
 		return {
 			success: false,
 			refused: true,
-			error: `skillguard scan failed — ${msg}`,
+			error: scanFailureMessage(scanError),
+		};
+	}
+
+	const decision = evaluateCoverageGate(coverage, { force });
+	if (decision.refusalError) {
+		return {
+			success: false,
+			refused: true,
+			error: decision.refusalError,
 		};
 	}
 

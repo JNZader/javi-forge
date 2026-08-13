@@ -608,19 +608,20 @@ export async function scanSkillsWithCoverage(
 		declaredDirs.set(entry, await resolveContained(rootAbs, rootReal, entry));
 	}
 
-	const declaredFiles = new Set<string>();
-	for (const absDir of declaredDirs.values()) {
-		// Seed BOTH basenames the walk recognizes as skill-shaped. The walk
-		// collects case-insensitively (`entry.toLowerCase() === "skill.md"`),
-		// so a declared skill whose on-disk file is lowercase `skill.md` must
-		// match membership — otherwise it is collected, fails membership, and
-		// lands in `undeclared`, a block-level refusal `--force` never lifts
-		// (JD-011: permanent lockout for a declared skill). Files NOT inside a
-		// declared dir still miss the set — the lowercase-as-undeclared
-		// refusal for undeclared files is preserved.
-		declaredFiles.add(path.join(absDir, "SKILL.md"));
-		declaredFiles.add(path.join(absDir, "skill.md"));
-	}
+	// Declared skill DIRECTORIES — membership is case-insensitive by declared
+	// directory, never by file-basename spelling (R1-001/R3-001/R4-001). The
+	// walk collects ANY entry whose lowercased basename is `skill.md`, because
+	// the installed footprint is the on-disk tree whether the author wrote
+	// `SKILL.md`, `Skill.md`, `SKILL.MD` or any other fold — a declared skill's
+	// file must be recognized as declared no matter its case. Seeding exact-case
+	// basenames (F1/JD-011 seeded `SKILL.md` + `skill.md`) still missed every
+	// other fold: the file was collected, failed membership, and landed in
+	// `undeclared` — a block-level refusal `--force` never lifts — while the
+	// declared scan reported `unscannable` (permanent lockout for a legit
+	// declared skill). Membership by declared DIRECTORY keeps the smuggling
+	// refusal intact: a skill-shaped file whose parent dir is NOT a declared
+	// dir still misses the set and refuses as undeclared (CASE3).
+	const declaredDirAbs = new Set(declaredDirs.values());
 
 	const undeclared: string[] = [];
 	const symlinks: string[] = [];
@@ -679,11 +680,15 @@ export async function scanSkillsWithCoverage(
 				continue;
 			}
 
-			// SKILL.md-only collection: basename SKILL.md/skill.md, never
-			// PLUGIN.md or README (JD-002).
+			// SKILL.md-only collection: basename SKILL.md/skill.md (any case
+			// fold), never PLUGIN.md or README (JD-002). Declared-ness is
+			// decided by the parent DIRECTORY being declared (R1-001): any case
+			// fold of the file inside a declared dir is declared, so the file
+			// is scanned — never flagged undeclared (block-level, force never
+			// lifts) for the exact-case spelling it happens to carry on disk.
 			if (entry.toLowerCase() === "skill.md") {
 				const resolved = path.resolve(fullPath);
-				if (!declaredFiles.has(resolved)) {
+				if (!declaredDirAbs.has(path.dirname(resolved))) {
 					undeclared.push(fullPath);
 				}
 			}
@@ -701,8 +706,9 @@ export async function scanSkillsWithCoverage(
 	// Iterating the map keeps declared order (insertion order == declaredPaths)
 	// and guarantees an entry cannot be absent once resolved.
 	for (const absDir of declaredDirs.values()) {
-		// Case-tolerant resolution (JD-011): a declared skill whose on-disk
-		// file is lowercase `skill.md` is the same declared entry — scan the
+		// Case-tolerant resolution (JD-011/R1-001): a declared skill whose
+		// on-disk file is lowercase `skill.md` — or any other case fold
+		// (`Skill.md`, `SKILL.MD`, …) — is the same declared entry; scan the
 		// file that actually exists instead of reporting the exact-case path
 		// as a missing/unscannable file.
 		const file = await declaredSkillFileOnDisk(absDir);
@@ -717,17 +723,31 @@ export async function scanSkillsWithCoverage(
 
 /**
  * Resolve the on-disk skill file for a declared skill directory. The coverage
- * walk recognizes both `SKILL.md` and `skill.md` basenames (case-insensitive
- * collection), so a declared entry may legitimately carry either; favor the
- * conventional exact-case name, fall back to the lowercase variant (JD-011).
- * When neither exists, return the canonical path so `scanSkillFile` reports
- * the declared skill as `unscannable` (fail-closed, unchanged behavior).
+ * walk recognizes ANY case fold of the `skill.md`/`SKILL.md` basename in a
+ * declared dir as the declared file (R1-001), so a declared entry may
+ * legitimately carry any fold on disk; favor the conventional exact-case name,
+ * fall back to the lowercase variant (JD-011), then to any other case fold via
+ * a case-insensitive readdir. When no skill-shaped file exists at all, return
+ * the canonical path so `scanSkillFile` reports the declared skill as
+ * `unscannable` (fail-closed, unchanged behavior).
  */
 async function declaredSkillFileOnDisk(absDir: string): Promise<string> {
 	const canonical = path.join(absDir, "SKILL.md");
 	if (await fs.pathExists(canonical)) return canonical;
 	const lower = path.join(absDir, "skill.md");
 	if (await fs.pathExists(lower)) return lower;
+	// Any other case fold (`Skill.md`, `SKILL.MD`, `skill.MD`, …) is the same
+	// declared file (R1-001): the declared scan must read what actually exists
+	// or the declared entry reports `unscannable` while the walk collects it as
+	// declared. Prefer the canonical name when both exist (JD-F1-N1 residual).
+	try {
+		const entries = await fs.readdir(absDir);
+		const fold = entries.find((e) => e.toLowerCase() === "skill.md");
+		if (fold) return path.join(absDir, fold);
+	} catch {
+		// Unreadable declared dir → return the canonical path so scanSkillFile
+		// fails closed as `unscannable` (no new behavior).
+	}
 	return canonical;
 }
 

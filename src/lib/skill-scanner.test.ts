@@ -1089,6 +1089,54 @@ describe("scanSkillsWithCoverage", () => {
 		expect(scan.declared[0].verdict).toBe("pass");
 	});
 
+	it.each([
+		"Skill.md",
+		"SKILL.MD",
+		"skill.MD",
+	])("treats a declared skill whose on-disk file is a non-canonical case fold (%s) as declared and scans it — not undeclared (R1-001)", async (fileName) => {
+		// JD-011 closed only the full-lowercase `skill.md` variant; the
+		// exact-case declared-set seeding still missed every other fold.
+		// ANY case fold of a DECLARED skill file must be recognized as
+		// declared (scanned) — never pushed to `undeclared` (block-level,
+		// force never lifts) while its declared scan reports
+		// `unscannable` (permanent lockout for a legit package).
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", fileName),
+			SAFE_SKILL,
+		);
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.symlinks).toEqual([]);
+		expect(scan.errors).toEqual([]);
+		// Scanned as a real verdict — the case-folded file was found and
+		// read, not reported as a missing/unscannable `SKILL.md`.
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.declared[0].verdict).toBe("pass");
+	});
+
+	it("still refuses a non-canonical-case skill.md OUTSIDE a declared dir as undeclared (CASE3 preserved)", async () => {
+		// The case-insensitive membership fix must not weaken the smuggling
+		// refusal: an undeclared dir's case-folded `Skill.md` still misses the
+		// declared set and is collected as undeclared — block-level, force
+		// never lifts (CASE3, the refuse-by-entitlement guard).
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.ensureDir(path.join(tmpDir, "evil"));
+		await fs.writeFile(path.join(tmpDir, "evil", "Skill.md"), SAFE_SKILL);
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.undeclared).toEqual([path.join(tmpDir, "evil", "Skill.md")]);
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.declared[0].verdict).toBe("pass");
+	});
+
 	it("records readdir failures as errors instead of treating the subtree as empty (JD-013)", async () => {
 		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
 		await fs.writeFile(

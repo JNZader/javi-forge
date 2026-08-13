@@ -1,3 +1,9 @@
+## [1.28.1](https://github.com/JNZader/javi-forge/compare/v1.28.0...v1.28.1) (2026-08-13)
+
+### Bug Fixes
+
+* **skillguard:** close runtime gate follow-ups — exit codes, shared policy, collision refusal ([#47](https://github.com/JNZader/javi-forge/issues/47)) ([0a3ee93](https://github.com/JNZader/javi-forge/commit/0a3ee93b6f3c9ffff021e798c57dce719e8dbf7a))
+
 ## [1.28.0](https://github.com/JNZader/javi-forge/compare/v1.27.0...v1.28.0) (2026-08-13)
 
 ### Features

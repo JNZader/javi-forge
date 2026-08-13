@@ -2,6 +2,21 @@
 
 Branch `feat/skillguard-runtime-gate` (base `main` @ `24661957`). Strict TDD mode. Single PR with `size:exception`, work-unit commits.
 
+## Phase 2 — Shared gate helper (DONE)
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| 2.1 `evaluateInstallGate` pure module | DONE | RED: 9 tests failed (module missing); GREEN: 9 pass; TRIANGULATE: +1 force-lift test; final 10/10. Commit `d861351b` |
+| 2.2 shared-gate suite | DONE | 10 tests (real fs fixtures, no safe-read mock): gate rule `allowed = !hasBlock && (rejected.length === 0 \|\| force)`; block always refuses; force lifts only unscannable |
+
+## Phase 3 — Install gates (3/3 done)
+
+| Task | Status | Evidence |
+|------|--------|----------|
+| 3.1 plugin.ts add gate | DONE | RED: 8 gate tests + scanner double (importOriginal); GREEN: 59/59; gate before existing-remove/`fs.move`; force on options; dryRun skips. Commit `1fedc2ab` |
+| 3.2 agent-skills.ts import gate | DONE | RED: 7 gate tests (2 JD-006 validation + 5 gate), 1 existing `skills: []`→success test updated to refusal contract; GREEN: 47/47; `skillPathContained` helper (lexical+realpath); gate before `fs.remove`/`fs.copy`; refused imports preserve install. Commit `9a089281` |
+| 3.3 auto-skill-install.ts gate | PENDING | — |
+
 ## Phase 1 — Scanner foundation (DONE)
 
 | Task | Status | Evidence |
@@ -12,7 +27,8 @@ Branch `feat/skillguard-runtime-gate` (base `main` @ `24661957`). Strict TDD mod
 
 ## Notes
 
+- Safety net after Phase 3.2: 96 files / 1755 pass + 2 pre-existing skips; `pnpm typecheck`, `typecheck:test`, `lint` clean (1 pre-existing warning in `ci-hooks.test.ts`, unrelated).
+- S3/S4 gate pattern: refuse BEFORE any destructive step (remove/move/copy) so prior install survives refusal; scanner/eval throw → deny `"skillguard scan failed — …"` (D7); dryRun early-returns before scan (import/plugin) — auto-install dryRun still scans (D4).
 - `resolveContained`: lexical (`..`, absolute) + realpath containment for declared entries; throws → caller denies (mirrors D7 scanner-throw rule).
 - Declared results scanned in declared order (deterministic reports); symlinked declared file skipped from scanning (already in `symlinks`, caller refuses first).
-- Safety net after Phase 1: 5 files / 191 tests pass (178 baseline + 13 new). `pnpm typecheck`, `typecheck:test`, `lint` clean (1 pre-existing warning in `ci-hooks.test.ts`, unrelated).
 - JD-010 respected: no test asserts absence of `.git`.

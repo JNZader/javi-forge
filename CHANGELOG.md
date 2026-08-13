@@ -1,3 +1,9 @@
+## [1.28.0](https://github.com/JNZader/javi-forge/compare/v1.27.0...v1.28.0) (2026-08-13)
+
+### Features
+
+* **lib:** skillguard runtime gates — fail-closed install for plugin add/import + skills auto-install ([#45](https://github.com/JNZader/javi-forge/issues/45)) ([e457b1b](https://github.com/JNZader/javi-forge/commit/e457b1be8178e4f3ff67cea2f670e79bbc7c1ef8))
+
 ## [1.27.0](https://github.com/JNZader/javi-forge/compare/v1.26.0...v1.27.0) (2026-08-12)
 
 ### Features

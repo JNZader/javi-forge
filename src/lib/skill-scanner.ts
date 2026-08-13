@@ -622,10 +622,28 @@ export async function scanSkillsWithCoverage(
 	// refusal intact: a skill-shaped file whose parent dir is NOT a declared
 	// dir still misses the set and refuses as undeclared (CASE3).
 	const declaredDirAbs = new Set(declaredDirs.values());
+	// R1-F2-N1: declared-dir membership must ALSO fold case on the DIRECTORY
+	// name. `declaredDirAbs` retains MANIFEST case (`resolveContained` returns
+	// the manifest-spelled `entryAbs`); a package authored on a case-
+	// insensitive FS can declare `skills/Alpha` while the disk tree carries
+	// `skills/alpha` — the on-disk footprint the walk actually sees. Exact-
+	// case membership left the walk's dirname check missing the set → the file
+	// landed `undeclared` (block-level, force never lifts) while the declared
+	// scan reported the manifest-case path `unscannable` — the third instance
+	// of the case-lockout class (JD-011 file, R1-001 file-fold, dir-name
+	// fold). Compare lowercased on BOTH sides; the real on-disk path is still
+	// the one scanned below (never invent casing for file access).
+	const declaredDirAbsLower = new Set(
+		[...declaredDirAbs].map((d) => d.toLowerCase()),
+	);
 
 	const undeclared: string[] = [];
 	const symlinks: string[] = [];
 	const errors: string[] = [];
+	// Real on-disk dirs the walk actually visited (readdir-spelled casing) —
+	// used AFTER the walk to resolve declared dirs whose manifest spelling
+	// differs in case from the disk (R1-F2-N1); see the declared scan below.
+	const walkDirs: string[] = [];
 	const visited = new Set<string>();
 
 	async function walk(currentDir: string): Promise<void> {
@@ -643,6 +661,7 @@ export async function scanSkillsWithCoverage(
 		}
 		if (visited.has(real)) return;
 		visited.add(real);
+		walkDirs.push(currentDir);
 
 		let entries: string[];
 		try {
@@ -688,7 +707,7 @@ export async function scanSkillsWithCoverage(
 			// lifts) for the exact-case spelling it happens to carry on disk.
 			if (entry.toLowerCase() === "skill.md") {
 				const resolved = path.resolve(fullPath);
-				if (!declaredDirAbs.has(path.dirname(resolved))) {
+				if (!declaredDirAbsLower.has(path.dirname(resolved).toLowerCase())) {
 					undeclared.push(fullPath);
 				}
 			}
@@ -705,13 +724,26 @@ export async function scanSkillsWithCoverage(
 	const declared: SkillScanResult[] = [];
 	// Iterating the map keeps declared order (insertion order == declaredPaths)
 	// and guarantees an entry cannot be absent once resolved.
-	for (const absDir of declaredDirs.values()) {
+	for (const declaredAbs of declaredDirs.values()) {
+		// R1-F2-N1: the declared scan reads the REAL on-disk dir the walk saw —
+		// a manifest spelling `skills/Alpha` against a disk tree `skills/alpha`
+		// must scan the lowercase dir that exists. The two-tier lookup prefers
+		// the exact-case real dir when present, then a case-fold match; a truly
+		// missing declared dir (no real dir matches) falls back to the manifest
+		// path so it still fails closed as `unscannable` (unchanged). Only
+		// the real on-disk path is ever handed to
+		// `declaredSkillFileOnDisk`/`scanSkillFile` — no casing is invented for
+		// file access.
+		const realDir =
+			walkDirs.find((d) => d === declaredAbs) ??
+			walkDirs.find((d) => d.toLowerCase() === declaredAbs.toLowerCase()) ??
+			declaredAbs;
 		// Case-tolerant resolution (JD-011/R1-001): a declared skill whose
 		// on-disk file is lowercase `skill.md` — or any other case fold
 		// (`Skill.md`, `SKILL.MD`, …) — is the same declared entry; scan the
 		// file that actually exists instead of reporting the exact-case path
 		// as a missing/unscannable file.
-		const file = await declaredSkillFileOnDisk(absDir);
+		const file = await declaredSkillFileOnDisk(realDir);
 		// Whether the canonical or the lowercase variant, a symlinked declared
 		// file is already in `symlinks` — never read through it (JD-003/JD-007).
 		if (symlinkSet.has(path.resolve(file))) continue;

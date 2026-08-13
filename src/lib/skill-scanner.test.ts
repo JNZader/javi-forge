@@ -1117,6 +1117,53 @@ describe("scanSkillsWithCoverage", () => {
 		expect(scan.declared[0].verdict).toBe("pass");
 	});
 
+	it("treats a declared dir whose on-disk NAME differs in case as declared and scans its real path — not undeclared (R1-F2-N1)", async () => {
+		// R1-001 closed the FILE-fold lockout but the declared DIR paths still
+		// retained manifest case (`resolveContained` returns the manifest-
+		// spelled entryAbs): a manifest declaring `skills/Alpha` against a disk
+		// tree carrying `skills/alpha` left the walk's dirname check missing
+		// the set → the file landed `undeclared` (block-level, force never
+		// lifts) while the declared scan reported the manifest-case path
+		// `unscannable` — the third instance of the case-lockout class (JD-011
+		// file → R1-001 file-fold → dir-name fold). Both the walk membership
+		// and the declared scan must resolve the REAL on-disk dir; no casing
+		// is ever invented for file access.
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.ensureDir(path.join(tmpDir, "skills", "beta"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "beta", "SKILL.md"),
+			SAFE_SKILL,
+		);
+
+		// Declared with the case the manifest spells (`skills/Alpha`) — the
+		// disk tree only has the lowercase `skills/alpha`.
+		const scan = await scanSkillsWithCoverage(tmpDir, [
+			"skills/Alpha",
+			"skills/beta",
+		]);
+
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.symlinks).toEqual([]);
+		expect(scan.errors).toEqual([]);
+		// Both declared scans pass, reading the REAL on-disk paths (never the
+		// manifest-case spelling, which does not exist).
+		expect(scan.declared).toHaveLength(2);
+		expect(scan.declared.map((r) => r.verdict)).toEqual(["pass", "pass"]);
+		expect(scan.declared[0].skillPath).toBe(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+		);
+		expect(scan.declared[1].skillPath).toBe(
+			path.join(tmpDir, "skills", "beta", "SKILL.md"),
+		);
+		for (const result of scan.declared) {
+			expect(fs.existsSync(result.skillPath)).toBe(true);
+		}
+	});
+
 	it("still refuses a non-canonical-case skill.md OUTSIDE a declared dir as undeclared (CASE3 preserved)", async () => {
 		// The case-insensitive membership fix must not weaken the smuggling
 		// refusal: an undeclared dir's case-folded `Skill.md` still misses the

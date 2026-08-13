@@ -15,6 +15,7 @@ import {
 	scanSkillContent,
 	scanSkillFile,
 	scanSkillsDirectory,
+	scanSkillsWithCoverage,
 	THREAT_PATTERNS,
 } from "./skill-scanner.js";
 
@@ -822,6 +823,268 @@ describe("scanSkillsDirectory", () => {
 
 		const results = await scanSkillsDirectory(tmpDir);
 		expect(results).toHaveLength(1);
+	});
+});
+
+// =============================================================================
+// scanSkillsWithCoverage — gate coverage walk (JD-002, JD-003, JD-005, JD-007)
+// =============================================================================
+
+describe("scanSkillsWithCoverage", () => {
+	let tmpDir: string;
+	let outsideDir: string;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-coverage-"));
+		outsideDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "javi-forge-coverage-out-"),
+		);
+	});
+
+	afterEach(async () => {
+		await fs.remove(tmpDir);
+		await fs.remove(outsideDir);
+	});
+
+	it("scans declared entries and collects undeclared SKILL.md paths elsewhere", async () => {
+		// Declared: skills/alpha + skills/beta (either content class).
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.ensureDir(path.join(tmpDir, "skills", "beta"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "beta", "SKILL.md"),
+			MALICIOUS_CREDENTIAL_SKILL,
+		);
+		// Undeclared: a hidden dir and a lowercase skill.md.
+		await fs.ensureDir(path.join(tmpDir, "evil"));
+		await fs.writeFile(path.join(tmpDir, "evil", "SKILL.md"), SAFE_SKILL);
+		await fs.ensureDir(path.join(tmpDir, "docs"));
+		await fs.writeFile(path.join(tmpDir, "docs", "skill.md"), SAFE_SKILL);
+
+		const scan = await scanSkillsWithCoverage(tmpDir, [
+			"skills/alpha",
+			"skills/beta",
+		]);
+
+		expect(scan.declared).toHaveLength(2);
+		expect(scan.declared.map((r) => r.verdict).sort()).toEqual([
+			"block",
+			"pass",
+		]);
+		expect(scan.undeclared).toHaveLength(2);
+		expect(scan.undeclared).toContain(path.join(tmpDir, "evil", "SKILL.md"));
+		expect(scan.undeclared).toContain(path.join(tmpDir, "docs", "skill.md"));
+		expect(scan.symlinks).toEqual([]);
+	});
+
+	it("visits node_modules and .git — their SKILL.md files surface as undeclared (JD-007)", async () => {
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.ensureDir(path.join(tmpDir, "node_modules", "evil-pkg"));
+		await fs.writeFile(
+			path.join(tmpDir, "node_modules", "evil-pkg", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.ensureDir(path.join(tmpDir, ".git", "objects"));
+		await fs.writeFile(
+			path.join(tmpDir, ".git", "objects", "SKILL.md"),
+			SAFE_SKILL,
+		);
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.undeclared).toHaveLength(2);
+		expect(scan.undeclared).toContain(
+			path.join(tmpDir, "node_modules", "evil-pkg", "SKILL.md"),
+		);
+		expect(scan.undeclared).toContain(
+			path.join(tmpDir, ".git", "objects", "SKILL.md"),
+		);
+	});
+
+	it("never collects PLUGIN.md or README as skill-shaped files (JD-002)", async () => {
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		// Critical-pattern docs must never be collected or scanned by the walk.
+		await fs.writeFile(
+			path.join(tmpDir, "PLUGIN.md"),
+			MALICIOUS_CREDENTIAL_SKILL,
+		);
+		await fs.writeFile(
+			path.join(tmpDir, "README.md"),
+			MALICIOUS_CREDENTIAL_SKILL,
+		);
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.declared[0].verdict).toBe("pass");
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.symlinks).toEqual([]);
+	});
+
+	it("flags a symlinked SKILL.md without ever reading its target (JD-007)", async () => {
+		// The target exists OUTSIDE the tree and would scan as block if dereferenced.
+		const target = path.join(outsideDir, "linked-target.md");
+		await fs.writeFile(target, MALICIOUS_CREDENTIAL_SKILL);
+
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.ensureDir(path.join(tmpDir, "linked"));
+		await fs.symlink(target, path.join(tmpDir, "linked", "SKILL.md"));
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.symlinks).toEqual([path.join(tmpDir, "linked", "SKILL.md")]);
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.declared[0].verdict).toBe("pass");
+	});
+
+	it("flags a dangling symlink without dereferencing or crashing (JD-003)", async () => {
+		const ghost = path.join(outsideDir, "does-not-exist.md");
+
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.ensureDir(path.join(tmpDir, "linked"));
+		await fs.symlink(ghost, path.join(tmpDir, "linked", "SKILL.md"));
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.symlinks).toEqual([path.join(tmpDir, "linked", "SKILL.md")]);
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.declared).toHaveLength(1);
+	});
+
+	it("flags a symlinked directory without enumerating its subtree (JD-007)", async () => {
+		// The subtree contains a SKILL.md that must NOT be collected through the link.
+		const outsideSub = path.join(outsideDir, "sub");
+		await fs.ensureDir(outsideSub);
+		await fs.writeFile(path.join(outsideSub, "SKILL.md"), SAFE_SKILL);
+
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.symlink(outsideSub, path.join(tmpDir, "linked-dir"), "dir");
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.symlinks).toEqual([path.join(tmpDir, "linked-dir")]);
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.declared).toHaveLength(1);
+	});
+
+	it("terminates on a recursive symlink (visited-set/realpath invariant, JD-003)", async () => {
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		// Self-referential dir symlink: loop -> tmpDir (an ancestor).
+		await fs.symlink(tmpDir, path.join(tmpDir, "loop"), "dir");
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.symlinks).toContain(path.join(tmpDir, "loop"));
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.undeclared).toEqual([]);
+	});
+
+	it("does not read content of undeclared SKILL.md files during the walk (JD-005)", async () => {
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		// Malicious undeclared content is collected by path only — no verdict produced.
+		await fs.ensureDir(path.join(tmpDir, "evil"));
+		await fs.writeFile(
+			path.join(tmpDir, "evil", "SKILL.md"),
+			MALICIOUS_CREDENTIAL_SKILL,
+		);
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.undeclared).toEqual([path.join(tmpDir, "evil", "SKILL.md")]);
+		// Declared keeps only the declared scan — the malicious file is never scanned here.
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.declared[0].verdict).toBe("pass");
+	});
+
+	it("returns an unscannable declared result when a declared SKILL.md is missing (fail-closed)", async () => {
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		// Declared path exists but has no SKILL.md inside.
+
+		const scan = await scanSkillsWithCoverage(tmpDir, ["skills/alpha"]);
+
+		expect(scan.declared).toHaveLength(1);
+		expect(scan.declared[0].verdict).toBe("unscannable");
+		expect(isRejectedVerdict(scan.declared[0].verdict)).toBe(true);
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.symlinks).toEqual([]);
+	});
+
+	it("treats an empty tree as a clean scan", async () => {
+		const scan = await scanSkillsWithCoverage(tmpDir, []);
+
+		expect(scan.declared).toEqual([]);
+		expect(scan.undeclared).toEqual([]);
+		expect(scan.symlinks).toEqual([]);
+	});
+
+	it("collects every SKILL.md as undeclared when no declared paths are given", async () => {
+		await fs.ensureDir(path.join(tmpDir, "skills", "alpha"));
+		await fs.writeFile(
+			path.join(tmpDir, "skills", "alpha", "SKILL.md"),
+			SAFE_SKILL,
+		);
+		await fs.ensureDir(path.join(tmpDir, "docs"));
+		await fs.writeFile(path.join(tmpDir, "docs", "skill.md"), SAFE_SKILL);
+
+		const scan = await scanSkillsWithCoverage(tmpDir, []);
+
+		expect(scan.declared).toEqual([]);
+		expect(scan.undeclared).toHaveLength(2);
+		expect(scan.symlinks).toEqual([]);
+	});
+
+	it("refuses a declared path escaping the scan root (../outside, JD-003)", async () => {
+		// A hostile package manifest must never make the gate read outside the
+		// staged clone: path.resolve(dir, "../../x") must be rejected.
+		await fs.writeFile(
+			path.join(outsideDir, "SKILL.md"),
+			MALICIOUS_CREDENTIAL_SKILL,
+		);
+
+		await expect(
+			scanSkillsWithCoverage(tmpDir, ["../outside", "skills/alpha"]),
+		).rejects.toThrow(/outside|escape/);
+	});
+
+	it("refuses an absolute declared path (JD-003)", async () => {
+		const absolute = path.join(outsideDir, "abs-skill");
+
+		await expect(scanSkillsWithCoverage(tmpDir, [absolute])).rejects.toThrow(
+			/outside|escape/,
+		);
 	});
 });
 

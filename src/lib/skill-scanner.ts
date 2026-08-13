@@ -544,6 +544,183 @@ export async function scanSkillsDirectory(
 }
 
 // =============================================================================
+// Coverage walk — install-footprint integrity (JD-002, JD-003, JD-005, JD-007)
+// =============================================================================
+
+export interface SkillCoverageScan {
+	/**
+	 * Scan results for the declared-entry SKILL.md files — the ONLY files the
+	 * walk content-scans (JD-005). A declared file that is a symlink is never
+	 * read through (it is already in {@link symlinks}); a missing declared
+	 * SKILL.md fails closed as `unscannable`.
+	 */
+	declared: SkillScanResult[];
+	/**
+	 * Skill-shaped files (basename `SKILL.md`/`skill.md`) found in the tree
+	 * OUTSIDE the declared set — including under `node_modules`/`.git` (JD-007).
+	 * Paths only; content is never read during the walk (JD-005).
+	 */
+	undeclared: string[];
+	/**
+	 * ANY symlink (file or dir) found in the tree. The caller refuses on this
+	 * (manifest-integrity, block-level, force never lifts — JD-007); the walk
+	 * never dereferences them (JD-003).
+	 */
+	symlinks: string[];
+}
+
+/**
+ * SKILL.md-only coverage walk for the install gates (JD-006/JD-007).
+ *
+ * Visits the ENTIRE tree with NO `node_modules`/`.git` exemption, so the visit
+ * set is exactly the footprint `fs.move`/`fs.copy` will place (JD-007). Collects
+ * only basename `SKILL.md`/`skill.md` files — never `PLUGIN.md`/README content
+ * (JD-002) — and flags ANY symlink (file or dir) without dereferencing it
+ * (JD-007/JD-003). A realpath visited-set terminates cycles defensively even if
+ * a future caller ever recurses through a link (JD-003). The walk itself does NO
+ * content reads: only the declared-entry files are handed to
+ * {@link scanSkillFile} afterwards (JD-005).
+ */
+export async function scanSkillsWithCoverage(
+	dir: string,
+	declaredPaths: string[],
+): Promise<SkillCoverageScan> {
+	// Resolve the scan root once. Declared entries must stay inside it — a
+	// hostile manifest can never make the gate read outside the staged clone
+	// (JD-003: "no read outside the staged clone"; the interface contract names
+	// declared paths realpath-contained).
+	const rootAbs = path.resolve(dir);
+	const rootReal = await fs.realpath(rootAbs);
+
+	// Resolve each declared entry once (containment-verified) and reuse it for
+	// both the coverage set and the content scan — never twice.
+	const declaredDirs = new Map<string, string>();
+	for (const entry of declaredPaths) {
+		declaredDirs.set(entry, await resolveContained(rootAbs, rootReal, entry));
+	}
+
+	const declaredFiles = new Set<string>();
+	for (const absDir of declaredDirs.values()) {
+		declaredFiles.add(path.join(absDir, "SKILL.md"));
+	}
+
+	const undeclared: string[] = [];
+	const symlinks: string[] = [];
+	const visited = new Set<string>();
+
+	async function walk(currentDir: string): Promise<void> {
+		// realpath visited-set: a defensive cycle invariant (JD-003). Symlinks are
+		// never recursed into, so no cycle can form through the walk itself; the
+		// set guarantees termination even if that ever changes.
+		let real: string;
+		try {
+			real = await fs.realpath(currentDir);
+		} catch {
+			return;
+		}
+		if (visited.has(real)) return;
+		visited.add(real);
+
+		let entries: string[];
+		try {
+			entries = await fs.readdir(currentDir);
+		} catch {
+			return;
+		}
+
+		for (const entry of entries) {
+			const fullPath = path.join(currentDir, entry);
+			let lst: fs.Stats;
+			try {
+				lst = await fs.lstat(fullPath);
+			} catch {
+				continue;
+			}
+
+			// Symlinks are never dereferenced: flagged for the caller's
+			// manifest-integrity refusal, never recursed into, never scanned
+			// (JD-007/JD-003).
+			if (lst.isSymbolicLink()) {
+				symlinks.push(fullPath);
+				continue;
+			}
+
+			if (lst.isDirectory()) {
+				await walk(fullPath);
+				continue;
+			}
+
+			// SKILL.md-only collection: basename SKILL.md/skill.md, never
+			// PLUGIN.md or README (JD-002).
+			if (entry.toLowerCase() === "skill.md") {
+				const resolved = path.resolve(fullPath);
+				if (!declaredFiles.has(resolved)) {
+					undeclared.push(fullPath);
+				}
+			}
+		}
+	}
+
+	await walk(dir);
+
+	// Content-scanned results for declared entries only (JD-005), in declared
+	// order so reports are deterministic. A declared file that is a symlink is
+	// already in `symlinks` — reading through it would escape the tree (JD-003),
+	// so it is skipped here (the caller refuses on `symlinks` first anyway).
+	const symlinkSet = new Set(symlinks.map((p) => path.resolve(p)));
+	const declared: SkillScanResult[] = [];
+	// Iterating the map keeps declared order (insertion order == declaredPaths)
+	// and guarantees an entry cannot be absent once resolved.
+	for (const absDir of declaredDirs.values()) {
+		const file = path.join(absDir, "SKILL.md");
+		if (symlinkSet.has(file)) continue;
+		declared.push(await scanSkillFile(file));
+	}
+
+	return { declared, undeclared, symlinks };
+}
+
+/**
+ * Resolve a declared skill entry to an absolute directory and verify it stays
+ * inside the scan root — both lexically (`../../x`, absolute paths) and by
+ * realpath, so an in-tree symlink cannot redirect the declared read outside the
+ * staged clone (JD-003). Throws when the entry escapes; the caller denies.
+ */
+async function resolveContained(
+	rootAbs: string,
+	rootReal: string,
+	entry: string,
+): Promise<string> {
+	const entryAbs = path.resolve(rootAbs, entry);
+
+	// Lexical containment — catches `../outside` and absolute entries.
+	const rel = path.relative(rootAbs, entryAbs);
+	if (rel.startsWith("..") || path.isAbsolute(rel)) {
+		throw new Error(
+			`skillguard: declared skill path escapes scan root — ${entry}`,
+		);
+	}
+
+	// Realpath containment — catches a directory inside the tree whose real
+	// location is outside it. A missing declared dir (later `unscannable`) has
+	// no realpath yet; its lexical containment above is then the whole guard.
+	let real: string;
+	try {
+		real = await fs.realpath(entryAbs);
+	} catch {
+		return entryAbs;
+	}
+	const relReal = path.relative(rootReal, real);
+	if (relReal.startsWith("..") || path.isAbsolute(relReal)) {
+		throw new Error(
+			`skillguard: declared skill path escapes scan root — ${entry}`,
+		);
+	}
+
+	return entryAbs;
+}
+
+// =============================================================================
 // Report formatting
 // =============================================================================
 

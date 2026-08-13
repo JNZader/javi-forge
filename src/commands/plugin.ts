@@ -295,7 +295,7 @@ export async function runPluginImport(
 	sourceDir: string,
 	dryRun: boolean,
 	onStep: StepCallback,
-	force = false,
+	options: { force?: boolean } = {},
 ): Promise<void> {
 	const stepId = "plugin-import";
 	report(
@@ -305,7 +305,10 @@ export async function runPluginImport(
 		"running",
 	);
 
-	const result = await importAgentSkillsPackage(sourceDir, { dryRun, force });
+	const result = await importAgentSkillsPackage(sourceDir, {
+		dryRun,
+		force: options.force,
+	});
 
 	if (result.success) {
 		report(

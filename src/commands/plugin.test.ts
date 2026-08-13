@@ -418,17 +418,17 @@ describe("runPluginImport", () => {
 		expect(steps[1]!.detail).toContain("skills.json not found");
 	});
 
-	it("threads force to importAgentSkillsPackage (defaults false)", async () => {
+	it("threads force to importAgentSkillsPackage (options object, R2-003)", async () => {
 		mockImport.mockResolvedValue({ success: true, name: "imported-skill" });
 		const { onStep } = collectSteps();
 
 		await runPluginImport("/path/to/package", false, onStep);
 		expect(mockImport).toHaveBeenLastCalledWith("/path/to/package", {
 			dryRun: false,
-			force: false,
+			force: undefined,
 		});
 
-		await runPluginImport("/path/to/package", false, onStep, true);
+		await runPluginImport("/path/to/package", false, onStep, { force: true });
 		expect(mockImport).toHaveBeenLastCalledWith("/path/to/package", {
 			dryRun: false,
 			force: true,

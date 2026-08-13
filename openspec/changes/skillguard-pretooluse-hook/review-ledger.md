@@ -28,11 +28,21 @@ Judges also validated the current Claude matcher/config protocol, JSON stdin fie
 
 | id | lens | location | severity | status | evidence |
 |---|---|---|---|---|---|
-| JD-FR1-001 | judgment-day | `design.md:359-366` | CRITICAL | open | Parent identity is checked but subsequent temp creation and rename remain pathname-based. A symlink/junction swap after validation can redirect staging or replacement. |
-| JD-FR1-002 | judgment-day | `design.md:426-430`; `spec.md:253,275-281`; `proposal.md:104-106` | CRITICAL | open | Doctor status is contradictory: design permits RUNNABLE while proposal/spec require INCONCLUSIVE when relevant higher-precedence or launch policy is unobservable. |
-| JD-FR1-003 | judgment-day | `design.md:351-369`; `spec.md:358-366` | CRITICAL | open | Existing POSIX extended ACLs are not captured or preserved; mode-only replacement can broaden effective access. |
+| JD-FR1-001 | judgment-day | `design.md` — **Decision 5**, **Atomic write, fsync, rename, and rollback**; `spec.md` — **Backups, writes, rollback, and permissions are safe**; `proposal.md` — **Security-enabled init**, **Managed Ownership and Migration Rules** | CRITICAL | fixed | Contract now acknowledges Node lacks portable `openat`/`renameat`, holds/revalidates platform directory identities, and refuses unsupported, reparse/network, ACL/DACL-untrusted-writable, or otherwise unprovable parent chains. Swap-out/swap-back safety derives from the explicit trusted-principal boundary, not two pathname observations. |
+| JD-FR1-002 | judgment-day | `design.md` — **Manager Interfaces and CLI UX / authoritative matrix**; `spec.md` — **Install, doctor, and repair provide explicit idempotent UX**; `proposal.md` — **Doctor** | CRITICAL | fixed | One ordered matrix now governs all artifacts: known blocker => BLOCKED/false/1; otherwise any relevant unknown => INCONCLUSIVE/false/2; only explicit all-clear => RUNNABLE/true/0. Stable IDs and exact remediation classes are deterministic. |
+| JD-FR1-003 | judgment-day | `design.md` — **Backup naming, permissions, and safety**, **Testing Strategy**; `spec.md` — **Backups, writes, rollback, and permissions are safe**, **Acceptance tests exercise shipped behavior**; `proposal.md` — **Managed Ownership and Migration Rules**, **Dependencies** | CRITICAL | fixed | Linux `getfacl` and macOS `/bin/ls -lde` must prove ACL absence; any extended/default/inherited or inconclusive ACL state refuses before backup/temp content or target mutation. Source mode is exact, resulting ACL absence is verified, Windows DACL behavior remains exact, and capability-skipped real ACL fixtures are backed by non-skippable adapter refusal tests. |
 
-Fix Round 2 must establish an auditable baseline, resolve these three findings, and then run one final scoped re-review. Anything still open after that round is reported without extending the loop.
+Baseline `f8dc247d` makes this amendment auditable. The orchestrator must now run the one final scoped re-review; anything still open after that review is reported without extending the loop.
+
+## Fix Round 2 — Amendment Evidence
+
+Baseline `f8dc247d` contains the planning artifacts. Design/spec/proposal/ledger only; no production files were changed.
+
+| Finding | Amendment evidence | Exact anchors |
+|---|---|---|
+| JD-FR1-001 | Implementable fail-closed parent-chain gate with held handles/file IDs, explicit trusted-principal/write checks, around-operation revalidation, Windows helper constraints, and an honest same-user/Node-API residual. | `design.md` — **Decision 5: Prove a private parent chain, then stage the complete two-target transaction**, **Atomic write, fsync, rename, and rollback**; `spec.md` — **Requirement: Backups, writes, rollback, and permissions are safe / Untrusted-writable parent refuses pathname mutation**; `proposal.md` — **Security-enabled init**, **Managed Ownership and Migration Rules**. |
+| JD-FR1-002 | Shared ordered status/exit/remediation matrix, including blocker+unknown precedence and explicit all-clear requirement. | `design.md` — **Manager Interfaces and CLI UX** matrix; `spec.md` — **Requirement: Install, doctor, and repair provide explicit idempotent UX / Known blocker dominates a simultaneous unknown / Runnable requires explicit all-clear evidence**; `proposal.md` — **Doctor**. |
+| JD-FR1-003 | Conservative POSIX refusal instead of mode-only ACL loss, exact Linux/macOS inspectors, parent inherited/default ACL checks, backup/replacement no-broadening rule, and capability-aware tests. | `design.md` — **Backup naming, permissions, and safety**, **Testing Strategy / Transaction**; `spec.md` — **Requirement: Backups, writes, rollback, and permissions are safe / POSIX extended ACL refuses replacement and backup**, **Requirement: Acceptance tests exercise shipped behavior**; `proposal.md` — **Managed Ownership and Migration Rules**, **Compatibility and Installed-Consumer Impact**, **Dependencies**. |
 
 ## Fix Round 1 — Amendment Evidence
 
@@ -50,3 +60,13 @@ Design/spec artifacts only; no production files were changed.
 | JD-008 | Restrictive create-before-write, fsync, POSIX mode preservation, Windows DACL adapter, and fail-on-unprovable ACL policy. | `design.md` — **Backup naming, permissions, and safety**, **Atomic write...**; `spec.md` — **Backups, writes, rollback, and permissions / Windows ACL cannot be preserved**. |
 | JD-009 | Concrete `windows-latest` workflow path and exact focused command. | `design.md` — **File Changes**, **Testing Strategy**; `spec.md` — **Acceptance tests... / Windows continuous validation runs the supported slice**; `proposal.md` — **Affected Areas**. |
 | JD-010 | Explicit trigger matrix keeps Minimal CI-only absent separate opt-in. | `design.md` — **Manager Interfaces and CLI UX** trigger matrix; `spec.md` — **Security-enabled init... / Minimal does not imply runtime-guard consent**; `proposal.md` — **Decision Summary**, **Security-enabled init**. |
+
+## Fix Round 2 Final Re-review
+
+**Verdict:** CLEAN — both blind judges independently verified JD-FR1-001, JD-FR1-002, and JD-FR1-003. No new BLOCKER/CRITICAL findings on fix-touched lines.
+
+- Parent-chain contract is implementable and conservative: it acknowledges Node's lack of portable dirfd-relative mutation, refuses unprovable/untrusted-writable chains, and documents the same-user/trusted-admin residual.
+- Doctor matrix is consistent across proposal/spec/design: known blocker → `BLOCKED`/1; otherwise relevant unknown → `INCONCLUSIVE`/2; explicit all-clear → `RUNNABLE`/0.
+- Linux/macOS ACL handling is mandatory and fail-closed; extended/inherited/default/unavailable/inconclusive ACLs refuse before mutation, with no mode-only fallback.
+
+**Design judgment:** APPROVED. Planning may proceed to `sdd-tasks` while preserving the four review-bounded delivery slices.

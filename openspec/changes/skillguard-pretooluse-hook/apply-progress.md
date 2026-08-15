@@ -39,3 +39,8 @@
 None — Slice 1 implements runtime policy only. Installer/settings/doctor/CLI/init/package-verifier wiring remains deferred.
 ## Remaining Tasks
 - [ ] Slice 2 ownership/doctor core; Slice 3 transactional install/platform adapters; Slice 4 public wiring/package/docs. No Slice 2+ work is part of this fix.
+
+## Blocked After Exceptional Fix Round 3
+- Slice 1 is **not PR-ready**. Final scoped Judgment Day reproduced two open CRITICAL families: GNU `env -S` split-string escapes/abbreviations and GNU/macOS chmod/base64 option semantics.
+- Current child budget remains **793/800** and all normal gates are green, but live bypass evidence takes precedence.
+- Do not start Slice 2 and do not publish the Slice 1 child until a fresh-context parser redesign closes `JD-S1-FR3-001` and `JD-S1-FR3-002` and re-review returns CLEAN.

@@ -125,3 +125,16 @@ Verified fixed: combined static-shell recursion and bounds, Bash substitutions/b
 | JD-S1-FR2-002 | judgment-day | runtime chmod/base64 option predicates | CRITICAL | fixed | Bundled chmod options containing uppercase `R`, exact `--recursive`, base64 short bundles with `d`, macOS `-D`, and GNU `--d` through `--decode` deny only with a real downstream shell pipe; eight new deny and one no-pipe allow spawned probes pass. |
 
 The exceptional fix passes focused/full tests, typechecks, lint, pre-commit build, package and static/hash gates at **780 additions + 13 deletions = 793**; `split_required=false`. Required scoped re-judgment remains pending.
+
+### Slice 1 Exceptional Fix Round 3 Final Re-review
+
+**Verdict:** FAIL — both judges reproduced semantic option variants outside the F3 corpus. The two findings remain open. The automatic and user-authorized convergence budget is exhausted; Slice 1 MUST NOT open a PR in this state.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JD-S1-FR3-001 | judgment-day | runtime GNU `env -S` parser | CRITICAL | open | GNU `env -S` supports `\_` as whitespace, abbreviated long option `--split-str=...`, and `\c`; valid forms execute the sensitive command but the guard exits 0. |
+| JD-S1-FR3-002 | judgment-day | runtime chmod/base64 option semantics | CRITICAL | open | GNU accepts `chmod --rec` through `--recursiv`; macOS accepts bundled `base64 -Di`; current predicates miss those forms and also risk false positives when `-i/-o` argument text contains `d`. |
+
+Passing evidence retained: F3 focused suites 147/147, full tests 1957/2, package/hash binding, and child budget 793/800. These green gates do not override the live bypasses.
+
+**Required next-session strategy:** replace ad-hoc regex/token enumeration with explicit utility-specific option parsers matching the supported GNU/macOS semantics, add property/table corpora for accepted abbreviations/escapes, then run a fresh scoped re-review. No additional fix round is authorized in this session.

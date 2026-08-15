@@ -112,3 +112,16 @@ Fix commit `2c20241b` addresses only the six open findings below; statuses remai
 | JD-S1-FR1-006 | judgment-day | child diff budget | BLOCKER | fixed | Exact tracker comparison is 787 additions + 13 deletions = 800; `split_required=false`. |
 
 Warning/info unchanged: `command -v` can be over-denied; it does not enter the fix loop.
+
+### Slice 1 Fix Round 2 Final Re-review
+
+**Verdict:** FIXED_PENDING_REJUDGMENT — Judge A returned CLEAN and Judge B reproduced two concrete variants after Round 2; the user authorized this exceptional, final Fix Round 3.
+
+Verified fixed: combined static-shell recursion and bounds, Bash substitutions/backticks, PowerShell managed redirections/escaped pipes, ordinary wrapper forms, and the 800-line child budget.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JD-S1-FR2-001 | judgment-day | runtime `env -S` wrapper parser | CRITICAL | fixed | GNU separated/attached `-S` and separated/equals `--split-string` lex their supplied argv and remaining command tokens; five new exact spawned deny probes plus benign attached-env allow probe pass. |
+| JD-S1-FR2-002 | judgment-day | runtime chmod/base64 option predicates | CRITICAL | fixed | Bundled chmod options containing uppercase `R`, exact `--recursive`, base64 short bundles with `d`, macOS `-D`, and GNU `--d` through `--decode` deny only with a real downstream shell pipe; eight new deny and one no-pipe allow spawned probes pass. |
+
+The exceptional fix passes focused/full tests, typechecks, lint, pre-commit build, package and static/hash gates at **780 additions + 13 deletions = 793**; `split_required=false`. Required scoped re-judgment remains pending.

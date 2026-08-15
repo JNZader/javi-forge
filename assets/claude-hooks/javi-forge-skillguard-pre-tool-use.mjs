@@ -137,7 +137,7 @@ function commandWords(input, powershell = false) {
 		tokens.shift();
 		for (;;) {
 			if (tokens[0] === "--" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) { tokens.shift(); continue; }
-			if (wrapper === "env" && /^(?:-S|--split-string)$/.test(tokens[0] ?? "")) { const split = lex(tokens[1] ?? ""); if (split.commands.length !== 1 || split.separators.length) fail("unlexable-command"); tokens.splice(0, 2, ...split.commands[0]); continue; }
+			if (wrapper === "env") { const option = tokens[0] ?? "", attached = option.match(/^-S(.+)$|^--split-string=(.*)$/); if (attached || /^(?:-S|--split-string)$/.test(option)) { const split = lex(attached ? (attached[1] ?? attached[2]) : (tokens[1] ?? "")); if (split.commands.length !== 1 || split.separators.length) fail("unlexable-command"); tokens.splice(0, attached ? 1 : 2, ...split.commands[0]); continue; } }
 			if ((wrapper === "sudo" && /^(?:-u|-g|-h|-p|-C|-D|-R|-T|-r|-t|--user|--group|--host|--prompt|--chdir|--chroot|--command-timeout|--role|--type)$/.test(tokens[0] ?? "")) || (wrapper === "env" && /^(?:-u|-C|--unset|--chdir)$/.test(tokens[0] ?? ""))) { tokens.splice(0, 2); continue; }
 			if (tokens[0]?.startsWith("-") && tokens[0] !== "--") { tokens.shift(); continue; }
 			break;
@@ -209,10 +209,10 @@ function evaluateBash(command, cwd, depth = 0) {
 		const executable = (tokens[0] ?? "").toLowerCase();
 		const rmOptions = tokens.filter((token) => token.startsWith("-")).join("");
 		if ((executable === "rm" && /r/i.test(rmOptions) && /f/i.test(rmOptions) && tokens.some((token) => ["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT].includes(token))) || /^mkfs/.test(executable) || (executable === "dd" && tokens.some((token) => /^of=\/dev\/(?:sd|nvme|vd|disk)/.test(token)))) return { allowed: false, ruleId: "shell.destructive-root" };
-		if (executable === "chmod" && (tokens.some((token) => /^(?:-[^-]*R|--recursive)$/i.test(token)) || tokens.some((token) => /^(?:0?777)$/.test(token))) && tokens.some((token) => ["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT].includes(token))) return { allowed: false, ruleId: "shell.destructive-root" };
+		if (executable === "chmod" && (tokens.some((token) => /^-[^-]*R[^-]*$|^--recursive$/.test(token)) || tokens.some((token) => /^(?:0?777)$/.test(token))) && tokens.some((token) => ["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT].includes(token))) return { allowed: false, ruleId: "shell.destructive-root" };
 		if (parsed.separators[index] === "|") {
 			const downstream = commandWords(parsed.commands[index + 1] ?? []);
-			const producer = executable === "base64" ? tokens.some((token) => token === "--decode" || /^-[^-]*d[^-]*$/.test(token)) : /^(?:curl|wget)$/.test(executable);
+			const producer = executable === "base64" ? tokens.some((token) => /^-[^-]*d[^-]*$|^-D$|^--d(?:e(?:c(?:o(?:d(?:e)?)?)?)?)?$/.test(token)) : /^(?:curl|wget)$/.test(executable);
 			if (producer && /^(?:sh|bash|zsh|dash|ksh)$/.test((downstream[0] ?? "").toLowerCase())) return { allowed: false, ruleId: "shell.pipe-to-shell" };
 		}
 		if (["cat", "less", "more", "head", "tail", "bat", "grep", "rg", "sed", "awk", "source", ".", "cp", "install"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "shell.sensitive-read" };

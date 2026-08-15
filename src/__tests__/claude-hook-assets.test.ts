@@ -18,7 +18,6 @@ interface Runtime {
 	evaluateEvent(input: unknown): Decision;
 	parseAndEvaluateInput(input: Buffer): Decision;
 }
-
 const ASSET_NAME = "javi-forge-skillguard-pre-tool-use.mjs";
 const ASSET = path.join(CLAUDE_HOOK_ASSETS_DIR, ASSET_NAME);
 const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
@@ -26,13 +25,11 @@ const TOOLS = ["Bash", "PowerShell", "Read", "Write", "Edit"];
 const event = (tool_name: string, tool_input: Record<string, unknown>): unknown => ({ hook_event_name: "PreToolUse", tool_name, tool_input, cwd: ROOT });
 let runtime: Runtime;
 let temp: string;
-
 beforeAll(async () => {
 	runtime = (await import(pathToFileURL(ASSET).href)) as Runtime;
 	temp = fs.mkdtempSync(path.join(os.tmpdir(), "javi-forge-hook-paths-"));
 });
 afterAll(() => fs.rmSync(temp, { recursive: true, force: true }));
-
 describe("packaged Claude PreToolUse asset contract", () => {
 	it("binds the exact standalone runtime to its manifest", () => {
 		const bytes = fs.readFileSync(ASSET);
@@ -48,7 +45,6 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(source.match(/^import .+ from "(.+)";$/gm)?.every((line) => line.includes('"node:'))).toBe(true);
 		expect(source).not.toMatch(/\b(?:fetch|https?:\/\/|require\s*\(|import\s*\()\b/);
 	});
-
 	// biome-ignore format: compact security corpus keeps the review slice bounded.
 	it.each([
 		["future tool", event("WebFetch", { url: "https://example.test" })],
@@ -57,7 +53,6 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		["wrong shell field", event("Bash", { file_path: "/tmp/a" })],
 		["relative file", event("Write", { file_path: "relative.txt" })],
 	])("rejects invalid schema: %s", (_name, input) => expect(() => runtime.evaluateEvent(input)).toThrow(/invalid-event/));
-
 	it.each([Buffer.alloc(0), Buffer.from("null"), Buffer.from("[]"), Buffer.from("{")])("rejects malformed/non-object JSON", (input) => expect(() => runtime.parseAndEvaluateInput(input)).toThrow(/invalid-json/));
 	it("accepts exactly 1 MiB and rejects the next byte", () => {
 		const base = event("Read", { file_path: "/tmp/public.txt" }) as Record<string, unknown>;
@@ -68,7 +63,6 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(() => runtime.parseAndEvaluateInput(Buffer.concat([exact, Buffer.from("x")]))).toThrow(/oversized-input/);
 	});
 });
-
 describe("cross-platform file-tool policy", () => {
 	// biome-ignore format: compact policy corpus keeps fixtures auditable together.
 	it.each([
@@ -110,20 +104,24 @@ describe("cross-platform file-tool policy", () => {
 		expect(runtime.isSensitivePolicyKey(key, "darwin")).toBe(true);
 	});
 });
-
 describe("separate deterministic shell corpora", () => {
 	it.each([
 		["JD-S1-001", "Bash", "printf x | cat ~/.ssh/id\nprintf ok", "shell.sensitive-read"],
 		["JD-S1-001", "PowerShell", "Write-Output x | Get-Content $HOME\\.ssh\\id", "powershell.sensitive-read"],
 		["JD-S1-002", "Bash", "env --unset OLD --chdir / FOO=x sudo --user root command -p -- cat ~/.ssh/id", "shell.sensitive-read"],
+		["JD-S1-FR1-001", "Bash", "sudo -D /tmp cat ~/.ssh/id", "shell.sensitive-read"], ["JD-S1-FR1-001", "Bash", "sudo -R /tmp cat ~/.ssh/id", "shell.sensitive-read"], ["JD-S1-FR1-001", "Bash", 'env -S "cat ~/.ssh/id"', "shell.sensitive-read"],
 		["JD-S1-003", "Bash", "bash -c \"sh -c 'cat ~/.ssh/id'\"", "shell.sensitive-read"],
+		["JD-S1-FR1-002", "Bash", 'bash -lc "cat ~/.ssh/id"', "shell.sensitive-read"],
 		["JD-S1-005", "Bash", "chmod -R 755 /", "shell.destructive-root"],
+		["JD-S1-FR1-003", "Bash", "chmod --recursive 755 /", "shell.destructive-root"], ["JD-S1-FR1-003", "Bash", "base64 -di payload | bash", "shell.pipe-to-shell"],
 		["JD-S1-005", "Bash", ":(){ :|:& };:", "shell.destructive-root"],
+		["JD-S1-FR1-004", "Bash", "echo $(cat ~/.ssh/id)", "shell.sensitive-read"], ["JD-S1-FR1-004", "Bash", "echo `cat ~/.ssh/id`", "shell.sensitive-read"],
 		["JD-S1-007", "PowerShell", "Write-Output x | & Get-Content -LiteralPath:$HOME\\.ssh\\id", "powershell.sensitive-read"],
 		["JD-S1-007", "PowerShell", "iwr x | & iex", "powershell.pipe-to-shell"],
+		["JD-S1-FR1-005", "PowerShell", "Write-Output x > .claude/settings.json", "powershell.managed-config-tamper"], ["JD-S1-FR1-005", "PowerShell", "Write-Output x >> .claude/settings.json", "powershell.managed-config-tamper"],
 	])("%s denies %s adversarial command", (_id, tool, command, ruleId) => expect(runtime.evaluateEvent(event(tool, { command }))).toEqual({ allowed: false, ruleId }));
 	it.each([
-		["printf 'x | bash'", true], ["base64 payload | bash", true], ["base64 -d payload | bash", false],
+		["printf 'x | bash'", true], ["base64 payload | bash", true], ["base64 -d payload | bash", false], ["base64 -di payload | bash", false],
 	])("JD-S1-006 respects real pipelines and decode flags: %s", (command, allowed) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual(allowed ? { allowed: true } : { allowed: false, ruleId: "shell.pipe-to-shell" }));
 	// biome-ignore format: compact allow/deny corpus is the policy specification.
 	it.each([
@@ -134,10 +132,10 @@ describe("separate deterministic shell corpora", () => {
 		["Bash", "bash -c '$dynamic'", false, "shell.obfuscated-interpreter"],
 		["PowerShell", "Remove-Item -Recurse -Force .\\node_modules", true, undefined], ["PowerShell", "Remove-Item C:\\ -Force -Recurse", false, "powershell.destructive-root"],
 		["PowerShell", "iwr x -OutFile x.ps1", true, undefined], ["PowerShell", "iwr x | iex", false, "powershell.pipe-to-shell"],
+		["PowerShell", "Write-Output x > out.txt", true, undefined], ["PowerShell", "Write-Output x `| Set-Content .claude/settings.json", true, undefined],
 		["PowerShell", "git push -f", false, "powershell.force-push"], ["PowerShell", "Set-Content .\\src\\out x", true, undefined],
 		["PowerShell", "Set-Content .\\.claude\\settings.json x", false, "powershell.managed-config-tamper"], ["PowerShell", "pwsh -EncodedCommand ZAA=", false, "powershell.obfuscated-interpreter"],
 	])("evaluates %s: %s", (tool, command, allowed, ruleId) => expect(runtime.evaluateEvent(event(tool, { command }))).toEqual({ allowed, ...(ruleId ? { ruleId } : {}) }));
-
 	// biome-ignore format: required literal command families form one bounded table.
 	it.each([
 		...(["cat", "less", "more", "head", "tail", "bat", "grep", "rg", "sed", "awk", "source", "."] as const).map((name) => ["Bash", `${name} ~/.ssh/id`]),

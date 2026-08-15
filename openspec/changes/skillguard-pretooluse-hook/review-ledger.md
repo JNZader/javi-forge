@@ -95,3 +95,20 @@ Fix Round 1 must close JD-S1-001 through JD-S1-009 with spawned/live regression 
 - RED: focused adversarial run produced 18 failures across all nine findings.
 - GREEN: focused runtime suites pass 101/101, including real spawned-process, PowerShell parser, and real symlink probes.
 - Budget: 800 changed lines (787 additions + 13 deletions) against `feat/skillguard-pretooluse-hook`; no split required.
+
+### Slice 1 Fix Round 1 Re-review
+
+**Verdict:** FIXED_PENDING_REJUDGMENT. Final automatic fix round reproduced 11 live failures, then passed 132/132 focused tests and every required gate at exactly **800 changed lines** (787 additions + 13 deletions).
+
+Fix commit `2c20241b` addresses only the six open findings below; statuses remain `fixed` until the required blind final re-judgment verifies them.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JD-S1-FR1-001 | judgment-day | runtime wrapper parser | CRITICAL | fixed | `sudo -D/-R <value>` and lexable `env -S "..."` consume their values before evaluating the wrapped command; exact spawned probes deny. |
+| JD-S1-FR1-002 | judgment-day | runtime nested shell parser | CRITICAL | fixed | Bundled short options carrying `c` recurse for all five supported shells, with depth overflow denied; spawned probes cover both. |
+| JD-S1-FR1-003 | judgment-day | runtime destructive/pipe rules | CRITICAL | fixed | `chmod --recursive 755 /` and `base64 -di payload | bash` deny while undecoded base64 remains allowed. |
+| JD-S1-FR1-004 | judgment-day | runtime Bash substitution handling | CRITICAL | fixed | Lexable `$()` and backtick bodies recurse through the bounded Bash evaluator and deny contained sensitive reads. |
+| JD-S1-FR1-005 | judgment-day | runtime PowerShell evaluator | CRITICAL | fixed | Managed overwrite/append redirections deny; ordinary output and a backtick-escaped pipe remain allowed. |
+| JD-S1-FR1-006 | judgment-day | child diff budget | BLOCKER | fixed | Exact tracker comparison is 787 additions + 13 deletions = 800; `split_required=false`. |
+
+Warning/info unchanged: `command -v` can be over-denied; it does not enter the fix loop.

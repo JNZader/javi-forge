@@ -111,7 +111,7 @@ function lex(command, powershell = false) {
 	for (let index = 0; index < command.length; index++) {
 		const char = command[index];
 		if (escaped) { token += char; escaped = false; continue; }
-		if (char === "\\" && quote !== "'" && !powershell) { escaped = true; continue; }
+		if (char === "\\" && quote !== "'" && !powershell) { if (quote === '"' && !/[$`"\\\n]/.test(command[index + 1] ?? "")) token += "\\"; else escaped = true; continue; }
 		if (char === "`" && quote !== "'" && powershell) { escaped = true; continue; }
 		if (quote) { if (char === quote) quote = ""; else token += char; continue; }
 		if (char === "'" || char === '"') { quote = char; continue; }
@@ -127,6 +127,67 @@ function lex(command, powershell = false) {
 	if (!commands.at(-1).length) commands.pop();
 	return { commands, separators };
 }
+function isLongPrefix(token, name, minimum = 1) {
+	if (!token.startsWith("--")) return false;
+	const equal = token.indexOf("=");
+	const option = token.slice(2, equal < 0 ? undefined : equal);
+	return option.length >= minimum && name.startsWith(option);
+}
+const ENV_ESCAPES = Object.freeze({ f: "\f", n: "\n", r: "\r", t: "\t", v: "\v", "#": "#", $: "$", _: " ", '"': '"', "'": "'", "\\": "\\" });
+function splitEnvString(input) {
+	const words = [];
+	let word = "", quote = "", started = false;
+	const push = () => { if (started) words.push(word); word = ""; started = false; };
+	for (let index = 0; index < input.length; index++) {
+		const char = input[index];
+		if (quote && char === quote) { quote = ""; continue; }
+		if (quote === "'") { word += char; started = true; continue; }
+		if (!quote && (char === "'" || char === '"')) { quote = char; started = true; continue; }
+		if (char === "\\") {
+			const escape = input[++index];
+			if (!escape || escape === "c" && quote) fail("unlexable-command");
+			if (escape === "c") break;
+			if (!(escape in ENV_ESCAPES)) fail("unlexable-command");
+			const value = ENV_ESCAPES[escape];
+			if (!quote && /\s/.test(value)) push(); else { word += value; started = true; }
+			continue;
+		}
+		if (!quote && /\s/.test(char)) { push(); continue; }
+		if (!quote && char === "#" && !started) break;
+		word += char; started = true;
+	}
+	if (quote) fail("unlexable-command");
+	push(); return words;
+}
+export function parseEnvSplit(tokens) {
+	const option = tokens[0] ?? "";
+	let value, consumed = 1;
+	if (option === "-S") { value = tokens[1]; consumed = 2; }
+	else if (option.startsWith("-S") && !option.startsWith("--")) value = option.slice(2);
+	else if (isLongPrefix(option, "split-string")) { const equal = option.indexOf("="); if (equal < 0) { value = tokens[1]; consumed = 2; } else value = option.slice(equal + 1); }
+	else return null;
+	if (value === undefined) fail("unlexable-command");
+	return { consumed, words: splitEnvString(value) };
+}
+export function hasChmodRecursive(tokens) {
+	for (const token of tokens) {
+		if (token === "--" || !token.startsWith("-")) break;
+		if (isLongPrefix(token, "recursive", 3)) return true;
+		if (isLongPrefix(token, "reference", 3)) break;
+		if (!token.startsWith("--") && token.includes("R")) return true;
+	}
+	return false;
+}
+export function hasBase64Decode(tokens) {
+	for (let index = 0; index < tokens.length; index++) {
+		const token = tokens[index];
+		if (token === "--") break;
+		if (token.startsWith("--")) { if (!token.includes("=") && isLongPrefix(token, "decode")) return true; if (isLongPrefix(token, "wrap") && !token.includes("=")) index++; continue; }
+		if (!/^-[^-]/.test(token)) continue;
+		for (let short = 1; short < token.length; short++) { const flag = token[short]; if (flag === "d" || flag === "D") return true; if ("iowb".includes(flag)) { if (short === token.length - 1) index++; break; } break; }
+	}
+	return false;
+}
 function commandWords(input, powershell = false) {
 	const tokens = [...input];
 	if (powershell) while (tokens[0] === "&") tokens.shift();
@@ -137,7 +198,7 @@ function commandWords(input, powershell = false) {
 		tokens.shift();
 		for (;;) {
 			if (tokens[0] === "--" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) { tokens.shift(); continue; }
-			if (wrapper === "env") { const option = tokens[0] ?? "", attached = option.match(/^-S(.+)$|^--split-string=(.*)$/); if (attached || /^(?:-S|--split-string)$/.test(option)) { const split = lex(attached ? (attached[1] ?? attached[2]) : (tokens[1] ?? "")); if (split.commands.length !== 1 || split.separators.length) fail("unlexable-command"); tokens.splice(0, attached ? 1 : 2, ...split.commands[0]); continue; } }
+			if (wrapper === "env") { const split = parseEnvSplit(tokens); if (split) { tokens.splice(0, split.consumed, ...split.words); continue; } }
 			if ((wrapper === "sudo" && /^(?:-u|-g|-h|-p|-C|-D|-R|-T|-r|-t|--user|--group|--host|--prompt|--chdir|--chroot|--command-timeout|--role|--type)$/.test(tokens[0] ?? "")) || (wrapper === "env" && /^(?:-u|-C|--unset|--chdir)$/.test(tokens[0] ?? ""))) { tokens.splice(0, 2); continue; }
 			if (tokens[0]?.startsWith("-") && tokens[0] !== "--") { tokens.shift(); continue; }
 			break;
@@ -205,14 +266,15 @@ function evaluateBash(command, cwd, depth = 0) {
 	let parsed;
 	try { parsed = lex(command); } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
 	for (let index = 0; index < parsed.commands.length; index++) {
-		const tokens = commandWords(parsed.commands[index]);
+		let tokens;
+		try { tokens = commandWords(parsed.commands[index]); } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
 		const executable = (tokens[0] ?? "").toLowerCase();
 		const rmOptions = tokens.filter((token) => token.startsWith("-")).join("");
 		if ((executable === "rm" && /r/i.test(rmOptions) && /f/i.test(rmOptions) && tokens.some((token) => ["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT].includes(token))) || /^mkfs/.test(executable) || (executable === "dd" && tokens.some((token) => /^of=\/dev\/(?:sd|nvme|vd|disk)/.test(token)))) return { allowed: false, ruleId: "shell.destructive-root" };
-		if (executable === "chmod" && (tokens.some((token) => /^-[^-]*R[^-]*$|^--recursive$/.test(token)) || tokens.some((token) => /^(?:0?777)$/.test(token))) && tokens.some((token) => ["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT].includes(token))) return { allowed: false, ruleId: "shell.destructive-root" };
+		if (executable === "chmod" && (hasChmodRecursive(tokens.slice(1)) || tokens.some((token) => /^(?:0?777)$/.test(token))) && tokens.some((token) => ["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT].includes(token))) return { allowed: false, ruleId: "shell.destructive-root" };
 		if (parsed.separators[index] === "|") {
 			const downstream = commandWords(parsed.commands[index + 1] ?? []);
-			const producer = executable === "base64" ? tokens.some((token) => /^-[^-]*d[^-]*$|^-D$|^--d(?:e(?:c(?:o(?:d(?:e)?)?)?)?)?$/.test(token)) : /^(?:curl|wget)$/.test(executable);
+			const producer = executable === "base64" ? hasBase64Decode(tokens.slice(1)) : /^(?:curl|wget)$/.test(executable);
 			if (producer && /^(?:sh|bash|zsh|dash|ksh)$/.test((downstream[0] ?? "").toLowerCase())) return { allowed: false, ruleId: "shell.pipe-to-shell" };
 		}
 		if (["cat", "less", "more", "head", "tail", "bat", "grep", "rg", "sed", "awk", "source", ".", "cp", "install"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "shell.sensitive-read" };

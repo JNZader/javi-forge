@@ -70,6 +70,12 @@ export function canonicalizePolicyPath(input, options = {}) {
 			expanded = path.resolve(options.base, expanded);
 		}
 	}
+	// Strip Windows device aliases (\??\, \\?\, \\.\) BEFORE native realpath:
+	// on a real win32 host nativeRealpath resolves an unstripped \??\ against the
+	// current drive (D:\??\C:\...), so the alias must be canonicalized first or a
+	// \??\-prefixed path to a secret would evade sensitive/managed detection.
+	const windowsInput = platform === "win32" || WINDOWS_DRIVE.test(expanded) || WINDOWS_UNC.test(expanded) || /^\\(?:\\\?|\?\?|\\\.)\\/i.test(expanded);
+	if (windowsInput) expanded = normalizeWindowsAlias(expanded);
 	const native = platform === process.platform && path.isAbsolute(expanded) ? nativeRealpath(expanded) : expanded;
 	return lexicalNormalize(native, platform);
 }
@@ -94,7 +100,12 @@ function isManaged(key) {
 	const project = canonicalizePolicyPath(PROJECT_ROOT);
 	if (!key.startsWith(`${project}/`) && key !== project) return false;
 	const relative = key.slice(project.length + 1);
-	return relative === ".claude/settings.json" || relative === ".claude/settings.local.json" || relative === ".claude/CLAUDE.md" || relative === "CLAUDE.md" || relative === ".javi-forge/ci.yaml" || relative.startsWith(".claude/hooks/") || relative.startsWith(".claude/agents/") || relative.startsWith(".claude/skills/");
+	// On case-insensitive platforms lexicalNormalize folds the key to lowercase,
+	// so the mixed-case CLAUDE.md literals must be matched case-insensitively too
+	// (the other literals are already lowercase). Otherwise CLAUDE.md and
+	// .claude/CLAUDE.md lose managed-config protection on macOS/Windows.
+	const foldedClaudeMd = (process.platform === "win32" || process.platform === "darwin") && (relative === "claude.md" || relative === ".claude/claude.md");
+	return foldedClaudeMd || relative === ".claude/settings.json" || relative === ".claude/settings.local.json" || relative === ".claude/CLAUDE.md" || relative === "CLAUDE.md" || relative === ".javi-forge/ci.yaml" || relative.startsWith(".claude/hooks/") || relative.startsWith(".claude/agents/") || relative.startsWith(".claude/skills/");
 }
 function evaluateFile(toolName, filePath) {
 	const keys = policyPathKeys(filePath);

@@ -1,1 +1,5 @@
 assets/hooks/** text eol=lf
+# The packaged Claude hook runtime + manifest MUST stay LF on every platform:
+# the manifest binds an exact SHA-256 of the .mjs bytes, and a CRLF checkout on
+# Windows would break both the integrity gate and the `v1\n` marker assertion.
+assets/claude-hooks/** text eol=lf

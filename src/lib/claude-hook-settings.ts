@@ -309,3 +309,114 @@ export function classifySettingsEntry(
 	}
 	return { state: "edited-managed", ...base };
 }
+
+// Removal / merge planning (planning only — no I/O, no execution)
+
+export interface ManagedRemovalPlan {
+	refused: boolean;
+	reason?: string;
+	state: ClaudeHookComponentState;
+	groupIndex?: number;
+	handlerIndex?: number;
+	/** True when removing the managed handler empties the group. */
+	removeGroup?: boolean;
+	/** Sibling handlers in the group that removal must preserve. */
+	preservedSiblings?: number;
+}
+
+function groupHandlerCount(parsed: unknown, groupIndex: number): number {
+	const hooks = isPlainObject(parsed) ? parsed.hooks : undefined;
+	const groups =
+		isPlainObject(hooks) && Array.isArray(hooks.PreToolUse)
+			? hooks.PreToolUse
+			: [];
+	const group = groups[groupIndex];
+	return isPlainObject(group) && Array.isArray(group.hooks)
+		? group.hooks.length
+		: 0;
+}
+
+/**
+ * Plan removal of the marker-proven managed handler. Only a recognized managed
+ * identity (`managed-current` or `released-outdated`) is eligible; foreign,
+ * partial-legacy, edited-managed, and every non-regular state refuse.
+ */
+export function planManagedClaudeHookRemoval(
+	parsed: unknown,
+	currentAssetSha: string,
+	identities: SettingsIdentityManifest,
+): ManagedRemovalPlan {
+	const cls = classifySettingsEntry(parsed, currentAssetSha, identities);
+	if (cls.state === "managed-current" || cls.state === "released-outdated") {
+		const handlerCount = groupHandlerCount(parsed, cls.groupIndex ?? -1);
+		const preservedSiblings = Math.max(handlerCount - 1, 0);
+		return {
+			refused: false,
+			state: cls.state,
+			groupIndex: cls.groupIndex,
+			handlerIndex: cls.handlerIndex,
+			removeGroup: preservedSiblings === 0,
+			preservedSiblings,
+		};
+	}
+	return {
+		refused: true,
+		reason: `refuse removal for state ${cls.state}`,
+		state: cls.state,
+	};
+}
+
+export interface ManagedMergePlan {
+	refused: boolean;
+	reason?: string;
+	state: ClaudeHookComponentState;
+	action: "install" | "replace" | "noop" | "refuse";
+	groupIndex?: number;
+	handlerIndex?: number;
+	preservedSiblings?: number;
+}
+
+/**
+ * Plan the managed merge. `absent` installs a new group, `managed-current` is a
+ * no-op, `released-outdated` replaces the marked handler in place (siblings
+ * preserved), and every other state refuses (edited/force is a Slice-3 concern).
+ */
+export function planManagedClaudeHookMerge(
+	parsed: unknown,
+	currentAssetSha: string,
+	identities: SettingsIdentityManifest,
+): ManagedMergePlan {
+	const cls = classifySettingsEntry(parsed, currentAssetSha, identities);
+	if (cls.state === "absent") {
+		return { refused: false, state: cls.state, action: "install" };
+	}
+	if (cls.state === "managed-current") {
+		return {
+			refused: false,
+			state: cls.state,
+			action: "noop",
+			groupIndex: cls.groupIndex,
+			handlerIndex: cls.handlerIndex,
+		};
+	}
+	if (cls.state === "released-outdated") {
+		const preservedSiblings = Math.max(
+			groupHandlerCount(parsed, cls.groupIndex ?? -1) - 1,
+			0,
+		);
+		return {
+			refused: false,
+			state: cls.state,
+			action: "replace",
+			groupIndex: cls.groupIndex,
+			handlerIndex: cls.handlerIndex,
+			preservedSiblings,
+		};
+	}
+	return {
+		refused: true,
+		reason: `refuse merge for state ${cls.state}`,
+		state: cls.state,
+		action: "refuse",
+	};
+}

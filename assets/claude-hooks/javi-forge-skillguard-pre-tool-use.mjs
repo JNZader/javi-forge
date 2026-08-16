@@ -127,6 +127,7 @@ function lex(command, powershell = false) {
 		if (quote) { if (char === quote) quote = ""; else token += char; continue; }
 		if (char === "'" || char === '"') { quote = char; continue; }
 		if (char === "|" && command[index + 1] === "|") { split("||"); index++; continue; }
+		if (char === "|" && command[index + 1] === "&") { split("|"); index++; continue; } // bash `|&` pipes stdout+stderr; a real pipe for policy
 		if (char === "&" && command[index + 1] === "&") { split("&&"); index++; continue; }
 		if (char === "|" || char === ";" || char === "\n" || char === "\r") { split(char === "|" ? "|" : ";"); continue; }
 		if (char === ">" || char === "<") { pushToken(); commands.at(-1).push(char); continue; }
@@ -383,7 +384,10 @@ function conservativePossibleTargets(tokens) {
 	return tokens.slice(1).filter(isCriticalTarget);
 }
 function assessChmodProfile(applicability, state) {
-	const mode777 = state.mode !== undefined && /^0?777$/.test(state.mode);
+	// Low 777 (world rwx) is the danger; setuid/setgid/sticky prefixes (4777, 2777,
+	// 1777, 00777, …) on a critical root are equally dangerous, so match any leading
+	// special/zero octal digits before 777.
+	const mode777 = state.mode !== undefined && /^[0-7]{0,2}777$/.test(state.mode);
 	const roles = { targets: state.targets, possibleTargets: [] };
 	if (state.mode !== undefined) roles.mode = state.mode;
 	if (state.reference !== undefined) roles.reference = state.reference;

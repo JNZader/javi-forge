@@ -183,4 +183,79 @@ describe("createPosixSecureFs ownership + secure I/O (host-independent, own tmp 
 		const res = await fsx.captureFile(path.join(dir, "link"));
 		expect(res.ok).toBe(false);
 	});
+
+	it("creates a child dir at 0o700 exclusively and refuses a second create", async () => {
+		const parent = (await fsx.openDirNoFollow(dir)).value;
+		if (!parent) throw new Error("dir handle");
+		const created = await fsx.createDirExclusive(parent, "seg", 0o700);
+		expect(created.ok).toBe(true);
+		const { stat } = await import("node:fs/promises");
+		expect((await stat(path.join(dir, "seg"))).mode & 0o777).toBe(0o700);
+		// A second exclusive create over the same name refuses (EEXIST).
+		expect((await fsx.createDirExclusive(parent, "seg", 0o700)).ok).toBe(false);
+		await created.value?.close();
+		await parent.close();
+	});
+
+	it("revalidates identity and refuses on drift or a missing path", async () => {
+		const handle = (await fsx.openDirNoFollow(dir)).value;
+		if (!handle) throw new Error("dir handle");
+		expect((await fsx.revalidateIdentity(dir, handle.identity)).ok).toBe(true);
+		expect(
+			(await fsx.revalidateIdentity(path.join(dir, "nope"), handle.identity))
+				.ok,
+		).toBe(false);
+		// A different inode fails identity.
+		expect((await fsx.revalidateIdentity(dir, { dev: 0, ino: -1 })).ok).toBe(
+			false,
+		);
+		await handle.close();
+	});
+
+	it("applies an exact mode and re-verifies it, then renames within the dir", async () => {
+		const handle = (await fsx.openDirNoFollow(dir)).value;
+		if (!handle) throw new Error("dir handle");
+		await fsx.writeExclusive(handle, "staged.tmp", Buffer.from("x"), 0o600);
+		expect(
+			(await fsx.applyExactMode(path.join(dir, "staged.tmp"), 0o640)).ok,
+		).toBe(true);
+		const { stat } = await import("node:fs/promises");
+		expect((await stat(path.join(dir, "staged.tmp"))).mode & 0o777).toBe(0o640);
+		expect((await fsx.renameInDir(handle, "staged.tmp", "final")).ok).toBe(
+			true,
+		);
+		expect((await fsx.captureFile(path.join(dir, "final"))).ok).toBe(true);
+		await handle.close();
+	});
+
+	it("unlinks an identity-matched file and rmdirs only an empty identity-matched dir", async () => {
+		const parent = (await fsx.openDirNoFollow(dir)).value;
+		if (!parent) throw new Error("dir handle");
+		await fsx.writeExclusive(parent, "victim", Buffer.from("x"), 0o600);
+		const captured = await fsx.captureFile(path.join(dir, "victim"));
+		expect(
+			(
+				await fsx.unlinkIfIdentity(
+					parent,
+					"victim",
+					captured.value?.identity ?? {
+						dev: 0,
+						ino: 0,
+					},
+				)
+			).ok,
+		).toBe(true);
+		const seg = await fsx.createDirExclusive(parent, "empty", 0o700);
+		if (!seg.value) throw new Error("seg handle");
+		// Non-empty dir refuses removal.
+		await fsx.writeExclusive(seg.value, "child", Buffer.from("x"), 0o600);
+		expect((await fsx.rmdirIfIdentityEmpty(seg.value)).ok).toBe(false);
+		await fsx
+			.unlinkIfIdentity(seg.value, "child", { dev: 0, ino: 0 })
+			.catch(() => {});
+		const { unlink } = await import("node:fs/promises");
+		await unlink(path.join(dir, "empty", "child"));
+		expect((await fsx.rmdirIfIdentityEmpty(seg.value)).ok).toBe(true);
+		await parent.close();
+	});
 });

@@ -218,11 +218,16 @@ export const UTILITY_PROFILE_REGISTRY = deepFreeze([
 const NON_LITERAL_IDENTITY_MARKERS = /[$`*?\[\]{};|&<>()\n\r\0]/;
 export function normalizeLiteralUtilityIdentity(rawToken) {
 	// Lexical-only: split on "/" without path/realpath/PATH/alias resolution.
+	// Basename compare is case-insensitive and host-independent so inherited
+	// deny families still fire for CHMOD/ENV/BASE64 on case-insensitive
+	// filesystems, mirroring the darwin/win32 path folding lexicalNormalize
+	// already applies. The canonical lowercase utility feeds profile lookup.
 	const token = typeof rawToken === "string" ? rawToken : "";
 	const literal = token.length > 0 && !NON_LITERAL_IDENTITY_MARKERS.test(token);
 	const component = token.split("/").filter(Boolean);
 	const basename = literal ? (component.at(-1) ?? "") : "";
-	const utility = literal && (basename === "env" || basename === "chmod" || basename === "base64") ? basename : UTILITY.UNSUPPORTED;
+	const canonical = basename.toLowerCase();
+	const utility = literal && (canonical === "env" || canonical === "chmod" || canonical === "base64") ? canonical : UTILITY.UNSUPPORTED;
 	return { rawToken: token, basename, utility, literal, pathQualified: token.includes("/") };
 }
 export function matchLongOption(token, longOptions) {

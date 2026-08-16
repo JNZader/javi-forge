@@ -138,3 +138,26 @@ The exceptional fix passes focused/full tests, typechecks, lint, pre-commit buil
 Passing evidence retained: F3 focused suites 147/147, full tests 1957/2, package/hash binding, and child budget 793/800. These green gates do not override the live bypasses.
 
 **Required next-session strategy:** replace ad-hoc regex/token enumeration with explicit utility-specific option parsers matching the supported GNU/macOS semantics, add property/table corpora for accepted abbreviations/escapes, then run a fresh scoped re-review. No additional fix round is authorized in this session.
+
+### Slice 1 Recovery Incident Audit
+
+**Verdict:** BLOCKED — the installed `gentle-ai` binary does not expose the workflow-required `sdd-attempt` command. Process inspection found no active apply, verify, Vitest, or javi-forge process, so a read-only final scoped re-review was allowed; runtime-bearing apply/verify remains blocked until attempt authority is restored or explicitly replaced.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| R4-001 | resilience | installed `gentle-ai` command surface | BLOCKER | verified | Installed official v2.4.0-rc.8 at `/home/javier/.local/bin/gentle-ai`; both blind judges verified pinned SHA-256, PATH precedence, version, Homebrew rollback, and `sdd-attempt status` exit 0 with no active attempts and `next_action=begin`. |
+| R4-002 | resilience | OpenSpec dispatcher state | CRITICAL | open | Native status reports the existing review ledger as missing and recommends aggregate `apply` from 13/59 tasks, which would ignore the blocked Slice 1 review and could advance into future slices. |
+| R4-003 | resilience | `apply-progress.md:5-46` | WARNING | info | OpenSpec progress remains bound to obsolete commits, the old 793-line count, and the pre-`69823570` blocked state. |
+
+### Slice 1 Recovery Final Scoped Re-review
+
+**Target:** existing findings `JD-S1-FR3-001` and `JD-S1-FR3-002`; fix delta `bbcc95e5..69823570` only.
+
+**Verdict:** ESCALATED — both blind judges independently reproduced residual variants of both existing CRITICAL findings. No new ledger IDs were created because the bypasses remain within the original finding families. The convergence budget is exhausted; no further automatic fix round is authorized.
+
+| id | lens | location | severity | status | evidence |
+|---|---|---|---|---|---|
+| JD-S1-FR3-001 | judgment-day | `assets/claude-hooks/javi-forge-skillguard-pre-tool-use.mjs:137-170,191-203` | CRITICAL | open | Judge A reproduced GNU bundled `env -iS`; Judge B reproduced GNU `env -S` `${VARNAME}` expansion. Equivalent guard probes exit 0 for sensitive reads. |
+| JD-S1-FR3-002 | judgment-day | `assets/claude-hooks/javi-forge-skillguard-pre-tool-use.mjs:172-189,274-278` | CRITICAL | open | Both judges reproduced GNU base64 `-id`/`-i -d` and chmod option permutations after mode or `--reference`; equivalent guard probes exit 0. Existing focused Vitest remains green at 110 passed, 1 skipped but encodes incorrect GNU assumptions. |
+
+Repository remained clean at `69823570ccae4b3a78e717b6510c3c402bb8975a`. `JUDGMENT: ESCALATED`.

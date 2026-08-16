@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: verbatim shell `${…}` and the literal Claude `${CLAUDE_PROJECT_DIR}` placeholder — never JS templates.
 /**
  * Shared frozen ownership fixtures for the SkillGuard Claude PreToolUse guard.
  *

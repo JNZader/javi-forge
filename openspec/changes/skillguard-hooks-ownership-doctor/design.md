@@ -517,3 +517,20 @@ and asserts one `canonicalSha256`. The append-only guard test asserts
 None. Approach 1, Decision ①, and Decision ② are locked; the 9 states, canonical serialization
 rules, legacy recognizer, report struct, `healthy` predicate, manifest shape, and slice seams
 are fixed by this design.
+
+## Post-Apply Reconciliation (2026-08-16)
+
+- **Spec R2 overrides design Algorithm C (settings fallthrough).** Implementation
+  follows the authoritative spec: a content-bearing unmarked `PreToolUse` handler
+  that is not the exact v0 legacy cohort classifies as `foreign`; only zero managed
+  PreToolUse handler content classifies as `absent`. `design.md` Algorithm C's
+  `absent` fallthrough is superseded by this note.
+- **Slice-3 defense-in-depth notes (from the read-only review, both `info`):**
+  1. `canonicalizeSettingsEntry` rebuilds the handler from the fixed 5-key allow-list
+     and drops unknown handler keys — identity is STRUCTURAL, not byte-exact. Slice 3
+     must not treat `managed-current` as a byte guarantee. Inert here: command/args are
+     pinned to `node` + the managed asset arg, so no foreign command can execute.
+  2. A `statusMessage` embedding the literal `<ASSET_SHA256>` placeholder collides to
+     `managed-current` (Decision ②), but only with the exact managed matcher/command/
+     args/timeout, so the handler still invokes the legitimate asset; effect is limited
+     to `assetSettingsConsistent=false` (advisory, not part of `healthy`).

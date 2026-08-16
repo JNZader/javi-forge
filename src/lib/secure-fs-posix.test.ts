@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	createLinuxAclAdapter,
 	createMacosAclAdapter,
+	createPosixSecureFs,
 	type SpawnFn,
 	type SpawnOutcome,
+	selectSecureFs,
 } from "./secure-fs-posix.js";
 
 /** A deterministic spawn fake returning a fixed sequence of outcomes. */
@@ -114,5 +119,68 @@ describe("createMacosAclAdapter (/bin/ls -lde, mocked spawn — never skipped)",
 			spawnReturning(clean("-rw-r--r-- 1 user staff 10 Jan 1 file")),
 		);
 		expect((await acl.proveClean("/x")).ok).toBe(true);
+	});
+});
+
+describe("selectSecureFs platform selection", () => {
+	it("returns null on win32 and unknown platforms", () => {
+		expect(selectSecureFs("win32")).toBeNull();
+		expect(selectSecureFs("sunos")).toBeNull();
+	});
+
+	it("returns an adapter on linux and darwin", () => {
+		expect(selectSecureFs("linux")).not.toBeNull();
+		expect(selectSecureFs("darwin")).not.toBeNull();
+	});
+});
+
+describe("createPosixSecureFs ownership + secure I/O (host-independent, own tmp tree)", () => {
+	let dir: string;
+	const cleanAcl = createLinuxAclAdapter(
+		spawnReturning(clean("user::rwx\ngroup::r-x\nother::r--")),
+	);
+	const fsx = createPosixSecureFs(cleanAcl);
+
+	beforeEach(async () => {
+		dir = await mkdtemp(path.join(os.tmpdir(), "javi-forge-securefs-"));
+		await chmod(dir, 0o700);
+	});
+	afterEach(() => rm(dir, { recursive: true, force: true }));
+
+	it("proves ownership + mode on a private 0700 dir and refuses a world-writable one", async () => {
+		const handle = await fsx.openDirNoFollow(dir);
+		expect(handle.ok).toBe(true);
+		expect((await fsx.proveOwnershipAndMode(dir)).ok).toBe(true);
+		await chmod(dir, 0o777);
+		const refused = await fsx.proveOwnershipAndMode(dir);
+		expect(refused.ok).toBe(false);
+		expect(refused.refusal).toBe("unsafe-parent-chain");
+		await handle.value?.close();
+	});
+
+	it("writes a file exclusively, refuses a second exclusive create, and captures it back", async () => {
+		const handle = (await fsx.openDirNoFollow(dir)).value;
+		if (!handle) throw new Error("dir handle");
+		const bytes = Buffer.from("payload\n", "utf8");
+		expect((await fsx.writeExclusive(handle, "f.tmp", bytes, 0o600)).ok).toBe(
+			true,
+		);
+		// Exclusive create over an existing name refuses (EEXIST).
+		expect((await fsx.writeExclusive(handle, "f.tmp", bytes, 0o600)).ok).toBe(
+			false,
+		);
+		const captured = await fsx.captureFile(path.join(dir, "f.tmp"));
+		expect(captured.ok).toBe(true);
+		expect(captured.value?.bytes.equals(bytes)).toBe(true);
+		expect(captured.value?.mode).toBe(0o600);
+		await handle.close();
+	});
+
+	it("captureFile refuses to follow a symlink at the target name", async () => {
+		await writeFile(path.join(dir, "real"), "secret\n");
+		const { symlink } = await import("node:fs/promises");
+		await symlink(path.join(dir, "real"), path.join(dir, "link"));
+		const res = await fsx.captureFile(path.join(dir, "link"));
+		expect(res.ok).toBe(false);
 	});
 });

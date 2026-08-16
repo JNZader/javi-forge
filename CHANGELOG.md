@@ -1,3 +1,31 @@
+## [1.29.0](https://github.com/JNZader/javi-forge/compare/v1.28.1...v1.29.0) (2026-08-16)
+
+### Features
+
+* **skillguard:** add frozen profile registry and identity/union primitives ([95791e2](https://github.com/JNZader/javi-forge/commit/95791e219ddb6e7c30269321b4a04c36319aeae2))
+* **skillguard:** add standalone PreToolUse protocol and path policy ([0c0f286](https://github.com/JNZader/javi-forge/commit/0c0f286a08e1aa69e512c4756cd9d51f9a6fc145))
+* **skillguard:** enforce shell policy in the shipped evaluator ([4a58e4d](https://github.com/JNZader/javi-forge/commit/4a58e4dd9337b203ee2ee694804d592e96ea3b7f))
+* **skillguard:** implement WU2 GREEN env/chmod/base64 machines ([8daa283](https://github.com/JNZader/javi-forge/commit/8daa283193129563dfbf93a584fc593a2a3ea4c2))
+* **skillguard:** pure claude-hook-settings classifier and canonical identity ([cc86632](https://github.com/JNZader/javi-forge/commit/cc86632e7f5e4ee7afeb1e307302e2aeadc77cf9))
+* **skillguard:** pure managed removal and merge planners ([8b3c447](https://github.com/JNZader/javi-forge/commit/8b3c447afe2a0bd04b924a5c10c1b340258b42a2))
+* **skillguard:** read-only claude-hook-manager asset classifier and doctor ([ae8146a](https://github.com/JNZader/javi-forge/commit/ae8146aa1ea46b9843959bfda8a211fddfc57998))
+
+### Bug Fixes
+
+* **skillguard:** case-insensitive utility identity preserves inherited denials ([815685c](https://github.com/JNZader/javi-forge/commit/815685cb59c9f33b89a0d43adf195210bde7dfad))
+* **skillguard:** close |& pipe and setuid/sticky mode-777 deny-rule gaps ([65bb130](https://github.com/JNZader/javi-forge/commit/65bb13011a1d40e49920f9354f950fa9bb8391b4))
+* **skillguard:** close final runtime parser bypasses ([e3578db](https://github.com/JNZader/javi-forge/commit/e3578dbf27c8c9cf6872e915dc9541e051ea1199))
+* **skillguard:** close runtime policy bypasses ([ac5ab42](https://github.com/JNZader/javi-forge/commit/ac5ab4268780c5e70bfc15fe3a1b01f085d3222d))
+* **skillguard:** harden runtime path policy on case-insensitive/Windows hosts ([3b70d6b](https://github.com/JNZader/javi-forge/commit/3b70d6bba4565e0557f93123fc58a56bf0c3ff94))
+* **skillguard:** parse runtime option families ([bbcc95e](https://github.com/JNZader/javi-forge/commit/bbcc95e54f5c67af515f65de5192cba321ad7aab))
+* **skillguard:** parse utility option semantics ([6982357](https://github.com/JNZader/javi-forge/commit/69823570ccae4b3a78e717b6510c3c402bb8975a))
+
+### Refactoring
+
+* **skillguard:** drop dead boolean utility helpers ([e41215d](https://github.com/JNZader/javi-forge/commit/e41215d558814b089b82cbc604e838a60d2d4562))
+* **skillguard:** populate settings-entry manifest identity with append-only guard ([c91417a](https://github.com/JNZader/javi-forge/commit/c91417a99dbc1704552cff53e9fd8166b10ae50e))
+* **skillguard:** use the static safe-read import in readManifest ([3e10202](https://github.com/JNZader/javi-forge/commit/3e1020205f8357d855f4568be387c2c11abe3920))
+
 ## [1.28.1](https://github.com/JNZader/javi-forge/compare/v1.28.0...v1.28.1) (2026-08-13)
 
 ### Bug Fixes

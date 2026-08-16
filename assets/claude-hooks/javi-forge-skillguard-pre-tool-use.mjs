@@ -138,67 +138,10 @@ function lex(command, powershell = false) {
 	if (!commands.at(-1).length) commands.pop();
 	return { commands, separators };
 }
-function isLongPrefix(token, name, minimum = 1) {
-	if (!token.startsWith("--")) return false;
-	const equal = token.indexOf("=");
-	const option = token.slice(2, equal < 0 ? undefined : equal);
-	return option.length >= minimum && name.startsWith(option);
-}
+// The pre-redesign boolean helpers (parseEnvSplit/hasChmodRecursive/hasBase64Decode
+// and their isLongPrefix/splitEnvString internals) were replaced by the semantic
+// state machines below; only ENV_ESCAPES survives, shared with splitEnvSemantics.
 const ENV_ESCAPES = Object.freeze({ f: "\f", n: "\n", r: "\r", t: "\t", v: "\v", "#": "#", $: "$", _: " ", '"': '"', "'": "'", "\\": "\\" });
-function splitEnvString(input) {
-	const words = [];
-	let word = "", quote = "", started = false;
-	const push = () => { if (started) words.push(word); word = ""; started = false; };
-	for (let index = 0; index < input.length; index++) {
-		const char = input[index];
-		if (quote && char === quote) { quote = ""; continue; }
-		if (quote === "'") { word += char; started = true; continue; }
-		if (!quote && (char === "'" || char === '"')) { quote = char; started = true; continue; }
-		if (char === "\\") {
-			const escape = input[++index];
-			if (!escape || escape === "c" && quote) fail("unlexable-command");
-			if (escape === "c") break;
-			if (!(escape in ENV_ESCAPES)) fail("unlexable-command");
-			const value = ENV_ESCAPES[escape];
-			if (!quote && /\s/.test(value)) push(); else { word += value; started = true; }
-			continue;
-		}
-		if (!quote && /\s/.test(char)) { push(); continue; }
-		if (!quote && char === "#" && !started) break;
-		word += char; started = true;
-	}
-	if (quote) fail("unlexable-command");
-	push(); return words;
-}
-export function parseEnvSplit(tokens) {
-	const option = tokens[0] ?? "";
-	let value, consumed = 1;
-	if (option === "-S") { value = tokens[1]; consumed = 2; }
-	else if (option.startsWith("-S") && !option.startsWith("--")) value = option.slice(2);
-	else if (isLongPrefix(option, "split-string")) { const equal = option.indexOf("="); if (equal < 0) { value = tokens[1]; consumed = 2; } else value = option.slice(equal + 1); }
-	else return null;
-	if (value === undefined) fail("unlexable-command");
-	return { consumed, words: splitEnvString(value) };
-}
-export function hasChmodRecursive(tokens) {
-	for (const token of tokens) {
-		if (token === "--" || !token.startsWith("-")) break;
-		if (isLongPrefix(token, "recursive", 3)) return true;
-		if (isLongPrefix(token, "reference", 3)) break;
-		if (!token.startsWith("--") && token.includes("R")) return true;
-	}
-	return false;
-}
-export function hasBase64Decode(tokens) {
-	for (let index = 0; index < tokens.length; index++) {
-		const token = tokens[index];
-		if (token === "--") break;
-		if (token.startsWith("--")) { if (!token.includes("=") && isLongPrefix(token, "decode")) return true; if (isLongPrefix(token, "wrap") && !token.includes("=")) index++; continue; }
-		if (!/^-[^-]/.test(token)) continue;
-		for (let short = 1; short < token.length; short++) { const flag = token[short]; if (flag === "d" || flag === "D") return true; if ("iowb".includes(flag)) { if (short === token.length - 1) index++; break; } break; }
-	}
-	return false;
-}
 // =====================================================================
 // Utility profile registry + shared semantic primitives (tasks 2.1-2.2)
 //

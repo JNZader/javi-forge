@@ -420,3 +420,200 @@ export function planManagedClaudeHookMerge(
 		action: "refuse",
 	};
 }
+
+// Slice-3a write-plan helpers (Decision 8) — pure, reuse the module primitives.
+
+/** The managed timeout, matching the fixture handler shape. */
+const MANAGED_TIMEOUT = 30;
+
+/** The exact managed handler shape the writer installs. */
+export interface ManagedHandler {
+	type: "command";
+	command: "node";
+	args: [string];
+	timeout: number;
+	statusMessage: string;
+}
+
+/** The exact managed matcher group the writer installs. */
+export interface ManagedMatcherGroup {
+	matcher: string;
+	hooks: [ManagedHandler];
+}
+
+/** Cohort-excision plan for embedded exact-legacy. */
+export interface LegacyCohortExcisionPlan {
+	refused: boolean;
+	reason?: string;
+	/** Indices to remove from hooks.PreToolUse (L1..L3 matches), ascending. */
+	removePreIndices: number[];
+	/** Indices to remove from hooks.PostToolUse (L4 match), ascending. */
+	removePostIndices: number[];
+	/** Append position for the freshly built managed PreToolUse group. */
+	insertPreAt: number;
+}
+
+function preToolUseArray(parsed: unknown): unknown[] {
+	const hooks = isPlainObject(parsed) ? parsed.hooks : undefined;
+	return isPlainObject(hooks) && Array.isArray(hooks.PreToolUse)
+		? hooks.PreToolUse
+		: [];
+}
+
+function postToolUseArray(parsed: unknown): unknown[] {
+	const hooks = isPlainObject(parsed) ? parsed.hooks : undefined;
+	return isPlainObject(hooks) && Array.isArray(hooks.PostToolUse)
+		? hooks.PostToolUse
+		: [];
+}
+
+/**
+ * Plan excision of the proven four-object legacy cohort from an embedded
+ * container. Reuses `LEGACY_COHORT` + `deepStructuralEqual` (the same primitives
+ * `classifyLegacy` uses) and never re-derives the classifier. Returns the exact
+ * ascending object indices to remove per event plus the append position for the
+ * freshly built managed group; every non-cohort sibling is preserved by index.
+ * Only an exact-legacy cohort is eligible — a partial/edited cohort refuses
+ * (the classifier already routes those to `foreign`).
+ */
+export function planLegacyCohortExcision(
+	parsed: unknown,
+): LegacyCohortExcisionPlan {
+	const cls = classifyLegacy(parsed);
+	if (cls.state !== "exact-legacy") {
+		return {
+			refused: true,
+			reason: `refuse cohort excision for state ${cls.state}`,
+			removePreIndices: [],
+			removePostIndices: [],
+			insertPreAt: 0,
+		};
+	}
+	const pre = preToolUseArray(parsed);
+	const post = postToolUseArray(parsed);
+	const removePreIndices: number[] = [];
+	for (const member of [LEGACY_COHORT.L1, LEGACY_COHORT.L2, LEGACY_COHORT.L3]) {
+		const index = pre.findIndex((item) => deepStructuralEqual(member, item));
+		if (index >= 0) removePreIndices.push(index);
+	}
+	const removePostIndices: number[] = [];
+	const l4Index = post.findIndex((item) =>
+		deepStructuralEqual(LEGACY_COHORT.L4, item),
+	);
+	if (l4Index >= 0) removePostIndices.push(l4Index);
+	removePreIndices.sort((a, b) => a - b);
+	removePostIndices.sort((a, b) => a - b);
+	return {
+		refused: false,
+		removePreIndices,
+		removePostIndices,
+		// The managed group appends after every surviving Pre sibling.
+		insertPreAt: pre.length - removePreIndices.length,
+	};
+}
+
+/**
+ * Force-replace plan for edited-managed. Eligibility keys on MATCHER EXACTNESS
+ * (§324), not unconditionally on sibling count. Exposes matcherExact +
+ * siblingHandlers so the manager can enforce the exact §324 rule.
+ */
+export interface ForceReplacePlan {
+	refused: boolean;
+	/** Set only when matcher edited AND siblingHandlers > 0. */
+	reason?: string;
+	state: ClaudeHookComponentState;
+	groupIndex?: number;
+	handlerIndex?: number;
+	/** True => group matcher === MANAGED_MATCHER. */
+	matcherExact?: boolean;
+	/** Count of unrelated handlers in the group. */
+	siblingHandlers?: number;
+}
+
+/**
+ * Plan an in-place force replacement of the single marker-proven managed
+ * handler for an `edited-managed` component. Eligibility (§324 / JD-A-001):
+ * - matcherExact === true  → eligible regardless of siblingHandlers.
+ * - matcherExact === false && siblingHandlers === 0 → eligible.
+ * - matcherExact === false && siblingHandlers  >  0 → refused even under force.
+ * A container without exactly one marker-proven handler in a valid matcher
+ * group also refuses.
+ */
+export function planForceReplace(
+	parsed: unknown,
+	currentAssetSha: string,
+): ForceReplacePlan {
+	// Empty identities force the marker-proven state to resolve as edited-managed
+	// while still exposing groupIndex/handlerIndex from the marker finder.
+	const cls = classifySettingsEntry(parsed, currentAssetSha, {
+		current: null,
+		historical: [],
+	});
+	if (
+		cls.state !== "edited-managed" ||
+		cls.groupIndex === undefined ||
+		cls.handlerIndex === undefined
+	) {
+		return {
+			refused: true,
+			reason: `refuse force replace for state ${cls.state}`,
+			state: cls.state,
+		};
+	}
+	const groups = preToolUseArray(parsed);
+	const group = groups[cls.groupIndex];
+	const matcherExact =
+		isPlainObject(group) && group.matcher === MANAGED_MATCHER;
+	const handlerCount =
+		isPlainObject(group) && Array.isArray(group.hooks) ? group.hooks.length : 0;
+	const siblingHandlers = Math.max(handlerCount - 1, 0);
+	if (!matcherExact && siblingHandlers > 0) {
+		return {
+			refused: true,
+			reason:
+				"refuse force replace: edited matcher with unrelated sibling handlers (§324)",
+			state: cls.state,
+			groupIndex: cls.groupIndex,
+			handlerIndex: cls.handlerIndex,
+			matcherExact,
+			siblingHandlers,
+		};
+	}
+	return {
+		refused: false,
+		state: cls.state,
+		groupIndex: cls.groupIndex,
+		handlerIndex: cls.handlerIndex,
+		matcherExact,
+		siblingHandlers,
+	};
+}
+
+/**
+ * Synthesize a fresh managed-only container for the two terminal states with no
+ * parsed value: fresh install (`absent`) and whole-file `exact-legacy`. Takes
+ * only the current asset SHA — not the whole Manifest — so this module never
+ * imports the manager's manifest reader at runtime (JD-A-002).
+ */
+export function buildManagedContainer(currentAssetSha: string): {
+	hooks: { PreToolUse: [ManagedMatcherGroup] };
+} {
+	return {
+		hooks: {
+			PreToolUse: [
+				{
+					matcher: MANAGED_MATCHER,
+					hooks: [
+						{
+							type: "command",
+							command: "node",
+							args: [MANAGED_ASSET_ARG],
+							timeout: MANAGED_TIMEOUT,
+							statusMessage: `${MANAGED_STATUS_PREFIX}${currentAssetSha}`,
+						},
+					],
+				},
+			],
+		},
+	};
+}

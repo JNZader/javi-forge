@@ -208,11 +208,11 @@ export function hasBase64Decode(tokens) {
 // exact/unique-prefix long-option matching, the consumed-argument
 // recorder, and the danger-dominant profile-union reducer.
 //
-// WU2-A boundary: recognized utilities return fixed `unresolved-profile`
-// evidence until the option-pass machines land in tasks 2.3-2.5. This
-// placeholder is deliberately NOT a pinned evidence code; it is replaced
-// by machine-produced evidence in WU2-B. Identity rejection evidence
-// (`non-literal-identity`, `unsupported-utility`) IS pinned.
+// WU2-B (tasks 2.3-2.6) adds the three bounded state machines, the env
+// split-string character machine with its cumulative split-work bound,
+// and the protected-sink adapter wired into evaluateBash. Identity
+// rejection evidence (`non-literal-identity`, `unsupported-utility`) and
+// the machine-produced evidence codes are pinned by the semantic corpus.
 // =====================================================================
 const OVERALL_CLASS = Object.freeze({ SAFE: "safe", DANGEROUS: "dangerous", AMBIGUOUS: "ambiguous" });
 const PROFILE_STATUS = Object.freeze({ ACCEPTED_SAFE: "accepted-safe", ACCEPTED_DANGEROUS: "accepted-dangerous", REJECTED: "rejected-by-profile", UNSUPPORTED: "unsupported" });
@@ -322,45 +322,336 @@ function identityEvidence(identity) {
 function profilesFor(utility) {
 	return UTILITY_PROFILE_REGISTRY.filter((profile) => profile.utility === utility);
 }
-function unresolvedProfileResults(profiles) {
-	return profiles.map((profile) => ({
-		status: PROFILE_STATUS.UNSUPPORTED,
-		applicability: { profileId: profile.id, utility: profile.utility, mode: profile.mode, applicable: true },
-		evidence: { code: "unresolved-profile", phase: "option" },
-	}));
+function profileApplicability(profile) {
+	return { profileId: profile.id, utility: profile.utility, mode: profile.mode, applicable: true };
+}
+function classifyLongOption(token, longOptions) {
+	const match = matchLongOption(token, longOptions);
+	if (match) return { kind: "match", option: match.option, name: match.name, value: match.value };
+	const equal = token.indexOf("=");
+	const supplied = token.slice(2, equal < 0 ? undefined : equal);
+	const matches = supplied ? longOptions.filter((option) => option.name.startsWith(supplied)) : [];
+	return { kind: matches.length > 1 ? "ambiguous" : "unknown" };
+}
+const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const SHORT_BUNDLE = /^-[^-]/;
+const CRITICAL_TARGET_CORPUS = Object.freeze(["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT]);
+const isCriticalTarget = (token) => CRITICAL_TARGET_CORPUS.includes(token);
+const OCTAL_MODE_SHAPE = /^0?[0-7]{3,4}$/;
+const SYMBOLIC_MODE_SHAPE = /^[ugoa]*[+=-][rwxXstugo]+(?:,[ugoa]*[+=-][rwxXstugo]+)*$/;
+const isModeShaped = (token) => OCTAL_MODE_SHAPE.test(token) || SYMBOLIC_MODE_SHAPE.test(token);
+const ENV_SPLIT_WHITESPACE = " \t\n\v\f\r";
+function splitEnvSemantics(input) {
+	const words = [];
+	let word = "", quote = "", started = false, stopped = false;
+	const push = () => { if (started) words.push(word); word = ""; started = false; };
+	for (let index = 0; index < input.length; index++) {
+		const char = input[index];
+		if (quote === "'") { if (char === "'") quote = ""; else word += char; continue; }
+		if (quote === '"' && char === '"') { quote = ""; continue; }
+		if (!quote && (char === "'" || char === '"')) { quote = char; started = true; continue; }
+		if (char === "\\") {
+			const escape = input[index + 1];
+			if (escape === undefined) return { error: "env-unsupported-escape" };
+			index++;
+			if (escape === "c") { if (quote) return { error: "env-unsupported-escape" }; stopped = true; break; }
+			if (!(escape in ENV_ESCAPES)) return { error: "env-unsupported-escape" };
+			if (escape === "_") { if (quote) { word += " "; started = true; } else push(); continue; }
+			word += ENV_ESCAPES[escape]; started = true;
+			continue;
+		}
+		if (char === "$") return { error: "env-active-expansion" };
+		if (!quote && ENV_SPLIT_WHITESPACE.includes(char)) { push(); continue; }
+		if (!quote && char === "#" && !started) break;
+		word += char; started = true;
+	}
+	if (quote) return { error: "env-unclosed-quote" };
+	push();
+	return { words, stopped };
+}
+function runEnvMachine(profile, tokens) {
+	const applicability = profileApplicability(profile);
+	const unsupported = (code, phase, tokenIndex) => ({ status: PROFILE_STATUS.UNSUPPORTED, applicability, evidence: tokenIndex === undefined ? { code, phase } : { code, phase, tokenIndex } });
+	const queue = tokens.slice(1);
+	// Cumulative split-work bound: splitOps <= 32 AND splitBytes <= 8N over the
+	// outer argv byte count, enforced across every nested -S splice.
+	const splitByteBudget = 8 * queue.reduce((total, token) => total + Buffer.byteLength(token, "utf8"), 0);
+	const facts = { utility: UTILITY.ENV, wrapperOptions: [], assignments: [], consumedArguments: [], delimiter: { seen: false }, eventualExecutable: null, eventualArgv: [], activeExpansion: false, terminatedByControlEscape: false };
+	let splitOps = 0, splitBytes = 0, index = 0;
+	const takeSplit = (value, tokenIndex, source) => {
+		splitOps += 1;
+		splitBytes += Buffer.byteLength(value, "utf8");
+		if (splitOps > 32 || splitBytes > splitByteBudget) return unsupported("split-work-limit", "split", tokenIndex);
+		const parsed = splitEnvSemantics(value);
+		if (parsed.error) return unsupported(parsed.error, "split", tokenIndex);
+		facts.splitInput ??= consumedArgument("split-string", tokenIndex, source, "split-string", value);
+		if (parsed.stopped) facts.terminatedByControlEscape = true;
+		queue.splice(index, 0, ...parsed.words);
+		return null;
+	};
+	while (index < queue.length) {
+		const token = queue[index];
+		if (token === "--") { facts.delimiter = { seen: true, tokenIndex: index }; index++; break; }
+		if (token === "-") { facts.wrapperOptions.push("-"); index++; continue; } // GNU: a bare - implies -i, never the command
+		if (ASSIGNMENT_TOKEN.test(token)) { facts.assignments.push(token); index++; continue; }
+		if (token.startsWith("--")) {
+			const match = classifyLongOption(token, profile.longOptions);
+			if (match.kind !== "match") return unsupported("env-unsupported-option", "wrapper", index);
+			const optionIndex = index;
+			index++;
+			if (match.option.type !== "arg") { facts.wrapperOptions.push(match.name); continue; }
+			let value = match.value, source = "attached";
+			if (value === null) { if (index >= queue.length) return unsupported("env-missing-argument", "option", optionIndex); value = queue[index]; queue.splice(index, 1); source = "next-token"; }
+			if (match.name === "split-string") { const stop = takeSplit(value, optionIndex, source); if (stop) return stop; continue; }
+			facts.consumedArguments.push(consumedArgument(match.name, optionIndex, source, "other", value));
+			continue;
+		}
+		if (SHORT_BUNDLE.test(token)) {
+			const bundleIndex = index;
+			index++;
+			let stop = null;
+			for (let position = 1; position < token.length; position++) {
+				const short = token[position];
+				const spec = profile.shortOptions[short];
+				if (!spec) { stop = unsupported("env-unsupported-option", "wrapper", bundleIndex); break; }
+				if (spec.type === "flag") { facts.wrapperOptions.push(short); continue; }
+				let value, source;
+				if (position + 1 < token.length) { value = token.slice(position + 1); source = "attached"; }
+				else if (index < queue.length) { value = queue[index]; queue.splice(index, 1); source = "next-token"; }
+				else { stop = unsupported("env-missing-argument", "option", bundleIndex); break; }
+				if (short === "S") stop = takeSplit(value, bundleIndex, source);
+				else facts.consumedArguments.push(consumedArgument(short, bundleIndex, source, "other", value));
+				break;
+			}
+			if (stop) return stop;
+			continue;
+		}
+		break;
+	}
+	if (index < queue.length) { facts.eventualExecutable = queue[index]; facts.eventualArgv = queue.slice(index + 1); }
+	return { status: PROFILE_STATUS.ACCEPTED_SAFE, applicability, facts };
+}
+function conservativePossibleTargets(tokens) {
+	return tokens.slice(1).filter(isCriticalTarget);
+}
+function assessChmodProfile(applicability, state) {
+	const mode777 = state.mode !== undefined && /^0?777$/.test(state.mode);
+	const roles = { targets: state.targets, possibleTargets: [] };
+	if (state.mode !== undefined) roles.mode = state.mode;
+	if (state.reference !== undefined) roles.reference = state.reference;
+	const dangerous = state.targets.some(isCriticalTarget) && (state.recursive || mode777);
+	return { status: dangerous ? PROFILE_STATUS.ACCEPTED_DANGEROUS : PROFILE_STATUS.ACCEPTED_SAFE, applicability, facts: { utility: UTILITY.CHMOD, recursive: state.recursive, mode777, roles, consumedArguments: state.consumedArguments, delimiter: state.delimiter } };
+}
+function runGnuChmodMachine(profile, tokens) {
+	const applicability = profileApplicability(profile);
+	const posix = profile.mode === "posixly-correct";
+	const consumedArguments = [];
+	const operands = [];
+	let delimiter = { seen: false };
+	let recursive = false, reference, recognizing = true;
+	const rejected = (reasonCode) => ({ status: PROFILE_STATUS.REJECTED, applicability, reasonCode, partialRoles: { targets: [...operands], possibleTargets: conservativePossibleTargets(tokens) } });
+	for (let index = 1; index < tokens.length; index++) {
+		const token = tokens[index];
+		if (recognizing && token === "--") { delimiter = { seen: true, tokenIndex: index }; recognizing = false; continue; }
+		if (recognizing && token.startsWith("--")) {
+			const match = classifyLongOption(token, profile.longOptions);
+			if (match.kind === "ambiguous") return rejected("ambiguous-long-option");
+			if (match.kind !== "match") return rejected("unknown-long-option");
+			if (match.option.type === "arg") {
+				let value = match.value, source = "attached";
+				if (value === null) { if (index + 1 >= tokens.length) return rejected("missing-option-argument"); value = tokens[++index]; source = "next-token"; }
+				if (match.name === "reference") reference = value;
+				consumedArguments.push(consumedArgument(match.name, index, source, match.name === "reference" ? "reference" : "other", value));
+			} else if (match.name === "recursive") recursive = true;
+			continue;
+		}
+		if (recognizing && SHORT_BUNDLE.test(token)) {
+			for (let position = 1; position < token.length; position++) {
+				if (!profile.shortOptions[token[position]]) return rejected("unknown-short-option");
+				if (token[position] === "R") recursive = true;
+			}
+			continue;
+		}
+		operands.push(token);
+		if (posix) recognizing = false;
+	}
+	if (reference !== undefined) {
+		const modeCandidate = operands.findIndex(isModeShaped);
+		if (modeCandidate >= 0) {
+			const targets = operands.filter((_, position) => position !== modeCandidate);
+			return { status: PROFILE_STATUS.REJECTED, applicability, reasonCode: "mixed-mode-reference", partialRoles: { mode: operands[modeCandidate], reference, targets, possibleTargets: [...targets] } };
+		}
+		return assessChmodProfile(applicability, { recursive, mode: undefined, reference, targets: [...operands], consumedArguments, delimiter });
+	}
+	return assessChmodProfile(applicability, { recursive, mode: operands[0], reference: undefined, targets: operands.slice(1), consumedArguments, delimiter });
+}
+function runAppleChmodMachine(profile, tokens) {
+	const applicability = profileApplicability(profile);
+	const partialRoles = { targets: [], possibleTargets: conservativePossibleTargets(tokens) };
+	if (tokens.slice(1).some((token) => token.startsWith("--"))) return { status: PROFILE_STATUS.REJECTED, applicability, reasonCode: "long-option-unsupported", partialRoles };
+	const aclEvidence = (tokenIndex) => ({ status: PROFILE_STATUS.UNSUPPORTED, applicability, evidence: { code: "chmod-acl-mode", phase: "roles", tokenIndex }, partialRoles });
+	const operands = [];
+	let recursive = false, recognizing = true;
+	for (let index = 1; index < tokens.length; index++) {
+		const token = tokens[index];
+		if (recognizing && SHORT_BUNDLE.test(token)) {
+			for (let position = 1; position < token.length; position++) {
+				if (token[position] === "a") return aclEvidence(index);
+				if (!profile.shortOptions[token[position]]) return { status: PROFILE_STATUS.REJECTED, applicability, reasonCode: "unknown-short-option", partialRoles };
+				if (token[position] === "R") recursive = true;
+			}
+			continue;
+		}
+		recognizing = false;
+		if (/^[+=]a|^-a/.test(token)) return aclEvidence(index);
+		operands.push(token);
+	}
+	return assessChmodProfile(applicability, { recursive, mode: operands[0], reference: undefined, targets: operands.slice(1), consumedArguments: [], delimiter: { seen: false } });
+}
+function runGnuBase64Machine(profile, tokens) {
+	const applicability = profileApplicability(profile);
+	const posix = profile.mode === "posixly-correct";
+	const booleanOptions = [];
+	const operands = [];
+	const consumedArguments = [];
+	let delimiter = { seen: false };
+	let decode = false, recognizing = true;
+	const rejected = (reasonCode) => ({ status: PROFILE_STATUS.REJECTED, applicability, reasonCode });
+	for (let index = 1; index < tokens.length; index++) {
+		const token = tokens[index];
+		if (recognizing && token === "--") { delimiter = { seen: true, tokenIndex: index }; recognizing = false; continue; }
+		if (recognizing && token.startsWith("--")) {
+			const match = classifyLongOption(token, profile.longOptions);
+			if (match.kind === "ambiguous") return rejected("ambiguous-long-option");
+			if (match.kind !== "match") return rejected("unknown-long-option");
+			if (match.option.type === "arg") {
+				let value = match.value, source = "attached";
+				if (value === null) { if (index + 1 >= tokens.length) return rejected("missing-option-argument"); value = tokens[++index]; source = "next-token"; }
+				consumedArguments.push(consumedArgument(match.name, index, source, match.name === "wrap" ? "wrap" : "other", value));
+			} else if (match.name === "decode") decode = true;
+			else booleanOptions.push(match.name);
+			continue;
+		}
+		if (recognizing && SHORT_BUNDLE.test(token)) {
+			for (let position = 1; position < token.length; position++) {
+				const short = token[position];
+				const spec = profile.shortOptions[short];
+				if (!spec) return rejected("unknown-short-option");
+				if (spec.type === "flag") { if (short === "d") decode = true; else booleanOptions.push(short); continue; }
+				let value, source;
+				if (position + 1 < token.length) { value = token.slice(position + 1); source = "attached"; }
+				else if (index + 1 < tokens.length) { value = tokens[++index]; source = "next-token"; }
+				else return rejected("missing-option-argument");
+				consumedArguments.push(consumedArgument(short, index, source, short === "w" ? "wrap" : "other", value));
+				break;
+			}
+			continue;
+		}
+		operands.push(token);
+		if (posix) recognizing = false;
+	}
+	return { status: PROFILE_STATUS.ACCEPTED_SAFE, applicability, facts: { utility: UTILITY.BASE64, decode, booleanOptions, operands, consumedArguments, delimiter } };
+}
+const APPLE_BASE64_ARGUMENT_ROLES = Object.freeze({ b: "wrap", i: "input", o: "output", w: "wrap", break: "wrap", input: "input", output: "output", wrap: "wrap" });
+function runAppleBase64Machine(profile, tokens) {
+	const applicability = profileApplicability(profile);
+	const booleanOptions = [];
+	const operands = [];
+	const consumedArguments = [];
+	let decode = false, recognizing = true;
+	const rejected = (reasonCode) => ({ status: PROFILE_STATUS.REJECTED, applicability, reasonCode });
+	for (let index = 1; index < tokens.length; index++) {
+		const token = tokens[index];
+		if (recognizing && token === "--") return rejected("delimiter-unsupported");
+		if (recognizing && token.startsWith("--")) {
+			const equal = token.indexOf("=");
+			const name = token.slice(2, equal < 0 ? undefined : equal);
+			const option = profile.longOptions.find((entry) => entry.name === name);
+			if (!option) return rejected("unknown-long-option");
+			const attached = equal < 0 ? null : token.slice(equal + 1);
+			if (attached !== null && option.type !== "arg") return rejected("unknown-long-option");
+			if (option.type === "arg") {
+				let value = attached, source = "attached";
+				if (value === null) { if (index + 1 >= tokens.length) return rejected("missing-option-argument"); value = tokens[++index]; source = "next-token"; }
+				consumedArguments.push(consumedArgument(name, index, source, APPLE_BASE64_ARGUMENT_ROLES[name] ?? "other", value));
+			} else if (name === "decode") decode = true;
+			else booleanOptions.push(name);
+			continue;
+		}
+		if (recognizing && SHORT_BUNDLE.test(token)) {
+			for (let position = 1; position < token.length; position++) {
+				const short = token[position];
+				const spec = profile.shortOptions[short];
+				if (!spec) return rejected("unknown-short-option");
+				if (spec.type === "flag") { if (short === "d" || short === "D") decode = true; if (short !== "d") booleanOptions.push(short); continue; }
+				let value, source;
+				if (position + 1 < token.length) { value = token.slice(position + 1); source = "attached"; }
+				else if (index + 1 < tokens.length) { value = tokens[++index]; source = "next-token"; }
+				else return rejected("missing-option-argument");
+				consumedArguments.push(consumedArgument(short, index, source, APPLE_BASE64_ARGUMENT_ROLES[short] ?? "other", value));
+				break;
+			}
+			continue;
+		}
+		recognizing = false;
+		operands.push(token);
+	}
+	return { status: PROFILE_STATUS.ACCEPTED_SAFE, applicability, facts: { utility: UTILITY.BASE64, decode, booleanOptions, operands, consumedArguments, delimiter: { seen: false } } };
 }
 export function normalizeEnvInvocation(tokens = []) {
 	const identity = normalizeLiteralUtilityIdentity(tokens[0] ?? "");
 	if (identity.utility !== UTILITY.ENV) return identityEvidence(identity);
-	return unresolvedProfileResults(profilesFor(UTILITY.ENV));
+	return profilesFor(UTILITY.ENV).map((profile) => runEnvMachine(profile, tokens));
 }
 export function normalizeChmodInvocation(tokens = []) {
 	const identity = normalizeLiteralUtilityIdentity(tokens[0] ?? "");
 	if (identity.utility !== UTILITY.CHMOD) return identityEvidence(identity);
-	return unresolvedProfileResults(profilesFor(UTILITY.CHMOD));
+	return profilesFor(UTILITY.CHMOD).map((profile) => (profile.mode === "apple" ? runAppleChmodMachine(profile, tokens) : runGnuChmodMachine(profile, tokens)));
 }
 export function normalizeBase64Invocation(tokens = []) {
 	const identity = normalizeLiteralUtilityIdentity(tokens[0] ?? "");
 	if (identity.utility !== UTILITY.BASE64) return identityEvidence(identity);
-	return unresolvedProfileResults(profilesFor(UTILITY.BASE64));
+	return profilesFor(UTILITY.BASE64).map((profile) => (profile.mode === "apple" ? runAppleBase64Machine(profile, tokens) : runGnuBase64Machine(profile, tokens)));
 }
-function commandWords(input, powershell = false) {
-	const tokens = [...input];
+function firstUnsupportedProfileId(results) {
+	return results.find((result) => result.status === PROFILE_STATUS.UNSUPPORTED)?.applicability.profileId ?? "unsupported";
+}
+function ambiguityDecision(context) {
+	// Fixed enums only (reason/utility/profile/sink); carried non-enumerable so
+	// the public Decision shape stays exactly { allowed, ruleId }.
+	const decision = { allowed: false, ruleId: "utility-ambiguity" };
+	Object.defineProperty(decision, "ambiguity", { value: Object.freeze(context), enumerable: false });
+	return decision;
+}
+function adaptProtectedSink(utility, results, union, sink) {
+	if (union.classification === "dangerous") return { allowed: false, ruleId: sink.dangerousRuleId };
+	if (union.classification !== "unsupported" || !sink.applicable) return null;
+	return ambiguityDecision({ utility, profile: firstUnsupportedProfileId(results), sink: sink.id });
+}
+function reduceWrappers(input, powershell = false) {
+	let tokens = [...input];
 	if (powershell) while (tokens[0] === "&") tokens.shift();
-	for (;;) {
-		while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) tokens.shift();
+	for (let hops = 0; ; hops++) {
+		if (hops > 32) return { tokens: null, ambiguity: { utility: UTILITY.UNSUPPORTED, profile: "unsupported", sink: SINK.WRAPPER } };
+		while (ASSIGNMENT_TOKEN.test(tokens[0] ?? "")) tokens.shift();
+		if (normalizeLiteralUtilityIdentity(tokens[0] ?? "").utility === UTILITY.ENV) {
+			const [result] = normalizeEnvInvocation(tokens);
+			if (result.status !== PROFILE_STATUS.ACCEPTED_SAFE) return { tokens: null, ambiguity: { utility: UTILITY.ENV, profile: result.applicability.profileId, sink: SINK.WRAPPER } };
+			if (result.facts.eventualExecutable === null) return { tokens: [] };
+			tokens = [result.facts.eventualExecutable, ...result.facts.eventualArgv];
+			continue;
+		}
 		const wrapper = (tokens[0] ?? "").toLowerCase();
-		if (!["sudo", "command", "builtin", "nohup", "env"].includes(wrapper)) break;
+		if (!["sudo", "command", "builtin", "nohup"].includes(wrapper)) break;
 		tokens.shift();
 		for (;;) {
-			if (tokens[0] === "--" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) { tokens.shift(); continue; }
-			if (wrapper === "env") { const split = parseEnvSplit(tokens); if (split) { tokens.splice(0, split.consumed, ...split.words); continue; } }
-			if ((wrapper === "sudo" && /^(?:-u|-g|-h|-p|-C|-D|-R|-T|-r|-t|--user|--group|--host|--prompt|--chdir|--chroot|--command-timeout|--role|--type)$/.test(tokens[0] ?? "")) || (wrapper === "env" && /^(?:-u|-C|--unset|--chdir)$/.test(tokens[0] ?? ""))) { tokens.splice(0, 2); continue; }
+			if (tokens[0] === "--" || ASSIGNMENT_TOKEN.test(tokens[0] ?? "")) { tokens.shift(); continue; }
+			if (wrapper === "sudo" && /^(?:-u|-g|-h|-p|-C|-D|-R|-T|-r|-t|--user|--group|--host|--prompt|--chdir|--chroot|--command-timeout|--role|--type)$/.test(tokens[0] ?? "")) { tokens.splice(0, 2); continue; }
 			if (tokens[0]?.startsWith("-") && tokens[0] !== "--") { tokens.shift(); continue; }
 			break;
 		}
 	}
-	return tokens;
+	return { tokens };
 }
 function hasSensitiveLiteral(tokens, cwd) {
 	return tokens.some((token) => {
@@ -422,16 +713,29 @@ function evaluateBash(command, cwd, depth = 0) {
 	let parsed;
 	try { parsed = lex(command); } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
 	for (let index = 0; index < parsed.commands.length; index++) {
-		let tokens;
-		try { tokens = commandWords(parsed.commands[index]); } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
+		const reduced = reduceWrappers(parsed.commands[index]);
+		if (reduced.ambiguity) return ambiguityDecision(reduced.ambiguity);
+		const tokens = reduced.tokens;
 		const executable = (tokens[0] ?? "").toLowerCase();
+		const identity = normalizeLiteralUtilityIdentity(tokens[0] ?? "");
 		const rmOptions = tokens.filter((token) => token.startsWith("-")).join("");
-		if ((executable === "rm" && /r/i.test(rmOptions) && /f/i.test(rmOptions) && tokens.some((token) => ["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT].includes(token))) || /^mkfs/.test(executable) || (executable === "dd" && tokens.some((token) => /^of=\/dev\/(?:sd|nvme|vd|disk)/.test(token)))) return { allowed: false, ruleId: "shell.destructive-root" };
-		if (executable === "chmod" && (hasChmodRecursive(tokens.slice(1)) || tokens.some((token) => /^(?:0?777)$/.test(token))) && tokens.some((token) => ["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT].includes(token))) return { allowed: false, ruleId: "shell.destructive-root" };
+		if ((executable === "rm" && /r/i.test(rmOptions) && /f/i.test(rmOptions) && tokens.some(isCriticalTarget)) || /^mkfs/.test(executable) || (executable === "dd" && tokens.some((token) => /^of=\/dev\/(?:sd|nvme|vd|disk)/.test(token)))) return { allowed: false, ruleId: "shell.destructive-root" };
+		if (identity.utility === UTILITY.CHMOD) {
+			const results = normalizeChmodInvocation(tokens);
+			const union = reduceProfileUnion(results);
+			const possibleCritical = results.some((result) => (result.partialRoles?.possibleTargets ?? []).some(isCriticalTarget));
+			const decision = adaptProtectedSink(UTILITY.CHMOD, results, union, { id: SINK.CRITICAL_CHMOD, dangerousRuleId: "shell.destructive-root", applicable: possibleCritical });
+			if (decision) return decision;
+		}
 		if (parsed.separators[index] === "|") {
-			const downstream = commandWords(parsed.commands[index + 1] ?? []);
-			const producer = executable === "base64" ? hasBase64Decode(tokens.slice(1)) : /^(?:curl|wget)$/.test(executable);
-			if (producer && /^(?:sh|bash|zsh|dash|ksh)$/.test((downstream[0] ?? "").toLowerCase())) return { allowed: false, ruleId: "shell.pipe-to-shell" };
+			const downstream = reduceWrappers(parsed.commands[index + 1] ?? []).tokens ?? [];
+			const shellSink = /^(?:sh|bash|zsh|dash|ksh)$/.test((downstream[0] ?? "").toLowerCase());
+			if (identity.utility === UTILITY.BASE64) {
+				const results = normalizeBase64Invocation(tokens).map((result) => (shellSink && result.status === PROFILE_STATUS.ACCEPTED_SAFE && result.facts.decode ? { ...result, status: PROFILE_STATUS.ACCEPTED_DANGEROUS } : result));
+				const union = reduceProfileUnion(results);
+				const decision = adaptProtectedSink(UTILITY.BASE64, results, union, { id: SINK.BASE64_SHELL, dangerousRuleId: "shell.pipe-to-shell", applicable: shellSink });
+				if (decision) return decision;
+			} else if (/^(?:curl|wget)$/.test(executable) && shellSink) return { allowed: false, ruleId: "shell.pipe-to-shell" };
 		}
 		if (["cat", "less", "more", "head", "tail", "bat", "grep", "rg", "sed", "awk", "source", ".", "cp", "install"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "shell.sensitive-read" };
 		if (tokens.some((token) => token === "<") && hasSensitiveLiteral(tokens, cwd)) return { allowed: false, ruleId: "shell.sensitive-read" };
@@ -449,10 +753,12 @@ function evaluateBash(command, cwd, depth = 0) {
 function evaluatePowerShell(command, cwd) {
 	const parsed = lex(command, true);
 	for (let index = 0; index < parsed.commands.length; index++) {
-		const tokens = commandWords(parsed.commands[index], true);
+		const reduced = reduceWrappers(parsed.commands[index], true);
+		if (reduced.ambiguity) return ambiguityDecision(reduced.ambiguity);
+		const tokens = reduced.tokens;
 		const executable = (tokens[0] ?? "").toLowerCase();
 		if ((["remove-item", "rm", "del", "erase", "rmdir", "rd"].includes(executable) && tokens.some((token) => /^-(?:r|recurse)$/i.test(token)) && tokens.some((token) => /^-(?:fo|force)$/i.test(token)) && tokens.some((token) => /^(?:[a-z]:\\?|[/~]|\$HOME)$/i.test(token))) || ["format-volume", "clear-disk", "initialize-disk"].includes(executable)) return { allowed: false, ruleId: "powershell.destructive-root" };
-		if (parsed.separators[index] === "|" && /^(?:invoke-webrequest|iwr|curl|wget|invoke-restmethod|irm)$/.test(executable) && /^(?:invoke-expression|iex)$/.test((commandWords(parsed.commands[index + 1] ?? [], true)[0] ?? "").toLowerCase())) return { allowed: false, ruleId: "powershell.pipe-to-shell" };
+		if (parsed.separators[index] === "|" && /^(?:invoke-webrequest|iwr|curl|wget|invoke-restmethod|irm)$/.test(executable) && /^(?:invoke-expression|iex)$/.test(((reduceWrappers(parsed.commands[index + 1] ?? [], true).tokens ?? [])[0] ?? "").toLowerCase())) return { allowed: false, ruleId: "powershell.pipe-to-shell" };
 		if (["get-content", "gc", "cat", "type", "select-string", "copy-item", "cp", "copy"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "powershell.sensitive-read" };
 		if (executable === "git" && tokens[1]?.toLowerCase() === "push" && tokens.some((token) => ["-f", "--force", "--force-with-lease"].includes(token.toLowerCase()))) return { allowed: false, ruleId: "powershell.force-push" };
 		if (["set-content", "add-content", "out-file", "clear-content", "remove-item", "move-item", "copy-item", "rename-item", "new-item"].includes(executable) && hasManagedLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "powershell.managed-config-tamper" };
@@ -494,7 +800,11 @@ function diagnostic(error) {
 	};
 	return `javi-forge PreToolUse failed closed [${id}]: ${messages[id] ?? messages["internal-error"]}`;
 }
-function denialDiagnostic(toolName, decision) { return `javi-forge PreToolUse denied ${SUPPORTED_TOOLS.includes(toolName) ? toolName : "supported tool"} [${decision.ruleId}]: global guard policy denied the invocation`; }
+function denialDiagnostic(toolName, decision) {
+	const tool = SUPPORTED_TOOLS.includes(toolName) ? toolName : "supported tool";
+	if (decision.ambiguity) return `javi-forge PreToolUse denied ${tool} [${decision.ruleId}]: ${decision.ambiguity.utility} ${decision.ambiguity.profile} ${decision.ambiguity.sink} semantics denied as ambiguous`;
+	return `javi-forge PreToolUse denied ${tool} [${decision.ruleId}]: global guard policy denied the invocation`;
+}
 function truncateUtf8(message, maxBytes) {
 	let output = message;
 	while (Buffer.byteLength(output) > maxBytes) output = output.slice(0, -1);

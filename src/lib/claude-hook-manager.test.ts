@@ -225,6 +225,17 @@ describe("doctorClaudePreToolUse (read-only component report)", () => {
 		);
 	};
 
+	it("reads the packaged manifest by default and round-trips the real released identities", async () => {
+		// No injected manifest: exercises readManifest against the populated
+		// packaged manifest and proves the exact managed asset + group are
+		// recognized as managed-current end-to-end.
+		writeCurrent(REAL_ASSET_SHA);
+		const report = await doctorClaudePreToolUse(dir, { nodeVersion: "22.5.0" });
+		expect(report.asset.state).toBe("managed-current");
+		expect(report.settings.state).toBe("managed-current");
+		expect(report.healthy).toBe(true);
+	});
+
 	it("is healthy only when both components are current, shape exact, Node >= 22", async () => {
 		writeCurrent(REAL_ASSET_SHA);
 		const report = await doctorClaudePreToolUse(dir, {

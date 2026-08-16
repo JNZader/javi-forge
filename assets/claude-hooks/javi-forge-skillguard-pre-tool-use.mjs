@@ -199,6 +199,151 @@ export function hasBase64Decode(tokens) {
 	}
 	return false;
 }
+// =====================================================================
+// Utility profile registry + shared semantic primitives (tasks 2.1-2.2)
+//
+// Fixed, host-independent GNU Coreutils 9.4 and Apple dated-snapshot
+// profile bindings plus the shared primitives the per-profile state
+// machines (tasks 2.3-2.5) consume: literal identity normalization,
+// exact/unique-prefix long-option matching, the consumed-argument
+// recorder, and the danger-dominant profile-union reducer.
+//
+// WU2-A boundary: recognized utilities return fixed `unresolved-profile`
+// evidence until the option-pass machines land in tasks 2.3-2.5. This
+// placeholder is deliberately NOT a pinned evidence code; it is replaced
+// by machine-produced evidence in WU2-B. Identity rejection evidence
+// (`non-literal-identity`, `unsupported-utility`) IS pinned.
+// =====================================================================
+const OVERALL_CLASS = Object.freeze({ SAFE: "safe", DANGEROUS: "dangerous", AMBIGUOUS: "ambiguous" });
+const PROFILE_STATUS = Object.freeze({ ACCEPTED_SAFE: "accepted-safe", ACCEPTED_DANGEROUS: "accepted-dangerous", REJECTED: "rejected-by-profile", UNSUPPORTED: "unsupported" });
+const UTILITY = Object.freeze({ ENV: "env", CHMOD: "chmod", BASE64: "base64", UNSUPPORTED: "unsupported" });
+const SINK = Object.freeze({ WRAPPER: "wrapper-extraction", CRITICAL_CHMOD: "critical-chmod", BASE64_SHELL: "base64-to-shell" });
+function deepFreeze(value) {
+	if (value && typeof value === "object" && !Object.isFrozen(value)) {
+		Object.freeze(value);
+		for (const key of Object.getOwnPropertyNames(value)) deepFreeze(value[key]);
+	}
+	return value;
+}
+const GNU_COREUTILS_9_4_SOURCE = { publisher: "GNU", artifact: "GNU Coreutils manual (doc/coreutils.texi)", version: "Coreutils 9.4", sourceReference: "GNU Coreutils 9.4 release tarball / gnu.org Coreutils manual, 9.4 node set" };
+const APPLE_CHMOD_SOURCE = { publisher: "Apple", artifact: "chmod(1)", version: "2017-01-07", sourceReference: "Apple public man page (xcode-man-pages mirror), chmod.1, dated January 7, 2017" };
+const APPLE_BINTRANS_SOURCE = { publisher: "Apple", artifact: "bintrans(1)", version: "2022-04-18", sourceReference: "Apple public man page (xcode-man-pages mirror), bintrans.1, dated April 18, 2022" };
+const GNU_CHMOD_TABLE = {
+	longOptions: [
+		{ name: "changes", type: "flag" }, { name: "help", type: "flag" }, { name: "no-preserve-root", type: "flag" },
+		{ name: "preserve-root", type: "flag" }, { name: "quiet", type: "flag" }, { name: "recursive", type: "flag" },
+		{ name: "reference", type: "arg" }, { name: "silent", type: "flag" }, { name: "verbose", type: "flag" }, { name: "version", type: "flag" },
+	],
+	shortOptions: { R: { type: "flag" }, c: { type: "flag" }, f: { type: "flag" }, v: { type: "flag" } },
+};
+const GNU_BASE64_TABLE = {
+	longOptions: [
+		{ name: "decode", type: "flag" }, { name: "help", type: "flag" }, { name: "ignore-garbage", type: "flag" },
+		{ name: "version", type: "flag" }, { name: "wrap", type: "arg" },
+	],
+	shortOptions: { d: { type: "flag" }, i: { type: "flag" }, w: { type: "arg" } },
+};
+export const UTILITY_PROFILE_REGISTRY = deepFreeze([
+	{
+		id: "gnu-env-v1", utility: "env", mode: "default",
+		source: { ...GNU_COREUTILS_9_4_SOURCE, section: "env invocation" },
+		longOptions: [
+			{ name: "argv0", type: "arg" }, { name: "chdir", type: "arg" }, { name: "debug", type: "flag" }, { name: "help", type: "flag" },
+			{ name: "ignore-environment", type: "flag" }, { name: "null", type: "flag" }, { name: "split-string", type: "arg" },
+			{ name: "unset", type: "arg" }, { name: "version", type: "flag" },
+		],
+		shortOptions: { 0: { type: "flag" }, a: { type: "arg" }, C: { type: "arg" }, i: { type: "flag" }, S: { type: "arg" }, u: { type: "arg" }, v: { type: "flag" } },
+	},
+	{ id: "gnu-chmod-default-v1", utility: "chmod", mode: "default", source: { ...GNU_COREUTILS_9_4_SOURCE, section: "chmod invocation" }, ...GNU_CHMOD_TABLE },
+	{ id: "gnu-chmod-posix-v1", utility: "chmod", mode: "posixly-correct", source: { ...GNU_COREUTILS_9_4_SOURCE, section: "chmod invocation" }, ...GNU_CHMOD_TABLE },
+	{
+		id: "apple-chmod-v1", utility: "chmod", mode: "apple", source: { ...APPLE_CHMOD_SOURCE, section: "SYNOPSIS" },
+		longOptions: [],
+		shortOptions: { C: { type: "flag" }, E: { type: "flag" }, H: { type: "flag" }, I: { type: "flag" }, L: { type: "flag" }, N: { type: "flag" }, P: { type: "flag" }, R: { type: "flag" }, f: { type: "flag" }, h: { type: "flag" }, i: { type: "flag" }, v: { type: "flag" } },
+	},
+	{ id: "gnu-base64-default-v1", utility: "base64", mode: "default", source: { ...GNU_COREUTILS_9_4_SOURCE, section: "base64 invocation" }, ...GNU_BASE64_TABLE },
+	{ id: "gnu-base64-posix-v1", utility: "base64", mode: "posixly-correct", source: { ...GNU_COREUTILS_9_4_SOURCE, section: "base64 invocation" }, ...GNU_BASE64_TABLE },
+	{
+		id: "apple-base64-v1", utility: "base64", mode: "apple", source: { ...APPLE_BINTRANS_SOURCE, section: "base64" },
+		longOptions: [
+			{ name: "break", type: "arg" }, { name: "decode", type: "flag" }, { name: "help", type: "flag" }, { name: "ignore-garbage", type: "flag" },
+			{ name: "input", type: "arg" }, { name: "output", type: "arg" }, { name: "wrap", type: "arg" },
+		],
+		shortOptions: { D: { type: "flag" }, b: { type: "arg" }, d: { type: "flag" }, h: { type: "flag" }, i: { type: "arg" }, o: { type: "arg" }, w: { type: "arg" } },
+	},
+]);
+const NON_LITERAL_IDENTITY_MARKERS = /[$`*?\[\]{};|&<>()\n\r\0]/;
+export function normalizeLiteralUtilityIdentity(rawToken) {
+	// Lexical-only: split on "/" without path/realpath/PATH/alias resolution.
+	const token = typeof rawToken === "string" ? rawToken : "";
+	const literal = token.length > 0 && !NON_LITERAL_IDENTITY_MARKERS.test(token);
+	const component = token.split("/").filter(Boolean);
+	const basename = literal ? (component.at(-1) ?? "") : "";
+	const utility = literal && (basename === "env" || basename === "chmod" || basename === "base64") ? basename : UTILITY.UNSUPPORTED;
+	return { rawToken: token, basename, utility, literal, pathQualified: token.includes("/") };
+}
+export function matchLongOption(token, longOptions) {
+	// Exact/unique-prefix matching over the committed long names. Accepts
+	// only when exactly one committed name starts with the supplied name
+	// and the attached `=value` form is permitted by that option's type.
+	// Returns null for zero/multiple matches or a disallowed argument form
+	// (the profile machine records that as rejected-by-profile).
+	if (typeof token !== "string" || !token.startsWith("--") || token === "--") return null;
+	const equal = token.indexOf("=");
+	const supplied = token.slice(2, equal < 0 ? undefined : equal);
+	if (!supplied) return null;
+	const value = equal < 0 ? null : token.slice(equal + 1);
+	const matches = longOptions.filter((option) => option.name.startsWith(supplied));
+	if (matches.length !== 1) return null;
+	const option = matches[0];
+	if (value !== null && option.type !== "arg") return null;
+	return { option, name: option.name, value };
+}
+function consumedArgument(option, tokenIndex, source, role, value) {
+	return { option, tokenIndex, source, role, value };
+}
+export function reduceProfileUnion(results = []) {
+	const acceptedFacts = results.filter((result) => result && (result.status === PROFILE_STATUS.ACCEPTED_SAFE || result.status === PROFILE_STATUS.ACCEPTED_DANGEROUS));
+	const utility = results[0]?.applicability?.utility ?? UTILITY.UNSUPPORTED;
+	// Union classification uses "unsupported", not OVERALL_CLASS.AMBIGUOUS:
+	// ambiguity is decided later by the protected-sink adapter, never by the union.
+	let classification = "unsupported";
+	if (acceptedFacts.some((result) => result.status === PROFILE_STATUS.ACCEPTED_DANGEROUS)) classification = "dangerous";
+	else if (acceptedFacts.length > 0) classification = "safe";
+	return { classification, utility, results, acceptedFacts };
+}
+function identityEvidence(identity) {
+	return [{
+		status: PROFILE_STATUS.UNSUPPORTED,
+		applicability: { profileId: "unsupported", utility: identity.utility, mode: "unsupported", applicable: false },
+		evidence: { code: identity.literal ? "unsupported-utility" : "non-literal-identity", phase: "identity" },
+	}];
+}
+function profilesFor(utility) {
+	return UTILITY_PROFILE_REGISTRY.filter((profile) => profile.utility === utility);
+}
+function unresolvedProfileResults(profiles) {
+	return profiles.map((profile) => ({
+		status: PROFILE_STATUS.UNSUPPORTED,
+		applicability: { profileId: profile.id, utility: profile.utility, mode: profile.mode, applicable: true },
+		evidence: { code: "unresolved-profile", phase: "option" },
+	}));
+}
+export function normalizeEnvInvocation(tokens = []) {
+	const identity = normalizeLiteralUtilityIdentity(tokens[0] ?? "");
+	if (identity.utility !== UTILITY.ENV) return identityEvidence(identity);
+	return unresolvedProfileResults(profilesFor(UTILITY.ENV));
+}
+export function normalizeChmodInvocation(tokens = []) {
+	const identity = normalizeLiteralUtilityIdentity(tokens[0] ?? "");
+	if (identity.utility !== UTILITY.CHMOD) return identityEvidence(identity);
+	return unresolvedProfileResults(profilesFor(UTILITY.CHMOD));
+}
+export function normalizeBase64Invocation(tokens = []) {
+	const identity = normalizeLiteralUtilityIdentity(tokens[0] ?? "");
+	if (identity.utility !== UTILITY.BASE64) return identityEvidence(identity);
+	return unresolvedProfileResults(profilesFor(UTILITY.BASE64));
+}
 function commandWords(input, powershell = false) {
 	const tokens = [...input];
 	if (powershell) while (tokens[0] === "&") tokens.shift();

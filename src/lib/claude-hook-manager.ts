@@ -379,11 +379,9 @@ export async function doctorClaudePreToolUse(
 }
 
 async function readManifest(): Promise<Manifest> {
-	const read = await import("./safe-read.js").then((m) =>
-		m.safeReadFile(
-			path.join(CLAUDE_HOOK_ASSETS_DIR, "manifest.json"),
-			READ_OPTS,
-		),
+	const read = await safeReadFile(
+		path.join(CLAUDE_HOOK_ASSETS_DIR, "manifest.json"),
+		READ_OPTS,
 	);
 	if (!read.ok)
 		throw new Error(`unreadable claude-hooks manifest: ${read.reason}`);

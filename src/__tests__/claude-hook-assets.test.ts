@@ -21,6 +21,24 @@ interface Runtime {
 const ASSET_NAME = "javi-forge-skillguard-pre-tool-use.mjs";
 const ASSET = path.join(CLAUDE_HOOK_ASSETS_DIR, ASSET_NAME);
 const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
+// Decision ②: placeholder-normalized canonical hash of the exact managed matcher
+// group. Bound here so a silent settings-identity rewrite fails this contract.
+const SETTINGS_CANONICAL_SHA256 = "038c59a91bf8967f6908afed74c465f1e7030254e11e4f8738975d6d708424d4";
+// R2 fleet-brick guard for the settings entry, mirroring hook-assets.test.ts:
+// settingsEntries.historical[] MUST forever START WITH this released list.
+const RELEASED_SETTINGS_SNAPSHOT = { current: SETTINGS_CANONICAL_SHA256, historical: [] as string[] };
+// Append-only invariant: the manifest history must still start with the released
+// list; when current moves, the outgoing hash must have been appended and grown.
+function settingsHistoryViolations(released: { current: string; historical: string[] }, entry: { current: { canonicalSha256: string } | null; historical: { canonicalSha256: string }[] }): string[] {
+	const violations: string[] = [];
+	const hashes = entry.historical.map((h) => h.canonicalSha256);
+	const prefixIntact = hashes.length >= released.historical.length && released.historical.every((h, i) => hashes[i] === h);
+	if (!prefixIntact) violations.push("settingsEntries.historical[] no longer starts with the released list (append-only violated)");
+	if (entry.current?.canonicalSha256 === released.current) return violations;
+	if (!hashes.includes(released.current)) violations.push(`outgoing settings hash ${released.current} was not appended to historical[]`);
+	if (hashes.length <= released.historical.length) violations.push(`settingsEntries.historical[] did not grow: ${released.historical.length} -> ${hashes.length}`);
+	return violations;
+}
 const TOOLS = ["Bash", "PowerShell", "Read", "Write", "Edit"];
 const event = (tool_name: string, tool_input: Record<string, unknown>): unknown => ({ hook_event_name: "PreToolUse", tool_name, tool_input, cwd: ROOT });
 let runtime: Runtime;
@@ -40,10 +58,19 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(runtime.SUPPORTED_TOOLS).toEqual(TOOLS);
 		expect(runtime.INPUT_LIMIT_BYTES).toBe(1_048_576);
 		expect(runtime.POLICY_REGISTRY).toEqual({ schemaVersion: 1, policyVersion: 1, diagnosticsMaxBytes: 240 });
-		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 1, historical: [] }, settingsEntries: { current: null, historical: [] }, installerHelpers: { windowsSecureObject: null } });
+		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 1, historical: [] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [] }, installerHelpers: { windowsSecureObject: null } });
 		expect(manifest.asset.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
 		expect(source.match(/^import .+ from "(.+)";$/gm)?.every((line) => line.includes('"node:'))).toBe(true);
 		expect(source).not.toMatch(/\b(?:fetch|https?:\/\/|require\s*\(|import\s*\()\b/);
+	});
+	it("keeps the settings-entry historical list append-only (R2 fleet-brick guard)", () => {
+		const manifest = JSON.parse(fs.readFileSync(path.join(CLAUDE_HOOK_ASSETS_DIR, "manifest.json"), "utf8"));
+		expect(manifest.settingsEntries.current.canonicalSha256).toBe(SETTINGS_CANONICAL_SHA256);
+		expect(settingsHistoryViolations(RELEASED_SETTINGS_SNAPSHOT, manifest.settingsEntries)).toEqual([]);
+	});
+	it("settingsHistoryViolations flags a silently rewritten released hash", () => {
+		expect(settingsHistoryViolations({ current: "a".repeat(64), historical: ["a".repeat(64)] }, { current: { canonicalSha256: "a".repeat(64) }, historical: [{ canonicalSha256: "b".repeat(64) }] })).toEqual(["settingsEntries.historical[] no longer starts with the released list (append-only violated)"]);
+		expect(settingsHistoryViolations({ current: "a".repeat(64), historical: [] }, { current: { canonicalSha256: "b".repeat(64) }, historical: [{ canonicalSha256: "a".repeat(64) }, { canonicalSha256: "b".repeat(64) }] })).toEqual([]);
 	});
 	// biome-ignore format: compact security corpus keeps the review slice bounded.
 	it.each([

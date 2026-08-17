@@ -1,3 +1,13 @@
+## [1.30.0](https://github.com/JNZader/javi-forge/compare/v1.29.0...v1.30.0) (2026-08-17)
+
+### Features
+
+* **claude-hook:** add Slice-3a settings write-plan helpers ([5842f37](https://github.com/JNZader/javi-forge/commit/5842f37669da6b95a93dcf1cd212d2028c8ecfbe))
+* **claude-hook:** transactional install/repair via _run seam ([9a913e3](https://github.com/JNZader/javi-forge/commit/9a913e3f64fd944a857a0df0e9b6b64aa0419056))
+* **secure-fs:** platform-agnostic runTransaction engine ([7b9bfb5](https://github.com/JNZader/javi-forge/commit/7b9bfb5a26c10d5c50079f1437d516903d52d92d))
+* **secure-fs:** PlatformSecureFs interface + POSIX ACL adapters ([0045ba7](https://github.com/JNZader/javi-forge/commit/0045ba76d5c787f22d669d08d63ea931ed16c53b))
+* **secure-fs:** POSIX secure filesystem + selectSecureFs ([47e51d3](https://github.com/JNZader/javi-forge/commit/47e51d32f17bd6dceced98fd1c86418087d7a2e1))
+
 ## [1.29.0](https://github.com/JNZader/javi-forge/compare/v1.28.1...v1.29.0) (2026-08-16)
 
 ### Features

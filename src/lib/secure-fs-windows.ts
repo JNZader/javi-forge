@@ -68,6 +68,15 @@ const POWERSHELL_ARGS = [
 /** Kill an idle session this long after the last transaction (zero handles). */
 const HELPER_IDLE_MS = 30_000;
 
+/**
+ * R4-001 (Phase-4 hard gate): the per-request / handshake deadline. A timer is
+ * armed when a frame is written to the child (and while awaiting the startup
+ * handshake) and cleared the instant its response arrives. If it fires, the
+ * child is killed and every pending/subsequent op fails closed — a hung or
+ * non-responding `.ps1` can no longer hang the installer transaction forever.
+ */
+export const HELPER_OP_TIMEOUT_MS = 30_000;
+
 // --- transport seam ----------------------------------------------------------
 
 export type HelperOp =
@@ -496,6 +505,7 @@ export interface Ps1SessionOptions {
 	readFile?: (filePath: string) => Buffer;
 	spawn?: (cmd: string, args: string[]) => Ps1Child;
 	idleMs?: number;
+	opTimeoutMs?: number;
 	setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
 	clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
 	registerExitHook?: (fn: () => void) => void;
@@ -526,6 +536,7 @@ export function createPs1Session(
 		((cmd: string, args: string[]) =>
 			nodeSpawn(cmd, args) as unknown as Ps1Child);
 	const idleMs = opts.idleMs ?? HELPER_IDLE_MS;
+	const opTimeoutMs = opts.opTimeoutMs ?? HELPER_OP_TIMEOUT_MS;
 	const setTimer =
 		opts.setTimer ??
 		((fn: () => void, ms: number) => {
@@ -547,6 +558,7 @@ export function createPs1Session(
 	const queue: Pending[] = [];
 	let outstanding = 0; // live directory handles in the .ps1 handle table
 	let idleTimer: ReturnType<typeof setTimeout> | null = null;
+	let opTimer: ReturnType<typeof setTimeout> | null = null; // R4-001 deadline
 
 	/** Resolve the manifest binding from exactly ONE source (R1-001). */
 	function resolveBinding(): WindowsHelperBinding | null | undefined {
@@ -589,13 +601,33 @@ export function createPs1Session(
 		}
 	}
 
-	// PHASE-4 GATE (R4-001): there is intentionally NO per-request/handshake
-	// timeout here yet. It is safe in Phase 2 ONLY because the manifest binding is
-	// null so no real child ever spawns. Before flipping
-	// `manifest.installerHelpers.windowsSecureObject` to a real sha in Phase 4,
-	// a HELPER_OP_TIMEOUT_MS deadline MUST be added in the SAME change — otherwise
-	// a hung/non-responding `.ps1` hangs the installer transaction forever.
+	/** R4-001: clear the per-op / handshake deadline (idempotent). */
+	function clearOpTimer(): void {
+		if (opTimer) {
+			clearTimer(opTimer);
+			opTimer = null;
+		}
+	}
+
+	/**
+	 * R4-001: arm the per-op / handshake deadline. Idempotent — one outstanding
+	 * deadline at a time (the protocol is strictly serial). On expiry the child is
+	 * killed and every pending/subsequent op fails closed via `fail`.
+	 */
+	function armOpTimer(): void {
+		if (dead || opTimer) return;
+		opTimer = setTimer(() => {
+			opTimer = null;
+			fail("timeout");
+		}, opTimeoutMs);
+	}
+
 	function init(): void {
+		// R1-004: a completed close() is TERMINAL. Never re-init/spawn after close —
+		// the finished close would not reap the new child, leaking it. `dead` is set
+		// by close() (and by fail()), so guarding here + the `dead` check in request()
+		// makes the session single-shot: once closed, every request refuses closed.
+		if (dead) return;
 		initialized = true;
 		const verified = verifyDigest();
 		if ("detail" in verified) {
@@ -618,6 +650,9 @@ export function createPs1Session(
 		child.on("exit", () => onExit());
 		child.on("error", () => onExit());
 		registerExitHook(() => child?.kill());
+		// R4-001: arm the handshake deadline — a `.ps1` that spawns but never emits
+		// the ready frame must not hang the first caller forever.
+		armOpTimer();
 	}
 
 	/**
@@ -647,6 +682,7 @@ export function createPs1Session(
 			clearTimer(idleTimer);
 			idleTimer = null;
 		}
+		clearOpTimer(); // R4-001
 		drainPending();
 	}
 
@@ -677,6 +713,7 @@ export function createPs1Session(
 		if (!ready) {
 			const hs = frame as { ready?: unknown; protocolVersion?: unknown };
 			if (hs?.ready === true && hs.protocolVersion === 1) {
+				clearOpTimer(); // R4-001: handshake arrived; pump re-arms per request
 				ready = true;
 				pump();
 			} else {
@@ -686,6 +723,7 @@ export function createPs1Session(
 		}
 		const item = current;
 		if (!item) return; // stray frame with nothing outstanding — ignore
+		clearOpTimer(); // R4-001: response arrived; pump re-arms for the next frame
 		current = null;
 		queue.shift();
 		adjustHandles(item.req, frame as HelperResponse);
@@ -715,6 +753,7 @@ export function createPs1Session(
 		if (dead || !ready || current || queue.length === 0) return;
 		current = queue[0];
 		child?.stdin.write(encodeFrame(current.req));
+		armOpTimer(); // R4-001: deadline for this outstanding request
 	}
 
 	return {
@@ -745,6 +784,7 @@ export function createPs1Session(
 				clearTimer(idleTimer);
 				idleTimer = null;
 			}
+			clearOpTimer(); // R4-001
 			// R4-002: drain BEFORE killing the child so pending/queued promises settle
 			// fail-closed even when close() (not onExit) is the terminator — otherwise
 			// a caller that wired abort→close() would hang forever.

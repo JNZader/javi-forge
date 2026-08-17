@@ -608,19 +608,24 @@ describe("createPs1Session — digest verify before spawn", () => {
 		expect(spawn).not.toHaveBeenCalled();
 	});
 
-	it("reads the real on-disk manifest by default and refuses (Phase-1 binding is null, no spawn)", async () => {
-		const spawn = vi.fn();
+	it("reads the real on-disk manifest + .ps1 by default and, on the Phase-4 digest match, spawns and round-trips", async () => {
+		const child = makeFakeChild();
+		const spawn = vi.fn(() => child);
 		// No manifest/readFile injected → default readManifestBinding reads the real
-		// assets/claude-hooks/manifest.json, whose windowsSecureObject is still null
-		// (flipped to a real sha in Phase 4) → digest mismatch, nothing spawned.
+		// assets/claude-hooks/manifest.json (Phase-4: windowsSecureObject bound to a
+		// real sha) and the default readFile hashes the real on-disk .ps1. The digest
+		// now MATCHES, so the session spawns lazily and completes a real round-trip —
+		// this is the wiring the manifest flip enables.
 		const session = createPs1Session({
 			spawn: spawn as unknown as (c: string, a: string[]) => Ps1Child,
+			registerExitHook: () => {}, // hermetic: no real process 'exit' listener
 		});
-		const res = await session.request({ op: "openDir", args: { path: DIR } });
-		expect(res.ok).toBe(false);
-		expect(res.refusal).toBe("windows-secure-object-unavailable");
-		expect(res.detail).toMatch(/digest/i);
-		expect(spawn).not.toHaveBeenCalled();
+		const p = session.request({ op: "proveOwner", args: { path: DIR } });
+		child.emitStdout(encodeFrame({ ready: true, protocolVersion: 1 }));
+		child.emitStdout(encodeFrame({ ok: true }));
+		const res = await p;
+		expect(res.ok).toBe(true);
+		expect(spawn).toHaveBeenCalledTimes(1);
 		await session.close();
 	});
 
@@ -792,6 +797,83 @@ describe("createPs1Session — digest verify before spawn", () => {
 		expect(res.detail).not.toMatch(/oversized/i);
 		expect(child.killed).toBe(true);
 	});
+
+	it("refuses (does not hang) when the child never replies to a request (R4-001)", async () => {
+		const child = makeFakeChild();
+		let fire: (() => void) | undefined;
+		const session = createPs1Session({
+			manifest: MATCHING_MANIFEST,
+			readFile: () => PS1_BYTES,
+			spawn: (() => child) as unknown as (c: string, a: string[]) => Ps1Child,
+			// Capture the op-deadline callback (ms === opTimeoutMs) so the test can
+			// fire it deterministically without real time — the injected timer seam.
+			setTimer: (fn, ms) => {
+				if (ms === 50) fire = fn;
+				return 1 as unknown as ReturnType<typeof setTimeout>;
+			},
+			clearTimer: () => {},
+			opTimeoutMs: 50,
+			registerExitHook: () => {},
+		});
+		const p = session.request({ op: "proveOwner", args: { path: DIR } });
+		child.emitStdout(encodeFrame({ ready: true, protocolVersion: 1 }));
+		// The child ACKs the handshake but NEVER replies to the request. Firing the
+		// armed deadline must kill the child and settle the caller fail-closed.
+		expect(fire).toBeDefined();
+		fire?.();
+		const res = await p;
+		expect(res.ok).toBe(false);
+		expect(res.refusal).toBe("windows-secure-object-unavailable");
+		expect(res.detail).toMatch(/timeout/i);
+		expect(child.killed).toBe(true);
+	});
+
+	it("refuses (does not hang) when the handshake never arrives (R4-001)", async () => {
+		const child = makeFakeChild();
+		let fire: (() => void) | undefined;
+		const session = createPs1Session({
+			manifest: MATCHING_MANIFEST,
+			readFile: () => PS1_BYTES,
+			spawn: (() => child) as unknown as (c: string, a: string[]) => Ps1Child,
+			setTimer: (fn, ms) => {
+				if (ms === 50) fire = fn;
+				return 1 as unknown as ReturnType<typeof setTimeout>;
+			},
+			clearTimer: () => {},
+			opTimeoutMs: 50,
+			registerExitHook: () => {},
+		});
+		const p = session.request({ op: "proveOwner", args: { path: DIR } });
+		// No handshake is ever emitted; the handshake deadline must fire closed.
+		expect(fire).toBeDefined();
+		fire?.();
+		const res = await p;
+		expect(res.ok).toBe(false);
+		expect(res.refusal).toBe("windows-secure-object-unavailable");
+		expect(res.detail).toMatch(/timeout/i);
+		expect(child.killed).toBe(true);
+	});
+
+	it("does NOT re-init or spawn a child after close() — a completed close is terminal (R1-004)", async () => {
+		const child = makeFakeChild();
+		const spawn = vi.fn(() => child);
+		const session = createPs1Session({
+			manifest: MATCHING_MANIFEST,
+			readFile: () => PS1_BYTES,
+			spawn: spawn as unknown as (c: string, a: string[]) => Ps1Child,
+		});
+		// close() BEFORE any request → the session was never initialized/spawned.
+		await session.close();
+		// A subsequent request must refuse closed and MUST NOT run init()/spawn a
+		// fresh child the finished close() would never reap.
+		const res = await session.request({
+			op: "proveOwner",
+			args: { path: DIR },
+		});
+		expect(res.ok).toBe(false);
+		expect(res.refusal).toBe("windows-secure-object-unavailable");
+		expect(spawn).not.toHaveBeenCalled();
+	});
 });
 
 describe("createPs1Session — idle watchdog gated on outstanding handles (W1)", () => {
@@ -802,8 +884,10 @@ describe("createPs1Session — idle watchdog gated on outstanding handles (W1)",
 			manifest: MATCHING_MANIFEST,
 			readFile: () => PS1_BYTES,
 			spawn: (() => child) as unknown as (c: string, a: string[]) => Ps1Child,
-			setTimer: () => {
-				armed++;
+			// Only count IDLE arms (ms === idleMs); the R4-001 op deadline shares the
+			// same seam but arms with opTimeoutMs, so it must not inflate this count.
+			setTimer: (_fn, ms) => {
+				if (ms === 10) armed++;
 				return 1 as unknown as ReturnType<typeof setTimeout>;
 			},
 			clearTimer: () => {},

@@ -74,12 +74,22 @@ function pwsh(script: string): void {
 	);
 }
 /** Replace a path's whole security descriptor via a raw SDDL string (emits
- * generic bits / NULL DACL / foreign owner that `icacls` cannot). */
+ * generic bits / NULL DACL / foreign owner that `icacls` cannot).
+ * Uses pure .NET (System.Security.AccessControl + System.IO static
+ * SetAccessControl) rather than the Get-Acl/Set-Acl cmdlets: on the
+ * windows-latest runner those cmdlets live in Microsoft.PowerShell.Security,
+ * which fails to autoload when powershell.exe 5.1 is spawned under pwsh 7
+ * ("the module could not be loaded"). The .NET types need no module. */
 function setSddl(target: string, sddl: string): void {
 	pwsh(
-		`$a = Get-Acl -LiteralPath '${target}'; ` +
-			`$a.SetSecurityDescriptorSddlForm('${sddl}'); ` +
-			`Set-Acl -LiteralPath '${target}' -AclObject $a`,
+		`$ErrorActionPreference='Stop'; $p='${target}'; $s='${sddl}'; ` +
+			`if ([System.IO.Directory]::Exists($p)) { ` +
+			`$sec = New-Object System.Security.AccessControl.DirectorySecurity; ` +
+			`$sec.SetSecurityDescriptorSddlForm($s); ` +
+			`[System.IO.Directory]::SetAccessControl($p, $sec) } else { ` +
+			`$sec = New-Object System.Security.AccessControl.FileSecurity; ` +
+			`$sec.SetSecurityDescriptorSddlForm($s); ` +
+			`[System.IO.File]::SetAccessControl($p, $sec) }`,
 	);
 }
 /** Remove a directory/junction robustly (rmdir does NOT follow a junction). */

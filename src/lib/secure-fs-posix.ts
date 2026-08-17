@@ -29,6 +29,10 @@ import type {
 	SecureRefusal,
 	SecureResult,
 } from "./secure-fs-transaction.js";
+import {
+	createPs1Session,
+	createWindowsSecureFs,
+} from "./secure-fs-windows.js";
 
 /** Bounded time budget for a single ACL inspection. */
 const ACL_TIMEOUT_MS = 2000;
@@ -205,10 +209,16 @@ export function createPosixSecureFs(acl: PosixAclAdapter): PlatformSecureFs {
 					throw error;
 				}
 			} catch (error) {
-				return refuse(
+				const code = errCode(error);
+				const result = refuse<SecureDirHandle>(
 					"unsafe-parent-chain",
-					`openDir ${dirPath}: ${errCode(error) ?? "error"}`,
+					`openDir ${dirPath}: ${code ?? "error"}`,
 				);
+				// Genuine not-found ONLY on ENOENT (Round-6 / JDA6-001). Every other
+				// errno — ELOOP/reparse, EACCES, ENOTDIR, transient — leaves notFound
+				// absent so a present-but-unopenable managed container fails closed.
+				if (code === "ENOENT") result.notFound = true;
+				return result;
 			}
 		},
 
@@ -387,16 +397,35 @@ export function createPosixSecureFs(acl: PosixAclAdapter): PlatformSecureFs {
 				);
 			}
 		},
+
+		// On POSIX, permission to ADD a child to a directory IS the directory's
+		// write bit; proveOwnershipAndMode already refuses any group/other write
+		// (stats.mode & 0o022). So the managed-container check is definitionally the
+		// same predicate gate() just ran on this path — idempotent, no new refusal
+		// surface. The seam has teeth only on win32, where Predicate A tolerates
+		// add-child on high ancestors (Round-4 / JDA-401).
+		proveManagedContainer(dirPath) {
+			return secureFs.proveOwnershipAndMode(dirPath);
+		},
 	};
 
 	return secureFs;
 }
 
 /**
- * Select the POSIX secure filesystem for the host platform. Linux uses the
- * `getfacl` adapter, macOS uses `/bin/ls -lde`; Windows and every other platform
- * return `null` so the manager refuses with `windows-secure-object-unavailable`
- * and mutates nothing (Slice 3b implements Windows).
+ * Select the secure filesystem for the host platform. Linux uses the `getfacl`
+ * adapter, macOS uses `/bin/ls -lde`, and win32 uses the digest-bound PowerShell
+ * helper over a lazily-spawned session (Slice 3b). Every other platform returns
+ * `null` so the manager refuses with `windows-secure-object-unavailable` and
+ * mutates nothing.
+ *
+ * The win32 branch is host-independent to CONSTRUCT: `createPs1Session` spawns
+ * nothing until the first request, and it verifies the on-disk `.ps1` sha256
+ * against the manifest binding before spawning. If the binding is absent or the
+ * digest mismatches, the transport refuses every op (`refusingTransport`), so
+ * the adapter fails closed exactly like the pre-3b `null` did — but a real,
+ * matching helper now drives Windows installs. The `.ps1`'s runtime behavior is
+ * validated by the `windows-latest` CI job (Phase 5), never on the dev box.
  */
 export function selectSecureFs(
 	platform: NodeJS.Platform = process.platform,
@@ -404,5 +433,6 @@ export function selectSecureFs(
 	if (platform === "linux") return createPosixSecureFs(createLinuxAclAdapter());
 	if (platform === "darwin")
 		return createPosixSecureFs(createMacosAclAdapter());
+	if (platform === "win32") return createWindowsSecureFs(createPs1Session());
 	return null;
 }

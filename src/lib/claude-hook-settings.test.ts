@@ -20,14 +20,18 @@ import {
 	settingsContainer,
 } from "./__fixtures__/claude-hook-ownership.js";
 import {
+	buildManagedContainer,
 	canonicalizeSettingsEntry,
 	classifyLegacy,
 	classifySettingsEntry,
 	deepStructuralEqual,
 	normalizeStatusMessage,
 	parseVersionFromStatus,
+	planForceReplace,
+	planLegacyCohortExcision,
 	planManagedClaudeHookMerge,
 	planManagedClaudeHookRemoval,
+	MANAGED_MATCHER as SETTINGS_MANAGED_MATCHER,
 	type SettingsIdentityManifest,
 	validateSettingsShape,
 } from "./claude-hook-settings.js";
@@ -394,5 +398,138 @@ describe("removal / merge planning preserves siblings and refuses foreign", () =
 		);
 		expect(plan.action).toBe("refuse");
 		expect(plan.refused).toBe(true);
+	});
+});
+
+describe("planLegacyCohortExcision (Slice 3a write-plan helper)", () => {
+	it("locates the four cohort objects by index and preserves every sibling", () => {
+		const readGroup = { matcher: "Read", hooks: [] };
+		const otherGroup = { matcher: "Grep", hooks: [] };
+		const postSibling = { matcher: "Bash", hooks: [] };
+		const parsed = settingsContainer(
+			[
+				readGroup,
+				L1_BASH_DANGEROUS,
+				L2_BASH_SENSITIVE_READ,
+				otherGroup,
+				L3_WRITE_EDIT_PROTECTED,
+			],
+			[L4_BASH_POST_SECRET_SCAN, postSibling],
+		);
+		const plan = planLegacyCohortExcision(parsed);
+		expect(plan.refused).toBe(false);
+		// L1 idx 1, L2 idx 2, L3 idx 4 — ascending, siblings at 0 and 3 preserved.
+		expect(plan.removePreIndices).toEqual([1, 2, 4]);
+		expect(plan.removePostIndices).toEqual([0]);
+		// Two Pre siblings survive excision → managed group appends at index 2.
+		expect(plan.insertPreAt).toBe(2);
+	});
+
+	it("returns ascending indices even when cohort members appear out of order", () => {
+		const parsed = settingsContainer(
+			[L3_WRITE_EDIT_PROTECTED, L1_BASH_DANGEROUS, L2_BASH_SENSITIVE_READ],
+			[L4_BASH_POST_SECRET_SCAN],
+		);
+		const plan = planLegacyCohortExcision(parsed);
+		expect(plan.removePreIndices).toEqual([0, 1, 2]);
+		expect(plan.insertPreAt).toBe(0);
+	});
+
+	it("refuses when the parsed value is not an exact legacy cohort", () => {
+		const parsed = settingsContainer([{ matcher: "Read", hooks: [] }]);
+		const plan = planLegacyCohortExcision(parsed);
+		expect(plan.refused).toBe(true);
+		expect(plan.reason).toMatch(/refuse/);
+	});
+});
+
+describe("planForceReplace (Slice 3a write-plan helper, §324 matcher-exactness)", () => {
+	it("matcher exact → eligible in place regardless of siblings", () => {
+		const group = managedGroup();
+		(group.hooks as unknown[]).push({
+			type: "command",
+			command: "echo",
+			args: ["hi"],
+		});
+		group.hooks[0].timeout = 45; // edits canonical identity → edited-managed
+		const plan = planForceReplace(
+			settingsContainer([group]),
+			SAMPLE_ASSET_SHA256,
+		);
+		expect(plan.refused).toBe(false);
+		expect(plan.matcherExact).toBe(true);
+		expect(plan.siblingHandlers).toBe(1);
+		expect(plan.groupIndex).toBe(0);
+		expect(plan.handlerIndex).toBe(0);
+	});
+
+	it("matcher edited with 0 siblings → eligible in place", () => {
+		const edited = {
+			matcher: "Bash",
+			hooks: [{ ...managedHandler(), timeout: 45 }],
+		};
+		const plan = planForceReplace(
+			settingsContainer([edited]),
+			SAMPLE_ASSET_SHA256,
+		);
+		expect(plan.refused).toBe(false);
+		expect(plan.matcherExact).toBe(false);
+		expect(plan.siblingHandlers).toBe(0);
+		expect(plan.groupIndex).toBe(0);
+		expect(plan.handlerIndex).toBe(0);
+	});
+
+	it("matcher edited with siblings > 0 → refused even under force (§324)", () => {
+		const edited = {
+			matcher: "Bash",
+			hooks: [
+				{ ...managedHandler(), timeout: 45 },
+				{ type: "command", command: "echo", args: ["hi"] },
+			],
+		};
+		const plan = planForceReplace(
+			settingsContainer([edited]),
+			SAMPLE_ASSET_SHA256,
+		);
+		expect(plan.refused).toBe(true);
+		expect(plan.matcherExact).toBe(false);
+		expect(plan.siblingHandlers).toBe(1);
+		expect(plan.reason).toMatch(/§324|sibling/);
+	});
+
+	it("refuses when there is no single marker-proven handler", () => {
+		const parsed = settingsContainer([{ matcher: "Read", hooks: [] }]);
+		const plan = planForceReplace(parsed, SAMPLE_ASSET_SHA256);
+		expect(plan.refused).toBe(true);
+	});
+});
+
+describe("buildManagedContainer (Slice 3a container synthesis)", () => {
+	it("synthesizes a managed-only PreToolUse container from the asset SHA", () => {
+		const container = buildManagedContainer(SAMPLE_ASSET_SHA256);
+		expect(Object.keys(container)).toEqual(["hooks"]);
+		const group = container.hooks.PreToolUse[0];
+		expect(container.hooks.PreToolUse).toHaveLength(1);
+		expect(group.matcher).toBe(SETTINGS_MANAGED_MATCHER);
+		expect(group.hooks[0].statusMessage).toBe(
+			`${MANAGED_STATUS_PREFIX}${SAMPLE_ASSET_SHA256}`,
+		);
+		expect(group.hooks[0].args).toEqual([MANAGED_ASSET_ARG]);
+	});
+
+	it("produces a container that classifies as managed-current for its own SHA", () => {
+		const container = buildManagedContainer(SAMPLE_ASSET_SHA256);
+		const group = container.hooks.PreToolUse[0];
+		const { canonicalSha256 } = canonicalizeSettingsEntry(
+			group,
+			group.hooks[0],
+		);
+		const identity: SettingsIdentityManifest = {
+			current: { version: 1, canonicalSha256 },
+			historical: [],
+		};
+		expect(
+			classifySettingsEntry(container, SAMPLE_ASSET_SHA256, identity).state,
+		).toBe("managed-current");
 	});
 });

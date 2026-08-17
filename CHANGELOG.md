@@ -1,3 +1,12 @@
+## [1.31.0](https://github.com/JNZader/javi-forge/compare/v1.30.1...v1.31.0) (2026-08-17)
+
+### Features
+
+* **secure-fs:** activate win32 secure-fs — manifest binding + wiring + timeout gates (Slice 3b, 4/5) ([94619e5](https://github.com/JNZader/javi-forge/commit/94619e591170a9c0f6d33242616eed513913be63))
+* **secure-fs:** agnostic managed-container seam for transactional install ([1a017bc](https://github.com/JNZader/javi-forge/commit/1a017bc2bb1d03620b675e8f75c83612382f8a9f))
+* **secure-fs:** packaged win32 secure-object .ps1 helper (Slice 3b, 3/5) [size:exception] ([d82b740](https://github.com/JNZader/javi-forge/commit/d82b740ca33ca176ba88a4409daa9b5a271a66f1))
+* **secure-fs:** win32 PlatformSecureFs adapter over HelperTransport [size:exception] ([c81cb86](https://github.com/JNZader/javi-forge/commit/c81cb86953096f78bf240e9a3c82dcb177dc495a))
+
 ## [1.30.1](https://github.com/JNZader/javi-forge/compare/v1.30.0...v1.30.1) (2026-08-17)
 
 ### Bug Fixes

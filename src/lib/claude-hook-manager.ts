@@ -8,8 +8,8 @@
  * Slice-3 seams — Slice 3 GROWS this file, it does not relocate this code.
  */
 
-import { createHash } from "node:crypto";
-import { lstat } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { CLAUDE_HOOK_ASSETS_DIR } from "../constants.js";
 import {
@@ -17,17 +17,28 @@ import {
 	ASSET_NAME,
 } from "./__fixtures__/claude-hook-ownership.js";
 import {
+	buildManagedContainer,
 	type ClaudeHookComponentState,
 	classifySettingsEntry,
 	isPlainObject,
 	LEGACY_FILE_SHA256,
+	type LegacyCohortExcisionPlan,
 	MANAGED_ASSET_ARG,
 	MANAGED_MATCHER,
 	MANAGED_STATUS_PREFIX,
+	planForceReplace,
+	planLegacyCohortExcision,
+	planManagedClaudeHookMerge,
 	type SettingsClassification,
 	type SettingsIdentityManifest,
 } from "./claude-hook-settings.js";
 import { safeReadFile } from "./safe-read.js";
+import { selectSecureFs } from "./secure-fs-posix.js";
+import {
+	type PlatformSecureFs,
+	runTransaction,
+	type TransactionComponent,
+} from "./secure-fs-transaction.js";
 
 /** 1 MiB read budget, shared with the runtime's stdin envelope. */
 const ASSET_MAX_BYTES = 1024 * 1024;
@@ -388,27 +399,323 @@ async function readManifest(): Promise<Manifest> {
 	return JSON.parse(read.content) as Manifest;
 }
 
-// ---------------------------------------------------------------------------
-// Slice-3 transaction seams (declared, unimplemented). Slice 3 grows this file
-// with parent-chain gating, backups, temp/fsync/ACL/rename, and rollback.
-// ---------------------------------------------------------------------------
+// Slice-3a transactional install/repair. The manager stays a thin orchestrator:
+// classify (Slice 2) -> plan (Slice-2 planners + Slice-3a helpers) -> serialize
+// -> delegate the irreversible I/O to runTransaction (opens no handle itself).
 
 export interface ClaudeHookMutationResult {
 	ok: boolean;
-	changed: string[];
-	backups: string[];
-	errors: string[];
+	changed: string[]; // absolute paths actually written/renamed
+	backups: string[]; // absolute PERSISTENT backup paths — forced ops only
+	report: ClaudeHookDoctorReport; // post-mutation doctor snapshot
+	errors: string[]; // refusal/failure messages
+}
+
+/** Injectable deps so tests drive `_run` with a fake `PlatformSecureFs`. */
+export interface ClaudeHookRunDeps {
+	secureFs?: PlatformSecureFs | null;
+	clock?: () => Date;
+	nonce?: () => string; // 8 lowercase hex
+	manifest?: Manifest;
+	platform?: NodeJS.Platform;
+}
+
+type AssetPlan =
+	| { kind: "noop" }
+	| { kind: "write" }
+	| { kind: "refuse"; reason: string };
+
+type SettingsPlan =
+	| { kind: "noop" }
+	| { kind: "refuse"; reason: string }
+	| { kind: "container"; container: unknown }
+	| { kind: "install" }
+	| { kind: "replace"; groupIndex: number; handlerIndex: number }
+	| { kind: "excise"; plan: LegacyCohortExcisionPlan };
+
+function refuseMessage(
+	component: "asset" | "settings",
+	state: ClaudeHookComponentState,
+): string {
+	const remedy = remediationFor(state, component);
+	return `refuse ${component} in state ${state}${remedy ? ` — ${remedy}` : ""}`;
+}
+
+function resolveAssetPlan(
+	state: ClaudeHookComponentState,
+	forced: boolean,
+): AssetPlan {
+	switch (state) {
+		case "absent":
+		case "released-outdated":
+			return { kind: "write" };
+		case "managed-current":
+			return { kind: "noop" };
+		case "edited-managed":
+			return forced
+				? { kind: "write" }
+				: { kind: "refuse", reason: refuseMessage("asset", state) };
+		default:
+			return { kind: "refuse", reason: refuseMessage("asset", state) };
+	}
+}
+
+function resolveSettingsPlan(
+	settingsRead: SettingsRead,
+	currentAssetSha: string,
+	forced: boolean,
+	identities: SettingsIdentityManifest,
+): SettingsPlan {
+	if ("state" in settingsRead) {
+		const state = settingsRead.classification.state;
+		if (state === "absent" || state === "exact-legacy") {
+			return {
+				kind: "container",
+				container: buildManagedContainer(currentAssetSha),
+			};
+		}
+		return { kind: "refuse", reason: refuseMessage("settings", state) };
+	}
+
+	const value = settingsRead.value;
+	const merge = planManagedClaudeHookMerge(value, currentAssetSha, identities);
+	if (!merge.refused) {
+		if (merge.action === "install") return { kind: "install" };
+		if (merge.action === "noop") return { kind: "noop" };
+		if (merge.action === "replace") {
+			return {
+				kind: "replace",
+				groupIndex: merge.groupIndex as number,
+				handlerIndex: merge.handlerIndex as number,
+			};
+		}
+	}
+
+	const cls = classifySettingsEntry(value, currentAssetSha, identities);
+	if (cls.state === "exact-legacy") {
+		const plan = planLegacyCohortExcision(value);
+		return plan.refused
+			? {
+					kind: "refuse",
+					reason: plan.reason ?? refuseMessage("settings", cls.state),
+				}
+			: { kind: "excise", plan };
+	}
+	if (cls.state === "edited-managed") {
+		if (!forced)
+			return { kind: "refuse", reason: refuseMessage("settings", cls.state) };
+		const force = planForceReplace(value, currentAssetSha);
+		if (force.refused) {
+			return {
+				kind: "refuse",
+				reason: force.reason ?? refuseMessage("settings", cls.state),
+			};
+		}
+		return {
+			kind: "replace",
+			groupIndex: force.groupIndex as number,
+			handlerIndex: force.handlerIndex as number,
+		};
+	}
+	return { kind: "refuse", reason: refuseMessage("settings", cls.state) };
+}
+
+function freshManagedGroup(currentAssetSha: string): Record<string, unknown> {
+	return buildManagedContainer(currentAssetSha).hooks
+		.PreToolUse[0] as unknown as Record<string, unknown>;
+}
+
+function ensureHooks(container: Record<string, unknown>): {
+	PreToolUse: unknown[];
+	PostToolUse?: unknown[];
+} {
+	if (!isPlainObject(container.hooks)) container.hooks = {};
+	const hooks = container.hooks as Record<string, unknown>;
+	if (!Array.isArray(hooks.PreToolUse)) hooks.PreToolUse = [];
+	return hooks as { PreToolUse: unknown[]; PostToolUse?: unknown[] };
+}
+
+/** Build the desired settings container, preserving unrelated content. */
+function applySettingsPlan(
+	value: unknown,
+	plan: SettingsPlan,
+	currentAssetSha: string,
+): unknown {
+	if (plan.kind === "container") return plan.container;
+	const container = structuredClone(value) as Record<string, unknown>;
+	const group = freshManagedGroup(currentAssetSha);
+	const hooks = ensureHooks(container);
+	const pre = hooks.PreToolUse;
+
+	if (plan.kind === "install") {
+		pre.push(group);
+		return container;
+	}
+	if (plan.kind === "replace") {
+		const g = pre[plan.groupIndex] as Record<string, unknown>;
+		g.matcher = MANAGED_MATCHER;
+		(g.hooks as unknown[])[plan.handlerIndex] = (group.hooks as unknown[])[0];
+		return container;
+	}
+	if (plan.kind !== "excise") return container;
+	// excise: remove the proven cohort by descending index, then insert the group.
+	const { removePreIndices, removePostIndices, insertPreAt } = plan.plan;
+	for (const index of [...removePreIndices].sort((a, b) => b - a)) {
+		pre.splice(index, 1);
+	}
+	const post = Array.isArray(hooks.PostToolUse) ? hooks.PostToolUse : [];
+	for (const index of [...removePostIndices].sort((a, b) => b - a)) {
+		post.splice(index, 1);
+	}
+	pre.splice(insertPreAt, 0, group);
+	return container;
+}
+
+function serializeSettings(container: unknown): Buffer {
+	return Buffer.from(`${JSON.stringify(container, null, 2)}\n`, "utf8");
+}
+
+/** Internal deps-taking entry; tests drive it with a fake `PlatformSecureFs`. */
+export async function _run(
+	projectDir: string,
+	mode: "install" | "repair",
+	options: { force?: boolean },
+	deps: ClaudeHookRunDeps,
+): Promise<ClaudeHookMutationResult> {
+	const manifest = deps.manifest ?? (await readManifest());
+	const platform = deps.platform ?? process.platform;
+	const secureFs =
+		deps.secureFs !== undefined ? deps.secureFs : selectSecureFs(platform);
+	const clock = deps.clock ?? (() => new Date());
+	const nonce = deps.nonce ?? (() => randomBytes(4).toString("hex"));
+	const currentAssetSha = manifest.asset.sha256;
+
+	const assetDestPath = path.join(projectDir, ".claude", "hooks", ASSET_NAME);
+	const settingsPath = path.join(projectDir, ".claude", "settings.json");
+	const assetSrcPath = path.join(CLAUDE_HOOK_ASSETS_DIR, ASSET_NAME);
+	const doctor = (): Promise<ClaudeHookDoctorReport> =>
+		doctorClaudePreToolUse(projectDir, { manifest });
+
+	// Windows (or any platform without an adapter) refuses with zero mutation.
+	if (!secureFs) {
+		return {
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: ["windows-secure-object-unavailable"],
+			report: await doctor(),
+		};
+	}
+
+	// Classify both components with the Slice-2 read layer.
+	const assetCls = await classifyAssetState(assetDestPath, manifest);
+	const settingsRead = await readSettings(settingsPath);
+	const settingsState = (
+		"state" in settingsRead
+			? settingsRead.classification
+			: classifySettingsEntry(
+					settingsRead.value,
+					currentAssetSha,
+					manifest.settingsEntries,
+				)
+	).state;
+
+	const forced = mode === "repair" && options.force === true;
+	const assetPlan = resolveAssetPlan(assetCls.state, forced);
+	const settingsPlan = resolveSettingsPlan(
+		settingsRead,
+		currentAssetSha,
+		forced,
+		manifest.settingsEntries,
+	);
+
+	// A refusal on either component refuses the whole operation, zero mutation.
+	if (assetPlan.kind === "refuse" || settingsPlan.kind === "refuse") {
+		const reason =
+			assetPlan.kind === "refuse"
+				? assetPlan.reason
+				: (settingsPlan as { kind: "refuse"; reason: string }).reason;
+		return {
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: [reason],
+			report: await doctor(),
+		};
+	}
+
+	// Zero-write idempotent no-op: both components already current.
+	if (assetPlan.kind === "noop" && settingsPlan.kind === "noop") {
+		return {
+			ok: true,
+			changed: [],
+			backups: [],
+			errors: [],
+			report: await doctor(),
+		};
+	}
+
+	const assetWasAbsent = assetCls.state === "absent";
+	const settingsWasAbsent =
+		"state" in settingsRead && settingsRead.classification.state === "absent";
+	const assetForced = forced && assetCls.state === "edited-managed";
+	const settingsForced = forced && settingsState === "edited-managed";
+
+	const desiredAsset =
+		assetPlan.kind === "write" ? await readFile(assetSrcPath) : null;
+	const desiredSettings =
+		settingsPlan.kind === "noop"
+			? null
+			: serializeSettings(
+					applySettingsPlan(
+						"value" in settingsRead ? settingsRead.value : undefined,
+						settingsPlan,
+						currentAssetSha,
+					),
+				);
+
+	const asset: TransactionComponent = {
+		path: assetDestPath,
+		desired: desiredAsset,
+		capturePrior: assetPlan.kind === "write" && !assetWasAbsent,
+		forceBackup: assetForced,
+		wasAbsent: assetWasAbsent,
+	};
+	const settings: TransactionComponent = {
+		path: settingsPath,
+		desired: desiredSettings,
+		capturePrior: settingsPlan.kind !== "noop" && !settingsWasAbsent,
+		forceBackup: settingsForced,
+		wasAbsent: settingsWasAbsent,
+	};
+
+	const tx = await runTransaction({
+		secureFs,
+		clock,
+		nonce,
+		projectDir,
+		asset,
+		settings,
+	});
+
+	return {
+		ok: tx.ok,
+		changed: tx.committed,
+		backups: tx.backups,
+		errors: tx.errors,
+		report: await doctor(),
+	};
 }
 
 export function installClaudePreToolUse(
-	_projectDir: string,
+	projectDir: string,
 ): Promise<ClaudeHookMutationResult> {
-	throw new Error("unimplemented: Slice 3 transaction");
+	return _run(projectDir, "install", {}, {});
 }
 
 export function repairClaudePreToolUse(
-	_projectDir: string,
-	_options?: { force?: boolean },
+	projectDir: string,
+	options?: { force?: boolean },
 ): Promise<ClaudeHookMutationResult> {
-	throw new Error("unimplemented: Slice 3 transaction");
+	return _run(projectDir, "repair", options ?? {}, {});
 }

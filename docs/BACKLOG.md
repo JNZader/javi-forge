@@ -504,3 +504,37 @@ therefore invisible until someone runs the command by hand.
   stale global's bundled Dockerfiles no longer override a repo's committed runner assets. The "prefer
   repo-local BINARY" variant above stays deferred (it's a hook-contract change; the Dockerfile-level
   fix covered the class that actually bit us).
+
+## 2026-08-16 — from SDD `skillguard-transactional-install-posix` (Slice 3a) post-apply Judgment Day
+
+Source: `openspec/changes/archive/2026-08-16-skillguard-transactional-install-posix/verify-report.md`.
+All three are NON-BLOCKING (slice verified PASS, shipped in `javi-forge@1.30.0`); parked for
+between-SDD work per the Fix-Between-SDDs pattern. Batch them together to avoid a release per fix.
+
+### JD-B-001 — rollback restore-rename failure does not append STOP
+
+During guarded rollback, the restore path renames the backup back into place but does not
+check the `renameInDir` result; a failed restore-rename proceeds silently instead of STOPping
+with a lost-proof signal like the forward path does.
+
+- Evidence: `src/lib/secure-fs-transaction.ts:506` — `renameInDir(...)` result unchecked in the rollback restore branch.
+- Status: defense-in-depth; the forward path already STOPs on lost proof, this closes the symmetric rollback case.
+- Suggested fix: capture the restore-rename result and append a STOP to the report when it fails, mirroring `rollback()` :466-482.
+
+### JD-B-002 — `captureFile` should assert `S_ISREG`
+
+`captureFile` reads the target for backup without asserting it is a regular file; a non-regular
+target (fifo/device/socket) slipping through the parent-chain gate would be captured as if regular.
+
+- Evidence: `src/lib/secure-fs-posix.ts:274-296` — no `S_ISREG` assertion before capture.
+- Status: defense-in-depth; the O_NOFOLLOW + parent-chain gate already blocks the realistic vectors.
+- Suggested fix: assert `S_ISREG(st.mode)` after the no-follow open, fail closed otherwise.
+
+### LINT-001 — unused imports in `claude-hook-manager.test.ts`
+
+`installClaudePreToolUse`, `repairClaudePreToolUse`, and `type Manifest` are imported but unused
+in the manager test (biome `noUnusedImports`, FIXABLE, non-failing — `pnpm lint` exits 0).
+
+- Evidence: `src/lib/claude-hook-manager.test.ts:22-24`.
+- Status: cosmetic; grouped into the 8 non-failing lint warnings, not a gate failure.
+- Suggested fix: remove the three unused imports (biome unsafe-fix).

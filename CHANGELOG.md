@@ -1,3 +1,9 @@
+## [1.30.1](https://github.com/JNZader/javi-forge/compare/v1.30.0...v1.30.1) (2026-08-17)
+
+### Bug Fixes
+
+* **secure-fs:** STOP on rollback restore-rename failure and assert regular-file in capture ([235766b](https://github.com/JNZader/javi-forge/commit/235766bc241ba266c79e1de6f42d41347e6f43b7))
+
 ## [1.30.0](https://github.com/JNZader/javi-forge/compare/v1.29.0...v1.30.0) (2026-08-17)
 
 ### Features

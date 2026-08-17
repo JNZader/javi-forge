@@ -123,14 +123,17 @@ describe("createMacosAclAdapter (/bin/ls -lde, mocked spawn — never skipped)",
 });
 
 describe("selectSecureFs platform selection", () => {
-	it("returns null on win32 and unknown platforms", () => {
-		expect(selectSecureFs("win32")).toBeNull();
+	it("returns null on unknown platforms (no adapter → refuse, zero mutation)", () => {
 		expect(selectSecureFs("sunos")).toBeNull();
 	});
 
-	it("returns an adapter on linux and darwin", () => {
+	it("returns an adapter on linux, darwin and win32 (Slice 3b wiring)", () => {
 		expect(selectSecureFs("linux")).not.toBeNull();
 		expect(selectSecureFs("darwin")).not.toBeNull();
+		// Phase 4: win32 now returns the windows adapter over a lazily-spawned
+		// digest-bound .ps1 session (was null pre-3b). Constructing it spawns
+		// nothing — host-independent on the Linux dev box.
+		expect(selectSecureFs("win32")).not.toBeNull();
 	});
 });
 

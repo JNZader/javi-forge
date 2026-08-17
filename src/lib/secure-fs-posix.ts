@@ -29,6 +29,10 @@ import type {
 	SecureRefusal,
 	SecureResult,
 } from "./secure-fs-transaction.js";
+import {
+	createPs1Session,
+	createWindowsSecureFs,
+} from "./secure-fs-windows.js";
 
 /** Bounded time budget for a single ACL inspection. */
 const ACL_TIMEOUT_MS = 2000;
@@ -409,10 +413,19 @@ export function createPosixSecureFs(acl: PosixAclAdapter): PlatformSecureFs {
 }
 
 /**
- * Select the POSIX secure filesystem for the host platform. Linux uses the
- * `getfacl` adapter, macOS uses `/bin/ls -lde`; Windows and every other platform
- * return `null` so the manager refuses with `windows-secure-object-unavailable`
- * and mutates nothing (Slice 3b implements Windows).
+ * Select the secure filesystem for the host platform. Linux uses the `getfacl`
+ * adapter, macOS uses `/bin/ls -lde`, and win32 uses the digest-bound PowerShell
+ * helper over a lazily-spawned session (Slice 3b). Every other platform returns
+ * `null` so the manager refuses with `windows-secure-object-unavailable` and
+ * mutates nothing.
+ *
+ * The win32 branch is host-independent to CONSTRUCT: `createPs1Session` spawns
+ * nothing until the first request, and it verifies the on-disk `.ps1` sha256
+ * against the manifest binding before spawning. If the binding is absent or the
+ * digest mismatches, the transport refuses every op (`refusingTransport`), so
+ * the adapter fails closed exactly like the pre-3b `null` did — but a real,
+ * matching helper now drives Windows installs. The `.ps1`'s runtime behavior is
+ * validated by the `windows-latest` CI job (Phase 5), never on the dev box.
  */
 export function selectSecureFs(
 	platform: NodeJS.Platform = process.platform,
@@ -420,5 +433,6 @@ export function selectSecureFs(
 	if (platform === "linux") return createPosixSecureFs(createLinuxAclAdapter());
 	if (platform === "darwin")
 		return createPosixSecureFs(createMacosAclAdapter());
+	if (platform === "win32") return createWindowsSecureFs(createPs1Session());
 	return null;
 }

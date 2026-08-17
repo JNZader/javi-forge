@@ -20,6 +20,13 @@ interface Runtime {
 }
 const ASSET_NAME = "javi-forge-skillguard-pre-tool-use.mjs";
 const ASSET = path.join(CLAUDE_HOOK_ASSETS_DIR, ASSET_NAME);
+// Slice 3b Phase 4: the win32 secure-object helper is now digest-bound in the
+// manifest exactly like the .mjs. Pin its name + released sha256 so a silent
+// rebind (or a tampered .ps1) fails this contract — the "flip the guard or ship
+// nothing" gate. The on-disk .ps1 MUST hash to the manifest binding below.
+const WINDOWS_SECURE_OBJECT_NAME = "javi-forge-windows-secure-object.ps1";
+const WINDOWS_SECURE_OBJECT_SHA256 =
+	"2289ef6ac6b039ec74dc3ea0894413e243ff9bea963f04008a356b3838f9b8dd";
 const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
 // Decision ②: placeholder-normalized canonical hash of the exact managed matcher
 // group. Bound here so a silent settings-identity rewrite fails this contract.
@@ -58,8 +65,11 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(runtime.SUPPORTED_TOOLS).toEqual(TOOLS);
 		expect(runtime.INPUT_LIMIT_BYTES).toBe(1_048_576);
 		expect(runtime.POLICY_REGISTRY).toEqual({ schemaVersion: 1, policyVersion: 1, diagnosticsMaxBytes: 240 });
-		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 1, historical: [] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [] }, installerHelpers: { windowsSecureObject: null } });
+		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 1, historical: [] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
 		expect(manifest.asset.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+		// The bundled win32 helper on disk MUST hash to its manifest binding (mirrors the .mjs asset sha assertion above).
+		const ps1Bytes = fs.readFileSync(path.join(CLAUDE_HOOK_ASSETS_DIR, WINDOWS_SECURE_OBJECT_NAME));
+		expect(manifest.installerHelpers.windowsSecureObject.sha256).toBe(createHash("sha256").update(ps1Bytes).digest("hex"));
 		expect(source.match(/^import .+ from "(.+)";$/gm)?.every((line) => line.includes('"node:'))).toBe(true);
 		expect(source).not.toMatch(/\b(?:fetch|https?:\/\/|require\s*\(|import\s*\()\b/);
 	});

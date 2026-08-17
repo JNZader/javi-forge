@@ -27,3 +27,19 @@ jobs:
           pnpm typecheck; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           pnpm typecheck:test; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           pnpm vitest run src/__tests__/claude-hook-assets.test.ts src/__integration__/claude-pretooluse-exec.integration.test.ts
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      # NOTE: `pnpm package:check` is NOT run here — it is Linux-only (its npm
+      # script redirects to /tmp paths that do not exist on Windows) AND the
+      # packed-tarball contents are platform-independent, so the Linux/release CI
+      # already enforces that the .ps1 ships. This job's purpose is the .ps1 runtime.
+      # First-ever execution surface for the digest-bound
+      # javi-forge-windows-secure-object.ps1: drives the REAL
+      # createWindowsSecureFs(createPs1Session()) against real NTFS fixtures
+      # (icacls / mklink /J / .NET Set-Acl) on the C: volume. This suite is
+      # win32-gated (describe.skipIf) so it is inert on Linux and only runs here.
+      # A RED result means the .ps1 needs a fix — do NOT mask it.
+      - name: Validate real win32 secure-object helper (.ps1)
+        shell: pwsh
+        run: |
+          pnpm vitest run src/__integration__/secure-fs-windows.integration.test.ts
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

@@ -503,7 +503,13 @@ export async function runTransaction(
 					path.join(entry.dir.path, rName),
 					entry.prior.mode,
 				);
-				await secureFs.renameInDir(entry.dir, rName, base);
+				const restored = await secureFs.renameInDir(entry.dir, rName, base);
+				if (!restored.ok) {
+					errors.push(
+						`STOP: cannot restore ${entry.path}; prior payload staged at ${path.join(entry.dir.path, rName)} for manual recovery`,
+					);
+					return;
+				}
 			}
 		}
 		// Remove only tx-created, identity-matched, still-empty segments, child-first.

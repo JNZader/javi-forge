@@ -276,6 +276,12 @@ export function createPosixSecureFs(acl: PosixAclAdapter): PlatformSecureFs {
 				const handle = await open(target, CAPTURE_FLAGS);
 				try {
 					const stats = await handle.stat();
+					if (!stats.isFile()) {
+						return refuse(
+							"unsafe-parent-chain",
+							`capture ${target}: not a regular file`,
+						);
+					}
 					const bytes = await handle.readFile();
 					const sha256 = createHash("sha256").update(bytes).digest("hex");
 					return okValue<CapturedFile>({

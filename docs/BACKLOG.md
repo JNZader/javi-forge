@@ -520,6 +520,7 @@ with a lost-proof signal like the forward path does.
 - Evidence: `src/lib/secure-fs-transaction.ts:506` — `renameInDir(...)` result unchecked in the rollback restore branch.
 - Status: defense-in-depth; the forward path already STOPs on lost proof, this closes the symmetric rollback case.
 - Suggested fix: capture the restore-rename result and append a STOP to the report when it fails, mirroring `rollback()` :466-482.
+- **CLOSED 2026-08-16** — `renameInDir` result now checked; on `!ok` pushes `STOP: cannot restore <path>; prior payload staged at <rName> for manual recovery` and returns. TDD RED→GREEN (`secure-fs-transaction.rollback.test.ts`); review-risk CLEAN.
 
 ### JD-B-002 — `captureFile` should assert `S_ISREG`
 
@@ -529,6 +530,7 @@ target (fifo/device/socket) slipping through the parent-chain gate would be capt
 - Evidence: `src/lib/secure-fs-posix.ts:274-296` — no `S_ISREG` assertion before capture.
 - Status: defense-in-depth; the O_NOFOLLOW + parent-chain gate already blocks the realistic vectors.
 - Suggested fix: assert `S_ISREG(st.mode)` after the no-follow open, fail closed otherwise.
+- **CLOSED 2026-08-16** — after the O_NOFOLLOW fd stat, `captureFile` refuses `!stats.isFile()` (fd-based, TOCTOU-free) before reading. TDD RED→GREEN via `/dev/null` char device (FIFO blocks at open, dir throws EISDIR so old code already refused = false RED); review-risk CLEAN.
 
 ### LINT-001 — unused imports in `claude-hook-manager.test.ts`
 
@@ -538,3 +540,17 @@ in the manager test (biome `noUnusedImports`, FIXABLE, non-failing — `pnpm lin
 - Evidence: `src/lib/claude-hook-manager.test.ts:22-24`.
 - Status: cosmetic; grouped into the 8 non-failing lint warnings, not a gate failure.
 - Suggested fix: remove the three unused imports (biome unsafe-fix).
+- **CLOSED 2026-08-16 (partial correction)** — only `installClaudePreToolUse` and `repairClaudePreToolUse` were unused; `type Manifest` IS used (`claude-hook-manager.test.ts:35,37`, `syntheticManifest` return type) — removing it broke `typecheck:test`. Removed the two genuine ones, kept `Manifest`. The original ticket over-counted (biome carets were on 22 and 24 only).
+
+### JD-B-003 — `applyExactMode` unchecked during rollback restore
+
+Sibling of JD-B-001, surfaced by its review-risk pass (R1-001, INFO). In `rollback()`,
+`applyExactMode` is called fire-and-forget before the (now-checked) restore rename; a silent
+failure leaves the restored file at `writeExclusive`'s `0o600` instead of `prior.mode`.
+
+- Evidence: `src/lib/secure-fs-transaction.ts:502-505` — `applyExactMode(...)` result unchecked.
+- Status: NON-security (fails toward MORE restrictive perms, not exposure); functional restoration
+  defect only. Left out of JD-B-001 scope deliberately (mode-restore recovery semantics differ
+  from a rename failure — a STOP-and-return may be too aggressive for a perms-only miss).
+- Suggested fix: decide the recovery semantics (STOP vs. record-and-continue with a warning),
+  then check the `applyExactMode` result accordingly. Batch with the next secure-fs touch.

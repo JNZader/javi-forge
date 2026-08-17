@@ -19,9 +19,7 @@ import {
 	classifySettingsFile,
 	detectNode,
 	doctorClaudePreToolUse,
-	installClaudePreToolUse,
 	type Manifest,
-	repairClaudePreToolUse,
 } from "./claude-hook-manager.js";
 import { canonicalizeSettingsEntry } from "./claude-hook-settings.js";
 

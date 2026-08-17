@@ -183,6 +183,35 @@ describe("runTransaction — rollback STOPS on lost proof (never clobbers)", () 
 		expect(fake.fileText(ASSET)).toBe("NEW-ASSET");
 	});
 
+	it("stops when the restore-rename itself fails (payload staged for manual recovery)", async () => {
+		const fake = seededUpgradeFake();
+		let assetRenames = 0;
+		// settings.json rename fails → triggers rollback of the committed asset.
+		// asset.mjs renames twice: forward commit (1st, must succeed) then the
+		// rollback restore-rename (2nd, forced to fail).
+		fake.faults.renameRefuse = (to) => {
+			if (to === "settings.json") return true;
+			if (to === "asset.mjs") {
+				assetRenames += 1;
+				return assetRenames >= 2;
+			}
+			return false;
+		};
+		const outcome = await run(
+			fake,
+			asset({ capturePrior: true, wasAbsent: false }),
+			settings({ capturePrior: true, wasAbsent: false }),
+		);
+		expect(outcome.ok).toBe(false);
+		// The failed restore-rename must emit a STOP with manual-recovery guidance.
+		expect(outcome.errors.join(" ")).toMatch(
+			/STOP: cannot restore .*asset\.mjs.*staged at .*for manual recovery/,
+		);
+		// The prior bytes were NOT restored (the rename failed); the committed
+		// payload stays in place rather than being silently left half-restored.
+		expect(fake.fileText(ASSET)).toBe("NEW-ASSET");
+	});
+
 	it("stops when the committed target's hash drifted after commit (concurrent edit)", async () => {
 		const fake = seededUpgradeFake();
 		fake.faults.renameRefuse = (to) => to === "settings.json";

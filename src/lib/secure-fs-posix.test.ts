@@ -176,6 +176,18 @@ describe("createPosixSecureFs ownership + secure I/O (host-independent, own tmp 
 		await handle.close();
 	});
 
+	it("captureFile refuses a non-regular target (char device) as unsafe-parent-chain", async () => {
+		// /dev/null is a character device: open O_NOFOLLOW|O_RDONLY succeeds and a
+		// read returns EOF immediately, so the old capture path would treat it as a
+		// regular file. captureFile must fail closed because isFile() is false.
+		// (A FIFO would block at open() with no writer, and a directory throws
+		// EISDIR on read — both refuse for the wrong reason; a char device is the
+		// deterministic case that proves the regular-file assertion.)
+		const res = await fsx.captureFile("/dev/null");
+		expect(res.ok).toBe(false);
+		expect(res.refusal).toBe("unsafe-parent-chain");
+	});
+
 	it("captureFile refuses to follow a symlink at the target name", async () => {
 		await writeFile(path.join(dir, "real"), "secret\n");
 		const { symlink } = await import("node:fs/promises");

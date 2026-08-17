@@ -28,10 +28,10 @@ jobs:
           pnpm typecheck:test; if ($LASTEXITCODE) { exit $LASTEXITCODE }
           pnpm vitest run src/__tests__/claude-hook-assets.test.ts src/__integration__/claude-pretooluse-exec.integration.test.ts
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Verify packaged helper assets ship
-        shell: pwsh
-        run: |
-          pnpm package:check; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      # NOTE: `pnpm package:check` is NOT run here — it is Linux-only (its npm
+      # script redirects to /tmp paths that do not exist on Windows) AND the
+      # packed-tarball contents are platform-independent, so the Linux/release CI
+      # already enforces that the .ps1 ships. This job's purpose is the .ps1 runtime.
       # First-ever execution surface for the digest-bound
       # javi-forge-windows-secure-object.ps1: drives the REAL
       # createWindowsSecureFs(createPs1Session()) against real NTFS fixtures

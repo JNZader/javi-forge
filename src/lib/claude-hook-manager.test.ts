@@ -12,7 +12,9 @@ import {
 	managedHandler,
 	SAMPLE_ASSET_SHA256,
 } from "./__fixtures__/claude-hook-ownership.js";
+import { makeFakeSecureFs } from "./__fixtures__/fake-secure-fs.js";
 import {
+	_run,
 	classifyAssetState,
 	classifySettingsFile,
 	detectNode,
@@ -328,15 +330,63 @@ describe("doctorClaudePreToolUse (read-only component report)", () => {
 	});
 });
 
-describe("Slice-3 seams are declared but unimplemented", () => {
-	it("installClaudePreToolUse throws the Slice-3 marker", () => {
-		expect(() => installClaudePreToolUse(dir)).toThrow(
-			/unimplemented: Slice 3/,
+const txClock = () => new Date("2026-08-16T19:00:00.123Z");
+const makeNonce = () => {
+	let n = 0;
+	return () => (++n).toString(16).padStart(8, "0");
+};
+/** Seed the fake with the real ancestor chain of a project dir (root first). */
+const seedChain = (
+	fake: ReturnType<typeof makeFakeSecureFs>,
+	projectDir: string,
+): void => {
+	let current = projectDir;
+	while (true) {
+		fake.seedDir(current);
+		const parent = path.dirname(current);
+		if (parent === current) break;
+		current = parent;
+	}
+};
+
+describe("_run — install seam wiring (fake secureFs, host-independent)", () => {
+	it("installs both absent components in place and returns a reconciled report", async () => {
+		const fake = makeFakeSecureFs();
+		seedChain(fake, dir);
+		const res = await _run(
+			dir,
+			"install",
+			{},
+			{
+				secureFs: fake,
+				clock: txClock,
+				nonce: makeNonce(),
+				manifest: syntheticManifest(),
+			},
+		);
+		expect(res.ok).toBe(true);
+		expect(res.changed).toEqual([assetPath(), settingsPath()]);
+		expect(res.backups).toEqual([]);
+		expect(res.report).toBeDefined();
+		const parsed = JSON.parse(fake.fileText(settingsPath()) as string);
+		expect(parsed.hooks.PreToolUse[0].matcher).toBe(
+			"Bash|PowerShell|Read|Write|Edit",
+		);
+		expect(fake.fileText(assetPath())).toBe(
+			fs.readFileSync(REAL_ASSET, "utf8"),
 		);
 	});
-	it("repairClaudePreToolUse throws the Slice-3 marker", () => {
-		expect(() => repairClaudePreToolUse(dir, { force: true })).toThrow(
-			/unimplemented: Slice 3/,
+
+	it("refuses on Windows with zero mutation and still returns a report", async () => {
+		const res = await _run(
+			dir,
+			"install",
+			{},
+			{ secureFs: null, manifest: syntheticManifest() },
 		);
+		expect(res.ok).toBe(false);
+		expect(res.errors).toContain("windows-secure-object-unavailable");
+		expect(res.changed).toEqual([]);
+		expect(res.report).toBeDefined();
 	});
 });

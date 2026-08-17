@@ -17,6 +17,14 @@ import path from "node:path";
 export interface SecureIdentity {
 	dev: number;
 	ino: number;
+	/**
+	 * Full-precision, platform-opaque identity token. POSIX leaves this undefined
+	 * (identity is `dev`+`ino`). win32 sets `"<volumeSerialHex>:<fileIdHex>"` and
+	 * compares ONLY on this — an absent/zero token is a hard refusal there, never
+	 * a fallback to the truncated `dev`/`ino` (Decision 1b). Additive: the core
+	 * passes it back to the adapter opaquely and never interprets it.
+	 */
+	opaque?: string;
 }
 
 /** A held, no-follow directory handle plus its captured identity and path. */
@@ -37,6 +45,7 @@ export interface CapturedFile {
 export type SecureRefusal =
 	| "unsafe-parent-chain" // owner/mode/identity/handle proof failed
 	| "unsupported-posix-acl" // ACL tool absent/parse/timeout/extended/changed
+	| "unsafe-windows-dacl" // win32: foreign owner/path-endangering/add-child/NULL DACL
 	| "windows-secure-object-unavailable"; // 3a Windows stub only
 
 export interface SecureResult<T> {
@@ -44,6 +53,15 @@ export interface SecureResult<T> {
 	value?: T;
 	refusal?: SecureRefusal;
 	detail?: string; // first offending path/capability, never secret content
+	/**
+	 * Set ONLY by `openDirNoFollow` on a refusal, and ONLY for a GENUINE
+	 * not-found (POSIX ENOENT / win32 `ERROR_FILE_NOT_FOUND`|`ERROR_PATH_NOT_FOUND`).
+	 * Every other refusal — a reparse point/junction, EACCES, ENOTDIR, a transient
+	 * error, or any non-open proof — leaves this absent/false so a managed
+	 * container that is PRESENT-but-unopenable fails the transaction closed rather
+	 * than being silently skipped (Round-6 / JDA6-001). Additive.
+	 */
+	notFound?: boolean;
 }
 
 /**
@@ -116,6 +134,18 @@ export interface PlatformSecureFs {
 
 	/** Remove an identity-matched EMPTY directory (rollback of a created segment). */
 	rmdirIfIdentityEmpty(handle: SecureDirHandle): Promise<SecureResult<void>>;
+
+	/**
+	 * Prove a directory the tool OWNS as a MANAGED CONTAINER (`.claude`,
+	 * `.claude/hooks`): refuse ALL foreign add/delete-child rights — strictly more
+	 * than the lenient ancestor `gate()`, which tolerates harmless add-child on
+	 * high traversal ancestors (Round-4 / JDA-401). The core calls this ONLY on the
+	 * dirs it constructs, expressing the managed-container role by WHICH method it
+	 * invokes — no `process.platform` ever enters the engine. POSIX delegates to its
+	 * existing strict ownership/mode check (group/other write IS add-child on a
+	 * directory), so POSIX behavior is unchanged; the seam has teeth only on win32.
+	 */
+	proveManagedContainer(dirPath: string): Promise<SecureResult<void>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +271,11 @@ export async function runTransaction(
 	const { secureFs, clock, nonce, projectDir } = input;
 	const claudeDir = path.join(projectDir, ".claude");
 	const hooksDir = path.join(claudeDir, "hooks");
+	// The dirs the tool OWNS: their children include the executed asset and the
+	// settings it is referenced from. Fixed and known to the core regardless of
+	// the per-run write plan; each existing member is proved on EVERY anyWrite run
+	// (Round-4/5 / JDA-401 + JDB5-001).
+	const managedContainers = new Set<string>([claudeDir, hooksDir]);
 
 	const heldByPath = new Map<string, SecureDirHandle>();
 	const heldOrder: SecureDirHandle[] = [];
@@ -259,15 +294,47 @@ export async function runTransaction(
 		heldOrder.push(handle);
 	}
 
-	async function ensureDir(
+	/**
+	 * Ensure a MANAGED CONTAINER (`.claude`/`.claude/hooks`): an existing one is
+	 * ALWAYS gated + proveManagedContainer'd (→ heldOrder → re-proved pre-commit);
+	 * an absent one is created Predicate-B strict ONLY when `createIfAbsent` (a
+	 * child is written into it this run), else left alone. Four fail-closed
+	 * branches (Round-4/5/6 / JDA-401 + JDB5-001 + JDA6-001):
+	 *   (1) present + openable    → gate + proveManagedContainer, return handle
+	 *   (2) notFound + create     → createDirExclusive + gate + proveManagedContainer
+	 *   (3) notFound + !create    → return null (nothing to secure)
+	 *   (4) any non-notFound !ok  → FAIL CLOSED explicitly (present-but-unopenable:
+	 *                               junction/reparse/EACCES) regardless of create.
+	 */
+	async function ensureManagedContainer(
 		parent: SecureDirHandle,
 		fullPath: string,
-	): Promise<SecureDirHandle> {
+		createIfAbsent: boolean,
+	): Promise<SecureDirHandle | null> {
 		const opened = await secureFs.openDirNoFollow(fullPath);
+		// (1) PRESENT + openable no-follow.
 		if (opened.ok && opened.value) {
 			await gate(fullPath, opened.value);
+			must(
+				`container ${fullPath}`,
+				await secureFs.proveManagedContainer(fullPath),
+			);
 			return opened.value;
 		}
+		// (4) ANY non-notFound refusal → fail the whole transaction closed,
+		// regardless of createIfAbsent. Refuse EXPLICITLY (JDB7-002): do not rely
+		// on a later must() throwing — propagate the refusal here so a
+		// present-but-unopenable managed container is never silently skipped.
+		if (!opened.notFound) {
+			throw new TxAbort(
+				`container ${fullPath}`,
+				opened.detail ?? opened.refusal ?? "present-but-unopenable",
+			);
+		}
+		// GENUINELY ABSENT (notFound === true) — the ONLY safe skip/create path.
+		// (3) absent + no child written this run → nothing to secure.
+		if (!createIfAbsent) return null;
+		// (2) absent + a child IS written into it this run → create + prove.
 		const created = must(
 			`create ${fullPath}`,
 			await secureFs.createDirExclusive(parent, path.basename(fullPath), 0o700),
@@ -279,6 +346,10 @@ export async function runTransaction(
 		);
 		createdDirs.push(created);
 		await gate(fullPath, created);
+		must(
+			`container ${fullPath}`,
+			await secureFs.proveManagedContainer(fullPath),
+		);
 		return created;
 	}
 
@@ -291,6 +362,13 @@ export async function runTransaction(
 			if (!id.ok) return false;
 			if (!(await secureFs.proveOwnershipAndMode(handle.path)).ok) return false;
 			if (!(await secureFs.proveNoExtendedAcl(handle.path)).ok) return false;
+			// Re-check the container add/delete-child dimension on the rollback path
+			// too, for full symmetry with the pre-commit re-prove (JDB5-002).
+			if (managedContainers.has(handle.path)) {
+				if (!(await secureFs.proveManagedContainer(handle.path)).ok) {
+					return false;
+				}
+			}
 		}
 		return true;
 	}
@@ -305,11 +383,33 @@ export async function runTransaction(
 			await gate(dirPath, handle);
 		}
 
-		// --- SEGMENT CREATION: .claude then .claude/hooks, one at a time ---
+		// --- SEGMENT CREATION + MANAGED-CONTAINER PROOF ---
+		// Prove the COMPLETE managed set {claudeDir, hooksDir} on every anyWrite run,
+		// decoupled from which child is written. A managed container that EXISTS is
+		// always gate()d + proveManagedContainer'd (→ heldOrder → re-proved
+		// pre-commit); one that is absent is CREATED only when a child is written
+		// into it this run, else left alone (nothing to secure).
 		if (anyWrite) {
 			const projectHandle = heldByPath.get(projectDir) as SecureDirHandle;
-			const claudeHandle = await ensureDir(projectHandle, claudeDir);
-			if (needsWrite(input.asset)) await ensureDir(claudeHandle, hooksDir);
+			// .claude always ensured on anyWrite (holds settings; grandparent of
+			// the asset). createIfAbsent=true never returns null (opens, creates, or
+			// throws) → narrow non-null before passing as parent (JDA6-003).
+			const claudeHandle = await ensureManagedContainer(
+				projectHandle,
+				claudeDir,
+				/* createIfAbsent */ true,
+			);
+			if (!claudeHandle) {
+				throw new TxAbort(`container ${claudeDir}`, "unexpected null handle");
+			}
+			// .claude/hooks: create when the asset writes into it; otherwise prove
+			// IF it exists (settings-only repair must still secure the hook's
+			// container — JDB5-001).
+			await ensureManagedContainer(
+				claudeHandle,
+				hooksDir,
+				/* createIfAbsent */ needsWrite(input.asset),
+			);
 		}
 
 		// --- CAPTURE + (FORCED) BACKUP + STAGE, asset then settings ---
@@ -377,6 +477,15 @@ export async function runTransaction(
 				`recheck-acl ${handle.path}`,
 				await secureFs.proveNoExtendedAcl(handle.path),
 			);
+			// Re-prove the managed-container add/delete-child dimension for held
+			// handles that ARE managed containers, closing the TOCTOU window between
+			// ensure time and commit (JDB7-003; parity with 3a Decision 6 / JD-007).
+			if (managedContainers.has(handle.path)) {
+				must(
+					`recheck-container ${handle.path}`,
+					await secureFs.proveManagedContainer(handle.path),
+				);
+			}
 		}
 
 		// --- COMMIT: asset first, settings second ---

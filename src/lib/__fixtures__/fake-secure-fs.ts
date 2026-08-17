@@ -37,6 +37,18 @@ export interface FakeFaults {
 	writeRefuse?: (name: string, callIndex: number) => boolean;
 	/** Refuse renameInDir when the destination base name matches. */
 	renameRefuse?: (to: string) => boolean;
+	/**
+	 * Refuse proveManagedContainer for a path on its Nth call (a foreign
+	 * add/delete-child ACE on a managed container we own — the win32 CREATE_PARENT_DIR
+	 * strictness that the lenient ancestor gate deliberately tolerates).
+	 */
+	managedContainerRefuse?: (dirPath: string, callIndex: number) => boolean;
+	/**
+	 * Make openDirNoFollow return a PRESENT-BUT-UNOPENABLE refusal (a reparse
+	 * point/junction, EACCES, ENOTDIR, or transient) — a refusal with `notFound`
+	 * absent, so ensureManagedContainer must fail closed, never skip (JDA6-001).
+	 */
+	openDirUnopenable?: (dirPath: string) => boolean;
 }
 
 export interface FakeSecureFs extends PlatformSecureFs {
@@ -57,6 +69,13 @@ const unsafe = <T>(detail: string): SecureResult<T> => ({
 	refusal: "unsafe-parent-chain",
 	detail,
 });
+/** A GENUINE not-found refusal (the only state ensureManagedContainer may skip/create on). */
+const notFound = <T>(detail: string): SecureResult<T> => ({
+	ok: false,
+	refusal: "unsafe-parent-chain",
+	detail,
+	notFound: true,
+});
 
 export function makeFakeSecureFs(): FakeSecureFs {
 	const dirs = new Set<string>();
@@ -68,6 +87,7 @@ export function makeFakeSecureFs(): FakeSecureFs {
 	const ownershipCounts = new Map<string, number>();
 	const aclCounts = new Map<string, number>();
 	const writeCounts = new Map<string, number>();
+	const managedCounts = new Map<string, number>();
 
 	const inoFor = (p: string): number => {
 		let ino = inos.get(p);
@@ -118,7 +138,11 @@ export function makeFakeSecureFs(): FakeSecureFs {
 		},
 
 		async openDirNoFollow(dirPath) {
-			if (!dirs.has(dirPath)) return unsafe(`openDir enoent ${dirPath}`);
+			if (fake.faults.openDirUnopenable?.(dirPath)) {
+				// PRESENT-but-unopenable-no-follow: refusal WITHOUT notFound.
+				return unsafe(`openDir unopenable ${dirPath}`);
+			}
+			if (!dirs.has(dirPath)) return notFound(`openDir enoent ${dirPath}`);
 			return okValue<SecureDirHandle>(handleFor(dirPath));
 		},
 
@@ -217,6 +241,19 @@ export function makeFakeSecureFs(): FakeSecureFs {
 			if (!isEmptyDir(handle.path))
 				return unsafe(`rmdir not-empty ${handle.path}`);
 			dirs.delete(handle.path);
+			return ok();
+		},
+
+		async proveManagedContainer(dirPath) {
+			const idx = bump(managedCounts, dirPath);
+			if (fake.faults.managedContainerRefuse?.(dirPath, idx)) {
+				return {
+					ok: false,
+					refusal: "unsafe-windows-dacl",
+					detail: `add-child ${dirPath}`,
+				};
+			}
+			if (!dirs.has(dirPath)) return unsafe(`container enoent ${dirPath}`);
 			return ok();
 		},
 	};

@@ -205,10 +205,16 @@ export function createPosixSecureFs(acl: PosixAclAdapter): PlatformSecureFs {
 					throw error;
 				}
 			} catch (error) {
-				return refuse(
+				const code = errCode(error);
+				const result = refuse<SecureDirHandle>(
 					"unsafe-parent-chain",
-					`openDir ${dirPath}: ${errCode(error) ?? "error"}`,
+					`openDir ${dirPath}: ${code ?? "error"}`,
 				);
+				// Genuine not-found ONLY on ENOENT (Round-6 / JDA6-001). Every other
+				// errno — ELOOP/reparse, EACCES, ENOTDIR, transient — leaves notFound
+				// absent so a present-but-unopenable managed container fails closed.
+				if (code === "ENOENT") result.notFound = true;
+				return result;
 			}
 		},
 
@@ -386,6 +392,16 @@ export function createPosixSecureFs(acl: PosixAclAdapter): PlatformSecureFs {
 					`rmdir ${handle.path}: ${errCode(error) ?? "error"}`,
 				);
 			}
+		},
+
+		// On POSIX, permission to ADD a child to a directory IS the directory's
+		// write bit; proveOwnershipAndMode already refuses any group/other write
+		// (stats.mode & 0o022). So the managed-container check is definitionally the
+		// same predicate gate() just ran on this path — idempotent, no new refusal
+		// surface. The seam has teeth only on win32, where Predicate A tolerates
+		// add-child on high ancestors (Round-4 / JDA-401).
+		proveManagedContainer(dirPath) {
+			return secureFs.proveOwnershipAndMode(dirPath);
 		},
 	};
 

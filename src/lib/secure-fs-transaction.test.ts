@@ -154,3 +154,123 @@ describe("runTransaction — pre-commit aborts leave every target untouched", ()
 		expect(fake.files.has(SETTINGS)).toBe(false);
 	});
 });
+
+// A fake seeded as if a prior install already exists: root..project, .claude,
+// .claude/hooks, and the two managed files present with prior bytes.
+const installedFake = (over: { withHooks?: boolean } = {}) => {
+	const fake = makeFakeSecureFs();
+	for (const d of ["/", PROJECT, CLAUDE]) fake.seedDir(d);
+	if (over.withHooks !== false) fake.seedDir(HOOKS);
+	fake.seedFile(ASSET, Buffer.from("OLD-ASSET"), 0o600);
+	fake.seedFile(SETTINGS, Buffer.from("OLD-SETTINGS"), 0o600);
+	return fake;
+};
+
+describe("runTransaction — managed-container proof (Round-4/5/6 seam)", () => {
+	it("refuses an asset-only repair when .claude fails proveManagedContainer (JDA-401)", async () => {
+		// asset drifted (write), settings current (desired=null): the round-3
+		// create/write add-child check never fired on .claude (the grandparent);
+		// proveManagedContainer must now catch a foreign add-child on it.
+		const fake = installedFake();
+		fake.faults.managedContainerRefuse = (dirPath) => dirPath === CLAUDE;
+		const outcome = await run(
+			fake,
+			asset({ capturePrior: true, wasAbsent: false }),
+			settings({ desired: null }),
+		);
+		expect(outcome.ok).toBe(false);
+		expect(outcome.committed).toEqual([]);
+		expect(outcome.errors.join(" ")).toMatch(/container .*\.claude/);
+		// Zero mutation: the drifted asset keeps its prior bytes, no temp remains.
+		expect(fake.fileText(ASSET)).toBe("OLD-ASSET");
+		expect(
+			[...fake.files.keys()].filter((k) => k.includes(".javi-forge.tmp.")),
+		).toEqual([]);
+	});
+
+	it("refuses a settings-only repair when existing .claude/hooks fails proveManagedContainer (JDB5-001)", async () => {
+		// settings drifted (write), asset current (desired=null): under Round-4 the
+		// hooks dir was never opened on a settings-only run. Round-5 opens+proves it
+		// whenever it EXISTS, so a foreign add/delete-child on it now refuses.
+		const fake = installedFake();
+		fake.faults.managedContainerRefuse = (dirPath) => dirPath === HOOKS;
+		const outcome = await run(
+			fake,
+			asset({ desired: null }),
+			settings({ capturePrior: true, wasAbsent: false }),
+		);
+		expect(outcome.ok).toBe(false);
+		expect(outcome.committed).toEqual([]);
+		expect(outcome.errors.join(" ")).toMatch(/container .*hooks/);
+		expect(fake.fileText(SETTINGS)).toBe("OLD-SETTINGS");
+	});
+
+	it("commits a settings-only repair when existing .claude/hooks is clean (JDB5-001 positive)", async () => {
+		const fake = installedFake();
+		const outcome = await run(
+			fake,
+			asset({ desired: null }),
+			settings({ capturePrior: true, wasAbsent: false }),
+		);
+		expect(outcome.ok).toBe(true);
+		expect(outcome.committed).toEqual([SETTINGS]);
+		expect(fake.fileText(SETTINGS)).toBe("SETTINGS-BYTES");
+		// The clean existing hooks container was opened + proved, not created anew.
+		expect(fake.dirs.has(HOOKS)).toBe(true);
+	});
+
+	it("skips (neither creates nor proves) an absent .claude/hooks on a settings-only repair (genuine notFound + !createIfAbsent)", async () => {
+		const fake = installedFake({ withHooks: false });
+		const outcome = await run(
+			fake,
+			asset({ desired: null }),
+			settings({ capturePrior: true, wasAbsent: false }),
+		);
+		expect(outcome.ok).toBe(true);
+		expect(outcome.committed).toEqual([SETTINGS]);
+		// No asset written this run → nothing to secure → hooks not created.
+		expect(fake.dirs.has(HOOKS)).toBe(false);
+	});
+
+	it("fails closed when an existing managed container is present-but-unopenable on a settings-only repair (JDA6-001, createIfAbsent=false)", async () => {
+		// hooks EXISTS but openDirNoFollow returns a non-notFound refusal (a junction
+		// / EACCES). It MUST refuse the whole transaction, never return null/skip.
+		const fake = installedFake();
+		fake.faults.openDirUnopenable = (dirPath) => dirPath === HOOKS;
+		const outcome = await run(
+			fake,
+			asset({ desired: null }),
+			settings({ capturePrior: true, wasAbsent: false }),
+		);
+		expect(outcome.ok).toBe(false);
+		expect(outcome.committed).toEqual([]);
+		expect(fake.fileText(SETTINGS)).toBe("OLD-SETTINGS");
+	});
+
+	it("fails closed when a managed container is present-but-unopenable on a fresh install (JDA6-001, createIfAbsent=true)", async () => {
+		// Symmetric branch: even when createIfAbsent=true, a non-notFound refusal
+		// must fail closed BEFORE createDirExclusive, not fall through to create.
+		const fake = freshFake();
+		fake.seedDir(CLAUDE); // .claude exists so we reach the hooks open
+		fake.faults.openDirUnopenable = (dirPath) => dirPath === HOOKS;
+		const outcome = await run(fake, asset(), settings());
+		expect(outcome.ok).toBe(false);
+		expect(outcome.committed).toEqual([]);
+		expect(fake.files.has(ASSET)).toBe(false);
+		expect(fake.files.has(SETTINGS)).toBe(false);
+	});
+
+	it("re-proves managed containers in the pre-commit re-prove loop (JDB7-003 / TOCTOU parity)", async () => {
+		// proveManagedContainer(.claude) passes at ensure time but a foreign add-child
+		// is planted before the first rename: the 2nd container check must catch it.
+		const fake = freshFake();
+		fake.faults.managedContainerRefuse = (dirPath, idx) =>
+			dirPath === CLAUDE && idx >= 2;
+		const outcome = await run(fake, asset(), settings());
+		expect(outcome.ok).toBe(false);
+		expect(outcome.committed).toEqual([]);
+		expect(outcome.errors.join(" ")).toMatch(/recheck-container/);
+		expect(fake.files.has(ASSET)).toBe(false);
+		expect(fake.files.has(SETTINGS)).toBe(false);
+	});
+});

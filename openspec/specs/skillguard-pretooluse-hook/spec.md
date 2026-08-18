@@ -250,7 +250,10 @@ When a user selects security hooks during `javi-forge init`, Standard and Strict
 
 The CLI MUST expose `javi-forge hooks install claude`, `javi-forge hooks doctor claude`, and `javi-forge hooks repair claude [--force]`.
 
-`install` MUST install absent objects, no-op on current objects, and automatically replace only exact released-outdated or complete exact known legacy cohorts. `doctor` MUST be read-only and MUST report the asset and settings entry separately, including version/hash, command/args shape, matcher, Node availability, ownership state, actionable remediation, five-tool coverage, and host spawn/timeout residual. It MUST classify each supported project/local/user/managed/server/MDM/safe-mode/current-launch source as `clear`, `blocking`, or `unknown`; inability to prove a relevant source absent or resolved MUST be `unknown`, not `clear`. Its authoritative ordered matrix is: (1) any known installation, Node, configuration, or observed launch blocker produces `BLOCKED`, healthy false, exit `1`, even if another source is unknown; (2) otherwise any relevant higher-precedence or current-launch source that is unobservable/unresolved produces `INCONCLUSIVE`, healthy false, exit `2`; (3) only current components and exact shape/matcher with Node `>=22` and every relevant source explicitly clear produce `RUNNABLE`, healthy true, exit `0`. Blocker and unknown IDs MUST use committed stable order. `BLOCKED` MUST print the state-specific fix and rerun command. `INCONCLUSIVE` MUST print `installed bytes do not prove execution` and direct the user to `claude doctor`/`/status` and `/hooks` outside safe mode before rerunning. `RUNNABLE` MUST still print the host spawn/start/termination/timeout residual and MUST NOT say secure or fully fail-closed. `repair` without force MUST restore missing and exact-outdated managed pieces; `repair --force` MAY replace edited-managed objects only after required backups succeed. Repeating any successful command against its resulting runnable state MUST produce no further file changes; current files MUST remain byte- and mtime-stable.
+`install` MUST install absent objects, no-op on current objects, and automatically replace only exact released-outdated or complete exact known legacy cohorts. `doctor` MUST be read-only and MUST report the asset and settings entry separately (version/hash, command/args shape, matcher, Node availability, ownership state, remediation, five-tool coverage, host spawn/timeout residual), plus an `execution: { status: "runnable" | "blocked" | "inconclusive"; blockers: string[]; unknownSources: string[] }` field independent of `report.healthy`. It MUST read each readable settings source it probes (project, local, user, static managed OS paths, `managed-settings.d/*.json`) as a scalar-flag classifier: `disableAllHooks: true` in ANY readable source, or `allowManagedHooksOnly: true` in a managed source, is a blocker (source recorded in `blockers`). A source that is unreadable (permission error, not absence), server-delivered, or otherwise unverifiable — including safe-mode observed only from the doctor's own process — is recorded in `unknownSources` and MUST NOT be treated as clear. `status` is `blocked` if `blockers` is non-empty (checked first, even alongside a simultaneous unknown source); otherwise `inconclusive` if `unknownSources` is non-empty; otherwise `runnable` only when the managed asset and settings are current, every relevant local source was read successfully, and none set a blocking flag. `inconclusive` and `blocked` MUST NEVER be silently promoted to `runnable`. Exit code follows `status`: `runnable` → `0`, `blocked` → `1`, `inconclusive` → `2`. `blockers` and `unknownSources` MUST use committed stable order. The doctor MUST NOT invoke or scrape the `claude` binary to compute `execution`; it reads only static local files and its own process environment.
+(Previously: authoritative matrix classified server/MDM/current-launch sources and mixed a broader "unknown vs blocker precedence" model that assumed hooks could be shadowed by higher-precedence settings and implied CLI-output verification; superseded because hooks merge across levels — a project hook is blocked only by the two documented flags or safe-mode, and `claude doctor`/`--debug` scraping is undocumented and dropped.)
+
+`repair` without force MUST restore missing and exact-outdated managed pieces; `repair --force` MAY replace edited-managed objects only after required backups succeed. Repeating any successful command against its resulting runnable state MUST produce no further file changes; current files MUST remain byte- and mtime-stable.
 
 #### Scenario: Install is idempotent
 
@@ -259,42 +262,56 @@ The CLI MUST expose `javi-forge hooks install claude`, `javi-forge hooks doctor 
 - THEN it reports the installation as current
 - AND settings, asset bytes, and mtimes remain unchanged
 
-#### Scenario: Doctor is read-only and qualified
+#### Scenario: Doctor is read-only
 
 - GIVEN any absent, healthy, outdated, edited-managed, foreign-collision, or partial installation state
 - WHEN `javi-forge hooks doctor claude` runs
-- THEN it reports each component's state and appropriate next action without changing bytes, mtimes, or creating backups
-- AND it reports coverage and the host residual rather than an unqualified `secure` verdict
+- THEN it reports each component's state and the `execution` field without changing bytes, mtimes, or creating backups
 
-#### Scenario: Doctor detects effective execution blocker
+#### Scenario: disableAllHooks in any readable source blocks
 
-- GIVEN managed or effective settings disable project hooks, restrict hooks to managed/plugin sources, or observable safe mode suppresses project hooks
-- WHEN doctor inspects an otherwise current installation
-- THEN it reports `BLOCKED`, identifies the blocker, sets healthy false, and exits non-zero
+- GIVEN one of project, local, user, or managed settings is readable and sets `disableAllHooks: true`
+- WHEN doctor evaluates `execution`
+- THEN `status` is `blocked`, that source is named in `blockers`, and doctor exits `1`
 
-#### Scenario: Doctor cannot resolve higher-precedence policy
+#### Scenario: allowManagedHooksOnly in managed settings blocks
 
-- GIVEN installation bytes are current
-- AND a relevant server-managed, MDM, or launch policy source cannot be observed reliably
-- WHEN doctor evaluates effective execution
-- THEN it reports `INCONCLUSIVE`, sets healthy false, and exits non-zero
-- AND it provides concrete `claude doctor`/`/status` and `/hooks` verification instructions
+- GIVEN managed settings are readable and set `allowManagedHooksOnly: true`
+- WHEN doctor evaluates `execution`
+- THEN `status` is `blocked`, the managed source is named in `blockers`, and doctor exits `1`
 
-#### Scenario: Known blocker dominates a simultaneous unknown
+#### Scenario: All-clear local sources produce runnable
 
-- GIVEN an otherwise current installation has an observed effective blocker
-- AND a different relevant higher-precedence or current-launch source is unknown
-- WHEN doctor evaluates the ordered matrix
-- THEN it reports `BLOCKED`, sets healthy false, exits `1`, and lists the known blocker before the secondary unknown
-- AND it emits the blocker's deterministic remediation plus the doctor rerun command
+- GIVEN the managed asset and settings entry are current, every relevant local settings source is readable, and none sets a blocking flag or is unknown
+- WHEN doctor evaluates `execution`
+- THEN `status` is `runnable`, `blockers` and `unknownSources` are empty, and doctor exits `0`
 
-#### Scenario: Runnable requires explicit all-clear evidence
+#### Scenario: Unreadable user settings force inconclusive
 
-- GIVEN both components are current, command shape and matcher are exact, and Node `>=22` is available
-- AND every relevant supported policy and current-launch source is observably absent or permitting project hooks
-- WHEN doctor evaluates effective execution
-- THEN it reports `RUNNABLE`, sets healthy true, and exits `0`
-- AND it still prints the host spawn/start/termination/timeout residual
+- GIVEN user settings exist but cannot be read (permission error, not absence)
+- WHEN doctor evaluates `execution`
+- THEN `status` is `inconclusive`, that source is named in `unknownSources`, and doctor exits `2`
+
+#### Scenario: Present-but-unreadable managed path forces inconclusive
+
+- GIVEN a static managed settings path or `managed-settings.d/*.json` entry exists but cannot be read
+- WHEN doctor evaluates `execution`
+- THEN `status` is `inconclusive`, the source is named in `unknownSources`, and doctor exits `2`
+- AND doctor never reports `runnable` for that run
+
+#### Scenario: Safe-mode observation is never silently cleared
+
+- GIVEN `CLAUDE_CODE_SAFE_MODE=1` or `--safe-mode` is observed in the doctor's own process
+- WHEN doctor evaluates `execution`
+- THEN it records the caveat and reflects it in `inconclusive`/`unknownSources` rather than treating the diagnosed session as proven clear
+
+#### Scenario: A higher-precedence settings file with unrelated keys does not block
+
+- GIVEN user settings are readable and present but set neither `disableAllHooks` nor `allowManagedHooksOnly`
+- AND project settings are readable and clear
+- WHEN doctor evaluates `execution`
+- THEN the project hook is NOT reported blocked merely because the higher-precedence file exists
+- AND `status` is `runnable` if every other source is clear
 
 #### Scenario: Repair without force restores safe drift
 
@@ -308,7 +325,6 @@ The CLI MUST expose `javi-forge hooks install claude`, `javi-forge hooks doctor 
 - GIVEN an edited-managed asset or settings entry
 - WHEN repair runs without `--force`
 - THEN it refuses and identifies backup plus `repair claude --force` as the eligible path
-- AND when repair runs with `--force`, it proceeds only after safe backups of every edited managed target succeed
 
 ### Requirement: Ownership classification is strict and preserves unrelated hooks
 

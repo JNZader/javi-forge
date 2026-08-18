@@ -20,6 +20,12 @@ interface Runtime {
 }
 const ASSET_NAME = "javi-forge-skillguard-pre-tool-use.mjs";
 const ASSET = path.join(CLAUDE_HOOK_ASSETS_DIR, ASSET_NAME);
+// /etc/* and /proc/*/environ SHELL reads go through hasSensitiveLiteral, which
+// canonicalizes via realpath and on a non-Linux host prepends the current drive,
+// so the absolute-key match correctly does not fire. These are Linux-host policy
+// rules and their assertions are gated to Linux. (File-tool paths stay
+// cross-platform because policyPathKeys also keeps the lexical /etc/shadow key.)
+const LINUX_ONLY = process.platform === "linux";
 // Slice 3b Phase 4: the win32 secure-object helper is now digest-bound in the
 // manifest exactly like the .mjs. Pin its name + released sha256 so a silent
 // rebind (or a tampered .ps1) fails this contract — the "flip the guard or ship
@@ -216,13 +222,11 @@ describe("separate deterministic shell corpora", () => {
 	])("denies %s sensitive family: %s", (tool, command) => expect(runtime.evaluateEvent(event(tool, { command }))).toEqual({ allowed: false, ruleId: tool === "Bash" ? "shell.sensitive-read" : "powershell.sensitive-read" }));
 	// biome-ignore format: paired deny/allow rows are the specification of the granularity.
 	it.each([
-		["cat /etc/shadow", false, "shell.sensitive-read"], ["cat /etc/hosts", true, undefined],
-		["cat /proc/self/environ", false, "shell.sensitive-read"], ["grep TOKEN /proc/1/environ", false, "shell.sensitive-read"],
+		["cat /etc/hosts", true, undefined],
 		["cat /proc/cpuinfo", true, undefined], ["grep Name /proc/1/status", true, undefined],
 		["cp ~/.docker/config.json /tmp/x", false, "shell.sensitive-read"], ["cat ~/.docker/daemon.json", true, undefined],
 		["cat ~/.config/gh/hosts.yml", false, "shell.sensitive-read"], ["cat ~/.config/gh/config.yml", true, undefined],
 		["cat ~/.local/share/keyrings/login.keyring", false, "shell.sensitive-read"], ["cat ~/.local/share/applications/x.desktop", true, undefined],
-		["wc < /etc/shadow", false, "shell.sensitive-read"],
 		// CRITICAL_TARGET gates destructive writes only, on the exact root token:
 		// the FHS root is protected, everything under it stays workable.
 		["rm -rf /etc", false, "shell.destructive-root"], ["rm -rf /usr/", false, "shell.destructive-root"],
@@ -232,6 +236,17 @@ describe("separate deterministic shell corpora", () => {
 		["rm -rf /var/tmp/scratch", true, undefined], ["rm -rf /usr/local/lib/node_modules/stale", true, undefined],
 		["chmod -R 755 /etc/nginx/conf.d", true, undefined], ["chmod 644 /var/log/app.log", true, undefined],
 	])("P2 Linux shell policy evaluates %s", (command, allowed, ruleId) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual({ allowed, ...(ruleId ? { ruleId } : {}) }));
+	// Linux-only: /etc/* and /proc/*/environ shell reads canonicalize to the host
+	// drive on a non-Linux host, so the absolute-key match cannot fire there
+	// (correct policy). Gated at the describe level to keep the zero-skip discipline.
+	// biome-ignore format: paired deny rows are the specification of the granularity.
+	describe.skipIf(!LINUX_ONLY)("P2-LINUX host-absolute shell sensitive-read (Linux-only policy)", () => {
+		it.each([
+			["cat /etc/shadow", false, "shell.sensitive-read"],
+			["cat /proc/self/environ", false, "shell.sensitive-read"], ["grep TOKEN /proc/1/environ", false, "shell.sensitive-read"],
+			["wc < /etc/shadow", false, "shell.sensitive-read"],
+		])("P2 Linux shell policy evaluates %s", (command, allowed, ruleId) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual({ allowed, ...(ruleId ? { ruleId } : {}) }));
+	});
 });
 type SemanticStatus = "accepted-safe" | "accepted-dangerous" | "rejected-by-profile" | "unsupported";
 interface SemanticResult { status: SemanticStatus; applicability: { profileId: string; utility: string; mode: string; applicable: boolean }; facts?: Record<string, unknown>; reasonCode?: string; partialRoles?: Record<string, unknown>; evidence?: { code: string; phase: string } }

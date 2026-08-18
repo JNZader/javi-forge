@@ -38,6 +38,11 @@ export interface FakeFaults {
 	/** Refuse renameInDir when the destination base name matches. */
 	renameRefuse?: (to: string) => boolean;
 	/**
+	 * Refuse applyExactMode for a target (chmod fault). Lets a test drive the
+	 * rollback's prior-mode restore into failure without touching the bytes.
+	 */
+	applyModeRefuse?: (target: string) => boolean;
+	/**
 	 * Refuse proveManagedContainer for a path on its Nth call (a foreign
 	 * add/delete-child ACE on a managed container we own — the win32 CREATE_PARENT_DIR
 	 * strictness that the lenient ancestor gate deliberately tolerates).
@@ -208,6 +213,8 @@ export function makeFakeSecureFs(): FakeSecureFs {
 		},
 
 		async applyExactMode(target, mode) {
+			if (fake.faults.applyModeRefuse?.(target))
+				return unsafe(`applyMode ${target}`);
 			const file = files.get(target);
 			if (!file) return unsafe(`applyMode enoent ${target}`);
 			file.mode = mode;

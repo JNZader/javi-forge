@@ -317,10 +317,14 @@ function settingsSignals(
 }
 
 const REMEDIATION: Partial<Record<ClaudeHookComponentState, string>> = {
-	absent: "install the managed $ (Slice 3)",
-	"released-outdated": "upgrade the managed $ (Slice 3)",
-	"exact-legacy": "migrate the legacy $ (Slice 3)",
-	"edited-managed": "repair the managed $ with --force (Slice 3)",
+	// User-facing remediation: name the exact command to run, never an internal
+	// SDD slice number (which means nothing outside this repo's planning docs).
+	absent: "install the managed $ with: javi-forge hooks install claude",
+	"released-outdated":
+		"upgrade the managed $ with: javi-forge hooks install claude",
+	"exact-legacy": "migrate the legacy $ with: javi-forge hooks install claude",
+	"edited-managed":
+		"repair the managed $ with: javi-forge hooks repair claude --force",
 	foreign: "manually review the $",
 	symlink: "manually review the $",
 	"non-regular": "manually review the $",

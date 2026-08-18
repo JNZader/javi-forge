@@ -554,6 +554,15 @@ failure leaves the restored file at `writeExclusive`'s `0o600` instead of `prior
   from a rename failure — a STOP-and-return may be too aggressive for a perms-only miss).
 - Suggested fix: decide the recovery semantics (STOP vs. record-and-continue with a warning),
   then check the `applyExactMode` result accordingly. Batch with the next secure-fs touch.
+- **CLOSED 2026-08-18** — recovery semantics decided: **record-and-continue**, not STOP. The
+  rollback now captures the `applyExactMode` result and, on `!ok`, pushes an INFORMATIONAL
+  `note: restored <path> with mode 0600 (prior-mode restore failed: <detail>)` to the rollback
+  `errors` array and proceeds to the restore rename — restoring the prior BYTES matters more
+  than the prior mode, and `0o600` is safe. The `STOP:` prefix is deliberately NOT used: it
+  signals a halted rollback needing manual recovery, and this path does not halt. Covered by
+  `src/lib/secure-fs-transaction.rollback.test.ts` ("records-and-continues when the prior-mode
+  restore fails"), which asserts bytes restored, mode `0o600`, the note present, and no `STOP:`;
+  the fake adapter gained an `applyModeRefuse` fault toggle to drive it.
 
 ## 2026-08-18 — from the real-Linux `secure-fs-posix` integration suite (first CI run)
 

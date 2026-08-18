@@ -144,6 +144,35 @@ describe("runTransaction — guarded reverse-order rollback", () => {
 		expect(fake.fileText(SETTINGS)).toBe("OLD-SETTINGS");
 	});
 
+	it("records-and-continues when the prior-mode restore fails (JD-B-003)", async () => {
+		const fake = seededUpgradeFake();
+		fake.faults.renameRefuse = (to) => to === "settings.json";
+		// applyExactMode on the asset's staged temp: the 1st call is the forward
+		// stage (must succeed), the 2nd is the rollback's prior-mode restore.
+		let assetModeCalls = 0;
+		fake.faults.applyModeRefuse = (target) => {
+			if (!target.startsWith(`${ASSET}.javi-forge.tmp.`)) return false;
+			assetModeCalls += 1;
+			return assetModeCalls >= 2;
+		};
+		const outcome = await run(
+			fake,
+			asset({ capturePrior: true, wasAbsent: false }),
+			settings({ capturePrior: true, wasAbsent: false }),
+		);
+		expect(outcome.ok).toBe(false);
+		// Restoring BYTES matters more than the mode: the rename still happened.
+		expect(fake.fileText(ASSET)).toBe("OLD-ASSET");
+		// The restored file keeps the safe staging mode instead of prior 0o640.
+		expect(fake.files.get(ASSET)?.mode).toBe(0o600);
+		// An INFORMATIONAL note, never a STOP (the rollback did not halt).
+		const joined = outcome.errors.join(" ");
+		expect(joined).toMatch(
+			/note: restored .*asset\.mjs; prior-mode restore failed, verify permissions \(.*\)/,
+		);
+		expect(joined).not.toMatch(/STOP:/);
+	});
+
 	it("removes only tx-created empty segments when it aborts before staging", async () => {
 		const fake = makeFakeSecureFs();
 		fake.seedDir("/");

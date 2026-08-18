@@ -3,9 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	ACL_DETAIL,
 	createLinuxAclAdapter,
 	createMacosAclAdapter,
 	createPosixSecureFs,
+	probeAclCapability,
 	type SpawnFn,
 	type SpawnOutcome,
 	selectSecureFs,
@@ -119,6 +121,106 @@ describe("createMacosAclAdapter (/bin/ls -lde, mocked spawn — never skipped)",
 			spawnReturning(clean("-rw-r--r-- 1 user staff 10 Jan 1 file")),
 		);
 		expect((await acl.proveClean("/x")).ok).toBe(true);
+	});
+});
+
+describe("probeAclCapability (read-only capability probe, mocked spawn)", () => {
+	it("exports the stable detail tokens the adapters emit", () => {
+		expect(ACL_DETAIL.getfaclAbsent).toBe("getfacl absent");
+		expect(ACL_DETAIL.getfaclTimeout).toBe("getfacl timeout");
+		expect(ACL_DETAIL.extendedAclEntry).toBe("extended ACL entry");
+	});
+
+	it("reports available when getfacl --version resolves and runs", async () => {
+		const capability = await probeAclCapability(
+			spawnReturning(clean("getfacl 2.3.1\n")),
+			"linux",
+		);
+		expect(capability).toEqual({ status: "available", tool: "getfacl" });
+	});
+
+	it("reports absent when getfacl cannot be spawned (ENOENT)", async () => {
+		const capability = await probeAclCapability(
+			spawnReturning({ spawnError: true, code: null, stdout: "" }),
+			"linux",
+		);
+		expect(capability).toEqual({ status: "absent", tool: "getfacl" });
+	});
+
+	it("reports unknown on timeout", async () => {
+		const capability = await probeAclCapability(
+			spawnReturning({ timedOut: true, code: null, stdout: "" }),
+			"linux",
+		);
+		expect(capability.status).toBe("unknown");
+		expect(capability).toMatchObject({ tool: "getfacl" });
+	});
+
+	it("never names an argv the platform does not run in the timeout detail", async () => {
+		// darwin runs `/bin/ls -ld /`, never `--version`: the detail must not lie.
+		const capability = await probeAclCapability(
+			spawnReturning({ timedOut: true, code: null, stdout: "" }),
+			"darwin",
+		);
+		expect(capability.status).toBe("unknown");
+		const detail = (capability as { detail: string }).detail;
+		expect(detail).not.toContain("--version");
+		expect(detail).toContain("/bin/ls");
+	});
+
+	it("reports unknown on a non-zero exit", async () => {
+		const capability = await probeAclCapability(
+			spawnReturning({ code: 3, stdout: "" }),
+			"linux",
+		);
+		expect(capability.status).toBe("unknown");
+		expect((capability as { detail: string }).detail).toContain("3");
+	});
+
+	it("reports unknown when the version output is unparseable", async () => {
+		const capability = await probeAclCapability(
+			spawnReturning(clean("something else entirely\n")),
+			"linux",
+		);
+		expect(capability.status).toBe("unknown");
+	});
+
+	it("probes /bin/ls on darwin", async () => {
+		const capability = await probeAclCapability(
+			spawnReturning(clean("drwx------ 2 user staff 64 Jan 1 /\n")),
+			"darwin",
+		);
+		expect(capability).toEqual({ status: "available", tool: "/bin/ls" });
+	});
+
+	it("is not-applicable on win32 and never spawns", async () => {
+		let spawned = false;
+		const capability = await probeAclCapability(async () => {
+			spawned = true;
+			return { code: 0, stdout: "" };
+		}, "win32");
+		expect(capability).toEqual({
+			status: "not-applicable",
+			tool: "windows-secure-object",
+		});
+		expect(spawned).toBe(false);
+	});
+
+	it("reports unknown on a platform with no POSIX ACL adapter", async () => {
+		const capability = await probeAclCapability(
+			spawnReturning(clean("")),
+			"sunos",
+		);
+		expect(capability.status).toBe("unknown");
+	});
+
+	it("never mutates: it only ever runs a read-only version/list argv", async () => {
+		const calls: Array<[string, string[]]> = [];
+		await probeAclCapability(async (cmd, args) => {
+			calls.push([cmd, args]);
+			return { code: 0, stdout: "getfacl 2.3.1" };
+		}, "linux");
+		expect(calls).toEqual([["getfacl", ["--version"]]]);
 	});
 });
 

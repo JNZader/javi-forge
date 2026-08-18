@@ -3,6 +3,7 @@ import type {
 	ClaudeHookDoctorReport,
 	ClaudeHookMutationResult,
 } from "../lib/claude-hook-manager.js";
+import { ACL_PACKAGE_REMEDIATION } from "../lib/secure-refusal-remediation.js";
 import {
 	type ClaudeHookCmdDeps,
 	runClaudeHookCommand,
@@ -34,6 +35,7 @@ function doctorReport(
 			unknownSources: [],
 			residual: [],
 		},
+		installCapability: { acl: { status: "available", tool: "getfacl" } },
 		...overrides,
 	} as ClaudeHookDoctorReport;
 }
@@ -259,6 +261,120 @@ describe("runClaudeHookCommand", () => {
 		const text = out.join("\n");
 		expect(text).toContain("server-delivered policy caveat");
 		expect(text).toContain("session safe-mode caveat");
+	});
+
+	it("doctor: prints the acl capability row when the adapter is available", async () => {
+		const doctor = vi.fn().mockResolvedValue(
+			doctorReport({
+				installCapability: { acl: { status: "available", tool: "getfacl" } },
+			}),
+		);
+		const { out, deps } = harness({ doctor });
+
+		const code = await runClaudeHookCommand("doctor", "/proj", {}, deps);
+
+		expect(code).toBe(0);
+		const text = out.join("\n");
+		expect(text).toContain("acl-capability");
+		expect(text).toContain("available");
+		expect(text).toContain("getfacl");
+	});
+
+	it("doctor: prints the acl capability row + remediation when absent, still exit 0", async () => {
+		const doctor = vi.fn().mockResolvedValue(
+			doctorReport({
+				installCapability: {
+					acl: { status: "absent", tool: "getfacl" },
+					remediation: ACL_PACKAGE_REMEDIATION,
+				},
+			}),
+		);
+		const { out, deps } = harness({ doctor });
+
+		const code = await runClaudeHookCommand("doctor", "/proj", {}, deps);
+
+		// The capability section never drives the exit code — execution does.
+		expect(code).toBe(0);
+		const text = out.join("\n");
+		expect(text).toContain("acl-capability");
+		expect(text).toContain("absent");
+		expect(text).toContain("apt install acl");
+		expect(text).toContain("apk add acl");
+		expect(text).toContain("dnf install acl");
+	});
+
+	it("doctor: prints the unknown capability detail", async () => {
+		const doctor = vi.fn().mockResolvedValue(
+			doctorReport({
+				installCapability: {
+					acl: {
+						status: "unknown",
+						tool: "getfacl",
+						detail: "getfacl --version timeout",
+					},
+				},
+			}),
+		);
+		const { out, deps } = harness({ doctor });
+
+		await runClaudeHookCommand("doctor", "/proj", {}, deps);
+
+		expect(out.join("\n")).toContain("getfacl --version timeout");
+	});
+
+	it("install: an adapter-absent refusal prints the acl-package remediation", async () => {
+		const install = vi.fn().mockResolvedValue(
+			mutationResult({
+				ok: false,
+				errors: ["acl /home/user: getfacl absent"],
+			}),
+		);
+		const { out, err, deps } = harness({ install });
+
+		const code = await runClaudeHookCommand("install", "/proj", {}, deps);
+
+		expect(code).toBe(1);
+		const text = [...out, ...err].join("\n");
+		expect(text).toContain("acl /home/user: getfacl absent");
+		expect(text).toContain("apt install acl");
+		expect(text).toContain("apk add acl");
+		expect(text).toContain("dnf install acl");
+	});
+
+	it("repair: renders the identical remediation for the same refusal", async () => {
+		const repair = vi.fn().mockResolvedValue(
+			mutationResult({
+				ok: false,
+				errors: ["acl /home/user: getfacl absent"],
+			}),
+		);
+		const { out, err, deps } = harness({ repair });
+
+		const code = await runClaudeHookCommand(
+			"repair",
+			"/proj",
+			{ force: false },
+			deps,
+		);
+
+		expect(code).toBe(1);
+		expect([...out, ...err].join("\n")).toContain(ACL_PACKAGE_REMEDIATION);
+	});
+
+	it("install: a real extended-ACL refusal gets NO package remediation", async () => {
+		const install = vi.fn().mockResolvedValue(
+			mutationResult({
+				ok: false,
+				errors: ["acl /home/user: extended ACL entry"],
+			}),
+		);
+		const { out, err, deps } = harness({ install });
+
+		await runClaudeHookCommand("install", "/proj", {}, deps);
+
+		const text = [...out, ...err].join("\n");
+		expect(text).toContain("extended ACL entry");
+		expect(text).not.toContain("apt install acl");
 	});
 
 	it("repair: without --force on edited-managed refuses and returns 1", async () => {

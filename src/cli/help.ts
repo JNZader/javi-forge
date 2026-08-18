@@ -189,6 +189,12 @@ export const HOOKS_HELP_TEXT = `
     doctor claude is informational (always exits 0); install/repair exit 0 on
     success, non-zero on refusal/failure. Use repair claude --force to overwrite
     a locally edited managed asset.
+    Linux: install/repair claude need the acl package (getfacl) to prove the
+    parent chain — apt install acl / apk add acl / dnf install acl. Without it
+    they refuse fail-closed; an already-installed guard keeps firing, and
+    doctor claude reports the acl capability as its own row.
+    Claude Code spawns the guard with node from ITS path, so node must resolve
+    there, not only inside javi-forge.
 
   Examples
     $ javi-forge hooks run pre-commit

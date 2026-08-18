@@ -21,6 +21,7 @@ import {
 	installClaudePreToolUse,
 	repairClaudePreToolUse,
 } from "../lib/claude-hook-manager.js";
+import { remediationForMessage } from "../lib/secure-refusal-remediation.js";
 
 export type ClaudeHookSub = "install" | "doctor" | "repair";
 
@@ -55,7 +56,13 @@ function renderMutation(
 	}
 
 	logError(`${verb} claude: refused`);
-	for (const e of result.errors) logError(`  ${e}`);
+	// A refusal whose detail maps to a remediation is never rendered bare: the
+	// mapping is a CLI-layer lookup, so the adapter's refusal codes stay stable.
+	for (const e of result.errors) {
+		logError(`  ${e}`);
+		const remediation = remediationForMessage(e);
+		if (remediation) logError(`    → ${remediation}`);
+	}
 	return 1;
 }
 
@@ -83,6 +90,16 @@ function renderDoctor(
 	if (execution.residual.length > 0) {
 		log("  execution-residual:");
 		for (const r of execution.residual) log(`    - ${r}`);
+	}
+
+	// Install-capability is its OWN section, always printed so an absent adapter
+	// is never silent — and it never changes the exit code, which follows
+	// `execution.status` alone.
+	const acl = report.installCapability.acl;
+	const aclDetail = "detail" in acl ? ` — ${acl.detail}` : "";
+	log(`  acl-capability: ${acl.status} (${acl.tool})${aclDetail}`);
+	if (report.installCapability.remediation) {
+		log(`    → ${report.installCapability.remediation}`);
 	}
 
 	log(`  host-residual: ${report.hostResidual}`);

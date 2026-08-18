@@ -104,6 +104,23 @@ const defaultSpawn: SpawnFn = (cmd, args) =>
 		);
 	});
 
+// --- stable refusal-detail tokens --------------------------------------------
+
+/**
+ * The EXACT detail strings the POSIX adapters emit, exported so consumers (the
+ * CLI remediation table) can key off a token instead of string-matching prose.
+ * These values are frozen: changing one changes an observable refusal detail.
+ */
+export const ACL_DETAIL = {
+	getfaclAbsent: "getfacl absent",
+	getfaclTimeout: "getfacl timeout",
+	extendedAclEntry: "extended ACL entry",
+	macosLsAbsent: "/bin/ls absent",
+	macosLsTimeout: "ls timeout",
+	macosAclFlag: "ACL present (+ flag)",
+	macosAceListed: "ACE listed",
+} as const;
+
 // --- Linux getfacl adapter (Algorithm D) -------------------------------------
 
 const LINUX_BASE_ENTRY = /^(user|group|other)::/;
@@ -121,9 +138,9 @@ export function createLinuxAclAdapter(
 				target,
 			]);
 			if (res.spawnError)
-				return refuse("unsupported-posix-acl", "getfacl absent");
+				return refuse("unsupported-posix-acl", ACL_DETAIL.getfaclAbsent);
 			if (res.timedOut)
-				return refuse("unsupported-posix-acl", "getfacl timeout");
+				return refuse("unsupported-posix-acl", ACL_DETAIL.getfaclTimeout);
 			if (res.code !== 0) {
 				return refuse("unsupported-posix-acl", `getfacl exit ${res.code}`);
 			}
@@ -131,7 +148,7 @@ export function createLinuxAclAdapter(
 				const line = raw.trim();
 				if (line === "" || line.startsWith("#")) continue;
 				if (LINUX_BASE_ENTRY.test(line)) continue;
-				return refuse("unsupported-posix-acl", "extended ACL entry");
+				return refuse("unsupported-posix-acl", ACL_DETAIL.extendedAclEntry);
 			}
 			return ok();
 		},
@@ -149,22 +166,85 @@ export function createMacosAclAdapter(
 		async proveClean(target) {
 			const res = await spawn("/bin/ls", ["-lde", "--", target]);
 			if (res.spawnError)
-				return refuse("unsupported-posix-acl", "/bin/ls absent");
-			if (res.timedOut) return refuse("unsupported-posix-acl", "ls timeout");
+				return refuse("unsupported-posix-acl", ACL_DETAIL.macosLsAbsent);
+			if (res.timedOut)
+				return refuse("unsupported-posix-acl", ACL_DETAIL.macosLsTimeout);
 			if (res.code !== 0) {
 				return refuse("unsupported-posix-acl", `ls exit ${res.code}`);
 			}
 			const lines = res.stdout.split("\n");
 			const modeLine = lines[0] ?? "";
 			if (modeLine[10] === "+") {
-				return refuse("unsupported-posix-acl", "ACL present (+ flag)");
+				return refuse("unsupported-posix-acl", ACL_DETAIL.macosAclFlag);
 			}
 			if (lines.some((line) => MACOS_ACE_LINE.test(line))) {
-				return refuse("unsupported-posix-acl", "ACE listed");
+				return refuse("unsupported-posix-acl", ACL_DETAIL.macosAceListed);
 			}
 			return ok();
 		},
 	};
+}
+
+// --- read-only ACL capability probe ------------------------------------------
+
+/**
+ * Whether the host's ACL adapter is RESOLVABLE — an install-time capability
+ * question, deliberately separate from the per-target prover above. It never
+ * decides whether a target is safe and never gates a mutation.
+ */
+export type AclCapability =
+	| { status: "available"; tool: "getfacl" | "/bin/ls" }
+	| { status: "absent"; tool: "getfacl" | "/bin/ls" }
+	| { status: "unknown"; tool: string; detail: string }
+	| { status: "not-applicable"; tool: "windows-secure-object" };
+
+/**
+ * Probe the ACL adapter READ-ONLY: it resolves and runs a version/list argv and
+ * inspects nothing on disk. It creates, modifies and removes nothing, and its
+ * result NEVER feeds the transactional gate — the prover (`proveClean`) is the
+ * only authority on whether a path is safe, and it stays fail-closed.
+ *
+ * `unknown` (timeout, non-zero exit, unparseable output, unsupported platform)
+ * is honest ignorance: the caller reports it, it never becomes `available`.
+ */
+export async function probeAclCapability(
+	spawn: SpawnFn = defaultSpawn,
+	platform: NodeJS.Platform = process.platform,
+): Promise<AclCapability> {
+	if (platform === "win32") {
+		return { status: "not-applicable", tool: "windows-secure-object" };
+	}
+	if (platform !== "linux" && platform !== "darwin") {
+		return {
+			status: "unknown",
+			tool: platform,
+			detail: `no POSIX ACL adapter for platform ${platform}`,
+		};
+	}
+
+	const tool = platform === "linux" ? "getfacl" : "/bin/ls";
+	const args = platform === "linux" ? ["--version"] : ["-ld", "/"];
+	const res = await spawn(tool, args);
+
+	if (res.spawnError) return { status: "absent", tool };
+	if (res.timedOut) {
+		// The argv differs per platform (`getfacl --version` on linux, `/bin/ls -ld /`
+		// on darwin), so the detail names the probe, not a hardcoded flag.
+		return { status: "unknown", tool, detail: `${tool} probe timeout` };
+	}
+	if (res.code !== 0) {
+		return { status: "unknown", tool, detail: `${tool} exit ${res.code}` };
+	}
+	// Linux only: a zero exit whose banner does not name getfacl is a foreign
+	// binary on PATH, not proof of the adapter — report ignorance, not success.
+	if (platform === "linux" && !res.stdout.toLowerCase().includes("getfacl")) {
+		return {
+			status: "unknown",
+			tool,
+			detail: `${tool} --version output unparseable`,
+		};
+	}
+	return { status: "available", tool };
 }
 
 // --- the POSIX secure filesystem --------------------------------------------

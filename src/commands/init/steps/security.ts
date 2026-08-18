@@ -1,5 +1,6 @@
 import { setHookFeature } from "../../../lib/ci-config.js";
 import { installClaudePreToolUse } from "../../../lib/claude-hook-manager.js";
+import { remediationForMessage } from "../../../lib/secure-refusal-remediation.js";
 import type { HookProfile } from "../../../types/index.js";
 import { report } from "../report.js";
 import type { StepFn } from "../types.js";
@@ -35,6 +36,8 @@ const PROFILE_PRESET: Record<
  *      `claude-settings-security.json` scaffold is RETIRED — the managed
  *      installer owns `.claude/settings.json` + the hook asset with proper
  *      ownership markers.
+ *      A guard refusal/failure is REPORTED but does NOT abort the step: the
+ *      profile merge below is an independent outcome (Linux hardening Slice A).
  *   2. Merges the `hooks:` security sections for the selected reliability
  *      profile into `.javi-forge/ci.yaml` via `setHookFeature` (creating a
  *      minimal `version: 2` config when absent). The dispatcher composes these
@@ -48,6 +51,11 @@ export const stepSecurityHooks: StepFn = async (ctx) => {
 	const { securityHooks, hookProfile, claudePreToolUseGuard } = options;
 	const stepId = "security-hooks";
 	report(onStep, stepId, "Scaffold security hooks", "running");
+	// Declared OUTSIDE the try so a throw from the profile merge below cannot
+	// swallow a guard refusal that already happened: the outer catch reports
+	// BOTH failures (Linux hardening Slice A — a captured refusal and its
+	// remediation are never silently lost).
+	let guardError: string | undefined;
 	try {
 		if (!securityHooks) {
 			report(
@@ -79,20 +87,27 @@ export const stepSecurityHooks: StepFn = async (ctx) => {
 
 		// 1. Install the managed Claude PreToolUse guard (transactional; owns
 		//    .claude/settings.json + the hook asset). Retires the legacy copy.
+		//    A refusal (or a throw) is CAPTURED, not returned on: the guard and
+		//    the hook-profile merge below are independent outcomes, so a host
+		//    that cannot install the guard must not silently lose its
+		//    secrets/permissions/deps wiring. The captured failure still drives a
+		//    terminal status of "error" — visibility is never downgraded.
 		let guardNote = "";
 		if (claudePreToolUseGuard) {
-			const result = await installClaudePreToolUse(projectDir);
-			if (!result.ok) {
-				report(
-					onStep,
-					stepId,
-					"Scaffold security hooks",
-					"error",
-					`Claude guard install refused: ${result.errors.join("; ")}`,
-				);
-				return;
+			try {
+				const result = await installClaudePreToolUse(projectDir);
+				if (result.ok) {
+					guardNote = "; Claude guard installed";
+				} else {
+					guardError = `Claude guard install refused: ${result.errors.join("; ")}`;
+					const remediation = result.errors
+						.map((e) => remediationForMessage(e))
+						.find((line): line is string => line !== undefined);
+					if (remediation) guardError += ` → ${remediation}`;
+				}
+			} catch (e) {
+				guardError = `Claude guard install failed: ${String(e)}`;
 			}
-			guardNote = "; Claude guard installed";
 		}
 
 		// 2. Merge the profile's security sections into .javi-forge/ci.yaml.
@@ -111,14 +126,26 @@ export const stepSecurityHooks: StepFn = async (ctx) => {
 			merged.length > 0
 				? `${profile} preset: ${merged.join(", ")}`
 				: `${profile} preset: CI gate only (no security sections)`;
+		// ONE terminal report. On a captured guard failure the status stays
+		// "error" and the detail names BOTH the refusal (+ remediation) AND the
+		// preset that WAS merged, so a refused guard is never read as installed
+		// and a merged profile is never read as lost.
 		report(
 			onStep,
 			stepId,
 			"Scaffold security hooks",
-			"done",
-			`${presetNote}${guardNote}`,
+			guardError ? "error" : "done",
+			guardError
+				? `${guardError}; ${presetNote} merged`
+				: `${presetNote}${guardNote}`,
 		);
 	} catch (e) {
-		report(onStep, stepId, "Scaffold security hooks", "error", String(e));
+		report(
+			onStep,
+			stepId,
+			"Scaffold security hooks",
+			"error",
+			guardError ? `${guardError}; ${String(e)}` : String(e),
+		);
 	}
 };

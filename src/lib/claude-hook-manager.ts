@@ -35,12 +35,18 @@ import {
 	scanExecutionFlags,
 } from "./claude-hook-settings.js";
 import { safeReadFile } from "./safe-read.js";
-import { selectSecureFs } from "./secure-fs-posix.js";
+import {
+	ACL_DETAIL,
+	type AclCapability,
+	probeAclCapability,
+	selectSecureFs,
+} from "./secure-fs-posix.js";
 import {
 	type PlatformSecureFs,
 	runTransaction,
 	type TransactionComponent,
 } from "./secure-fs-transaction.js";
+import { remediationForRefusal } from "./secure-refusal-remediation.js";
 
 /** 1 MiB read budget, shared with the runtime's stdin envelope. */
 const ASSET_MAX_BYTES = 1024 * 1024;
@@ -97,6 +103,13 @@ export interface ClaudeHookDoctorReport {
 	hostResidual: string;
 	remediation: readonly string[];
 	execution: ExecutionReport;
+	/**
+	 * Host INSTALL-capability, reported as its own section. It answers "could
+	 * install/repair run here?", NOT "will the installed guard fire?" — so it
+	 * never feeds `execution`, `healthy`, or the exit code. A current, firing
+	 * guard on an image without `getfacl` stays `runnable`.
+	 */
+	installCapability: { acl: AclCapability; remediation?: string };
 }
 
 // The single non-`safe-read` fs surface, confined to one helper.
@@ -601,6 +614,8 @@ export async function doctorClaudePreToolUse(
 		manifest?: Manifest;
 		nodeVersion?: string;
 		execution?: ExecutionProbeEnv;
+		/** Injectable read-only ACL capability probe (defaults to the real one). */
+		aclProbe?: () => Promise<AclCapability>;
 	},
 ): Promise<ClaudeHookDoctorReport> {
 	const manifest = options?.manifest ?? (await readManifest());
@@ -656,6 +671,24 @@ export async function doctorClaudePreToolUse(
 		options?.execution ?? {},
 	);
 
+	// Install-capability section. Read-only, and deliberately OUTSIDE the
+	// execution matrix (design Decision 1): the installed `.mjs` guard never
+	// spawns `getfacl`, so an absent adapter cannot stop a current guard from
+	// firing. Only when a guard-currency blocker ALREADY exists does the
+	// remediation join `report.remediation` — there the user must install and
+	// cannot.
+	const aclCapability = await (options?.aclProbe ?? probeAclCapability)();
+	const aclRemediation =
+		aclCapability.status === "absent" && aclCapability.tool === "getfacl"
+			? remediationForRefusal("unsupported-posix-acl", ACL_DETAIL.getfaclAbsent)
+			: undefined;
+	if (
+		aclRemediation &&
+		execution.blockers.some((blocker) => blocker.startsWith("guard:"))
+	) {
+		remediation.add(aclRemediation);
+	}
+
 	return {
 		healthy,
 		settings: {
@@ -678,6 +711,10 @@ export async function doctorClaudePreToolUse(
 		hostResidual: HOST_RESIDUAL,
 		remediation: [...remediation].sort(),
 		execution,
+		installCapability: {
+			acl: aclCapability,
+			...(aclRemediation ? { remediation: aclRemediation } : {}),
+		},
 	};
 }
 
@@ -710,6 +747,12 @@ export interface ClaudeHookRunDeps {
 	nonce?: () => string; // 8 lowercase hex
 	manifest?: Manifest;
 	platform?: NodeJS.Platform;
+	/**
+	 * Injectable read-only ACL capability probe, forwarded to the doctor report
+	 * this run embeds. Same seam as `secureFs`/`clock`: it keeps unit tests from
+	 * spawning the real `getfacl` (defaults to the real probe in production).
+	 */
+	aclProbe?: () => Promise<AclCapability>;
 }
 
 type AssetPlan =
@@ -886,7 +929,7 @@ export async function _run(
 	const settingsPath = path.join(projectDir, ".claude", "settings.json");
 	const assetSrcPath = path.join(CLAUDE_HOOK_ASSETS_DIR, ASSET_NAME);
 	const doctor = (): Promise<ClaudeHookDoctorReport> =>
-		doctorClaudePreToolUse(projectDir, { manifest });
+		doctorClaudePreToolUse(projectDir, { manifest, aclProbe: deps.aclProbe });
 
 	// Windows (or any platform without an adapter) refuses with zero mutation.
 	if (!secureFs) {

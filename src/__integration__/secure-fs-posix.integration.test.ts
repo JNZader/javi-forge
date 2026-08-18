@@ -21,7 +21,7 @@
 // REAL extended ACL entry, and the ancestor-chain gate walks from `/` down — so
 // a `$HOME`- or `RUNNER_TEMP`-rooted fixture makes the shipped adapter refuse
 // `extended ACL entry` on the happy path, on the runner only. The workflow
-// creates a 0700 base OUTSIDE `/home` (`/opt/jf-int`) and points this suite at
+// creates a 0700 base OUTSIDE /home (/jf-int, directly under / — GH runners: /home has an extended ACL, /opt is mode 777) and points this suite at
 // it. The adapter is behaving as shipped; the over-refusal itself is recorded
 // as a product finding in `docs/BACKLOG.md`.
 //

@@ -82,8 +82,23 @@ export interface PlatformSecureFs {
 	/** Prove owner == effective uid or root AND no group/other write bits. */
 	proveOwnershipAndMode(dirPath: string): Promise<SecureResult<void>>;
 
-	/** Prove no extended/named/mask/default/inherited ACL on the path. */
+	/**
+	 * STRICT proof: no extended/named/mask/default/inherited ACL on the path. Used
+	 * on managed containers (via `proveManagedContainer`) and leaf source files.
+	 */
 	proveNoExtendedAcl(target: string): Promise<SecureResult<void>>;
+
+	/**
+	 * LENIENT ancestor proof: refuse only a path-ENDANGERING ACL entry (a foreign
+	 * principal that can swap/delete/rename the on-path node) and proceed on benign
+	 * ones (a lone mask, an effective-non-write or x-only or trusted named entry, a
+	 * `default:*`). Called by the engine on ANCESTOR (non-managed) controlling dirs
+	 * only; managed containers keep the strict proof. Selection is by the
+	 * managed-containers role, NEVER by `process.platform`. On win32 this mirrors
+	 * the ratified Predicate A (already lenient on ancestors); on darwin it is the
+	 * strict no-op alias (deferred).
+	 */
+	proveNoEndangeringAcl(target: string): Promise<SecureResult<void>>;
 
 	/** Create ONE child directory exclusively at mode, reopen+verify, return its handle. */
 	createDirExclusive(
@@ -287,9 +302,16 @@ export async function runTransaction(
 	const needsWrite = (c: TransactionComponent): boolean => c.desired !== null;
 	const anyWrite = needsWrite(input.asset) || needsWrite(input.settings);
 
+	// The uniform per-held-dir gate. It runs the LENIENT ancestor ACL predicate on
+	// EVERY held dir — including managed containers, which are ALSO proved strict by
+	// `proveManagedContainer` right after they are gated (in ensureManagedContainer)
+	// and re-proved strict pre-commit/rollback. So `.claude`/`.claude/hooks` still
+	// refuse ANY extended entry (lenient-gated THEN strict-managed); only ancestor-
+	// only segments loosen. No `process.platform` here — role is expressed by which
+	// dirs get proveManagedContainer'd (the managedContainers set).
 	async function gate(dirPath: string, handle: SecureDirHandle): Promise<void> {
 		must(`ownership ${dirPath}`, await secureFs.proveOwnershipAndMode(dirPath));
-		must(`acl ${dirPath}`, await secureFs.proveNoExtendedAcl(dirPath));
+		must(`acl ${dirPath}`, await secureFs.proveNoEndangeringAcl(dirPath));
 		heldByPath.set(dirPath, handle);
 		heldOrder.push(handle);
 	}
@@ -361,7 +383,9 @@ export async function runTransaction(
 			);
 			if (!id.ok) return false;
 			if (!(await secureFs.proveOwnershipAndMode(handle.path)).ok) return false;
-			if (!(await secureFs.proveNoExtendedAcl(handle.path)).ok) return false;
+			// Lenient ancestor predicate — identical to preflight `gate()`, so an ACL
+			// that passed preflight is not spuriously refused at rollback re-prove.
+			if (!(await secureFs.proveNoEndangeringAcl(handle.path)).ok) return false;
 			// Re-check the container add/delete-child dimension on the rollback path
 			// too, for full symmetry with the pre-commit re-prove (JDB5-002).
 			if (managedContainers.has(handle.path)) {
@@ -473,9 +497,13 @@ export async function runTransaction(
 				`recheck-own ${handle.path}`,
 				await secureFs.proveOwnershipAndMode(handle.path),
 			);
+			// LENIENT ancestor predicate — MUST match preflight `gate()` so an ancestor
+			// ACL accepted at preflight is not refused at commit (spec: predicate is
+			// consistent across preflight and re-prove). Managed containers held here
+			// are ALSO re-proved strict just below via `recheck-container`.
 			must(
 				`recheck-acl ${handle.path}`,
-				await secureFs.proveNoExtendedAcl(handle.path),
+				await secureFs.proveNoEndangeringAcl(handle.path),
 			);
 			// Re-prove the managed-container add/delete-child dimension for held
 			// handles that ARE managed containers, closing the TOCTOU window between

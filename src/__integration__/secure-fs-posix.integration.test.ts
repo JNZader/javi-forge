@@ -10,20 +10,21 @@
 // from the old `/tmp`-rooted case in `claude-hook-manager.run.test.ts`, which
 // "passed" on every host by returning before its first assertion.
 //
-// FIXTURE BASE: `mkdtemp` under `JF_INT_BASE` (explicit CI override),
-// `RUNNER_TEMP` (CI default) or `$HOME` (dev box), 0700. NEVER
-// `os.tmpdir()`/`/tmp`: its `1777` sticky mode makes the ancestor gate refuse
-// `unsafe-parent-chain` before any ACL logic runs, so a `/tmp`-rooted suite can
-// only prove that `/tmp` is world-writable. The precondition is ASSERTED up
-// front — it FAILS naming the offending path, it never skips.
+// FIXTURE BASE: `mkdtemp` under `RUNNER_TEMP` (CI default) or `$HOME` (dev box),
+// 0700. NEVER `os.tmpdir()`/`/tmp`: its `1777` sticky mode makes the ancestor
+// gate refuse `unsafe-parent-chain` before any ACL logic runs, so a `/tmp`-rooted
+// suite can only prove that `/tmp` is world-writable. The precondition is
+// ASSERTED up front — it FAILS naming the offending path, it never skips.
 //
-// WHY `JF_INT_BASE` EXISTS: GitHub's `ubuntu-latest` image ships `/home` with a
-// REAL extended ACL entry, and the ancestor-chain gate walks from `/` down — so
-// a `$HOME`- or `RUNNER_TEMP`-rooted fixture makes the shipped adapter refuse
-// `extended ACL entry` on the happy path, on the runner only. The workflow
-// creates a 0700 base OUTSIDE /home (/jf-int, directly under / — GH runners: /home has an extended ACL, /opt is mode 777) and points this suite at
-// it. The adapter is behaving as shipped; the over-refusal itself is recorded
-// as a product finding in `docs/BACKLOG.md`.
+// VALIDATION-VIA-REVERT (JD-P-001): the old `JF_INT_BASE=/jf-int` workaround (a
+// 0700 base OUTSIDE `/home`) is GONE. GitHub's `ubuntu-latest` image ships
+// `/home` with a REAL but BENIGN extended ACL entry, and the ancestor-chain gate
+// walks from `/` down. The gate now runs the LENIENT path-endangering predicate,
+// so a `$HOME`/`RUNNER_TEMP`-rooted fixture is ALLOWED past a benign `/home`
+// instead of over-refused. A green suite under `$HOME` is the empirical proof the
+// JD-P-001 over-refusal is closed. If CI `/home` ever carries an ENDANGERING
+// entry, the precondition names it — that is a design-revisit trigger, not a
+// test edit.
 //
 // LEG: `JAVI_FORGE_ACL_LEG=absent` (the CI leg where `/usr/bin/getfacl` is
 // displaced) selects EXPECTATIONS only — adapter-absent refusals WITH the
@@ -64,19 +65,19 @@ const EXPECTED_ACL_DETAIL = EXPECT_GETFACL
 let baseDir: string;
 
 /**
- * A PRIVATE fixture root: `JF_INT_BASE` when the environment pins one (the CI
- * legs point it outside `/home`), else `RUNNER_TEMP` on a GitHub runner, else
- * `$HOME` on a dev box. Never `os.tmpdir()` — see the header.
+ * A PRIVATE fixture root: `RUNNER_TEMP` on a GitHub runner, else `$HOME` on a
+ * dev box. Never `os.tmpdir()` — see the header.
+ *
+ * The old `JF_INT_BASE=/jf-int` workaround (a 0700 base OUTSIDE `/home`) is GONE
+ * (JD-P-001): the ancestor gate now runs the LENIENT path-endangering predicate,
+ * so a `$HOME`/`RUNNER_TEMP`-rooted fixture whose `/home` carries a BENIGN
+ * extended ACL is allowed instead of over-refused. A green suite under `$HOME`
+ * is the empirical proof the narrowing closed the over-refusal.
  */
 function privateRoot(): string {
-	// An exported-but-EMPTY JF_INT_BASE/RUNNER_TEMP is `absent`, not a valid
-	// root: `??` only rejects undefined and would hand `mkdtemp` a relative
-	// cwd-rooted path.
-	return (
-		process.env.JF_INT_BASE?.trim() ||
-		process.env.RUNNER_TEMP?.trim() ||
-		os.homedir()
-	);
+	// An exported-but-EMPTY RUNNER_TEMP is `absent`, not a valid root: `||` rejects
+	// it and would otherwise hand `mkdtemp` a relative cwd-rooted path.
+	return process.env.RUNNER_TEMP?.trim() || os.homedir();
 }
 
 function mkProject(tag: string): string {
@@ -100,34 +101,22 @@ function ancestorsOf(target: string): string[] {
 }
 
 /**
- * The base-entry shape the shipped Linux adapter treats as clean; anything else
- * getfacl prints is an EXTENDED entry. Mirrors `LINUX_BASE_ENTRY` in
- * `secure-fs-posix.ts` — duplicated on purpose so the precondition names the
- * offending ancestor even if the adapter's own predicate changes.
- */
-const BASE_ACL_ENTRY = /^(user|group|other)::/;
-
-/**
- * Every ancestor of `target` that carries an extended ACL entry, with the first
- * offending entry, as reported by the REAL `getfacl`. Empty on a clean chain.
+ * Every ancestor of `target` the REAL narrowed adapter treats as path-ENDANGERING
+ * (a foreign principal that can swap/delete/rename the on-path node), with the
+ * refusal detail. Empty on a chain the lenient predicate allows — which now
+ * includes a benign `/home` carrying a masked/read-only/`default:*` extended ACL.
  *
- * Only meaningful on the `present` leg — the caller gates on `EXPECT_GETFACL`.
+ * Uses the real `proveNoEndangeringAcl` (not a duplicated regex) so the
+ * precondition proves EXACTLY what the install path will decide. Only meaningful
+ * on the `present` leg — the caller gates on `EXPECT_GETFACL`.
  */
-function aclOffendingAncestors(target: string): string[] {
+async function endangeringAncestors(target: string): Promise<string[]> {
+	const secureFs = selectSecureFs("linux");
+	if (!secureFs) throw new Error("selectSecureFs('linux') returned no adapter");
 	const offenders: string[] = [];
 	for (const dir of ancestorsOf(target)) {
-		const stdout = execFileSync(
-			"getfacl",
-			["--absolute-names", "--numeric", "--omit-header", "--", dir],
-			{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-		);
-		for (const raw of stdout.split("\n")) {
-			const line = raw.trim();
-			if (line === "" || line.startsWith("#")) continue;
-			if (BASE_ACL_ENTRY.test(line)) continue;
-			offenders.push(`${dir} (${line})`);
-			break;
-		}
+		const res = await secureFs.proveNoEndangeringAcl(dir);
+		if (!res.ok) offenders.push(`${dir} (${res.detail ?? res.refusal})`);
 	}
 	return offenders;
 }
@@ -185,7 +174,7 @@ describe.skipIf(!LINUX)(
 		// that chain refuses `unsafe-parent-chain` and would mask every ACL result
 		// below. This is an ASSERTION, not a skip guard: a suite that cannot prove
 		// its own fixture base proves nothing at all.
-		it("PRECONDITION: fixture base is a private 0700 dir with a private ancestor chain", () => {
+		it("PRECONDITION: fixture base is a private 0700 dir with a private ancestor chain", async () => {
 			expect(
 				baseDir.startsWith(path.resolve(os.tmpdir())),
 				`fixture base is rooted under the world-writable ${os.tmpdir()}: ${baseDir}`,
@@ -214,16 +203,20 @@ describe.skipIf(!LINUX)(
 				).toBe(0);
 			}
 
-			// On the happy-path leg the chain must ALSO be free of extended ACL
-			// entries: the shipped adapter refuses on the FIRST ancestor that
-			// carries one, so an ACL'd ancestor would otherwise surface as an
-			// opaque install refusal two tests down. Name it here instead.
-			// (GitHub's `ubuntu-latest` ships `/home` with a real extended ACL —
-			// exactly why `JF_INT_BASE` points outside `/home` in CI.)
-			const aclOffenders = EXPECT_GETFACL ? aclOffendingAncestors(baseDir) : [];
+			// On the happy-path leg the chain must be free of PATH-ENDANGERING ACL
+			// entries: the narrowed adapter refuses on the FIRST ancestor a foreign
+			// principal could swap/delete/rename, so an endangering ancestor would
+			// otherwise surface as an opaque install refusal two tests down. Name it
+			// here instead. A BENIGN extended entry (GitHub `ubuntu-latest` ships
+			// `/home` with a masked/read-only one) is ALLOWED — that is precisely the
+			// JD-P-001 over-refusal this change closes. An endangering entry here is a
+			// DESIGN-REVISIT trigger, not a test edit.
+			const aclOffenders = EXPECT_GETFACL
+				? await endangeringAncestors(baseDir)
+				: [];
 			expect(
 				aclOffenders,
-				`controlling directories carry extended ACL entries, which the shipped adapter refuses: ${aclOffenders.join(", ")} — point JF_INT_BASE at an ACL-clean 0700 directory outside /home`,
+				`controlling directories carry PATH-ENDANGERING ACL entries the narrowed adapter refuses: ${aclOffenders.join(", ")} — if this is a real GH runner /home entry, revisit the JD-P-001 predicate, do not edit this test`,
 			).toEqual([]);
 		});
 
@@ -300,10 +293,17 @@ describe.skipIf(!LINUX)(
 			}
 		});
 
-		// === A REAL extended ACL refuses — WITHOUT a package hint =================
-		it("refuses a real setfacl'd controlling directory with unsupported-posix-acl and no package remediation", async () => {
+		// === STRICT refuses a real named entry, LENIENT gate INSTALLS past it =====
+		// A read-only foreign named-user (`u:nobody:r`) on a controlling ANCESTOR is
+		// mode-innocuous (mask r-- → no group/other write bit). The STRICT proof
+		// still refuses it (managed containers + leaf source rely on that), but the
+		// narrowed LENIENT ancestor gate that drives the full install ALLOWS it —
+		// this is the JD-P-001 over-refusal being fixed, proven end-to-end through the
+		// real CLI. (An effective-WRITE entry cannot isolate the ACL path here: the
+		// mask couples into st_mode's group class, so `proveOwnershipAndMode` refuses
+		// it first — the lenient ACL refuse is exercised directly in the tests below.)
+		it("STRICT refuses a read-only named entry the LENIENT ancestor gate now installs past (JD-P-001)", async () => {
 			const projectDir = mkProject("extended-acl");
-			// A real named-user entry (uid 65534 / nobody) on the controlling dir.
 			execFileSync("setfacl", ["-m", "u:nobody:r", projectDir], {
 				stdio: "pipe",
 			});
@@ -312,29 +312,94 @@ describe.skipIf(!LINUX)(
 			expect(secureFs, "selectSecureFs('linux') returned no adapter").not.toBe(
 				null,
 			);
-			const proof = await secureFs?.proveNoExtendedAcl(projectDir);
+			// STRICT proof (managed-container/leaf predicate) still refuses ANY named.
+			const strict = await secureFs?.proveNoExtendedAcl(projectDir);
 			expect(
-				proof?.ok,
-				`proveNoExtendedAcl accepted a named-user ACL: ${proof?.detail}`,
+				strict?.ok,
+				`proveNoExtendedAcl accepted a named-user ACL: ${strict?.detail}`,
 			).toBe(false);
-			expect(proof?.refusal).toBe("unsupported-posix-acl");
-			expect(proof?.detail).toBe(EXPECTED_ACL_DETAIL);
-			// The mode alone stays innocuous (no group/other write) — only the ACL
-			// proof can catch this, which is exactly why it must not be skippable.
+			expect(strict?.refusal).toBe("unsupported-posix-acl");
+			expect(strict?.detail).toBe(EXPECTED_ACL_DETAIL);
+			// The mode stays innocuous (no group/other write) — a read-only mask.
 			expect(fs.lstatSync(projectDir).mode & 0o022).toBe(0);
+			// LENIENT ancestor proof ALLOWS it on the happy leg (read-only ≠ endanger).
+			const lenient = await secureFs?.proveNoEndangeringAcl(projectDir);
+			expect(lenient?.ok).toBe(EXPECT_GETFACL);
 
 			const { code, out } = await renderInstall(projectDir);
-			expect(code, `install did not refuse: ${out}`).toBe(1);
-			expect(out).toContain(EXPECTED_ACL_DETAIL);
-			expect(fs.readdirSync(projectDir)).toEqual([]);
+			if (EXPECT_GETFACL) {
+				// The over-refusal is CLOSED: the benign read-only ancestor entry no
+				// longer blocks the install. It commits both components.
+				expect(
+					code,
+					`install refused a benign read-only ancestor: ${out}`,
+				).toBe(0);
+				expect(fs.existsSync(path.join(projectDir, ".claude"))).toBe(true);
+			} else {
+				// getfacl displaced: fail closed with the adapter-absent detail.
+				expect(code, `install did not refuse: ${out}`).toBe(1);
+				expect(out).toContain(EXPECTED_ACL_DETAIL);
+				expect(fs.readdirSync(projectDir)).toEqual([]);
+			}
 
-			// A resolvable adapter that PROVES a real ACL must never suggest
-			// installing the `acl` package — the package is already there and would
-			// not fix anything. The hint belongs to the adapter-absent path alone.
+			// A resolvable adapter never suggests installing the `acl` package (it is
+			// already there); the hint belongs to the adapter-absent path alone.
 			expect(
 				out.includes(ACL_PACKAGE_REMEDIATION),
-				`package remediation leaked onto a ${EXPECTED_ACL_DETAIL} refusal`,
+				"package remediation leaked onto a resolvable-adapter run",
 			).toBe(!EXPECT_GETFACL);
+		});
+
+		// === LENIENT ANCESTOR PREDICATE over a REAL setfacl'd dir (JD-P-001) =======
+		// The narrowed `proveNoEndangeringAcl` must ALLOW a benign (masked read-only)
+		// foreign named-user on a controlling directory — the exact over-refusal this
+		// change fixes — while still REFUSING a foreign named-user with effective
+		// write.
+		it("ALLOWS a masked read-only foreign named-user on a controlling directory (the over-refusal fix)", async () => {
+			const projectDir = mkProject("masked-ro");
+			// nobody(65534): rwx granted but the mask pins effective down to r--.
+			execFileSync(
+				"setfacl",
+				["-m", "u:65534:rwx", "-m", "m::r--", projectDir],
+				{ stdio: "pipe" },
+			);
+			// Mode carries no group/other write — only the ACL math decides this.
+			expect(fs.lstatSync(projectDir).mode & 0o022).toBe(0);
+
+			const secureFs = selectSecureFs("linux");
+			const res = await secureFs?.proveNoEndangeringAcl(projectDir);
+			if (EXPECT_GETFACL) {
+				expect(
+					res?.ok,
+					`lenient predicate refused a masked read-only named-user: ${res?.detail}`,
+				).toBe(true);
+			} else {
+				// getfacl displaced → fail closed with the adapter-absent detail.
+				expect(res?.ok).toBe(false);
+				expect(res?.detail).toBe(ACL_DETAIL.getfaclAbsent);
+			}
+		});
+
+		it("REFUSES a foreign named-user with effective write on a controlling directory", async () => {
+			const projectDir = mkProject("foreign-write");
+			// nobody(65534): rwx with the auto-recalculated mask rwx → effective rwx,
+			// and 65534 ∉ {owner, root, euid} → path-endangering.
+			execFileSync("setfacl", ["-m", "u:65534:rwx", projectDir], {
+				stdio: "pipe",
+			});
+
+			const secureFs = selectSecureFs("linux");
+			const res = await secureFs?.proveNoEndangeringAcl(projectDir);
+			expect(
+				res?.ok,
+				"lenient predicate allowed a foreign named-user with effective write",
+			).toBe(false);
+			expect(res?.refusal).toBe("unsupported-posix-acl");
+			expect(res?.detail).toBe(EXPECTED_ACL_DETAIL);
+			// The strict managed-container proof refuses it too (defence in depth).
+			expect((await secureFs?.proveManagedContainer(projectDir))?.ok).toBe(
+				false,
+			);
 		});
 
 		// === getfacl unresolvable IN-PROCESS: real ENOENT, real remediation =======

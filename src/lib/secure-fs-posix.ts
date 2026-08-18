@@ -52,10 +52,27 @@ export interface SpawnOutcome {
 
 export type SpawnFn = (cmd: string, args: string[]) => Promise<SpawnOutcome>;
 
+/** Minimal `lstat` seam: yields the on-disk owner uid of the target. Injectable. */
+export type StatFn = (target: string) => Promise<{ uid: number }>;
+
 /** The bounded ACL prover behind each platform adapter. */
 export interface PosixAclAdapter {
-	/** Run the bounded, LC_ALL=C ACL tool and decide clean|extended|inconclusive. */
+	/**
+	 * STRICT any-extended-entry proof: refuse ANY named/mask/default/inherited ACL
+	 * entry. Used on managed containers (`.claude`/`.claude/hooks`) and leaf source
+	 * files, where the tool owns the node and tolerates no foreign ACL surface.
+	 */
 	proveClean(target: string): Promise<SecureResult<void>>;
+	/**
+	 * LENIENT path-endangering proof for ANCESTOR (non-managed) controlling dirs:
+	 * refuse only when a foreign principal can swap/delete/rename the on-path node
+	 * — a named-user for a uid outside {owner, root, euid} with effective (raw ∩
+	 * mask) `w`, OR any named-group with effective `w`. Everything else (base
+	 * entries, a lone `mask::`, effective-non-write named entries, x-only, trusted
+	 * named users, `default:*`) proceeds. Same fail-closed spawn edges as
+	 * `proveClean`. On darwin this is the no-op alias of `proveClean` (deferred).
+	 */
+	proveNoEndangeringAcl(target: string): Promise<SecureResult<void>>;
 }
 
 // --- result constructors -----------------------------------------------------
@@ -124,26 +141,128 @@ export const ACL_DETAIL = {
 // --- Linux getfacl adapter (Algorithm D) -------------------------------------
 
 const LINUX_BASE_ENTRY = /^(user|group|other)::/;
+// Numeric getfacl entry shapes (LC_ALL=C, --numeric, --omit-header).
+const MASK_PERMS = /^mask::([r-][w-][x-])$/;
+const MASK_ANY = /^mask::/;
+const NAMED_USER = /^user:(\d+):([r-][w-][x-])$/;
+const NAMED_GROUP = /^group:(\d+):([r-][w-][x-])$/;
+const DEFAULT_ENTRY = /^default:/;
+
+/** Default owner-uid source: an lstat of the target (authoritative carve-out). */
+const defaultStat: StatFn = async (target) => {
+	const stats = await lstat(target);
+	return { uid: stats.uid };
+};
+
+/** Run the shared, bounded, LC_ALL=C getfacl spawn and map its fail-closed edges. */
+async function runGetfacl(
+	spawn: SpawnFn,
+	target: string,
+): Promise<SpawnOutcome | SecureResult<void>> {
+	const res = await spawn("getfacl", [
+		"--absolute-names",
+		"--numeric",
+		"--omit-header",
+		"--",
+		target,
+	]);
+	if (res.spawnError)
+		return refuse("unsupported-posix-acl", ACL_DETAIL.getfaclAbsent);
+	if (res.timedOut)
+		return refuse("unsupported-posix-acl", ACL_DETAIL.getfaclTimeout);
+	if (res.code !== 0)
+		return refuse("unsupported-posix-acl", `getfacl exit ${res.code}`);
+	return res;
+}
+
+function isSpawnOutcome(
+	v: SpawnOutcome | SecureResult<void>,
+): v is SpawnOutcome {
+	return "stdout" in v;
+}
+
+/** Strip an inline `#effective:...` suffix (tab-separated) and trim. */
+function stripEffective(raw: string): string {
+	const hash = raw.indexOf("#");
+	return (hash === -1 ? raw : raw.slice(0, hash)).trim();
+}
+
+/** Non-empty, non-comment ACL lines with any inline `#effective` suffix removed. */
+function aclEntries(stdout: string): string[] {
+	const entries: string[] = [];
+	for (const raw of stdout.split("\n")) {
+		if (raw.trim() === "" || raw.trimStart().startsWith("#")) continue;
+		const line = stripEffective(raw);
+		if (line === "") continue;
+		entries.push(line);
+	}
+	return entries;
+}
+
+const hasW = (perm: string): boolean => perm.includes("w");
+
+/**
+ * Two-pass path-endangering classifier over numeric getfacl output. Returns
+ * `ok()` when no foreign principal can endanger the on-path node, or a
+ * fail-closed `unsupported-posix-acl` refusal. `trusted` is {ownerUid, 0, euid}.
+ */
+function classifyEndangering(
+	entries: string[],
+	trusted: ReadonlySet<number>,
+): SecureResult<void> {
+	// PASS 1 — locate the mask (order-independent). A malformed mask fails closed.
+	let maskPerm: string | null = null; // null = no `mask::` entry present
+	for (const line of entries) {
+		const m = MASK_PERMS.exec(line);
+		if (m) {
+			maskPerm = m[1] as string;
+			continue;
+		}
+		if (MASK_ANY.test(line)) {
+			return refuse("unsupported-posix-acl", ACL_DETAIL.extendedAclEntry);
+		}
+	}
+
+	const checkNamed = (id: number, raw: string, isUser: boolean): boolean => {
+		if (!hasW(raw)) return true; // x-only traverse / r-only read ≠ endanger
+		// raw carries `w`: a named entry with raw `w` REQUIRES a mask to be
+		// effective; POSIX always emits one when a named entry exists. Its absence
+		// is anomalous → fail closed.
+		if (maskPerm === null) return false;
+		if (!hasW(maskPerm)) return true; // masked out → effective lacks `w`
+		if (isUser && trusted.has(id)) return true; // owner/root/euid carve-out
+		return false; // foreign named-user OR any named-group with effective `w`
+	};
+
+	// PASS 2 — classify each entry.
+	for (const line of entries) {
+		if (LINUX_BASE_ENTRY.test(line)) continue; // base user::/group::/other::
+		if (MASK_ANY.test(line)) continue; // mask ceiling (validated in PASS 1)
+		if (DEFAULT_ENTRY.test(line)) continue; // inheritance-only; strict backstop
+		const nu = NAMED_USER.exec(line);
+		if (nu) {
+			if (checkNamed(Number(nu[1]), nu[2] as string, true)) continue;
+			return refuse("unsupported-posix-acl", ACL_DETAIL.extendedAclEntry);
+		}
+		const ng = NAMED_GROUP.exec(line);
+		if (ng) {
+			if (checkNamed(Number(ng[1]), ng[2] as string, false)) continue;
+			return refuse("unsupported-posix-acl", ACL_DETAIL.extendedAclEntry);
+		}
+		// Unrecognized/unparseable shape → fail closed.
+		return refuse("unsupported-posix-acl", ACL_DETAIL.extendedAclEntry);
+	}
+	return ok();
+}
 
 export function createLinuxAclAdapter(
 	spawn: SpawnFn = defaultSpawn,
+	stat: StatFn = defaultStat,
 ): PosixAclAdapter {
 	return {
 		async proveClean(target) {
-			const res = await spawn("getfacl", [
-				"--absolute-names",
-				"--numeric",
-				"--omit-header",
-				"--",
-				target,
-			]);
-			if (res.spawnError)
-				return refuse("unsupported-posix-acl", ACL_DETAIL.getfaclAbsent);
-			if (res.timedOut)
-				return refuse("unsupported-posix-acl", ACL_DETAIL.getfaclTimeout);
-			if (res.code !== 0) {
-				return refuse("unsupported-posix-acl", `getfacl exit ${res.code}`);
-			}
+			const res = await runGetfacl(spawn, target);
+			if (!isSpawnOutcome(res)) return res;
 			for (const raw of res.stdout.split("\n")) {
 				const line = raw.trim();
 				if (line === "" || line.startsWith("#")) continue;
@@ -151,6 +270,25 @@ export function createLinuxAclAdapter(
 				return refuse("unsupported-posix-acl", ACL_DETAIL.extendedAclEntry);
 			}
 			return ok();
+		},
+
+		async proveNoEndangeringAcl(target) {
+			const res = await runGetfacl(spawn, target);
+			if (!isSpawnOutcome(res)) return res;
+			// Owner uid is the authoritative carve-out source (proveOwnershipAndMode
+			// has already proven owner ∈ {euid, root}, so this narrows the trusted
+			// set to exactly those principals). An unresolvable lstat cannot prove
+			// the carve-out → fail closed.
+			let ownerUid: number;
+			try {
+				ownerUid = (await stat(target)).uid;
+			} catch {
+				return refuse("unsupported-posix-acl", "acl owner-stat failed");
+			}
+			const euid =
+				typeof process.geteuid === "function" ? process.geteuid() : -1;
+			const trusted = new Set<number>([ownerUid, 0, euid]);
+			return classifyEndangering(aclEntries(res.stdout), trusted);
 		},
 	};
 }
@@ -162,7 +300,7 @@ const MACOS_ACE_LINE = /^\s*\d+:\s/;
 export function createMacosAclAdapter(
 	spawn: SpawnFn = defaultSpawn,
 ): PosixAclAdapter {
-	return {
+	const adapter: PosixAclAdapter = {
 		async proveClean(target) {
 			const res = await spawn("/bin/ls", ["-lde", "--", target]);
 			if (res.spawnError)
@@ -182,7 +320,15 @@ export function createMacosAclAdapter(
 			}
 			return ok();
 		},
+		// DEFERRED (user: Linux only): darwin ancestors stay STRICT = status-quo
+		// over-refusal, not the reported Linux bug. `/bin/ls -lde` ACE text carries
+		// no numeric mask to compute effective rights from, so the path-endangering
+		// narrowing is a documented follow-up. Alias to the strict proof.
+		proveNoEndangeringAcl(target) {
+			return adapter.proveClean(target);
+		},
 	};
+	return adapter;
 }
 
 // --- read-only ACL capability probe ------------------------------------------
@@ -340,6 +486,15 @@ export function createPosixSecureFs(acl: PosixAclAdapter): PlatformSecureFs {
 			return acl.proveClean(target);
 		},
 
+		// Lenient ANCESTOR predicate: refuse only path-endangering foreign ACL
+		// entries. The transaction core calls THIS on ancestor (non-managed)
+		// controlling dirs and keeps `proveNoExtendedAcl`/`proveManagedContainer`
+		// (strict) on the dirs it owns — selection is by the managed-containers set,
+		// never by `process.platform`.
+		proveNoEndangeringAcl(target) {
+			return acl.proveNoEndangeringAcl(target);
+		},
+
 		async createDirExclusive(parent, name, mode) {
 			const full = path.join(parent.path, name);
 			try {
@@ -478,14 +633,20 @@ export function createPosixSecureFs(acl: PosixAclAdapter): PlatformSecureFs {
 			}
 		},
 
-		// On POSIX, permission to ADD a child to a directory IS the directory's
-		// write bit; proveOwnershipAndMode already refuses any group/other write
-		// (stats.mode & 0o022). So the managed-container check is definitionally the
-		// same predicate gate() just ran on this path — idempotent, no new refusal
-		// surface. The seam has teeth only on win32, where Predicate A tolerates
-		// add-child on high ancestors (Round-4 / JDA-401).
-		proveManagedContainer(dirPath) {
-			return secureFs.proveOwnershipAndMode(dirPath);
+		// A MANAGED CONTAINER (`.claude`/`.claude/hooks`) the tool owns must refuse
+		// ANY extended ACL entry — strictly more than the lenient ancestor `gate()`,
+		// which now tolerates benign path-non-endangering entries. Two arms, both
+		// fail-closed: (1) ownership/mode — on POSIX, group/other write IS add-child
+		// on a directory (stats.mode & 0o022); (2) the STRICT any-extended-entry ACL
+		// proof, re-homed here from the ancestor gate so the net managed-container
+		// guarantee stays byte-identical to the pre-narrowing strict-everywhere
+		// behavior. The seam's add-child dimension has teeth only on win32; the
+		// strict ACL arm is what keeps `.claude` from accepting a benign entry an
+		// ancestor now would.
+		async proveManagedContainer(dirPath) {
+			const owned = await secureFs.proveOwnershipAndMode(dirPath);
+			if (!owned.ok) return owned;
+			return acl.proveClean(dirPath);
 		},
 	};
 

@@ -28,6 +28,11 @@ export interface InitOptions {
 	claudeMd: boolean;
 	securityHooks: boolean;
 	hookProfile: HookProfile;
+	/**
+	 * Install the managed Claude PreToolUse guard during init. Derived from
+	 * `securityHooks` at the single App.tsx call site (all profiles incl. Minimal).
+	 */
+	claudePreToolUseGuard: boolean;
 	codeGraph: boolean;
 	dockerDeploy: boolean;
 	/** Service name for docker rollout (default: 'app') */

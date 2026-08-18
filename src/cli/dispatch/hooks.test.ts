@@ -7,8 +7,10 @@ import type { CLI } from "./types.js";
  */
 
 const runHook = vi.fn();
+const runClaudeHookCommand = vi.fn();
 
 vi.mock("../../commands/hooks.js", () => ({ runHook }));
+vi.mock("../../commands/claude-hooks.js", () => ({ runClaudeHookCommand }));
 
 const cliStub = (input: string[], flags: Record<string, unknown> = {}): CLI =>
 	({ input, flags }) as unknown as CLI;
@@ -44,6 +46,7 @@ describe("hooks dispatch", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
 		runHook.mockReset();
+		runClaudeHookCommand.mockReset();
 	});
 
 	it("dispatches `hooks run pre-commit` to runHook and exits with its code", async () => {
@@ -82,6 +85,60 @@ describe("hooks dispatch", () => {
 		const { exitCode } = await run(["hooks", "bogus"]);
 
 		expect(runHook).not.toHaveBeenCalled();
+		expect(runClaudeHookCommand).not.toHaveBeenCalled();
+		expect(exitCode).toBe(1);
+	});
+
+	it("routes `hooks install claude` and exits with its code", async () => {
+		runClaudeHookCommand.mockResolvedValue(0);
+
+		const { exitCode } = await run(["hooks", "install", "claude"]);
+
+		expect(runClaudeHookCommand).toHaveBeenCalledWith(
+			"install",
+			process.cwd(),
+			{ force: false },
+		);
+		expect(exitCode).toBe(0);
+	});
+
+	it("routes `hooks doctor claude` and exits with its code", async () => {
+		runClaudeHookCommand.mockResolvedValue(1);
+
+		const { exitCode } = await run(["hooks", "doctor", "claude"]);
+
+		expect(runClaudeHookCommand).toHaveBeenCalledWith("doctor", process.cwd(), {
+			force: false,
+		});
+		expect(exitCode).toBe(1);
+	});
+
+	it("routes `hooks repair claude --force` forwarding force:true", async () => {
+		runClaudeHookCommand.mockResolvedValue(0);
+
+		const { exitCode } = await run(["hooks", "repair", "claude"], {
+			force: true,
+		});
+
+		expect(runClaudeHookCommand).toHaveBeenCalledWith("repair", process.cwd(), {
+			force: true,
+		});
+		expect(exitCode).toBe(0);
+	});
+
+	it("rejects a wrong target with usage + exit 1, never calling the command", async () => {
+		const { err, exitCode } = await run(["hooks", "install", "foo"]);
+
+		expect(runClaudeHookCommand).not.toHaveBeenCalled();
+		expect(err.join("\n")).toContain("javi-forge hooks install claude");
+		expect(exitCode).toBe(1);
+	});
+
+	it("rejects a missing target with usage + exit 1", async () => {
+		const { err, exitCode } = await run(["hooks", "doctor"]);
+
+		expect(runClaudeHookCommand).not.toHaveBeenCalled();
+		expect(err.join("\n")).toContain("javi-forge hooks doctor claude");
 		expect(exitCode).toBe(1);
 	});
 });

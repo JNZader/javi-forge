@@ -55,6 +55,7 @@ describe("exact packaged Claude PreToolUse process", () => {
 		["JD-S1-FR1-005 overwrite", "PowerShell", "Write-Output x > .claude/settings.json"], ["JD-S1-FR1-005 append", "PowerShell", "Write-Output x >> .claude/settings.json"],
 		["JD-S1-008", "Read", null],
 		["JD-S1-009", "Read", "C:\\Users\\me\\.ssh\\id"],
+		...["cat /etc/shadow", "cat /proc/self/environ", "grep TOKEN /proc/1/environ", "cat ~/.docker/config.json", "cat ~/.config/gh/hosts.yml", "cat ~/.local/share/keyrings/login.keyring", "rm -rf /etc", "chmod -R 777 /usr"].map((command): [string, string, string] => [`P2-LINUX ${command}`, "Bash", command]),
 	])("spawn probe %s", async (_id, tool, command) => {
 		const toolInput = command === null ? { file_path: path.join(os.tmpdir(), "serviceAccountKey.json") } : tool === "Read" ? { file_path: command } : { command };
 		expect(await run(payload(tool, toolInput))).toMatchObject({ code: 2, stdout: Buffer.alloc(0) });
@@ -85,6 +86,12 @@ describe("exact packaged Claude PreToolUse process", () => {
 		["escaped PowerShell pipe", payload("PowerShell", { command: "Write-Output x `| Set-Content .claude/settings.json" }), 0, ""],
 		["denied Bash", payload("Bash", { command: "git push --force origin main SECRET_SUFFIX" }), 2, "shell.force-push"],
 		["ordinary Read", payload("Read", { file_path: "/tmp/public.txt" }), 0, ""],
+		["P2-LINUX legitimate /etc read", payload("Bash", { command: "cat /etc/hosts" }), 0, ""],
+		["P2-LINUX legitimate /proc read", payload("Bash", { command: "cat /proc/cpuinfo" }), 0, ""],
+		["P2-LINUX bounded FHS-root deletion", payload("Bash", { command: "rm -rf /var/tmp/scratch" }), 0, ""],
+		["P2-LINUX /etc/shadow read", payload("Bash", { command: "cat /etc/shadow" }), 2, "shell.sensitive-read"],
+		["P2-LINUX /proc environ read", payload("Bash", { command: "cat /proc/self/environ" }), 2, "shell.sensitive-read"],
+		["P2-LINUX FHS-root deletion", payload("Bash", { command: "rm -rf /boot" }), 2, "shell.destructive-root"],
 		["protected Edit", payload("Edit", { file_path: path.join(process.cwd(), "CLAUDE.md"), new_string: "SECRET_EDIT" }), 2, "path.managed-config"],
 		["malformed", Buffer.from('{"token":"SECRET_PAYLOAD"'), 2, "invalid-json"],
 	])("returns the bounded exit contract for %s", async (_name, input, code, reason) => {

@@ -27,6 +27,13 @@ const ASSET = path.join(CLAUDE_HOOK_ASSETS_DIR, ASSET_NAME);
 const WINDOWS_SECURE_OBJECT_NAME = "javi-forge-windows-secure-object.ps1";
 const WINDOWS_SECURE_OBJECT_SHA256 =
 	"2289ef6ac6b039ec74dc3ea0894413e243ff9bea963f04008a356b3838f9b8dd";
+// Deliberate asset rotation (Linux sensitive-path coverage): editing the .mjs
+// moves asset.sha256, so the OUTGOING released hash MUST be appended to
+// asset.historical[] or every installed copy in the fleet classifies as
+// `edited-managed` (user-tampered, needs --force) instead of `released-outdated`
+// (silent auto-upgrade). Pin the outgoing hash so that append can never be
+// silently dropped by a later rotation.
+const PRIOR_ASSET_SHA256 = "78be7e6613c012280b7ad17886462ba166b63ebd031e34565d757b3a0796d7cc";
 const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
 // Decision ②: placeholder-normalized canonical hash of the exact managed matcher
 // group. Bound here so a silent settings-identity rewrite fails this contract.
@@ -65,8 +72,12 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(runtime.SUPPORTED_TOOLS).toEqual(TOOLS);
 		expect(runtime.INPUT_LIMIT_BYTES).toBe(1_048_576);
 		expect(runtime.POLICY_REGISTRY).toEqual({ schemaVersion: 1, policyVersion: 1, diagnosticsMaxBytes: 240 });
-		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 1, historical: [] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
+		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 1, historical: [PRIOR_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
 		expect(manifest.asset.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+		// A rotated asset must not still claim the outgoing hash as current, and the
+		// outgoing hash must remain reachable as a historical (auto-upgradable) body.
+		expect(manifest.asset.sha256).not.toBe(PRIOR_ASSET_SHA256);
+		expect(manifest.asset.historical).toContain(PRIOR_ASSET_SHA256);
 		// The bundled win32 helper on disk MUST hash to its manifest binding (mirrors the .mjs asset sha assertion above).
 		const ps1Bytes = fs.readFileSync(path.join(CLAUDE_HOOK_ASSETS_DIR, WINDOWS_SECURE_OBJECT_NAME));
 		expect(manifest.installerHelpers.windowsSecureObject.sha256).toBe(createHash("sha256").update(ps1Bytes).digest("hex"));
@@ -136,6 +147,27 @@ describe("cross-platform file-tool policy", () => {
 			expect(runtime.evaluateEvent(event(tool, { file_path: path.join(temp, "alias-protected/id") }))).toEqual({ allowed: false, ruleId: "path.sensitive" });
 		}
 	});
+	// biome-ignore format: paired deny/allow rows are the specification of the granularity.
+	it.each([
+		// /etc/shadow suite: password hashes for every local account, plus the "-"
+		// backups passwd/vipw leave behind. Neighbours under /etc stay readable.
+		["/etc/shadow", false], ["/etc/shadow-", false], ["/etc/gshadow", false], ["/etc/gshadow-", false],
+		["/etc/passwd", true], ["/etc/hosts", true], ["/etc/shadowbox/config.yml", true],
+		// /proc/<pid>/environ leaks the whole environment of ANY visible process.
+		["/proc/self/environ", false], ["/proc/1/environ", false], ["/proc/12345/environ", false],
+		["/proc/thread-self/environ", false], ["/proc/1234/task/99/environ", false],
+		["/proc/cpuinfo", true], ["/proc/1234/status", true], ["/proc/1234/cmdline", true], ["/proc/self/environment", true],
+		// Credential files under HOME, matched by suffix so any HOME is covered.
+		["/home/me/.docker/config.json", false], ["/home/me/.docker/daemon.json", true], ["/home/me/.docker/contexts/meta.json", true],
+		["/home/me/.config/gh/hosts.yml", false], ["/home/me/.config/gh/config.yml", true],
+		// The keyring store is credential material as a whole subtree.
+		["/home/me/.local/share/keyrings", false], ["/home/me/.local/share/keyrings/login.keyring", false],
+		["/home/me/.local/share/applications/x.desktop", true], ["/home/me/.local/share/keyringsy/x", true],
+	])("P2 Linux sensitive-read policy resolves %s", (file_path, allowed) => {
+		for (const tool of ["Read", "Write", "Edit"]) {
+			expect(runtime.evaluateEvent(event(tool, { file_path }))).toEqual(allowed ? { allowed: true } : { allowed: false, ruleId: "path.sensitive" });
+		}
+	});
 	it("JD-S1-008 retains the Darwin service-account basename after case folding", () => {
 		const key = runtime.canonicalizePolicyPath("/Users/me/serviceAccountKey.json", { platform: "darwin" });
 		expect(runtime.isSensitivePolicyKey(key, "darwin")).toBe(true);
@@ -182,6 +214,24 @@ describe("separate deterministic shell corpora", () => {
 		...(["Get-Content", "gc", "cat", "type", "Select-String"] as const).map((name) => ["PowerShell", `${name} $HOME\\.ssh\\id`]),
 		["PowerShell", "Copy-Item -LiteralPath $HOME\\.npmrc C:\\Temp\\x"], ["PowerShell", "cp $HOME\\.ssh\\id C:\\Temp\\x"], ["PowerShell", "copy $HOME\\.netrc C:\\Temp\\x"],
 	])("denies %s sensitive family: %s", (tool, command) => expect(runtime.evaluateEvent(event(tool, { command }))).toEqual({ allowed: false, ruleId: tool === "Bash" ? "shell.sensitive-read" : "powershell.sensitive-read" }));
+	// biome-ignore format: paired deny/allow rows are the specification of the granularity.
+	it.each([
+		["cat /etc/shadow", false, "shell.sensitive-read"], ["cat /etc/hosts", true, undefined],
+		["cat /proc/self/environ", false, "shell.sensitive-read"], ["grep TOKEN /proc/1/environ", false, "shell.sensitive-read"],
+		["cat /proc/cpuinfo", true, undefined], ["grep Name /proc/1/status", true, undefined],
+		["cp ~/.docker/config.json /tmp/x", false, "shell.sensitive-read"], ["cat ~/.docker/daemon.json", true, undefined],
+		["cat ~/.config/gh/hosts.yml", false, "shell.sensitive-read"], ["cat ~/.config/gh/config.yml", true, undefined],
+		["cat ~/.local/share/keyrings/login.keyring", false, "shell.sensitive-read"], ["cat ~/.local/share/applications/x.desktop", true, undefined],
+		["wc < /etc/shadow", false, "shell.sensitive-read"],
+		// CRITICAL_TARGET gates destructive writes only, on the exact root token:
+		// the FHS root is protected, everything under it stays workable.
+		["rm -rf /etc", false, "shell.destructive-root"], ["rm -rf /usr/", false, "shell.destructive-root"],
+		["rm -rf /var/*", false, "shell.destructive-root"], ["rm -rf /boot", false, "shell.destructive-root"],
+		["sudo rm -fR /usr", false, "shell.destructive-root"], ["chmod -R 777 /usr", false, "shell.destructive-root"],
+		["chmod 777 /etc", false, "shell.destructive-root"], ["chmod --recursive 755 /boot", false, "shell.destructive-root"],
+		["rm -rf /var/tmp/scratch", true, undefined], ["rm -rf /usr/local/lib/node_modules/stale", true, undefined],
+		["chmod -R 755 /etc/nginx/conf.d", true, undefined], ["chmod 644 /var/log/app.log", true, undefined],
+	])("P2 Linux shell policy evaluates %s", (command, allowed, ruleId) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual({ allowed, ...(ruleId ? { ruleId } : {}) }));
 });
 type SemanticStatus = "accepted-safe" | "accepted-dangerous" | "rejected-by-profile" | "unsupported";
 interface SemanticResult { status: SemanticStatus; applicability: { profileId: string; utility: string; mode: string; applicable: boolean }; facts?: Record<string, unknown>; reasonCode?: string; partialRoles?: Record<string, unknown>; evidence?: { code: string; phase: string } }

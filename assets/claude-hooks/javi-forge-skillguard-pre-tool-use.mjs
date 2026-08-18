@@ -87,13 +87,31 @@ function policyPathKeys(input, options = {}) {
 	return real === lexical ? [lexical] : [lexical, real];
 }
 function isAbsolutePolicyPath(value) { return POSIX_ABSOLUTE.test(value) || WINDOWS_DRIVE.test(value) || WINDOWS_UNC.test(value) || /^\\(?:\\\?|\?\?|\\\.)\\/i.test(value); }
+// Home-relative credential files, matched as a path SUFFIX (never an expanded
+// literal home) so one rule holds for every user, container and HOME. Literals
+// stay lowercase because lexicalNormalize folds keys on darwin/win32.
+const SENSITIVE_PATH_SUFFIXES = Object.freeze(["/.aws/credentials", "/.kube/config", "/.config/gcloud/application_default_credentials.json", "/.docker/config.json", "/.config/gh/hosts.yml"]);
+// Absolute system secrets: the shadow suite holds every local account's password
+// hash, and passwd/vipw leave the "-" backup beside it holding the same secret.
+const SENSITIVE_ABSOLUTE_KEYS = Object.freeze(["/etc/shadow", "/etc/shadow-", "/etc/gshadow", "/etc/gshadow-"]);
+// /proc/<pid>/environ is the FULL environment - every secret - of ANY process the
+// agent can see, so it is a first-class exfiltration sink. The corpus idiom is
+// literal matching; this is the one place a wildcard is unavoidable because the
+// pid component is unbounded. Kept narrow (environ leaves only) and fail-closed:
+// it covers the self/thread-self aliases and the per-thread task/<tid> form.
+const PROC_ENVIRON_KEY = /^\/proc\/(?:\d+|self|thread-self)\/(?:task\/\d+\/)?environ$/;
+// Secret Service / GNOME keyring store: every file under it is credential
+// material, so the directory itself and its whole subtree are sensitive.
+const SENSITIVE_DIRECTORY_SUFFIXES = Object.freeze(["/.local/share/keyrings"]);
 export function isSensitivePolicyKey(key, platform = process.platform) {
 	const parts = key.split("/").filter(Boolean);
 	const basename = parts.at(-1) ?? "";
 	if (/^\.env(?:\..+)?$/i.test(basename) && !/^\.env\.(?:example|sample|template)$/i.test(basename)) return true;
 	if ([".npmrc", ".pypirc", ".netrc", ".git-credentials"].includes(basename.toLowerCase())) return true;
 	if (parts.some((part) => part === ".ssh" || part === ".gnupg")) return true;
-	if (key.endsWith("/.aws/credentials") || key.endsWith("/.kube/config") || key.endsWith("/.config/gcloud/application_default_credentials.json")) return true;
+	if (SENSITIVE_ABSOLUTE_KEYS.includes(key) || PROC_ENVIRON_KEY.test(key)) return true;
+	if (SENSITIVE_PATH_SUFFIXES.some((suffix) => key.endsWith(suffix))) return true;
+	if (SENSITIVE_DIRECTORY_SUFFIXES.some((directory) => key.endsWith(directory) || key.includes(`${directory}/`))) return true;
 	return platform === "win32" || platform === "darwin" ? basename.toLowerCase() === "serviceaccountkey.json" : basename === "serviceAccountKey.json";
 }
 function isManaged(key) {
@@ -284,7 +302,12 @@ function classifyLongOption(token, longOptions) {
 }
 const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const SHORT_BUNDLE = /^-[^-]/;
-const CRITICAL_TARGET_CORPUS = Object.freeze(["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT]);
+// FHS roots whose wholesale destruction bricks the host. CRITICAL_TARGET gates
+// ONLY destructive writes (rm -rf, recursive/777 chmod) and never reads, and
+// membership is exact-token, so `rm -rf /var/tmp/scratch` stays allowed: only the
+// root token itself is protected, in the same bare / trailing / glob forms as "/".
+const CRITICAL_SYSTEM_ROOTS = ["/etc", "/usr", "/var", "/boot"];
+const CRITICAL_TARGET_CORPUS = Object.freeze(["/", "/*", "~", "$HOME", "${HOME}", ".", "..", PROJECT_ROOT, ...CRITICAL_SYSTEM_ROOTS.flatMap((root) => [root, `${root}/`, `${root}/*`])]);
 const isCriticalTarget = (token) => CRITICAL_TARGET_CORPUS.includes(token);
 const OCTAL_MODE_SHAPE = /^0?[0-7]{3,4}$/;
 const SYMBOLIC_MODE_SHAPE = /^[ugoa]*[+=-][rwxXstugo]+(?:,[ugoa]*[+=-][rwxXstugo]+)*$/;

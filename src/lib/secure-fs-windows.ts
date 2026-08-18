@@ -329,6 +329,17 @@ export function createWindowsSecureFs(
 			);
 		},
 
+		// win32 already ships the ratified lenient Predicate A on ancestors via
+		// `proveDacl` (managed-container strictness lives in `proveManagedContainer`).
+		// So the lenient ancestor predicate is the SAME `proveDacl` op — ancestor and
+		// managed-container behavior stay byte-identical on Windows.
+		async proveNoEndangeringAcl(target) {
+			return mapVoid(
+				await call({ op: "proveDacl", args: { path: target } }),
+				`acl ${target}`,
+			);
+		},
+
 		async proveManagedContainer(dirPath) {
 			return mapVoid(
 				await call({ op: "proveContainer", args: { path: dirPath } }),

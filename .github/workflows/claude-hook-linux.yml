@@ -51,18 +51,31 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends acl
 
-      # FIXTURE BASE OUTSIDE /home (both legs). The `ubuntu-latest` image ships
-      # `/home` with a REAL extended ACL entry, and the adapter's ancestor-chain
-      # gate walks from `/` down — so a `$HOME`/`RUNNER_TEMP`-rooted fixture makes
-      # the shipped adapter refuse `extended ACL entry` on the happy path. `/` and
-      # a dir directly under / has the shortest ancestor chain (only /); on GH runners /home carries an extended ACL and /opt is mode 777, so both are unusable; if /
-      # ever carries one, the suite's PRECONDITION names it in one line.
-      - name: Create an ACL-clean private fixture base (both legs)
+      # VALIDATION-VIA-REVERT (JD-P-001). The old `JF_INT_BASE=/jf-int` workaround
+      # (a 0700 base OUTSIDE /home) is GONE: the ancestor gate now runs the LENIENT
+      # path-endangering predicate, so a `$HOME`/`RUNNER_TEMP`-rooted fixture is
+      # ALLOWED past the `ubuntu-latest` image's BENIGN `/home` extended ACL instead
+      # of over-refused. A green suite under `$HOME`/`RUNNER_TEMP` is the empirical
+      # proof the over-refusal is closed. If `/home` ever carries an ENDANGERING
+      # entry, the suite's PRECONDITION names it — a design-revisit trigger.
+
+      # DIAGNOSTIC (with-acl leg, non-gating): capture the runner's real
+      # `getfacl /home` so the representative golden fixture can be pinned to the
+      # exact observed bytes in a follow-up commit. Never a gate (`|| true`).
+      - name: Capture getfacl /home for the golden fixture (with-acl leg)
+        if: matrix.leg == 'with-acl'
         run: |
-          set -euo pipefail
-          sudo mkdir -p /jf-int
-          sudo chown "$(id -u):$(id -g)" /jf-int
-          chmod 700 /jf-int
+          set -uo pipefail
+          getfacl --absolute-names --numeric --omit-header -- /home \
+            | tee "$RUNNER_TEMP/getfacl-home.txt" || true
+
+      - name: Upload the getfacl /home diagnostic artifact (with-acl leg)
+        if: matrix.leg == 'with-acl'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gh-home-getfacl
+          path: ${{ runner.temp }}/getfacl-home.txt
+          if-no-files-found: warn
 
       - name: Assert getfacl is present (with-acl leg)
         if: matrix.leg == 'with-acl'
@@ -94,7 +107,6 @@ jobs:
         if: matrix.leg == 'with-acl'
         env:
           JAVI_FORGE_LINUX_INT: "1"
-          JF_INT_BASE: /jf-int
         run: |
           set -euo pipefail
           pnpm vitest run src/__integration__/secure-fs-posix.integration.test.ts
@@ -104,7 +116,6 @@ jobs:
         env:
           JAVI_FORGE_ACL_LEG: absent
           JAVI_FORGE_LINUX_INT: "1"
-          JF_INT_BASE: /jf-int
         run: |
           set -euo pipefail
           pnpm vitest run src/__integration__/secure-fs-posix.integration.test.ts

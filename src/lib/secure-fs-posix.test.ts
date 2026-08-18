@@ -7,9 +7,11 @@ import {
 	createLinuxAclAdapter,
 	createMacosAclAdapter,
 	createPosixSecureFs,
+	type PosixAclAdapter,
 	probeAclCapability,
 	type SpawnFn,
 	type SpawnOutcome,
+	type StatFn,
 	selectSecureFs,
 } from "./secure-fs-posix.js";
 
@@ -73,6 +75,209 @@ describe("createLinuxAclAdapter (getfacl, mocked spawn — never skipped)", () =
 	});
 });
 
+describe("createLinuxAclAdapter.proveNoEndangeringAcl (lenient ancestor predicate)", () => {
+	const OWNER_UID = 4242;
+	const EUID = process.geteuid?.() ?? -1;
+	const statReturning =
+		(uid: number): StatFn =>
+		async () => ({ uid });
+	const lenient = (stdout: string, uid = OWNER_UID) =>
+		createLinuxAclAdapter(spawnReturning(clean(stdout)), statReturning(uid));
+
+	it("1.1 ALLOWS a masked read-only named-user (user:5000:rwx under mask::r--)", async () => {
+		const acl = lenient(
+			"user::rwx\nuser:5000:rwx\ngroup::r-x\nmask::r--\nother::r--",
+		);
+		expect((await acl.proveNoEndangeringAcl("/x")).ok).toBe(true);
+	});
+
+	it("1.2 REFUSES a foreign named-user with effective write (mask::rwx)", async () => {
+		const acl = lenient(
+			"user::rwx\nuser:5000:rwx\ngroup::r-x\nmask::rwx\nother::r--",
+		);
+		const res = await acl.proveNoEndangeringAcl("/x");
+		expect(res.ok).toBe(false);
+		expect(res.refusal).toBe("unsupported-posix-acl");
+		expect(res.detail).toBe(ACL_DETAIL.extendedAclEntry);
+	});
+
+	it("1.3 REFUSES a named-group with effective write (all named groups potentially foreign)", async () => {
+		const acl = lenient(
+			"user::rwx\ngroup::r-x\ngroup:6000:rwx\nmask::rwx\nother::r--",
+		);
+		expect((await acl.proveNoEndangeringAcl("/x")).ok).toBe(false);
+	});
+
+	it("1.3a ALLOWS a named-group with effective non-write (group:6000:r-x under mask::r-x)", async () => {
+		const acl = lenient(
+			"user::rwx\ngroup::r-x\ngroup:6000:r-x\nmask::r-x\nother::r--",
+		);
+		expect((await acl.proveNoEndangeringAcl("/x")).ok).toBe(true);
+	});
+
+	it("1.3b ALLOWS a masked-out named-group (group:6000:rwx under mask::r-- → effective r--)", async () => {
+		const acl = lenient(
+			"user::rwx\ngroup::r-x\ngroup:6000:rwx\nmask::r--\nother::r--",
+		);
+		expect((await acl.proveNoEndangeringAcl("/x")).ok).toBe(true);
+	});
+
+	it("1.4 ALLOWS an x-only foreign named-user (traverse, not create/delete/rename)", async () => {
+		const acl = lenient(
+			"user::rwx\nuser:5000:--x\ngroup::r-x\nmask::r-x\nother::r--",
+		);
+		expect((await acl.proveNoEndangeringAcl("/x")).ok).toBe(true);
+	});
+
+	it.each([
+		["owner uid via lstat", OWNER_UID],
+		["root", 0],
+		["process euid", EUID],
+	])("1.5 ALLOWS a trusted named-user with effective write: %s", async (_n, uid) => {
+		const acl = lenient(
+			`user::rwx\nuser:${uid}:rwx\ngroup::r-x\nmask::rwx\nother::r--`,
+			OWNER_UID,
+		);
+		expect((await acl.proveNoEndangeringAcl("/x")).ok).toBe(true);
+	});
+
+	it("1.6 ALLOWS a default:* entry (inheritance-only, not the on-path node)", async () => {
+		const acl = lenient(
+			"user::rwx\ngroup::r-x\nother::r--\ndefault:user::rwx\ndefault:user:5000:rwx\ndefault:group::r-x\ndefault:mask::rwx\ndefault:other::r--",
+		);
+		expect((await acl.proveNoEndangeringAcl("/x")).ok).toBe(true);
+	});
+
+	it("1.7 ALLOWS mask:: alone and the three base entries", async () => {
+		expect(
+			(
+				await lenient(
+					"user::rwx\ngroup::r-x\nmask::r--\nother::r--",
+				).proveNoEndangeringAcl("/x")
+			).ok,
+		).toBe(true);
+		expect(
+			(
+				await lenient(
+					"user::rwx\ngroup::r-x\nother::r--",
+				).proveNoEndangeringAcl("/x")
+			).ok,
+		).toBe(true);
+	});
+
+	it("1.8 REFUSES a named entry with raw write when no mask entry is present (fail closed)", async () => {
+		const acl = lenient("user::rwx\nuser:5000:rwx\ngroup::r-x\nother::r--");
+		expect((await acl.proveNoEndangeringAcl("/x")).ok).toBe(false);
+	});
+
+	it("1.9 REFUSES an unparseable line and a malformed mask", async () => {
+		expect(
+			(
+				await lenient(
+					"user::rwx\nnot an acl line\nother::r--",
+				).proveNoEndangeringAcl("/x")
+			).ok,
+		).toBe(false);
+		expect(
+			(
+				await lenient(
+					"user::rwx\nmask::rw\ngroup::r-x\nother::r--",
+				).proveNoEndangeringAcl("/x")
+			).ok,
+		).toBe(false);
+	});
+
+	it("1.10 REFUSES fail-closed on getfacl absent, timeout, or nonzero exit", async () => {
+		const absent = createLinuxAclAdapter(
+			spawnReturning({ spawnError: true, code: null, stdout: "" }),
+			statReturning(OWNER_UID),
+		);
+		expect((await absent.proveNoEndangeringAcl("/x")).refusal).toBe(
+			"unsupported-posix-acl",
+		);
+		const timeout = createLinuxAclAdapter(
+			spawnReturning({ timedOut: true, code: null, stdout: "" }),
+			statReturning(OWNER_UID),
+		);
+		expect((await timeout.proveNoEndangeringAcl("/x")).refusal).toBe(
+			"unsupported-posix-acl",
+		);
+		const nonzero = createLinuxAclAdapter(
+			spawnReturning({ code: 1, stdout: "" }),
+			statReturning(OWNER_UID),
+		);
+		expect((await nonzero.proveNoEndangeringAcl("/x")).refusal).toBe(
+			"unsupported-posix-acl",
+		);
+	});
+
+	it("strips an inline #effective suffix before computing effective = raw ∩ mask", async () => {
+		const acl = lenient(
+			"user::rwx\nuser:5000:rwx\t#effective:r--\ngroup::r-x\nmask::r--\nother::r--",
+		);
+		expect((await acl.proveNoEndangeringAcl("/x")).ok).toBe(true);
+	});
+
+	it("keeps the getfacl argv shape unchanged (numeric, omit-header, -- guard)", async () => {
+		const calls: Array<[string, string[]]> = [];
+		const acl = createLinuxAclAdapter(async (cmd, args) => {
+			calls.push([cmd, args]);
+			return clean("user::rwx\ngroup::r-x\nother::r--");
+		}, statReturning(OWNER_UID));
+		await acl.proveNoEndangeringAcl("/some/dir");
+		expect(calls).toEqual([
+			[
+				"getfacl",
+				["--absolute-names", "--numeric", "--omit-header", "--", "/some/dir"],
+			],
+		]);
+	});
+
+	it("treats an owner-uid named-user as trusted only when lstat resolves it", async () => {
+		const stdout =
+			"user::rwx\nuser:5000:rwx\ngroup::r-x\nmask::rwx\nother::r--";
+		const resolved = createLinuxAclAdapter(
+			spawnReturning(clean(stdout)),
+			statReturning(5000),
+		);
+		// 5000 IS the directory owner → trusted → allowed.
+		expect((await resolved.proveNoEndangeringAcl("/x")).ok).toBe(true);
+		const unresolved = createLinuxAclAdapter(
+			spawnReturning(clean(stdout)),
+			() => {
+				throw new Error("ENOENT");
+			},
+		);
+		// Owner unknown (lstat failed) → cannot prove the carve-out → fail closed.
+		expect((await unresolved.proveNoEndangeringAcl("/x")).ok).toBe(false);
+	});
+
+	it("golden: ALLOWS the representative /home-class ancestor (root-owned uid0 mode0755, benign mask/RO-named/default)", async () => {
+		// Representative of ubuntu-latest `/home`; exact bytes pinned by the first
+		// green CI run (gh-home-getfacl artifact) in a follow-up commit — the
+		// `getfacl --absolute-names --numeric --omit-header -- /home` output class.
+		const GH_HOME_GETFACL_REPRESENTATIVE = [
+			"user::rwx",
+			"group::r-x",
+			"user:0:r-x",
+			"mask::r-x",
+			"other::r-x",
+			"default:user::rwx",
+			"default:group::r-x",
+			"default:other::r-x",
+		].join("\n");
+		const acl = lenient(GH_HOME_GETFACL_REPRESENTATIVE, 0);
+		expect((await acl.proveNoEndangeringAcl("/home")).ok).toBe(true);
+	});
+
+	it("skips interspersed #comment lines (e.g. `# flags:`) and classifies the real entries", async () => {
+		const acl = lenient(
+			"# flags: -s-\nuser::rwx\ngroup::r-x\ngroup:6000:r-x\nmask::r-x\nother::r--",
+		);
+		expect((await acl.proveNoEndangeringAcl("/x")).ok).toBe(true);
+	});
+});
+
 describe("createMacosAclAdapter (/bin/ls -lde, mocked spawn — never skipped)", () => {
 	it("refuses when /bin/ls is absent", async () => {
 		const acl = createMacosAclAdapter(
@@ -121,6 +326,23 @@ describe("createMacosAclAdapter (/bin/ls -lde, mocked spawn — never skipped)",
 			spawnReturning(clean("-rw-r--r-- 1 user staff 10 Jan 1 file")),
 		);
 		expect((await acl.proveClean("/x")).ok).toBe(true);
+	});
+
+	it("proveNoEndangeringAcl is the strict no-op on darwin (deferred; same as proveClean)", async () => {
+		// darwin ancestors stay strict = status-quo over-refusal, not the reported
+		// Linux bug. proveNoEndangeringAcl must mirror proveClean exactly.
+		const withAce = createMacosAclAdapter(
+			spawnReturning(
+				clean(
+					"-rw-r--r-- 1 user staff 10 Jan 1 file\n 0: user:root allow read",
+				),
+			),
+		);
+		expect((await withAce.proveNoEndangeringAcl("/x")).ok).toBe(false);
+		const clean0 = createMacosAclAdapter(
+			spawnReturning(clean("-rw-r--r-- 1 user staff 10 Jan 1 file")),
+		);
+		expect((await clean0.proveNoEndangeringAcl("/x")).ok).toBe(true);
 	});
 });
 
@@ -343,6 +565,43 @@ describe("createPosixSecureFs ownership + secure I/O (host-independent, own tmp 
 		);
 		expect((await fsx.captureFile(path.join(dir, "final"))).ok).toBe(true);
 		await handle.close();
+	});
+
+	it("1.11 proveManagedContainer stays STRICT: refuses a benign extended entry the lenient ancestor gate allows", async () => {
+		// A benign entry (e.g. `mask::r--` or a read-only named user) the lenient
+		// ancestor predicate ALLOWS, but a managed container (.claude/.claude/hooks)
+		// must still refuse ANY extended entry — byte-identical to today.
+		const benignAcl: PosixAclAdapter = {
+			proveClean: async () => ({
+				ok: false,
+				refusal: "unsupported-posix-acl",
+				detail: ACL_DETAIL.extendedAclEntry,
+			}),
+			proveNoEndangeringAcl: async () => ({ ok: true }),
+		};
+		const guarded = createPosixSecureFs(benignAcl);
+		// Ancestor gate: lenient predicate ALLOWS the benign entry.
+		expect((await guarded.proveNoEndangeringAcl(dir)).ok).toBe(true);
+		// Managed container: strict `proveClean` still REFUSES it.
+		const managed = await guarded.proveManagedContainer(dir);
+		expect(managed.ok).toBe(false);
+		expect(managed.refusal).toBe("unsupported-posix-acl");
+		expect(managed.detail).toBe(ACL_DETAIL.extendedAclEntry);
+	});
+
+	it("proveManagedContainer proves ownership AND strict ACL cleanliness (both must pass)", async () => {
+		const cleanAdapter: PosixAclAdapter = {
+			proveClean: async () => ({ ok: true }),
+			proveNoEndangeringAcl: async () => ({ ok: true }),
+		};
+		const guarded = createPosixSecureFs(cleanAdapter);
+		expect((await guarded.proveManagedContainer(dir)).ok).toBe(true);
+		// A group/other-writable managed container refuses on the ownership arm even
+		// with a clean ACL.
+		await chmod(dir, 0o777);
+		const refused = await guarded.proveManagedContainer(dir);
+		expect(refused.ok).toBe(false);
+		expect(refused.refusal).toBe("unsafe-parent-chain");
 	});
 
 	it("unlinks an identity-matched file and rmdirs only an empty identity-matched dir", async () => {

@@ -27,8 +27,16 @@ export interface FakeFaults {
 	revalidateRefuse?: (target: string, callIndex: number) => boolean;
 	/** Refuse proveOwnershipAndMode for a path on its Nth call. */
 	ownershipRefuse?: (dirPath: string, callIndex: number) => boolean;
-	/** Refuse proveNoExtendedAcl for a path on its Nth call. */
+	/** Refuse proveNoExtendedAcl (STRICT) for a path on its Nth call. */
 	aclRefuse?: (target: string, callIndex: number) => boolean;
+	/**
+	 * Refuse proveNoEndangeringAcl (LENIENT ancestor predicate) for a path on its
+	 * Nth call. When absent the fake falls back to `aclRefuse`, so an existing test
+	 * that models an endangering ancestor ACL via `aclRefuse` still aborts the
+	 * ancestor gate. Set this to drive the lenient and strict predicates
+	 * independently on the same path.
+	 */
+	endangeringAclRefuse?: (target: string, callIndex: number) => boolean;
 	/** Refuse captureFile for a path (simulate open/read failure). */
 	captureRefuse?: (target: string) => boolean;
 	/** Override the sha of a captured file (simulate post-commit drift). */
@@ -91,6 +99,7 @@ export function makeFakeSecureFs(): FakeSecureFs {
 	const revalidateCounts = new Map<string, number>();
 	const ownershipCounts = new Map<string, number>();
 	const aclCounts = new Map<string, number>();
+	const endangeringCounts = new Map<string, number>();
 	const writeCounts = new Map<string, number>();
 	const managedCounts = new Map<string, number>();
 
@@ -175,6 +184,22 @@ export function makeFakeSecureFs(): FakeSecureFs {
 		async proveNoExtendedAcl(target) {
 			const idx = bump(aclCounts, target);
 			if (fake.faults.aclRefuse?.(target, idx)) {
+				return { ok: false, refusal: "unsupported-posix-acl", detail: target };
+			}
+			return ok();
+		},
+
+		// The lenient ancestor predicate. The engine calls THIS on ancestor
+		// controlling dirs (formerly `proveNoExtendedAcl`). It shares the `aclRefuse`
+		// toggle so a test that models "a controlling directory carries an
+		// endangering ACL" still drives the ancestor-gate abort; a dedicated
+		// `endangeringAclRefuse` toggle overrides it when a test needs to distinguish
+		// the lenient predicate from the strict one on the same path.
+		async proveNoEndangeringAcl(target) {
+			const idx = bump(endangeringCounts, target);
+			const refuseFn =
+				fake.faults.endangeringAclRefuse ?? fake.faults.aclRefuse;
+			if (refuseFn?.(target, idx)) {
 				return { ok: false, refusal: "unsupported-posix-acl", detail: target };
 			}
 			return ok();

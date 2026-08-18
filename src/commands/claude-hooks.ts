@@ -34,6 +34,19 @@ export interface ClaudeHookCmdDeps {
 	logError?: (msg: string) => void;
 }
 
+/**
+ * Warnings are NON-BLOCKING notices, so they go to stdout under their own
+ * heading — never to the error stream and never into the exit code.
+ */
+function renderWarnings(
+	warnings: readonly string[],
+	log: (m: string) => void,
+): void {
+	if (warnings.length === 0) return;
+	log("warnings:");
+	for (const w of warnings) log(`  ${w}`);
+}
+
 function renderMutation(
 	verb: string,
 	result: ClaudeHookMutationResult,
@@ -52,6 +65,7 @@ function renderMutation(
 			log("backups:");
 			for (const p of result.backups) log(`  ${p}`);
 		}
+		renderWarnings(result.warnings, log);
 		return 0;
 	}
 
@@ -63,6 +77,7 @@ function renderMutation(
 		const remediation = remediationForMessage(e);
 		if (remediation) logError(`    → ${remediation}`);
 	}
+	renderWarnings(result.warnings, log);
 	return 1;
 }
 
@@ -75,6 +90,20 @@ function renderDoctor(
 	log(`  asset:    ${report.asset.state} — ${report.asset.detail}`);
 	log(
 		`  node:     ${report.node.version ?? "unavailable"} (min-satisfied: ${report.node.satisfiesMinimum})`,
+	);
+
+	// The node-on-PATH row is ALWAYS printed (satisfied included) and is always
+	// labelled a heuristic: this process' PATH only proxies the PATH Claude Code
+	// will use to spawn the exec-form handler.
+	const onPath = report.nodeOnPath;
+	const onPathDetail =
+		onPath.status === "resolved"
+			? ` ${onPath.version}`
+			: onPath.status === "unknown"
+				? ` — ${onPath.detail}`
+				: "";
+	log(
+		`  node-on-PATH: ${onPath.status}${onPathDetail} (heuristic: this process' PATH)`,
 	);
 
 	const execution = report.execution;

@@ -25,6 +25,7 @@ import {
 	classifyLegacy,
 	classifySettingsEntry,
 	deepStructuralEqual,
+	type FlagVerdict,
 	normalizeStatusMessage,
 	parseVersionFromStatus,
 	planForceReplace,
@@ -535,53 +536,76 @@ describe("buildManagedContainer (Slice 3a container synthesis)", () => {
 	});
 });
 
-describe("scanExecutionFlags (Slice 4b pure flag classifier)", () => {
-	it("flags disableAllHooks only for strict boolean true", () => {
-		expect(scanExecutionFlags({ disableAllHooks: true })).toEqual({
-			disableAllHooks: true,
-			allowManagedHooksOnly: false,
+describe("scanExecutionFlags (Slice 4b/C flag classifier — invalid ⇒ true)", () => {
+	const NOT_SET: FlagVerdict = { set: false };
+	const EXPLICIT: FlagVerdict = { set: true, reason: "explicit" };
+	const invalid = (shape: string): FlagVerdict => ({
+		set: true,
+		reason: "invalid",
+		shape,
+	});
+
+	/**
+	 * The full documented shape matrix. Claude Code treats an INVALID (non-boolean)
+	 * value as `true`, so every non-boolean present value is `set` with the shape
+	 * named — including the counterintuitive string `"false"`, which is not a
+	 * boolean and therefore does NOT clear the flag.
+	 */
+	const SHAPES: [name: string, value: unknown, expected: FlagVerdict][] = [
+		["boolean true", true, EXPLICIT],
+		["boolean false", false, NOT_SET],
+		["string 'true'", "true", invalid("string")],
+		["string 'false'", "false", invalid("string")],
+		["number 1", 1, invalid("number")],
+		["number 0", 0, invalid("number")],
+		["null", null, invalid("null")],
+		["object", {}, invalid("object")],
+		["array", [], invalid("array")],
+	];
+
+	it.each(SHAPES)("classifies disableAllHooks %s", (_name, value, expected) => {
+		expect(scanExecutionFlags({ disableAllHooks: value })).toEqual({
+			disableAllHooks: expected,
+			allowManagedHooksOnly: NOT_SET,
 		});
 	});
 
-	it("flags allowManagedHooksOnly only for strict boolean true", () => {
-		expect(scanExecutionFlags({ allowManagedHooksOnly: true })).toEqual({
-			disableAllHooks: false,
-			allowManagedHooksOnly: true,
+	it.each(
+		SHAPES,
+	)("classifies allowManagedHooksOnly %s", (_name, value, expected) => {
+		expect(scanExecutionFlags({ allowManagedHooksOnly: value })).toEqual({
+			disableAllHooks: NOT_SET,
+			allowManagedHooksOnly: expected,
 		});
 	});
 
-	it("flags both when both are strict boolean true", () => {
-		expect(
-			scanExecutionFlags({
-				disableAllHooks: true,
-				allowManagedHooksOnly: true,
-			}),
-		).toEqual({ disableAllHooks: true, allowManagedHooksOnly: true });
-	});
-
-	it("does NOT flag truthy-but-not-true values", () => {
-		for (const v of ["true", 1, {}, [], "yes"]) {
-			expect(
-				scanExecutionFlags({ disableAllHooks: v, allowManagedHooksOnly: v }),
-			).toEqual({ disableAllHooks: false, allowManagedHooksOnly: false });
-		}
-	});
-
-	it("does NOT flag false, absent keys, or non-object input", () => {
-		expect(
-			scanExecutionFlags({
-				disableAllHooks: false,
-				allowManagedHooksOnly: false,
-			}),
-		).toEqual({ disableAllHooks: false, allowManagedHooksOnly: false });
+	it("treats an absent key and an explicit undefined as not set", () => {
 		expect(scanExecutionFlags({})).toEqual({
-			disableAllHooks: false,
-			allowManagedHooksOnly: false,
+			disableAllHooks: NOT_SET,
+			allowManagedHooksOnly: NOT_SET,
 		});
+		expect(
+			scanExecutionFlags({
+				disableAllHooks: undefined,
+				allowManagedHooksOnly: undefined,
+			}),
+		).toEqual({ disableAllHooks: NOT_SET, allowManagedHooksOnly: NOT_SET });
+	});
+
+	it("classifies both flags independently in the same source", () => {
+		expect(
+			scanExecutionFlags({ disableAllHooks: true, allowManagedHooksOnly: 1 }),
+		).toEqual({
+			disableAllHooks: EXPLICIT,
+			allowManagedHooksOnly: invalid("number"),
+		});
+	});
+
+	it("yields 'not a flag' for non-object input (unreadability is upstream)", () => {
 		for (const notObj of [null, undefined, 42, "x", [], true]) {
 			expect(scanExecutionFlags(notObj)).toEqual({
-				disableAllHooks: false,
-				allowManagedHooksOnly: false,
+				disableAllHooks: NOT_SET,
+				allowManagedHooksOnly: NOT_SET,
 			});
 		}
 	});

@@ -10,11 +10,20 @@
 // from the old `/tmp`-rooted case in `claude-hook-manager.run.test.ts`, which
 // "passed" on every host by returning before its first assertion.
 //
-// FIXTURE BASE: `mkdtemp` under `RUNNER_TEMP` (CI) or `$HOME` (dev box), 0700.
-// NEVER `os.tmpdir()`/`/tmp`: its `1777` sticky mode makes the ancestor gate
-// refuse `unsafe-parent-chain` before any ACL logic runs, so a `/tmp`-rooted
-// suite can only prove that `/tmp` is world-writable. The precondition is
-// ASSERTED up front — it FAILS naming the offending path, it never skips.
+// FIXTURE BASE: `mkdtemp` under `JF_INT_BASE` (explicit CI override),
+// `RUNNER_TEMP` (CI default) or `$HOME` (dev box), 0700. NEVER
+// `os.tmpdir()`/`/tmp`: its `1777` sticky mode makes the ancestor gate refuse
+// `unsafe-parent-chain` before any ACL logic runs, so a `/tmp`-rooted suite can
+// only prove that `/tmp` is world-writable. The precondition is ASSERTED up
+// front — it FAILS naming the offending path, it never skips.
+//
+// WHY `JF_INT_BASE` EXISTS: GitHub's `ubuntu-latest` image ships `/home` with a
+// REAL extended ACL entry, and the ancestor-chain gate walks from `/` down — so
+// a `$HOME`- or `RUNNER_TEMP`-rooted fixture makes the shipped adapter refuse
+// `extended ACL entry` on the happy path, on the runner only. The workflow
+// creates a 0700 base OUTSIDE `/home` (`/opt/jf-int`) and points this suite at
+// it. The adapter is behaving as shipped; the over-refusal itself is recorded
+// as a product finding in `docs/BACKLOG.md`.
 //
 // LEG: `JAVI_FORGE_ACL_LEG=absent` (the CI leg where `/usr/bin/getfacl` is
 // displaced) selects EXPECTATIONS only — adapter-absent refusals WITH the
@@ -55,15 +64,19 @@ const EXPECTED_ACL_DETAIL = EXPECT_GETFACL
 let baseDir: string;
 
 /**
- * A PRIVATE fixture root: `RUNNER_TEMP` on a GitHub runner, `$HOME` on a dev
- * box. Never `os.tmpdir()` — see the header.
+ * A PRIVATE fixture root: `JF_INT_BASE` when the environment pins one (the CI
+ * legs point it outside `/home`), else `RUNNER_TEMP` on a GitHub runner, else
+ * `$HOME` on a dev box. Never `os.tmpdir()` — see the header.
  */
 function privateRoot(): string {
-	// An exported-but-EMPTY RUNNER_TEMP is `absent`, not a valid root: `??` only
-	// rejects undefined and would hand `mkdtemp` a relative cwd-rooted path.
-	return process.env.RUNNER_TEMP?.trim()
-		? process.env.RUNNER_TEMP
-		: os.homedir();
+	// An exported-but-EMPTY JF_INT_BASE/RUNNER_TEMP is `absent`, not a valid
+	// root: `??` only rejects undefined and would hand `mkdtemp` a relative
+	// cwd-rooted path.
+	return (
+		process.env.JF_INT_BASE?.trim() ||
+		process.env.RUNNER_TEMP?.trim() ||
+		os.homedir()
+	);
 }
 
 function mkProject(tag: string): string {
@@ -84,6 +97,39 @@ function ancestorsOf(target: string): string[] {
 		current = parent;
 	}
 	return chain;
+}
+
+/**
+ * The base-entry shape the shipped Linux adapter treats as clean; anything else
+ * getfacl prints is an EXTENDED entry. Mirrors `LINUX_BASE_ENTRY` in
+ * `secure-fs-posix.ts` — duplicated on purpose so the precondition names the
+ * offending ancestor even if the adapter's own predicate changes.
+ */
+const BASE_ACL_ENTRY = /^(user|group|other)::/;
+
+/**
+ * Every ancestor of `target` that carries an extended ACL entry, with the first
+ * offending entry, as reported by the REAL `getfacl`. Empty on a clean chain.
+ *
+ * Only meaningful on the `present` leg — the caller gates on `EXPECT_GETFACL`.
+ */
+function aclOffendingAncestors(target: string): string[] {
+	const offenders: string[] = [];
+	for (const dir of ancestorsOf(target)) {
+		const stdout = execFileSync(
+			"getfacl",
+			["--absolute-names", "--numeric", "--omit-header", "--", dir],
+			{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+		);
+		for (const raw of stdout.split("\n")) {
+			const line = raw.trim();
+			if (line === "" || line.startsWith("#")) continue;
+			if (BASE_ACL_ENTRY.test(line)) continue;
+			offenders.push(`${dir} (${line})`);
+			break;
+		}
+	}
+	return offenders;
 }
 
 function claudePaths(projectDir: string): {
@@ -167,6 +213,18 @@ describe.skipIf(!LINUX)(
 					`controlling directory ${dir} is group- or world-writable (mode ${(stats.mode & 0o7777).toString(8)})`,
 				).toBe(0);
 			}
+
+			// On the happy-path leg the chain must ALSO be free of extended ACL
+			// entries: the shipped adapter refuses on the FIRST ancestor that
+			// carries one, so an ACL'd ancestor would otherwise surface as an
+			// opaque install refusal two tests down. Name it here instead.
+			// (GitHub's `ubuntu-latest` ships `/home` with a real extended ACL —
+			// exactly why `JF_INT_BASE` points outside `/home` in CI.)
+			const aclOffenders = EXPECT_GETFACL ? aclOffendingAncestors(baseDir) : [];
+			expect(
+				aclOffenders,
+				`controlling directories carry extended ACL entries, which the shipped adapter refuses: ${aclOffenders.join(", ")} — point JF_INT_BASE at an ACL-clean 0700 directory outside /home`,
+			).toEqual([]);
 		});
 
 		// === LEG PROOF: the host matches the leg this run claims to exercise ======

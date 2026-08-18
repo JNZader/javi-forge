@@ -8,6 +8,14 @@ import { CLAUDE_HOOK_ASSETS_DIR } from "../constants.js";
 
 const ASSET = path.join(CLAUDE_HOOK_ASSETS_DIR, "javi-forge-skillguard-pre-tool-use.mjs");
 const LIMIT = 1_048_576;
+// /etc/* and /proc/*/environ shell reads are matched by shell.sensitive-read ONLY
+// after realpath canonicalization. On a non-Linux host that prepends the current
+// drive (e.g. d:/a/javi-forge/etc/shadow), so the absolute-key match correctly
+// does not fire — there is no /etc/shadow on a native Windows host. The policy is
+// a Linux-host rule; these assertions are Linux-only. HOME-suffix reads
+// (~/.docker, ~/.config/gh, ~/.local/share/keyrings) and raw-token critical-target
+// probes (rm -rf /etc, chmod -R 777 /usr, /boot) stay cross-platform.
+const LINUX_ONLY = process.platform === "linux";
 interface RunResult { code: number | null; stdout: Buffer; stderr: Buffer; elapsedMs: number }
 function payload(tool_name: string, tool_input: Record<string, unknown>, extra: Record<string, unknown> = {}): Buffer {
 	return Buffer.from(JSON.stringify({ hook_event_name: "PreToolUse", tool_name, tool_input, cwd: process.cwd(), ...extra }));
@@ -55,6 +63,7 @@ describe("exact packaged Claude PreToolUse process", () => {
 		["JD-S1-FR1-005 overwrite", "PowerShell", "Write-Output x > .claude/settings.json"], ["JD-S1-FR1-005 append", "PowerShell", "Write-Output x >> .claude/settings.json"],
 		["JD-S1-008", "Read", null],
 		["JD-S1-009", "Read", "C:\\Users\\me\\.ssh\\id"],
+		...["cat ~/.docker/config.json", "cat ~/.config/gh/hosts.yml", "cat ~/.local/share/keyrings/login.keyring", "rm -rf /etc", "chmod -R 777 /usr"].map((command): [string, string, string] => [`P2-LINUX ${command}`, "Bash", command]),
 	])("spawn probe %s", async (_id, tool, command) => {
 		const toolInput = command === null ? { file_path: path.join(os.tmpdir(), "serviceAccountKey.json") } : tool === "Read" ? { file_path: command } : { command };
 		expect(await run(payload(tool, toolInput))).toMatchObject({ code: 2, stdout: Buffer.alloc(0) });
@@ -85,6 +94,10 @@ describe("exact packaged Claude PreToolUse process", () => {
 		["escaped PowerShell pipe", payload("PowerShell", { command: "Write-Output x `| Set-Content .claude/settings.json" }), 0, ""],
 		["denied Bash", payload("Bash", { command: "git push --force origin main SECRET_SUFFIX" }), 2, "shell.force-push"],
 		["ordinary Read", payload("Read", { file_path: "/tmp/public.txt" }), 0, ""],
+		["P2-LINUX legitimate /etc read", payload("Bash", { command: "cat /etc/hosts" }), 0, ""],
+		["P2-LINUX legitimate /proc read", payload("Bash", { command: "cat /proc/cpuinfo" }), 0, ""],
+		["P2-LINUX bounded FHS-root deletion", payload("Bash", { command: "rm -rf /var/tmp/scratch" }), 0, ""],
+		["P2-LINUX FHS-root deletion", payload("Bash", { command: "rm -rf /boot" }), 2, "shell.destructive-root"],
 		["protected Edit", payload("Edit", { file_path: path.join(process.cwd(), "CLAUDE.md"), new_string: "SECRET_EDIT" }), 2, "path.managed-config"],
 		["malformed", Buffer.from('{"token":"SECRET_PAYLOAD"'), 2, "invalid-json"],
 	])("returns the bounded exit contract for %s", async (_name, input, code, reason) => {
@@ -135,6 +148,28 @@ describe("exact packaged Claude PreToolUse process", () => {
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
+	});
+});
+// Linux-only: /etc/* and /proc/*/environ shell reads canonicalize to the host
+// drive on Windows, so the absolute-key match cannot fire there (correct policy).
+// Gated at the describe level to keep the zero-skip-branch discipline.
+describe.skipIf(!LINUX_ONLY)("P2-LINUX host-absolute sensitive reads (Linux-only policy)", () => {
+	it.each([
+		["cat /etc/shadow", "cat /etc/shadow"],
+		["cat /proc/self/environ", "cat /proc/self/environ"],
+		["grep TOKEN /proc/1/environ", "grep TOKEN /proc/1/environ"],
+	])("spawn probe P2-LINUX %s", async (_id, command) => {
+		expect(await run(payload("Bash", { command }))).toMatchObject({ code: 2, stdout: Buffer.alloc(0) });
+	});
+	it.each([
+		["P2-LINUX /etc/shadow read", payload("Bash", { command: "cat /etc/shadow" })],
+		["P2-LINUX /proc environ read", payload("Bash", { command: "cat /proc/self/environ" })],
+	])("returns the bounded exit contract for %s", async (_name, input) => {
+		const result = await run(input);
+		expect(result.code).toBe(2);
+		expect(result.stdout).toHaveLength(0);
+		expect(result.stderr.toString()).toContain("shell.sensitive-read");
+		expect(result.stderr.byteLength).toBeLessThanOrEqual(241);
 	});
 });
 describe("protected ambiguity diagnostics and corrected orderings", () => {

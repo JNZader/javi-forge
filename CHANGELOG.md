@@ -1,3 +1,9 @@
+## [1.33.0](https://github.com/JNZader/javi-forge/compare/v1.32.0...v1.33.0) (2026-08-18)
+
+### Features
+
+* **hooks:** fail-closed effective-execution matrix for doctor (Slice 4b) [size:exception] ([cc6727b](https://github.com/JNZader/javi-forge/commit/cc6727b56ebb0710782026b48a19e416e4b38bea))
+
 ## [1.32.0](https://github.com/JNZader/javi-forge/compare/v1.31.0...v1.32.0) (2026-08-18)
 
 ### Features

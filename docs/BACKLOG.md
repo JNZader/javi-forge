@@ -554,3 +554,40 @@ failure leaves the restored file at `writeExclusive`'s `0o600` instead of `prior
   from a rename failure — a STOP-and-return may be too aggressive for a perms-only miss).
 - Suggested fix: decide the recovery semantics (STOP vs. record-and-continue with a warning),
   then check the `applyExactMode` result accordingly. Batch with the next secure-fs touch.
+
+## 2026-08-18 — from the real-Linux `secure-fs-posix` integration suite (first CI run)
+
+Source: the `with-acl` leg of `.github/workflows/claude-hook-linux.yml`, first run of
+`src/__integration__/secure-fs-posix.integration.test.ts`.
+
+### JD-P-001 — POSIX ancestor ACL over-refusal (GH-runner `/home` class)
+
+The shipped Linux adapter refuses an install when ANY ancestor carries ANY extended ACL
+entry: `proveNoExtendedAcl` is applied to the WHOLE controlling chain with a blunt
+any-extended-entry predicate, with no distinction between an ACL that can endanger the
+path and one that cannot.
+
+- Evidence (real-world, not theoretical): GitHub's `ubuntu-latest` image ships `/home`
+  with a real extended ACL entry. The ancestor gate walks from `/` down, so
+  `proveNoExtendedAcl("/home")` refuses and `hooks install claude` fails under `$HOME`
+  (and under `RUNNER_TEMP`) on every GH-hosted runner. Empirically hit by the first CI
+  run of the new suite: `install refused: acl /home: extended ACL entry`, with the other
+  4 tests (setfacl refusal + adapter-absent remediation) green — i.e. the suite and the
+  adapter both behaved exactly as specified.
+- Evidence (code): `src/lib/secure-fs-posix.ts:126,147-152` — `LINUX_BASE_ENTRY` accepts
+  only `user::`/`group::`/`other::`; every other getfacl line refuses
+  `ACL_DETAIL.extendedAclEntry`, and the caller applies this to each controlling
+  directory.
+- Relation to the Windows arc: this is the POSIX analog of **JDB-201** (real `C:\`
+  grants). Same failure class — a blunt any-ACL predicate over-refuses on real hosts
+  whose upper chain is administered by the OS vendor rather than by the user.
+- Status: NOT urgent, and the direction is safe — this is over-refusal (fail-closed),
+  never fail-open. Worked around in CI only: both legs now root their fixtures at an
+  ACL-clean 0700 base outside `/home` (`JF_INT_BASE=/opt/jf-int`), and the suite's
+  PRECONDITION now runs `getfacl` over the whole chain on the happy-path leg so the next
+  environment surprise is named in one line instead of an assertion diff.
+- Candidate fix (its OWN SDD change — it touches a shipped prover, so it must not be
+  done in-flight): narrow the ANCESTOR predicate to path-endangering rights only
+  (write/delete-class ACL entries granted to foreign users), mirroring the ratified
+  Windows **Predicate A**, while KEEPING the strict any-extended-entry predicate for the
+  managed containers the installer itself creates.

@@ -17,11 +17,11 @@ import {
 import { makeFakeSecureFs } from "./__fixtures__/fake-secure-fs.js";
 import {
 	_run,
-	installClaudePreToolUse,
 	type Manifest,
-	repairClaudePreToolUse,
+	type NodeOnPathProbe,
 } from "./claude-hook-manager.js";
 import { canonicalizeSettingsEntry } from "./claude-hook-settings.js";
+import type { AclCapability } from "./secure-fs-posix.js";
 
 const MANAGED_MATCHER = "Bash|PowerShell|Read|Write|Edit";
 const REAL_ASSET = path.join(CLAUDE_HOOK_ASSETS_DIR, ASSET_NAME);
@@ -81,17 +81,38 @@ const mirror = (fake: ReturnType<typeof makeFakeSecureFs>): void => {
 const writeSettings = (value: unknown): void =>
 	fs.writeFileSync(settingsPath(), `${JSON.stringify(value, null, 2)}\n`);
 
+/**
+ * Every `_run` in this file goes through this harness, so NO test here spawns
+ * the host's real `node --version` or `getfacl`: both read-only probes default
+ * to stubs, making the suite host-independent (a CI image with an older Node on
+ * PATH must not grow warnings). Tests asserting a specific probe outcome inject
+ * their own through the `extra` deps, which win by spread order.
+ */
+const STUB_NODE_PROBE = async (): Promise<NodeOnPathProbe> => ({
+	status: "resolved",
+	version: "v22.11.0",
+	major: 22,
+});
+const STUB_ACL_PROBE = async (): Promise<AclCapability> => ({
+	status: "available",
+	tool: "getfacl",
+});
+
 const run = (
 	fake: ReturnType<typeof makeFakeSecureFs>,
 	mode: "install" | "repair",
 	options: { force?: boolean } = {},
 	m: Manifest = manifest(),
+	extra: { nodeProbe?: () => Promise<NodeOnPathProbe> } = {},
 ) =>
 	_run(dir, mode, options, {
 		secureFs: fake,
 		clock,
 		nonce: makeNonce(),
 		manifest: m,
+		aclProbe: STUB_ACL_PROBE,
+		nodeProbe: STUB_NODE_PROBE,
+		...extra,
 	});
 
 const parseSettings = (
@@ -301,28 +322,43 @@ describe("_run refuses unsafe states and no-ops the healthy one", () => {
 	});
 });
 
-describe("_run real POSIX adapter idempotency (skips on incapable hosts)", () => {
-	it("installs then re-runs as a zero-write no-op under a private 0700 tree", async () => {
-		if (process.platform === "win32") return; // no adapter — covered elsewhere
-		const base = fs.mkdtempSync(path.join(os.tmpdir(), "javi-forge-real-"));
-		const project = path.join(base, "proj");
-		fs.mkdirSync(project);
-		fs.chmodSync(project, 0o700);
-		fs.chmodSync(base, 0o700);
-		try {
-			const first = await installClaudePreToolUse(project);
-			// Incapable host (world-writable temp ancestor, or getfacl absent) →
-			// the gate refuses; treat as skipped rather than failing.
-			if (!first.ok) return;
-			const asset = path.join(project, ".claude", "hooks", ASSET_NAME);
-			expect(fs.existsSync(asset)).toBe(true);
-			const second = await installClaudePreToolUse(project);
-			expect(second.ok).toBe(true);
-			expect(second.changed).toEqual([]);
-			const repaired = await repairClaudePreToolUse(project, {});
-			expect(repaired.changed).toEqual([]);
-		} finally {
-			fs.rmSync(base, { recursive: true, force: true });
-		}
+describe("_run probes node-on-PATH exactly once per call", () => {
+	const countingProbe = (): {
+		calls: () => number;
+		probe: () => Promise<NodeOnPathProbe>;
+	} => {
+		let calls = 0;
+		return {
+			calls: () => calls,
+			probe: async () => {
+				calls += 1;
+				return { status: "resolved", version: "v22.11.0", major: 22 };
+			},
+		};
+	};
+
+	it("shares ONE sample between the warning and the embedded doctor report", async () => {
+		writeSettings({ hooks: { PreToolUse: [] } });
+		const fake = makeFakeSecureFs();
+		mirror(fake);
+		const counter = countingProbe();
+		const res = await run(fake, "install", {}, manifest(), {
+			nodeProbe: counter.probe,
+		});
+		expect(res.ok).toBe(true);
+		expect(counter.calls()).toBe(1);
+	});
+
+	it("probes once on a refusal too, where the report is still embedded", async () => {
+		fs.writeFileSync(assetPath(), "// not ours\n");
+		writeSettings({ hooks: { PreToolUse: [managedGroup(REAL_ASSET_SHA)] } });
+		const fake = makeFakeSecureFs();
+		mirror(fake);
+		const counter = countingProbe();
+		const res = await run(fake, "install", {}, manifest(), {
+			nodeProbe: counter.probe,
+		});
+		expect(res.ok).toBe(false);
+		expect(counter.calls()).toBe(1);
 	});
 });

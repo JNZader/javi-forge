@@ -20,6 +20,7 @@ import {
 	detectNode,
 	doctorClaudePreToolUse,
 	type Manifest,
+	type NodeOnPathProbe,
 } from "./claude-hook-manager.js";
 import { canonicalizeSettingsEntry } from "./claude-hook-settings.js";
 import { ACL_PACKAGE_REMEDIATION } from "./secure-refusal-remediation.js";
@@ -58,11 +59,25 @@ const STUB_ACL_PROBE: NonNullable<DoctorOptions["aclProbe"]> = async () => ({
 	status: "available",
 	tool: "getfacl",
 });
+/**
+ * Same reasoning for the node-on-PATH heuristic: it spawns `node --version` from
+ * the host PATH, so every doctor call here stubs it. Tests that assert a
+ * specific outcome inject their own through `execution.nodeProbe`.
+ */
+const STUB_NODE_PROBE = async (): Promise<NodeOnPathProbe> => ({
+	status: "resolved",
+	version: "v22.11.0",
+	major: 22,
+});
 const doctor = (
 	projectDir: string,
 	options: DoctorOptions = {},
 ): ReturnType<typeof doctorClaudePreToolUse> =>
-	doctorClaudePreToolUse(projectDir, { aclProbe: STUB_ACL_PROBE, ...options });
+	doctorClaudePreToolUse(projectDir, {
+		aclProbe: STUB_ACL_PROBE,
+		...options,
+		execution: { nodeProbe: STUB_NODE_PROBE, ...(options.execution ?? {}) },
+	});
 
 let dir: string;
 const assetPath = (): string => path.join(dir, ".claude", "hooks", ASSET_NAME);
@@ -482,6 +497,65 @@ describe("doctor installCapability (ACL adapter capability section)", () => {
 		expect(report.installCapability.remediation).toBeUndefined();
 	});
 
+	it("always carries the node-on-PATH row, also when the capability is satisfied", async () => {
+		writeCurrent();
+		const report = await doctor(dir, {
+			manifest: syntheticManifest(),
+			nodeVersion: "22.5.0",
+			execution: isolatedExecution(home),
+		});
+		// Satisfied is NOT silent: the row is present and stays a heuristic
+		// observation — it clears nothing and adds no confidence.
+		expect(report.nodeOnPath).toEqual({
+			status: "resolved",
+			version: "v22.11.0",
+			major: 22,
+		});
+		expect(report.execution.status).toBe("runnable");
+	});
+
+	it("keeps report.node (process.versions.node) distinct from the node-on-PATH row", async () => {
+		writeCurrent();
+		const report = await doctor(dir, {
+			manifest: syntheticManifest(),
+			nodeVersion: "22.5.0",
+			execution: {
+				...isolatedExecution(home),
+				nodeProbe: async () => ({ status: "absent" }),
+			},
+		});
+		// The diagnosing process itself runs a supported Node…
+		expect(report.node).toEqual({
+			available: true,
+			version: "22.5.0",
+			satisfiesMinimum: true,
+		});
+		// …while the independent PATH heuristic reports the guard as unspawnable.
+		expect(report.execution.status).toBe("blocked");
+		expect(report.execution.blockers).toContain(
+			"runtime:node-not-on-PATH (heuristic: this process' PATH)",
+		);
+		expect(report.nodeOnPath).toEqual({ status: "absent" });
+	});
+
+	it("probes node ONCE per doctor run (the row and the matrix share it)", async () => {
+		writeCurrent();
+		let calls = 0;
+		const report = await doctor(dir, {
+			manifest: syntheticManifest(),
+			nodeVersion: "22.5.0",
+			execution: {
+				...isolatedExecution(home),
+				nodeProbe: async () => {
+					calls++;
+					return { status: "absent" };
+				},
+			},
+		});
+		expect(calls).toBe(1);
+		expect(report.nodeOnPath.status).toBe("absent");
+	});
+
 	it("does not report an absent adapter as healthy-affecting", async () => {
 		writeCurrent();
 		const report = await doctor(dir, {
@@ -540,6 +614,97 @@ describe("_run — install seam wiring (fake secureFs, host-independent)", () =>
 		expect(fake.fileText(assetPath())).toBe(
 			fs.readFileSync(REAL_ASSET, "utf8"),
 		);
+	});
+
+	it("still installs when node does not resolve on PATH, with a non-blocking warning", async () => {
+		// No guard at all is strictly worse than an exec-form guard that may not
+		// resolve, so the mutation proceeds and the operator is warned.
+		const fake = makeFakeSecureFs();
+		seedChain(fake, dir);
+		const res = await _run(
+			dir,
+			"install",
+			{},
+			{
+				secureFs: fake,
+				clock: txClock,
+				nonce: makeNonce(),
+				manifest: syntheticManifest(),
+				aclProbe: STUB_ACL_PROBE,
+				nodeProbe: async () => ({ status: "absent" }),
+			},
+		);
+		expect(res.ok).toBe(true);
+		expect(res.changed).toEqual([assetPath(), settingsPath()]);
+		expect(res.errors).toEqual([]);
+		expect(res.warnings).toHaveLength(1);
+		expect(res.warnings[0]).toContain("node");
+		expect(res.warnings[0]).toContain("PATH");
+	});
+
+	it("emits no warning when node resolves at or above the minimum major", async () => {
+		const fake = makeFakeSecureFs();
+		seedChain(fake, dir);
+		const res = await _run(
+			dir,
+			"install",
+			{},
+			{
+				secureFs: fake,
+				clock: txClock,
+				nonce: makeNonce(),
+				manifest: syntheticManifest(),
+				aclProbe: STUB_ACL_PROBE,
+				nodeProbe: async () => ({
+					status: "resolved",
+					version: "v22.11.0",
+					major: 22,
+				}),
+			},
+		);
+		expect(res.ok).toBe(true);
+		expect(res.warnings).toEqual([]);
+	});
+
+	it("warns when node on PATH is below the minimum major", async () => {
+		const fake = makeFakeSecureFs();
+		seedChain(fake, dir);
+		const res = await _run(
+			dir,
+			"repair",
+			{},
+			{
+				secureFs: fake,
+				clock: txClock,
+				nonce: makeNonce(),
+				manifest: syntheticManifest(),
+				aclProbe: STUB_ACL_PROBE,
+				nodeProbe: async () => ({
+					status: "resolved",
+					version: "v18.20.4",
+					major: 18,
+				}),
+			},
+		);
+		expect(res.ok).toBe(true);
+		expect(res.warnings.join("\n")).toContain("v18");
+	});
+
+	it("carries warnings on a refusal too, and never turns one into an error", async () => {
+		const res = await _run(
+			dir,
+			"install",
+			{},
+			{
+				secureFs: null,
+				manifest: syntheticManifest(),
+				aclProbe: STUB_ACL_PROBE,
+				nodeProbe: async () => ({ status: "absent" }),
+			},
+		);
+		expect(res.ok).toBe(false);
+		expect(res.errors).toEqual(["windows-secure-object-unavailable"]);
+		expect(res.warnings).toHaveLength(1);
 	});
 
 	it("refuses on Windows with zero mutation and still returns a report", async () => {

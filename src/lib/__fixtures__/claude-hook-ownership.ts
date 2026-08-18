@@ -33,6 +33,13 @@ export const MANAGED_MATCHER = "Bash|PowerShell|Read|Write|Edit";
 export const MANAGED_ASSET_ARG =
 	"${CLAUDE_PROJECT_DIR}/.claude/hooks/javi-forge-skillguard-pre-tool-use.mjs";
 
+/**
+ * The agent selector the install writer appends after the asset path. The runtime
+ * fails closed without it (no agent config = cannot know what to protect), so it is
+ * part of the managed command shape and the canonical settings identity.
+ */
+export const MANAGED_AGENT_ARG = "--agent=claude";
+
 /** Exact asset filename under `.claude/hooks/`. */
 export const ASSET_NAME = "javi-forge-skillguard-pre-tool-use.mjs";
 
@@ -60,7 +67,7 @@ export function managedHandler(assetSha: string = SAMPLE_ASSET_SHA256) {
 	return {
 		type: "command",
 		command: "node",
-		args: [MANAGED_ASSET_ARG],
+		args: [MANAGED_ASSET_ARG, MANAGED_AGENT_ARG],
 		timeout: 30,
 		statusMessage: managedStatusMessage(assetSha),
 	};

@@ -26,6 +26,7 @@ import {
 	isPlainObject,
 	LEGACY_FILE_SHA256,
 	type LegacyCohortExcisionPlan,
+	MANAGED_AGENT_ARG,
 	MANAGED_ASSET_ARG,
 	MANAGED_MATCHER,
 	MANAGED_STATUS_PREFIX,
@@ -296,8 +297,9 @@ function settingsSignals(
 		handler.type === "command" &&
 		handler.command === "node" &&
 		Array.isArray(args) &&
-		args.length === 1 &&
+		args.length === 2 &&
 		args[0] === MANAGED_ASSET_ARG &&
+		args[1] === MANAGED_AGENT_ARG &&
 		handler.timeout === 30;
 
 	let assetSettingsConsistent = false;

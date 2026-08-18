@@ -40,13 +40,25 @@ const WINDOWS_SECURE_OBJECT_SHA256 =
 // (silent auto-upgrade). Pin the outgoing hash so that append can never be
 // silently dropped by a later rotation.
 const PRIOR_ASSET_SHA256 = "78be7e6613c012280b7ad17886462ba166b63ebd031e34565d757b3a0796d7cc";
+// S0 core-extraction rotated the asset (AGENT_CONFIGS + --agent selector) AND the
+// settings command shape (`node <asset> --agent=claude`). Both outgoing released
+// identities MUST land in historical[] so already-installed Claude copies classify
+// as `released-outdated` (silent auto-upgrade), never `edited-managed`.
+const OUTGOING_ASSET_SHA256 = "5dc2a5c31131f4ac7d8657c78b950de52776aad6eaefe78ea0d764a9963c4425";
+// F2 protection-regression fix rotated the asset again (per-agent projectRoot fallback:
+// Claude with CLAUDE_PROJECT_DIR unset re-anchors to the asset-relative PROJECT_ROOT so a
+// managed-config write stays DENY, byte-identical to the pre-extraction guard). Its outgoing
+// released identity MUST also land in historical[] so installed Claude copies auto-upgrade.
+const F2_OUTGOING_ASSET_SHA256 = "0c9aa8fa26b389f4892782f83104f0792c2b71ebca39c18c02706e2185e22b40";
+const PRIOR_SETTINGS_CANONICAL_SHA256 = "038c59a91bf8967f6908afed74c465f1e7030254e11e4f8738975d6d708424d4";
 const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
 // Decision ②: placeholder-normalized canonical hash of the exact managed matcher
 // group. Bound here so a silent settings-identity rewrite fails this contract.
-const SETTINGS_CANONICAL_SHA256 = "038c59a91bf8967f6908afed74c465f1e7030254e11e4f8738975d6d708424d4";
-// R2 fleet-brick guard for the settings entry, mirroring hook-assets.test.ts:
-// settingsEntries.historical[] MUST forever START WITH this released list.
-const RELEASED_SETTINGS_SNAPSHOT = { current: SETTINGS_CANONICAL_SHA256, historical: [] as string[] };
+const SETTINGS_CANONICAL_SHA256 = "b1341803cd076091edfcb473494514df1a23bd33372374ca1de6b75258e52e06";
+// R2 fleet-brick guard for the settings entry: settingsEntries.historical[] MUST
+// forever START WITH the previously-released list (the outgoing S0 identity now
+// lives in historical, so this baseline keeps its release from being dropped).
+const RELEASED_SETTINGS_SNAPSHOT = { current: PRIOR_SETTINGS_CANONICAL_SHA256, historical: [] as string[] };
 // Append-only invariant: the manifest history must still start with the released
 // list; when current moves, the outgoing hash must have been appended and grown.
 function settingsHistoryViolations(released: { current: string; historical: string[] }, entry: { current: { canonicalSha256: string } | null; historical: { canonicalSha256: string }[] }): string[] {
@@ -78,12 +90,16 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(runtime.SUPPORTED_TOOLS).toEqual(TOOLS);
 		expect(runtime.INPUT_LIMIT_BYTES).toBe(1_048_576);
 		expect(runtime.POLICY_REGISTRY).toEqual({ schemaVersion: 1, policyVersion: 1, diagnosticsMaxBytes: 240 });
-		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 1, historical: [PRIOR_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
+		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 1, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
 		expect(manifest.asset.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
-		// A rotated asset must not still claim the outgoing hash as current, and the
-		// outgoing hash must remain reachable as a historical (auto-upgradable) body.
+		// A rotated asset must not still claim any outgoing hash as current, and every
+		// outgoing hash must remain reachable as historical (auto-upgradable) bodies.
 		expect(manifest.asset.sha256).not.toBe(PRIOR_ASSET_SHA256);
+		expect(manifest.asset.sha256).not.toBe(OUTGOING_ASSET_SHA256);
+		expect(manifest.asset.sha256).not.toBe(F2_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PRIOR_ASSET_SHA256);
+		expect(manifest.asset.historical).toContain(OUTGOING_ASSET_SHA256);
+		expect(manifest.asset.historical).toContain(F2_OUTGOING_ASSET_SHA256);
 		// The bundled win32 helper on disk MUST hash to its manifest binding (mirrors the .mjs asset sha assertion above).
 		const ps1Bytes = fs.readFileSync(path.join(CLAUDE_HOOK_ASSETS_DIR, WINDOWS_SECURE_OBJECT_NAME));
 		expect(manifest.installerHelpers.windowsSecureObject.sha256).toBe(createHash("sha256").update(ps1Bytes).digest("hex"));

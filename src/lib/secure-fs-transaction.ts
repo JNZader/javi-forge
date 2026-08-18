@@ -608,10 +608,21 @@ export async function runTransaction(
 					errors.push(`STOP: cannot stage rollback for ${entry.path}`);
 					return;
 				}
-				await secureFs.applyExactMode(
+				// Prior-mode restore is BEST-EFFORT (JD-B-003): a chmod miss fails
+				// toward MORE restrictive perms (the 0600 staging mode), so it is not
+				// a security regression and must not halt the rollback — restoring the
+				// prior BYTES matters more than the prior mode. Record an
+				// INFORMATIONAL note (never `STOP:`, which signals a halted rollback)
+				// and continue to the rename.
+				const remoded = await secureFs.applyExactMode(
 					path.join(entry.dir.path, rName),
 					entry.prior.mode,
 				);
+				if (!remoded.ok) {
+					errors.push(
+						`note: restored ${entry.path}; prior-mode restore failed, verify permissions (${remoded.detail ?? remoded.refusal ?? "unknown"})`,
+					);
+				}
 				const restored = await secureFs.renameInDir(entry.dir, rName, base);
 				if (!restored.ok) {
 					errors.push(

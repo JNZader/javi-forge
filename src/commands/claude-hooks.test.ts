@@ -216,7 +216,9 @@ describe("runClaudeHookCommand", () => {
 			doctorReport({
 				healthy: false,
 				asset: { state: "edited-managed", detail: "edited-managed" },
-				remediation: ["repair the managed asset with --force (Slice 3)"],
+				remediation: [
+					"repair the managed asset with: javi-forge hooks repair claude --force",
+				],
 				execution: {
 					status: "blocked",
 					blockers: ["guard:asset=edited-managed"],
@@ -233,7 +235,9 @@ describe("runClaudeHookCommand", () => {
 		const text = out.join("\n");
 		expect(text).toContain("blocked");
 		expect(text).toContain("guard:asset=edited-managed");
-		expect(text).toContain("repair the managed asset with --force");
+		expect(text).toContain(
+			"repair the managed asset with: javi-forge hooks repair claude --force",
+		);
 	});
 
 	it("doctor: runnable execution returns 0 and prints runnable", async () => {

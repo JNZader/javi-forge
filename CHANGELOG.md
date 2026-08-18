@@ -1,3 +1,9 @@
+## [1.34.1](https://github.com/JNZader/javi-forge/compare/v1.34.0...v1.34.1) (2026-08-18)
+
+### Bug Fixes
+
+* **hooks:** between-SDD nits — rollback mode-note, plain remediation text, corpus-test margin ([e96866a](https://github.com/JNZader/javi-forge/commit/e96866a17a2078ff3a04813ec368474465551f04))
+
 ## [1.34.0](https://github.com/JNZader/javi-forge/compare/v1.33.0...v1.34.0) (2026-08-18)
 
 ### Features

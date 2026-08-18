@@ -15,12 +15,7 @@ import {
 	settingsContainer,
 } from "./__fixtures__/claude-hook-ownership.js";
 import { makeFakeSecureFs } from "./__fixtures__/fake-secure-fs.js";
-import {
-	_run,
-	installClaudePreToolUse,
-	type Manifest,
-	repairClaudePreToolUse,
-} from "./claude-hook-manager.js";
+import { _run, type Manifest } from "./claude-hook-manager.js";
 import { canonicalizeSettingsEntry } from "./claude-hook-settings.js";
 
 const MANAGED_MATCHER = "Bash|PowerShell|Read|Write|Edit";
@@ -298,31 +293,5 @@ describe("_run refuses unsafe states and no-ops the healthy one", () => {
 		expect(res.backups).toEqual([]);
 		// No temp/backup was ever created — the transaction was never entered.
 		expect(fake.files.size).toBe(before);
-	});
-});
-
-describe("_run real POSIX adapter idempotency (skips on incapable hosts)", () => {
-	it("installs then re-runs as a zero-write no-op under a private 0700 tree", async () => {
-		if (process.platform === "win32") return; // no adapter — covered elsewhere
-		const base = fs.mkdtempSync(path.join(os.tmpdir(), "javi-forge-real-"));
-		const project = path.join(base, "proj");
-		fs.mkdirSync(project);
-		fs.chmodSync(project, 0o700);
-		fs.chmodSync(base, 0o700);
-		try {
-			const first = await installClaudePreToolUse(project);
-			// Incapable host (world-writable temp ancestor, or getfacl absent) →
-			// the gate refuses; treat as skipped rather than failing.
-			if (!first.ok) return;
-			const asset = path.join(project, ".claude", "hooks", ASSET_NAME);
-			expect(fs.existsSync(asset)).toBe(true);
-			const second = await installClaudePreToolUse(project);
-			expect(second.ok).toBe(true);
-			expect(second.changed).toEqual([]);
-			const repaired = await repairClaudePreToolUse(project, {});
-			expect(repaired.changed).toEqual([]);
-		} finally {
-			fs.rmSync(base, { recursive: true, force: true });
-		}
 	});
 });

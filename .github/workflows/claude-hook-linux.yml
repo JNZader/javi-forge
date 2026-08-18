@@ -1,0 +1,106 @@
+name: Claude Hook Linux Runtime
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # Real-Linux verification gate for the POSIX secure-fs adapter, mirroring the
+  # `windows-latest` gate for the win32 adapter. Mocked-adapter unit tests cannot
+  # prove the fail-closed guarantees: only a real `getfacl`/`setfacl` toolchain,
+  # a real parent-chain gate and a real commit/rename path can.
+  #
+  # Two legs, both asserting:
+  #   with-acl    — `getfacl` present: clean install, idempotent re-run, and a
+  #                 real `setfacl` extended ACL refusing WITHOUT a package hint.
+  #   without-acl — `/usr/bin/getfacl` displaced (NOT a PATH-shadow stub: a stub
+  #                 that exists gets EXECUTED and produces `getfacl exit N`, a
+  #                 different refusal path than the ENOENT `getfacl absent` this
+  #                 leg must prove). The leg asserts the binary is genuinely
+  #                 unresolvable BEFORE running anything — a leg that runs while
+  #                 `getfacl` still resolves proves nothing and must fail.
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [with-acl, without-acl]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # BOTH legs need the `acl` package: the without-acl leg builds its
+      # extended-ACL fixture with `setfacl` and only displaces `getfacl`, so a
+      # leg that skipped the install would fail on a missing `setfacl` instead
+      # of proving the adapter-absent refusal path.
+      - name: Install the acl toolchain (both legs)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends acl
+
+      - name: Assert getfacl is present (with-acl leg)
+        if: matrix.leg == 'with-acl'
+        run: |
+          set -euo pipefail
+          if ! command -v getfacl; then
+            echo "::error::getfacl is absent on ubuntu-latest — the with-acl leg cannot prove the happy path"
+            exit 1
+          fi
+          command -v setfacl
+          getfacl --version
+
+      - name: Displace getfacl and assert it is unresolvable (without-acl leg)
+        if: matrix.leg == 'without-acl'
+        run: |
+          set -euo pipefail
+          sudo mv /usr/bin/getfacl /usr/bin/getfacl.disabled
+          if command -v getfacl; then
+            echo "::error::getfacl still resolves after displacement — this leg would prove nothing"
+            exit 1
+          fi
+          # setfacl must survive: the extended-ACL fixture still needs to be built.
+          command -v setfacl
+
+      # JAVI_FORGE_LINUX_INT=1 opts this suite into vitest collection: it is
+      # excluded by default so a plain `pnpm test` elsewhere never picks it up
+      # without the leg setup above.
+      - name: Validate real POSIX secure-fs adapter (with-acl leg)
+        if: matrix.leg == 'with-acl'
+        env:
+          JAVI_FORGE_LINUX_INT: "1"
+        run: |
+          set -euo pipefail
+          pnpm vitest run src/__integration__/secure-fs-posix.integration.test.ts
+
+      - name: Validate real POSIX secure-fs adapter (without-acl leg)
+        if: matrix.leg == 'without-acl'
+        env:
+          JAVI_FORGE_ACL_LEG: absent
+          JAVI_FORGE_LINUX_INT: "1"
+        run: |
+          set -euo pipefail
+          pnpm vitest run src/__integration__/secure-fs-posix.integration.test.ts
+
+      # Restore the displaced binary so any later step on this runner sees a
+      # normal host. Trivial and always-run: the leg fails loudly above if the
+      # displacement itself did not take.
+      - name: Restore getfacl (without-acl leg)
+        if: always() && matrix.leg == 'without-acl'
+        run: |
+          set -euo pipefail
+          if [ -f /usr/bin/getfacl.disabled ]; then
+            sudo mv /usr/bin/getfacl.disabled /usr/bin/getfacl
+          fi

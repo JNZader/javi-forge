@@ -1,8 +1,5 @@
-import path from "node:path";
-import fs from "fs-extra";
-import { SECURITY_HOOKS_DIR } from "../../../constants.js";
 import { setHookFeature } from "../../../lib/ci-config.js";
-import { ensureDirExists } from "../../../lib/common.js";
+import { installClaudePreToolUse } from "../../../lib/claude-hook-manager.js";
 import type { HookProfile } from "../../../types/index.js";
 import { report } from "../report.js";
 import type { StepFn } from "../types.js";
@@ -28,12 +25,16 @@ const PROFILE_PRESET: Record<
 };
 
 /**
- * Step 14: Scaffold security hooks (hook-consolidation S4 fold).
+ * Step 14: Scaffold security hooks (hook-consolidation S4 fold + SkillGuard 4a).
  *
  * - When options.securityHooks is false, reports "skipped".
  * - Otherwise:
- *   1. Copies the kiteguard-style runtime settings to `.claude/settings.json`
- *      when absent (KEPT — this is a real feature).
+ *   1. When `claudePreToolUseGuard` is set, installs the managed Claude
+ *      PreToolUse guard via the transactional `installClaudePreToolUse`
+ *      (SkillGuard Slice 4a). The legacy copy-if-absent
+ *      `claude-settings-security.json` scaffold is RETIRED — the managed
+ *      installer owns `.claude/settings.json` + the hook asset with proper
+ *      ownership markers.
  *   2. Merges the `hooks:` security sections for the selected reliability
  *      profile into `.javi-forge/ci.yaml` via `setHookFeature` (creating a
  *      minimal `version: 2` config when absent). The dispatcher composes these
@@ -44,7 +45,7 @@ const PROFILE_PRESET: Record<
  */
 export const stepSecurityHooks: StepFn = async (ctx) => {
 	const { projectDir, dryRun, onStep, options } = ctx;
-	const { securityHooks, hookProfile } = options;
+	const { securityHooks, hookProfile, claudePreToolUseGuard } = options;
 	const stepId = "security-hooks";
 	report(onStep, stepId, "Scaffold security hooks", "running");
 	try {
@@ -63,28 +64,35 @@ export const stepSecurityHooks: StepFn = async (ctx) => {
 		const preset = PROFILE_PRESET[profile];
 
 		if (dryRun) {
+			const guardNote = claudePreToolUseGuard
+				? " + install Claude PreToolUse guard"
+				: "";
 			report(
 				onStep,
 				stepId,
 				"Scaffold security hooks",
 				"done",
-				`dry-run: would merge ${profile} hooks preset + copy .claude/settings.json`,
+				`dry-run: would merge ${profile} hooks preset${guardNote}`,
 			);
 			return;
 		}
 
-		// 1. Copy the kiteguard-style runtime security settings to .claude/.
-		const settingsSrc = path.join(
-			SECURITY_HOOKS_DIR,
-			"claude-settings-security.json",
-		);
-		if (await fs.pathExists(settingsSrc)) {
-			const claudeDir = path.join(projectDir, ".claude");
-			await ensureDirExists(claudeDir);
-			const settingsDest = path.join(claudeDir, "settings.json");
-			if (!(await fs.pathExists(settingsDest))) {
-				await fs.copy(settingsSrc, settingsDest);
+		// 1. Install the managed Claude PreToolUse guard (transactional; owns
+		//    .claude/settings.json + the hook asset). Retires the legacy copy.
+		let guardNote = "";
+		if (claudePreToolUseGuard) {
+			const result = await installClaudePreToolUse(projectDir);
+			if (!result.ok) {
+				report(
+					onStep,
+					stepId,
+					"Scaffold security hooks",
+					"error",
+					`Claude guard install refused: ${result.errors.join("; ")}`,
+				);
+				return;
 			}
+			guardNote = "; Claude guard installed";
 		}
 
 		// 2. Merge the profile's security sections into .javi-forge/ci.yaml.
@@ -99,14 +107,16 @@ export const stepSecurityHooks: StepFn = async (ctx) => {
 			...preset.preCommit.map((f) => `pre-commit.${f}`),
 			...preset.prePush.map((f) => `pre-push.${f}`),
 		];
+		const presetNote =
+			merged.length > 0
+				? `${profile} preset: ${merged.join(", ")}`
+				: `${profile} preset: CI gate only (no security sections)`;
 		report(
 			onStep,
 			stepId,
 			"Scaffold security hooks",
 			"done",
-			merged.length > 0
-				? `${profile} preset: ${merged.join(", ")}`
-				: `${profile} preset: CI gate only (no security sections)`,
+			`${presetNote}${guardNote}`,
 		);
 	} catch (e) {
 		report(onStep, stepId, "Scaffold security hooks", "error", String(e));

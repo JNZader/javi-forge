@@ -24,12 +24,30 @@ vi.mock("../../../lib/ci-config.js", () => ({
 		.mockResolvedValue("/test/project/.javi-forge/ci.yaml"),
 }));
 
+// Slice 4a: the legacy copy-if-absent scaffold is replaced by the transactional
+// managed installer. Mock it so the step wiring is verified without real I/O.
+vi.mock("../../../lib/claude-hook-manager.js", () => ({
+	installClaudePreToolUse: vi.fn(),
+}));
+
 import fs from "fs-extra";
 import { setHookFeature } from "../../../lib/ci-config.js";
+import { installClaudePreToolUse } from "../../../lib/claude-hook-manager.js";
 import { stepSecurityHooks } from "./security.js";
 
 const mockedFs = vi.mocked(fs);
 const mockedSetHookFeature = vi.mocked(setHookFeature);
+const mockedInstall = vi.mocked(installClaudePreToolUse);
+
+function okResult(changed: string[] = ["/test/project/.claude/settings.json"]) {
+	return {
+		ok: true,
+		changed,
+		backups: [],
+		errors: [],
+		report: {} as never,
+	};
+}
 
 beforeEach(() => {
 	vi.resetAllMocks();
@@ -38,6 +56,7 @@ beforeEach(() => {
 	mockedSetHookFeature.mockResolvedValue(
 		"/test/project/.javi-forge/ci.yaml" as never,
 	);
+	mockedInstall.mockResolvedValue(okResult() as never);
 });
 
 function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
@@ -55,6 +74,7 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
 		claudeMd: true,
 		securityHooks: true,
 		hookProfile: "standard",
+		claudePreToolUseGuard: true,
 		codeGraph: false,
 		dockerDeploy: false,
 		dockerServiceName: "app",
@@ -94,7 +114,7 @@ describe("stepSecurityHooks (S4 fold)", () => {
 		expect(securityHookCopies).toHaveLength(0);
 	});
 
-	it("KEEPS the .claude/settings.json copy when it does not already exist", async () => {
+	it("never copies the legacy claude-settings-security.json scaffold", async () => {
 		mockedFs.pathExists.mockImplementation(async (p: unknown) =>
 			String(p).endsWith("settings.json") ? false : (true as never),
 		);
@@ -103,17 +123,60 @@ describe("stepSecurityHooks (S4 fold)", () => {
 		const settingsCopy = mockedFs.copy.mock.calls.find((c: unknown[]) =>
 			String(c[1]).endsWith("settings.json"),
 		);
-		expect(settingsCopy).toBeDefined();
+		expect(settingsCopy).toBeUndefined();
 	});
 
-	it("does NOT overwrite an existing .claude/settings.json", async () => {
-		mockedFs.pathExists.mockResolvedValue(true as never); // settings.json exists
-		await collect(makeOptions({ securityHooks: true }));
-
-		const settingsCopy = mockedFs.copy.mock.calls.find((c: unknown[]) =>
-			String(c[1]).endsWith("settings.json"),
+	it("installs the managed guard when claudePreToolUseGuard is true", async () => {
+		const steps = await collect(
+			makeOptions({ securityHooks: true, claudePreToolUseGuard: true }),
 		);
-		expect(settingsCopy).toBeUndefined();
+
+		expect(mockedInstall).toHaveBeenCalledWith("/test/project");
+		const step = steps.find(
+			(s) => s.id === "security-hooks" && s.status === "done",
+		);
+		expect(step).toBeDefined();
+		expect(step!.detail).toContain("Claude guard installed");
+	});
+
+	it("installs the guard even for the minimal profile", async () => {
+		await collect(
+			makeOptions({
+				securityHooks: true,
+				claudePreToolUseGuard: true,
+				hookProfile: "minimal",
+			}),
+		);
+
+		expect(mockedInstall).toHaveBeenCalledWith("/test/project");
+	});
+
+	it("reports error when the guard install refuses", async () => {
+		mockedInstall.mockResolvedValue({
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: ["refuse asset in state edited-managed"],
+			report: {} as never,
+		} as never);
+
+		const steps = await collect(
+			makeOptions({ securityHooks: true, claudePreToolUseGuard: true }),
+		);
+
+		const step = steps.find(
+			(s) => s.id === "security-hooks" && s.status === "error",
+		);
+		expect(step).toBeDefined();
+		expect(step!.detail).toContain("refuse asset in state edited-managed");
+	});
+
+	it("does NOT install the guard when claudePreToolUseGuard is false", async () => {
+		await collect(
+			makeOptions({ securityHooks: true, claudePreToolUseGuard: false }),
+		);
+
+		expect(mockedInstall).not.toHaveBeenCalled();
 	});
 
 	it("strict profile merges secrets + permissions + deps", async () => {
@@ -151,17 +214,24 @@ describe("stepSecurityHooks (S4 fold)", () => {
 		expect(mockedSetHookFeature).not.toHaveBeenCalled();
 	});
 
-	it("dry-run merges nothing and copies nothing", async () => {
+	it("dry-run merges nothing, copies nothing, and installs no guard", async () => {
 		const steps = await collect(
-			makeOptions({ securityHooks: true, hookProfile: "strict", dryRun: true }),
+			makeOptions({
+				securityHooks: true,
+				hookProfile: "strict",
+				claudePreToolUseGuard: true,
+				dryRun: true,
+			}),
 		);
 		const step = steps.find(
 			(s) => s.id === "security-hooks" && s.status === "done",
 		);
 		expect(step).toBeDefined();
 		expect(step!.detail).toContain("dry-run");
+		expect(step!.detail).toContain("guard");
 		expect(mockedSetHookFeature).not.toHaveBeenCalled();
 		expect(mockedFs.copy).not.toHaveBeenCalled();
+		expect(mockedInstall).not.toHaveBeenCalled();
 	});
 
 	it("reports done with the merged features in the detail", async () => {

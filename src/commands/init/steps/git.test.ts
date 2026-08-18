@@ -67,6 +67,7 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
 		claudeMd: true,
 		securityHooks: true,
 		hookProfile: "standard",
+		claudePreToolUseGuard: false,
 		codeGraph: false,
 		dockerDeploy: false,
 		dockerServiceName: "app",

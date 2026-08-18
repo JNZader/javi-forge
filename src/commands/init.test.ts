@@ -136,6 +136,10 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
 		claudeMd: true,
 		securityHooks: true,
 		hookProfile: "standard",
+		// Guard install is unit-tested in security.test.ts with a mocked
+		// installer; keep it off here so this orchestration test does not invoke
+		// the real transactional installer against a non-existent project dir.
+		claudePreToolUseGuard: false,
 		codeGraph: false,
 		dockerDeploy: false,
 		dockerServiceName: "app",

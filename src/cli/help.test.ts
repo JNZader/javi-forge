@@ -121,4 +121,11 @@ describe("help — hooks command", () => {
 		expect(HOOKS_HELP_TEXT).toContain("pre-commit");
 		expect(HOOKS_HELP_TEXT).toContain("pre-push");
 	});
+
+	it("HOOKS_HELP_TEXT documents the claude guard subcommands and --force", () => {
+		expect(HOOKS_HELP_TEXT).toContain("install claude");
+		expect(HOOKS_HELP_TEXT).toContain("doctor claude");
+		expect(HOOKS_HELP_TEXT).toContain("repair claude");
+		expect(HOOKS_HELP_TEXT).toContain("--force");
+	});
 });

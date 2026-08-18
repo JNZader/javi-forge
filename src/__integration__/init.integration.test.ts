@@ -64,6 +64,7 @@ function makeOptions(overrides: Partial<InitOptions> = {}): InitOptions {
 		// renames break typecheck instead of slipping through `as Partial`
 		// casts in individual tests (round-8 review finding).
 		hookProfile: "standard",
+		claudePreToolUseGuard: false,
 		codeGraph: false,
 		dockerDeploy: false,
 		dockerServiceName: "app",

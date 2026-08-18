@@ -169,23 +169,33 @@ export const CI_HELP_TEXT = `
 export const HOOKS_HELP_TEXT = `
   Usage
     $ javi-forge hooks run <pre-commit|pre-push>
+    $ javi-forge hooks <install|doctor|repair> claude [--force]
 
     Run the sections enabled under hooks: in .javi-forge/ci.yaml, in a fixed
     cheap→expensive order, fail-fast. With no hooks: config the default is the
     quick native CI gate (setup + lint + compile + gates — no tests, no coverage).
 
   Subcommands
-    run pre-commit  Run the composed pre-commit sections
-    run pre-push    Run the composed pre-push sections
+    run pre-commit    Run the composed pre-commit sections
+    run pre-push      Run the composed pre-push sections
+    install claude    Install the managed Claude PreToolUse guard (.claude/)
+    doctor claude     Report Claude PreToolUse guard health (informational)
+    repair claude     Repair the managed guard; --force overwrites edited assets
 
   Notes
     A blocking section failure exits non-zero and blocks the commit/push.
     A broken .javi-forge/ci.yaml exits 1 (fail-closed — never skips a gate).
     To skip: git commit --no-verify   (pre-push: git push --no-verify)
+    doctor claude is informational (always exits 0); install/repair exit 0 on
+    success, non-zero on refusal/failure. Use repair claude --force to overwrite
+    a locally edited managed asset.
 
   Examples
     $ javi-forge hooks run pre-commit
     $ javi-forge hooks run pre-push
+    $ javi-forge hooks install claude
+    $ javi-forge hooks doctor claude
+    $ javi-forge hooks repair claude --force
 `;
 
 export const FLAGS_SCHEMA = {

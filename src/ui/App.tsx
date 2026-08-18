@@ -167,6 +167,9 @@ export default function App({
 				claudeMd: opts.claudeMd,
 				securityHooks: opts.securityHooks,
 				hookProfile: opts.hookProfile,
+				// Derived from securityHooks alone — ALL profiles incl. Minimal
+				// install the managed guard when security hooks are enabled.
+				claudePreToolUseGuard: opts.securityHooks,
 				codeGraph: opts.codeGraph,
 				localAi: opts.localAi,
 				dockerDeploy: false,

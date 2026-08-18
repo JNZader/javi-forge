@@ -1,3 +1,9 @@
+## [1.35.1](https://github.com/JNZader/javi-forge/compare/v1.35.0...v1.35.1) (2026-08-18)
+
+### Bug Fixes
+
+* **secure-fs:** narrow POSIX ancestor ACL gate to path-endangering only (JD-P-001) [size:exception] ([f9e6ffa](https://github.com/JNZader/javi-forge/commit/f9e6ffaca7f31394debc489d417025f08c0dde88)), closes [#effective](https://github.com/JNZader/javi-forge/issues/effective)
+
 ## [1.35.0](https://github.com/JNZader/javi-forge/compare/v1.34.1...v1.35.0) (2026-08-18)
 
 ### Features

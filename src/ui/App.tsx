@@ -9,6 +9,7 @@ import type {
 	MemoryOption,
 	Stack,
 } from "../types/index.js";
+import { buildInitOptions } from "./build-init-options.js";
 import CISelector from "./CISelector.js";
 import Header from "./Header.js";
 import HookProfileSelector from "./HookProfileSelector.js";
@@ -154,29 +155,15 @@ export default function App({
 		setStage("running");
 
 		await initProject(
-			{
+			buildInitOptions(opts, {
 				projectName,
 				projectDir,
 				stack,
 				ciProvider,
 				memory,
-				aiSync: opts.aiSync,
-				sdd: opts.sdd,
-				ghagga: opts.ghagga,
-				contextDir: opts.contextDir,
-				claudeMd: opts.claudeMd,
-				securityHooks: opts.securityHooks,
-				hookProfile: opts.hookProfile,
-				// Derived from securityHooks alone — ALL profiles incl. Minimal
-				// install the managed guard when security hooks are enabled.
-				claudePreToolUseGuard: opts.securityHooks,
-				codeGraph: opts.codeGraph,
-				localAi: opts.localAi,
-				dockerDeploy: false,
-				dockerServiceName: "app",
 				mock: presetMock,
 				dryRun,
-			},
+			}),
 			(step) =>
 				setSteps((prev) => {
 					const idx = prev.findIndex((s) => s.id === step.id);

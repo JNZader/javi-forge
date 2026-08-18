@@ -1,3 +1,9 @@
+## [1.32.0](https://github.com/JNZader/javi-forge/compare/v1.31.0...v1.32.0) (2026-08-18)
+
+### Features
+
+* **hooks:** CLI dispatch + init wiring for the Claude PreToolUse guard (Slice 4a) [size:exception] ([7583a20](https://github.com/JNZader/javi-forge/commit/7583a20209e1cf6577298ae8cc7b4846bcbf4d07))
+
 ## [1.31.0](https://github.com/JNZader/javi-forge/compare/v1.30.1...v1.31.0) (2026-08-17)
 
 ### Features

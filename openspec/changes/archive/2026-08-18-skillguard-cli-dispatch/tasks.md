@@ -22,11 +22,11 @@ count alone.
 
 ## 0. Foundation (blocks compilation of everything else)
 
-- [ ] **T0.1** — Add `claudePreToolUseGuard: boolean` to `InitOptions` in
+- [x] **T0.1** — Add `claudePreToolUseGuard: boolean` to `InitOptions` in
       `src/types/index.ts` (after `securityHooks`/`hookProfile`, :17-38).
       No test — pure type addition; downstream tests (T5, T6) will fail to
       compile without it, which is the intended forcing function.
-- [ ] **T0.2** — Update the `makeOptions()` fixture in
+- [x] **T0.2** — Update the `makeOptions()` fixture in
       `src/commands/init/steps/security.test.ts` (:43-65) to include
       `claudePreToolUseGuard: true` in the defaults (override per-test where a
       scenario needs it `false`). Required so the existing 10 passing tests keep
@@ -35,7 +35,7 @@ count alone.
 ## 1. `src/commands/claude-hooks.ts` — new command module
 
 RED:
-- [ ] **T1.1** — Create `src/commands/claude-hooks.test.ts` (model on
+- [x] **T1.1** — Create `src/commands/claude-hooks.test.ts` (model on
       `src/cli/dispatch/hooks.test.ts`'s inject-fake-deps + capture
       log/error/exit harness). Cover, injecting fake `install`/`doctor`/`repair`
       deps via `ClaudeHookCmdDeps`:
@@ -60,7 +60,7 @@ RED:
       that import failure is the RED state.
 
 GREEN:
-- [ ] **T1.2** — Create `src/commands/claude-hooks.ts`:
+- [x] **T1.2** — Create `src/commands/claude-hooks.ts`:
       - `export type ClaudeHookSub = "install" | "doctor" | "repair"`
       - `export interface ClaudeHookCmdDeps { install?; doctor?; repair?; log?; logError?; }`
         defaulting each to the real `installClaudePreToolUse` /
@@ -84,7 +84,7 @@ GREEN:
 ## 2. `src/cli/dispatch/hooks.tsx` — routing
 
 RED:
-- [ ] **T2.1** — Extend `src/cli/dispatch/hooks.test.ts`: add
+- [x] **T2.1** — Extend `src/cli/dispatch/hooks.test.ts`: add
       `vi.mock("../../commands/claude-hooks.js", () => ({ runClaudeHookCommand: vi.fn() }))`
       alongside the existing `runHook` mock. Add cases:
       - `hooks install claude` → `runClaudeHookCommand` called with
@@ -103,7 +103,7 @@ RED:
       install/doctor/repair yet.
 
 GREEN:
-- [ ] **T2.2** — Modify `src/cli/dispatch/hooks.tsx`:
+- [x] **T2.2** — Modify `src/cli/dispatch/hooks.tsx`:
       - Insert the `install|doctor|repair` branch immediately after the `run`
         block (:29) and before the fallthrough (:31-34), per design's Data Flow
         snippet: check `sub = cli.input[1]`, if one of the three and
@@ -117,7 +117,7 @@ GREEN:
 ## 3. `src/cli/help.ts` — help text
 
 RED:
-- [ ] **T3.1** — Add a case to `hooks.test.ts` (or a small dedicated
+- [x] **T3.1** — Add a case to `hooks.test.ts` (or a small dedicated
       `help.test.ts` case if one already covers `HOOKS_HELP_TEXT`) asserting
       `HOOKS_HELP_TEXT` contains `install claude`, `doctor claude`,
       `repair claude`, and `--force`. (Spec Requirement "Help text documents the
@@ -126,14 +126,14 @@ RED:
       `run`.
 
 GREEN:
-- [ ] **T3.2** — Extend `HOOKS_HELP_TEXT` in `src/cli/help.ts` (:169-189) with
+- [x] **T3.2** — Extend `HOOKS_HELP_TEXT` in `src/cli/help.ts` (:169-189) with
       the three new subcommands and `--force` under `Subcommands`/`Examples`
       (the `force` flag already exists in `FLAGS_SCHEMA`, :214 — no schema
       change needed). Run T3.1 → confirm GREEN.
 
 ## 4. `src/ui/App.tsx` — derive the opt-in (mechanical, no dedicated test file)
 
-- [ ] **T4.1** — At the `initProject` call in `runInit` (:156-176), add
+- [x] **T4.1** — At the `initProject` call in `runInit` (:156-176), add
       `claudePreToolUseGuard: opts.securityHooks` to the constructed
       `InitOptions` object. Derivation is `opts.securityHooks` ALONE — not
       gated on `hookProfile` (per design decision: Minimal profile installs the
@@ -148,7 +148,7 @@ GREEN:
 ## 5. `src/commands/init/steps/security.ts` — install wiring
 
 RED:
-- [ ] **T5.1** — Extend `src/commands/init/steps/security.test.ts` (after T0.2's
+- [x] **T5.1** — Extend `src/commands/init/steps/security.test.ts` (after T0.2's
       fixture update). Add:
       - `vi.mock("../../../lib/claude-hook-manager.js", () => ({ installClaudePreToolUse: vi.fn() }))`
         and import the mocked fn.
@@ -175,7 +175,7 @@ RED:
       copy-if-absent implementation.
 
 GREEN:
-- [ ] **T5.2** — Modify `src/commands/init/steps/security.ts`:
+- [x] **T5.2** — Modify `src/commands/init/steps/security.ts`:
       - Delete the copy-if-absent legacy branch (:76-88, the `settingsSrc`/
         `fs.pathExists`/`fs.copy` block).
       - When `options.claudePreToolUseGuard` is true (new destructure from
@@ -198,18 +198,18 @@ GREEN:
 
 ## 6. Full-suite verification
 
-- [ ] **T6.1** — `pnpm validate` (typecheck + typecheck:test + lint + test) —
+- [x] **T6.1** — `pnpm validate` (typecheck + typecheck:test + lint + test) —
       all green, including every regression case listed in T2.1/T5.1.
-- [ ] **T6.2** — `pnpm test:coverage` — confirm 85% lines / 80% branches on the
+- [x] **T6.2** — `pnpm test:coverage` — confirm 85% lines / 80% branches on the
       new/changed files (`claude-hooks.ts` is a brand-new module and needs its
       own coverage, not just a ride on existing suite totals).
-- [ ] **T6.3** — Manual smoke: `node dist/... hooks --help` shows all four
+- [x] **T6.3** — Manual smoke: `node dist/... hooks --help` shows all four
       subcommand families (or `pnpm build && node bin/... hooks --help` per
       repo's actual dev-run command) — confirms T3.2 renders correctly outside
       the test harness. `hooks install claude` / `hooks doctor claude` /
       `hooks repair claude` against a scratch dir — confirms exit codes and
       that `doctor` never prints `RUNNABLE`.
-- [ ] **T6.4** — Confirm no leftover references to
+- [x] **T6.4** — Confirm no leftover references to
       `templates/security-hooks/claude-settings-security.json` as an init-time
       copy source (grep for `claude-settings-security.json` outside
       `security.test.ts`'s now-updated fixtures/comments and outside the

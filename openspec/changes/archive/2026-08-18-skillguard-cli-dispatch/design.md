@@ -62,7 +62,7 @@ alone → help+0, `hooks bogus` typo → not one of the four → fallthrough hel
 |---|---|---|---|
 | init opt-in surface | Derive `claudePreToolUseGuard` from `securityHooks` at the one call site (all profiles incl. Minimal) | New OptionSelector checkbox | Zero UI-shape churn; guard ships with security hooks regardless of profile |
 | Honest execution stub | Command **renderer** prints `execution: inconclusive`; library struct unchanged | Add `execution` field to `ClaudeHookDoctorReport` now | Keeps library untouched; reserved slot (:97) stays for 4b; no false RUNNABLE |
-| doctor exit code | 0 = healthy, 1 = unhealthy; exit **2 reserved** for 4b INCONCLUSIVE | Emit 2 in 4a | 4a cannot determine effective execution — must not claim exit-2 semantics |
+| doctor exit code | **0 always** (informational, not a gate — per spec; unhealthy verdict is printed, not signalled by exit); exit **2 reserved** for 4b INCONCLUSIVE | unhealthy→1 (stale) / emit 2 in 4a | doctor is diagnostic; 4a cannot determine effective execution — must not claim exit-2 |
 | command test seams | `runClaudeHookCommand(sub, dir, opts, deps={})` injecting the 3 lib fns + log/logError | Direct import only | Mirrors `RunHookDeps` (`hooks.ts:301`); console-capture harness reuse |
 
 ## Data Flow
@@ -113,8 +113,8 @@ Exit-code mapping:
 |---|---|---|
 | install / repair claude | `result.ok === true` | 0 |
 | install / repair claude | `result.ok === false` (errors/refusal) | 1 |
-| doctor claude | `report.healthy === true` | 0 |
-| doctor claude | `report.healthy === false` | 1 |
+| doctor claude | any (healthy or unhealthy) | 0 (informational) |
+| doctor claude | (unhealthy verdict printed, exit still 0) | 0 |
 | any | target ≠ `claude` | 1 |
 | — | (INCONCLUSIVE effective-execution) | **2 — reserved for 4b, never emitted in 4a** |
 
@@ -122,7 +122,7 @@ Exit-code mapping:
 
 | Layer | What | Approach |
 |---|---|---|
-| Command | install/repair ok→0 & fail→1; doctor healthy→0 & unhealthy→1; doctor prints `inconclusive`, never `RUNNABLE`; force forwarded | New `claude-hooks.test.ts`, inject fake lib fns, capture log/err/exit (model on `hooks.test.ts`) |
+| Command | install/repair ok→0 & fail→1; doctor exits 0 always (healthy & unhealthy); doctor prints `inconclusive`, never `RUNNABLE`; force forwarded | New `claude-hooks.test.ts`, inject fake lib fns, capture log/err/exit (model on `hooks.test.ts`) |
 | Dispatch | install/doctor/repair route to command & exit with its code; wrong target→1; `hooks run` unchanged; `hooks bogus`→help+1; `hooks`→help+0 | Extend `hooks.test.ts`, mock `claude-hooks.js` |
 | Init wiring | legacy copy gone; guard true (incl. Minimal)→installer called; securityHooks off→skipped; dry-run never installs | Extend `security.test.ts`, inject/mock `installClaudePreToolUse` |
 

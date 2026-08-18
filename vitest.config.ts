@@ -6,7 +6,19 @@ export default defineConfig({
 		// Keep vitest out of agent worktrees under .claude/worktrees — the default
 		// discovery sweeps them and a plain `pnpm test` picks up phantom copies of
 		// the suite from unrelated in-flight branches.
-		exclude: [...configDefaults.exclude, "**/.claude/**"],
+		// The real-Linux POSIX integration suite needs a `getfacl`/`setfacl`
+		// toolchain and a displaced-binary leg that only its dedicated workflow
+		// sets up. A plain `pnpm test` (ci.yml coverage, release.yml, the
+		// `node:22-slim` ci-local container where acl is absent) would collect it
+		// and hard-fail with no leg setup, so collection is opt-in via
+		// JAVI_FORGE_LINUX_INT=1 — which `claude-hook-linux.yml` sets on both legs.
+		exclude: [
+			...configDefaults.exclude,
+			"**/.claude/**",
+			...(process.env.JAVI_FORGE_LINUX_INT === "1"
+				? []
+				: ["**/secure-fs-posix.integration.test.ts"]),
+		],
 		environment: "node",
 		pool: "forks",
 		// R3-003: a committed `test.only`/`describe.only` must fail CI AND local

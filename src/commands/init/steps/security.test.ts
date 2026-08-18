@@ -33,6 +33,7 @@ vi.mock("../../../lib/claude-hook-manager.js", () => ({
 import fs from "fs-extra";
 import { setHookFeature } from "../../../lib/ci-config.js";
 import { installClaudePreToolUse } from "../../../lib/claude-hook-manager.js";
+import { ACL_PACKAGE_REMEDIATION } from "../../../lib/secure-refusal-remediation.js";
 import { stepSecurityHooks } from "./security.js";
 
 const mockedFs = vi.mocked(fs);
@@ -151,12 +152,48 @@ describe("stepSecurityHooks (S4 fold)", () => {
 		expect(mockedInstall).toHaveBeenCalledWith("/test/project");
 	});
 
-	it("reports error when the guard install refuses", async () => {
+	it("reports error when the guard install refuses AND still merges the profile", async () => {
+		// The guard outcome and the hook-profile merge are INDEPENDENT: a refusal
+		// is reported (status stays "error", never downgraded to "done") but it no
+		// longer aborts the step, so the secrets/deps wiring is not silently lost.
 		mockedInstall.mockResolvedValue({
 			ok: false,
 			changed: [],
 			backups: [],
 			errors: ["refuse asset in state edited-managed"],
+			report: {} as never,
+		} as never);
+
+		const steps = await collect(
+			makeOptions({
+				securityHooks: true,
+				claudePreToolUseGuard: true,
+				hookProfile: "strict",
+			}),
+		);
+
+		expect(mergedFeatures()).toEqual([
+			"pre-commit.secrets",
+			"pre-commit.permissions",
+			"pre-push.deps",
+		]);
+		const errorSteps = steps.filter(
+			(s) => s.id === "security-hooks" && s.status === "error",
+		);
+		expect(errorSteps).toHaveLength(1);
+		const step = errorSteps[0]!;
+		expect(step.detail).toContain("refuse asset in state edited-managed");
+		expect(step.detail).toContain("pre-commit.secrets");
+		expect(step.detail).toContain("pre-push.deps");
+		expect(step.detail).not.toContain("Claude guard installed");
+	});
+
+	it("names the acl remediation when the refusal is adapter-absent", async () => {
+		mockedInstall.mockResolvedValue({
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: ["acl /test/project: getfacl absent"],
 			report: {} as never,
 		} as never);
 
@@ -168,7 +205,73 @@ describe("stepSecurityHooks (S4 fold)", () => {
 			(s) => s.id === "security-hooks" && s.status === "error",
 		);
 		expect(step).toBeDefined();
-		expect(step!.detail).toContain("refuse asset in state edited-managed");
+		expect(step!.detail).toContain(ACL_PACKAGE_REMEDIATION);
+		expect(mergedFeatures()).toEqual(["pre-commit.secrets", "pre-push.deps"]);
+	});
+
+	it("still merges the profile when the guard installer throws", async () => {
+		mockedInstall.mockRejectedValue(new Error("boom"));
+
+		const steps = await collect(
+			makeOptions({ securityHooks: true, claudePreToolUseGuard: true }),
+		);
+
+		expect(mergedFeatures()).toEqual(["pre-commit.secrets", "pre-push.deps"]);
+		const step = steps.find(
+			(s) => s.id === "security-hooks" && s.status === "error",
+		);
+		expect(step).toBeDefined();
+		expect(step!.detail).toContain("boom");
+		expect(step!.detail).toContain("pre-commit.secrets");
+	});
+
+	it("keeps the captured guard refusal when the profile merge THROWS", async () => {
+		// Both outcomes failed: the merge throw must not swallow the captured
+		// refusal (+ its remediation). The single terminal report names BOTH.
+		mockedInstall.mockResolvedValue({
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: ["acl /test/project: getfacl absent"],
+			report: {} as never,
+		} as never);
+		mockedSetHookFeature.mockRejectedValue(new Error("ci.yaml unwritable"));
+
+		const steps = await collect(
+			makeOptions({ securityHooks: true, claudePreToolUseGuard: true }),
+		);
+
+		const step = steps.find(
+			(s) => s.id === "security-hooks" && s.status === "error",
+		);
+		expect(step).toBeDefined();
+		expect(step!.detail).toContain("getfacl absent");
+		expect(step!.detail).toContain(ACL_PACKAGE_REMEDIATION);
+		expect(step!.detail).toContain("ci.yaml unwritable");
+	});
+
+	it("merges the minimal preset too when the guard refuses (no sections)", async () => {
+		mockedInstall.mockResolvedValue({
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: ["refuse asset in state edited-managed"],
+			report: {} as never,
+		} as never);
+
+		const steps = await collect(
+			makeOptions({
+				securityHooks: true,
+				claudePreToolUseGuard: true,
+				hookProfile: "minimal",
+			}),
+		);
+
+		expect(mockedSetHookFeature).not.toHaveBeenCalled();
+		const step = steps.find(
+			(s) => s.id === "security-hooks" && s.status === "error",
+		);
+		expect(step!.detail).toContain("CI gate only");
 	});
 
 	it("does NOT install the guard when claudePreToolUseGuard is false", async () => {

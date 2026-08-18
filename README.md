@@ -375,6 +375,8 @@ npx javi-forge doctor
 ## Requirements
 
 - **Node.js** >= 22 (required by ink 7; previous versions ran on >= 18)
+- **Linux only** — the `acl` package (provides `getfacl`) is required to install or repair the Claude PreToolUse guard: the transactional installer proves every controlling directory carries no extended ACL, and refuses fail-closed when `getfacl` is unresolvable. Install with `apt install acl`, `apk add acl`, or `dnf install acl` (slim container images usually omit it). An already-installed guard keeps working without it — `javi-forge hooks doctor claude` reports the capability as its own row.
+- **`node` on `PATH`** — Claude Code spawns the guard in exec form, so `node` must resolve on the `PATH` Claude Code itself uses, not only inside javi-forge.
 
 ## Ecosystem
 

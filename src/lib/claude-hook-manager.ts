@@ -8,6 +8,7 @@
  * Slice-3 seams — Slice 3 GROWS this file, it does not relocate this code.
  */
 
+import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import os from "node:os";
@@ -21,6 +22,7 @@ import {
 	buildManagedContainer,
 	type ClaudeHookComponentState,
 	classifySettingsEntry,
+	type FlagVerdict,
 	isPlainObject,
 	LEGACY_FILE_SHA256,
 	type LegacyCohortExcisionPlan,
@@ -35,12 +37,19 @@ import {
 	scanExecutionFlags,
 } from "./claude-hook-settings.js";
 import { safeReadFile } from "./safe-read.js";
-import { selectSecureFs } from "./secure-fs-posix.js";
+import {
+	ACL_DETAIL,
+	type AclCapability,
+	probeAclCapability,
+	type SpawnFn,
+	selectSecureFs,
+} from "./secure-fs-posix.js";
 import {
 	type PlatformSecureFs,
 	runTransaction,
 	type TransactionComponent,
 } from "./secure-fs-transaction.js";
+import { remediationForRefusal } from "./secure-refusal-remediation.js";
 
 /** 1 MiB read budget, shared with the runtime's stdin envelope. */
 const ASSET_MAX_BYTES = 1024 * 1024;
@@ -97,6 +106,20 @@ export interface ClaudeHookDoctorReport {
 	hostResidual: string;
 	remediation: readonly string[];
 	execution: ExecutionReport;
+	/**
+	 * Host INSTALL-capability, reported as its own section. It answers "could
+	 * install/repair run here?", NOT "will the installed guard fire?" — so it
+	 * never feeds `execution`, `healthy`, or the exit code. A current, firing
+	 * guard on an image without `getfacl` stays `runnable`.
+	 */
+	installCapability: { acl: AclCapability; remediation?: string };
+	/**
+	 * The node-on-PATH HEURISTIC row, always present so an absence is never
+	 * silent. It is DISTINCT from `node` (which measures this process'
+	 * `process.versions.node`) and it never inflates confidence: a `resolved`
+	 * row clears no blocker and no unknown source.
+	 */
+	nodeOnPath: NodeOnPathProbe;
 }
 
 // The single non-`safe-read` fs surface, confined to one helper.
@@ -330,6 +353,79 @@ export interface ExecutionReport {
 	residual: string[];
 }
 
+/**
+ * Whether a `node` executable resolves on THIS process' PATH, independently of
+ * `process.versions.node`. It is a HEURISTIC proxy for the PATH Claude Code will
+ * use to spawn the exec-form handler — never proof of it.
+ */
+export type NodeOnPathProbe =
+	| { status: "resolved"; version: string; major: number }
+	| { status: "absent" }
+	| { status: "unknown"; detail: string };
+
+const NODE_PROBE_TIMEOUT_MS = 2000;
+const NODE_PROBE_MAX_BUFFER = 64 * 1024;
+const NODE_VERSION_LINE = /^v(\d+)\.\d+\.\d+/;
+
+/**
+ * Bounded `node --version` spawn. argv only (never a shell string), `LC_ALL=C`,
+ * and a hard timeout — mirroring the ACL adapter's spawn discipline. It is
+ * read-only: it starts a process and reads its stdout, and touches no path.
+ */
+const defaultNodeSpawn: SpawnFn = (cmd, args) =>
+	new Promise((resolve) => {
+		execFile(
+			cmd,
+			args,
+			{
+				timeout: NODE_PROBE_TIMEOUT_MS,
+				maxBuffer: NODE_PROBE_MAX_BUFFER,
+				encoding: "utf8",
+				env: { ...process.env, LC_ALL: "C", LANG: "C" },
+			},
+			(error, stdout) => {
+				if (!error) return resolve({ code: 0, stdout: stdout ?? "" });
+				const e = error as NodeJS.ErrnoException & {
+					killed?: boolean;
+					signal?: NodeJS.Signals | null;
+				};
+				if (e.code === "ENOENT") {
+					return resolve({ spawnError: true, code: null, stdout: "" });
+				}
+				if (e.killed || e.signal === "SIGTERM") {
+					return resolve({ timedOut: true, code: null, stdout: stdout ?? "" });
+				}
+				const code = typeof e.code === "number" ? e.code : 1;
+				return resolve({ code, stdout: stdout ?? "" });
+			},
+		);
+	});
+
+/**
+ * Resolve and run `node --version` from this process' PATH. A spawn ENOENT is
+ * `absent` (near-certainly a dead exec-form guard); a timeout, non-zero exit, or
+ * unparseable banner is honest ignorance (`unknown`) and NEVER a fabricated
+ * version.
+ */
+export async function probeNodeOnPath(
+	spawn: SpawnFn = defaultNodeSpawn,
+): Promise<NodeOnPathProbe> {
+	const res = await spawn("node", ["--version"]);
+	if (res.spawnError) return { status: "absent" };
+	if (res.timedOut) {
+		return { status: "unknown", detail: "node --version timeout" };
+	}
+	if (res.code !== 0) {
+		return { status: "unknown", detail: `node --version exit ${res.code}` };
+	}
+	const banner = res.stdout.trim();
+	const match = NODE_VERSION_LINE.exec(banner);
+	if (!match) {
+		return { status: "unknown", detail: "node --version output unparseable" };
+	}
+	return { status: "resolved", version: banner, major: Number(match[1]) };
+}
+
 /** Injectable seams so units never hard-read real `/etc` or `/Library`. */
 export interface ExecutionProbeEnv {
 	platform?: NodeJS.Platform;
@@ -341,12 +437,19 @@ export interface ExecutionProbeEnv {
 	managedDropInDir?: string | null;
 	/** Override the drop-in directory listing (defaults to a confined readdir). */
 	listDir?: (dir: string) => Promise<string[]>;
+	/** Injectable node-on-PATH heuristic (defaults to the real bounded probe). */
+	nodeProbe?: () => Promise<NodeOnPathProbe>;
 }
 
 /** Per-source read outcome; never promotes an unobservable source to clear. */
 export type ExecutionSourceProbe =
 	| { kind: "clear" }
-	| { kind: "blocking"; flag: "disableAllHooks" | "allowManagedHooksOnly" }
+	| {
+			kind: "blocking";
+			flag: "disableAllHooks" | "allowManagedHooksOnly";
+			/** Present only for a PRESENT-but-INVALID value; names the observed shape. */
+			detail?: string;
+	  }
 	| { kind: "unknown"; reason: string };
 
 /** The already-computed component states the guard-currency check consumes. */
@@ -418,11 +521,24 @@ export async function probeExecutionSource(
 	}
 
 	const flags = scanExecutionFlags(parsed);
-	if (flags.disableAllHooks) {
-		return { kind: "blocking", flag: "disableAllHooks" };
+	const blocking = (
+		flag: "disableAllHooks" | "allowManagedHooksOnly",
+		verdict: FlagVerdict,
+	): ExecutionSourceProbe => ({
+		kind: "blocking",
+		flag,
+		// An INVALID value is blocking per the documented "invalid ⇒ true"
+		// semantics; the shape is surfaced so an operator can see why (say) the
+		// string "false" did not clear the flag.
+		...(verdict.set && verdict.reason === "invalid"
+			? { detail: `invalid value: ${verdict.shape} → treated as true` }
+			: {}),
+	});
+	if (flags.disableAllHooks.set) {
+		return blocking("disableAllHooks", flags.disableAllHooks);
 	}
-	if (flags.allowManagedHooksOnly) {
-		return { kind: "blocking", flag: "allowManagedHooksOnly" };
+	if (flags.allowManagedHooksOnly.set) {
+		return blocking("allowManagedHooksOnly", flags.allowManagedHooksOnly);
 	}
 	return { kind: "clear" };
 }
@@ -466,6 +582,7 @@ export async function listManagedDropIns(
 const EXECUTION_RESIDUAL: readonly string[] = [
 	"server-delivered managed policy can disable hooks and is not observable from local files",
 	"session safe-mode (--safe-mode / CLAUDE_CODE_SAFE_MODE) in the diagnosed session is not observable from this process",
+	'the installed hook is exec-form (command: "node"): node is resolved from Claude Code\'s PATH, which this process cannot observe — the node-on-PATH row is a heuristic proxy, never proof the guard will spawn',
 ];
 
 function isSafeModeTruthy(env: NodeJS.ProcessEnv): boolean {
@@ -553,8 +670,12 @@ export async function probeExecution(
 			continue;
 		}
 		// `allowManagedHooksOnly` is inert outside a managed source (hooks merge).
+		// An INVALID value there is inert for the same reason: the flag has no
+		// authority outside a managed source, so it gains none by being malformed.
 		if (probe.flag === "allowManagedHooksOnly" && !spec.managed) continue;
-		blockers.push(`policy:${probe.flag}@${spec.label}`);
+		blockers.push(
+			`policy:${probe.flag}@${spec.label}${probe.detail ? ` (${probe.detail})` : ""}`,
+		);
 	}
 	if (dropInDirUnknown) unknownSources.push(dropInDirUnknown);
 
@@ -564,6 +685,28 @@ export async function probeExecution(
 	}
 	if (componentStates.settings !== "managed-current") {
 		blockers.push(`guard:settings=${componentStates.settings}`);
+	}
+
+	// node-on-PATH heuristic (design Decision 2). The installed handler is
+	// exec-form (`command: "node"`), so a `node` that does not resolve means the
+	// guard NEVER fires — fail-closed, with the heuristic labelled in the entry.
+	// A SUCCESSFUL probe contributes NOTHING: it clears no blocker, removes no
+	// unknown source, and adds no confidence, because this process' PATH only
+	// proxies the PATH Claude Code will use.
+	const nodeOnPath = await (env.nodeProbe ?? probeNodeOnPath)();
+	if (nodeOnPath.status === "absent") {
+		blockers.push("runtime:node-not-on-PATH (heuristic: this process' PATH)");
+	} else if (
+		nodeOnPath.status === "resolved" &&
+		nodeOnPath.major < NODE_MINIMUM_MAJOR
+	) {
+		blockers.push(
+			`runtime:node-on-PATH v${nodeOnPath.major} (<${NODE_MINIMUM_MAJOR}, heuristic)`,
+		);
+	} else if (nodeOnPath.status === "unknown") {
+		unknownSources.push(
+			`runtime:node-on-PATH (heuristic: ${nodeOnPath.detail})`,
+		);
 	}
 
 	// Safe-mode observed in THIS doctor process is a real per-run unknown (the
@@ -601,6 +744,8 @@ export async function doctorClaudePreToolUse(
 		manifest?: Manifest;
 		nodeVersion?: string;
 		execution?: ExecutionProbeEnv;
+		/** Injectable read-only ACL capability probe (defaults to the real one). */
+		aclProbe?: () => Promise<AclCapability>;
 	},
 ): Promise<ClaudeHookDoctorReport> {
 	const manifest = options?.manifest ?? (await readManifest());
@@ -650,11 +795,33 @@ export async function doctorClaudePreToolUse(
 		signals.commandShapeExact &&
 		node.satisfiesMinimum;
 
+	// Probe node ONCE and share the outcome between the always-present report row
+	// and the execution matrix, so the doctor never spawns `node` twice per run.
+	const executionEnv = options?.execution ?? {};
+	const nodeOnPath = await (executionEnv.nodeProbe ?? probeNodeOnPath)();
 	const execution = await probeExecution(
 		projectDir,
 		{ asset: asset.state, settings: settings.state },
-		options?.execution ?? {},
+		{ ...executionEnv, nodeProbe: async () => nodeOnPath },
 	);
+
+	// Install-capability section. Read-only, and deliberately OUTSIDE the
+	// execution matrix (design Decision 1): the installed `.mjs` guard never
+	// spawns `getfacl`, so an absent adapter cannot stop a current guard from
+	// firing. Only when a guard-currency blocker ALREADY exists does the
+	// remediation join `report.remediation` — there the user must install and
+	// cannot.
+	const aclCapability = await (options?.aclProbe ?? probeAclCapability)();
+	const aclRemediation =
+		aclCapability.status === "absent" && aclCapability.tool === "getfacl"
+			? remediationForRefusal("unsupported-posix-acl", ACL_DETAIL.getfaclAbsent)
+			: undefined;
+	if (
+		aclRemediation &&
+		execution.blockers.some((blocker) => blocker.startsWith("guard:"))
+	) {
+		remediation.add(aclRemediation);
+	}
 
 	return {
 		healthy,
@@ -678,6 +845,11 @@ export async function doctorClaudePreToolUse(
 		hostResidual: HOST_RESIDUAL,
 		remediation: [...remediation].sort(),
 		execution,
+		nodeOnPath,
+		installCapability: {
+			acl: aclCapability,
+			...(aclRemediation ? { remediation: aclRemediation } : {}),
+		},
 	};
 }
 
@@ -701,6 +873,12 @@ export interface ClaudeHookMutationResult {
 	backups: string[]; // absolute PERSISTENT backup paths — forced ops only
 	report: ClaudeHookDoctorReport; // post-mutation doctor snapshot
 	errors: string[]; // refusal/failure messages
+	/**
+	 * NON-BLOCKING operator notices. A warning never changes `ok`: refusing to
+	 * install because `node` may not resolve would leave the host with NO guard,
+	 * which is strictly worse than an exec-form guard that may not resolve.
+	 */
+	warnings: string[];
 }
 
 /** Injectable deps so tests drive `_run` with a fake `PlatformSecureFs`. */
@@ -710,6 +888,33 @@ export interface ClaudeHookRunDeps {
 	nonce?: () => string; // 8 lowercase hex
 	manifest?: Manifest;
 	platform?: NodeJS.Platform;
+	/**
+	 * Injectable read-only ACL capability probe, forwarded to the doctor report
+	 * this run embeds. Same seam as `secureFs`/`clock`: it keeps unit tests from
+	 * spawning the real `getfacl` (defaults to the real probe in production).
+	 */
+	aclProbe?: () => Promise<AclCapability>;
+	/** Injectable node-on-PATH heuristic, shared by the warning and the report. */
+	nodeProbe?: () => Promise<NodeOnPathProbe>;
+}
+
+/**
+ * The non-blocking install/repair warning for the exec-form guard's runtime.
+ * Mirrors the doctor's heuristic wording: this process' PATH only PROXIES the
+ * PATH Claude Code will use to spawn the handler.
+ */
+function nodeOnPathWarnings(probe: NodeOnPathProbe): string[] {
+	if (probe.status === "absent") {
+		return [
+			`node did not resolve on this process' PATH (heuristic): the installed guard is exec-form (command: "node") and will not fire if Claude Code's PATH also lacks it — install Node ${NODE_MINIMUM_MAJOR}+ on PATH`,
+		];
+	}
+	if (probe.status === "resolved" && probe.major < NODE_MINIMUM_MAJOR) {
+		return [
+			`node on PATH is ${probe.version} (<${NODE_MINIMUM_MAJOR}, heuristic): the installed guard may fail to run — install Node ${NODE_MINIMUM_MAJOR}+ on PATH`,
+		];
+	}
+	return [];
 }
 
 type AssetPlan =
@@ -885,8 +1090,20 @@ export async function _run(
 	const assetDestPath = path.join(projectDir, ".claude", "hooks", ASSET_NAME);
 	const settingsPath = path.join(projectDir, ".claude", "settings.json");
 	const assetSrcPath = path.join(CLAUDE_HOOK_ASSETS_DIR, ASSET_NAME);
+	// Probe node ONCE per `_run` and share the sample with the embedded doctor
+	// report, so the run never spawns `node --version` twice and the warning, the
+	// report row and the verdict can never disagree about the same PATH.
+	const nodeOnPath = await (deps.nodeProbe ?? probeNodeOnPath)();
 	const doctor = (): Promise<ClaudeHookDoctorReport> =>
-		doctorClaudePreToolUse(projectDir, { manifest });
+		doctorClaudePreToolUse(projectDir, {
+			manifest,
+			aclProbe: deps.aclProbe,
+			execution: { nodeProbe: async () => nodeOnPath },
+		});
+
+	// Non-blocking runtime notice, computed once and carried by EVERY outcome
+	// (success, no-op and refusal alike) — it never gates the mutation.
+	const warnings = nodeOnPathWarnings(nodeOnPath);
 
 	// Windows (or any platform without an adapter) refuses with zero mutation.
 	if (!secureFs) {
@@ -895,6 +1112,7 @@ export async function _run(
 			changed: [],
 			backups: [],
 			errors: ["windows-secure-object-unavailable"],
+			warnings,
 			report: await doctor(),
 		};
 	}
@@ -932,6 +1150,7 @@ export async function _run(
 			changed: [],
 			backups: [],
 			errors: [reason],
+			warnings,
 			report: await doctor(),
 		};
 	}
@@ -943,6 +1162,7 @@ export async function _run(
 			changed: [],
 			backups: [],
 			errors: [],
+			warnings,
 			report: await doctor(),
 		};
 	}
@@ -995,6 +1215,7 @@ export async function _run(
 		changed: tx.committed,
 		backups: tx.backups,
 		errors: tx.errors,
+		warnings,
 		report: await doctor(),
 	};
 }

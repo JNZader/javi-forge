@@ -21,6 +21,7 @@ import {
 	installClaudePreToolUse,
 	repairClaudePreToolUse,
 } from "../lib/claude-hook-manager.js";
+import { remediationForMessage } from "../lib/secure-refusal-remediation.js";
 
 export type ClaudeHookSub = "install" | "doctor" | "repair";
 
@@ -31,6 +32,19 @@ export interface ClaudeHookCmdDeps {
 	repair?: typeof repairClaudePreToolUse;
 	log?: (msg: string) => void;
 	logError?: (msg: string) => void;
+}
+
+/**
+ * Warnings are NON-BLOCKING notices, so they go to stdout under their own
+ * heading — never to the error stream and never into the exit code.
+ */
+function renderWarnings(
+	warnings: readonly string[],
+	log: (m: string) => void,
+): void {
+	if (warnings.length === 0) return;
+	log("warnings:");
+	for (const w of warnings) log(`  ${w}`);
 }
 
 function renderMutation(
@@ -51,11 +65,19 @@ function renderMutation(
 			log("backups:");
 			for (const p of result.backups) log(`  ${p}`);
 		}
+		renderWarnings(result.warnings, log);
 		return 0;
 	}
 
 	logError(`${verb} claude: refused`);
-	for (const e of result.errors) logError(`  ${e}`);
+	// A refusal whose detail maps to a remediation is never rendered bare: the
+	// mapping is a CLI-layer lookup, so the adapter's refusal codes stay stable.
+	for (const e of result.errors) {
+		logError(`  ${e}`);
+		const remediation = remediationForMessage(e);
+		if (remediation) logError(`    → ${remediation}`);
+	}
+	renderWarnings(result.warnings, log);
 	return 1;
 }
 
@@ -68,6 +90,20 @@ function renderDoctor(
 	log(`  asset:    ${report.asset.state} — ${report.asset.detail}`);
 	log(
 		`  node:     ${report.node.version ?? "unavailable"} (min-satisfied: ${report.node.satisfiesMinimum})`,
+	);
+
+	// The node-on-PATH row is ALWAYS printed (satisfied included) and is always
+	// labelled a heuristic: this process' PATH only proxies the PATH Claude Code
+	// will use to spawn the exec-form handler.
+	const onPath = report.nodeOnPath;
+	const onPathDetail =
+		onPath.status === "resolved"
+			? ` ${onPath.version}`
+			: onPath.status === "unknown"
+				? ` — ${onPath.detail}`
+				: "";
+	log(
+		`  node-on-PATH: ${onPath.status}${onPathDetail} (heuristic: this process' PATH)`,
 	);
 
 	const execution = report.execution;
@@ -83,6 +119,16 @@ function renderDoctor(
 	if (execution.residual.length > 0) {
 		log("  execution-residual:");
 		for (const r of execution.residual) log(`    - ${r}`);
+	}
+
+	// Install-capability is its OWN section, always printed so an absent adapter
+	// is never silent — and it never changes the exit code, which follows
+	// `execution.status` alone.
+	const acl = report.installCapability.acl;
+	const aclDetail = "detail" in acl ? ` — ${acl.detail}` : "";
+	log(`  acl-capability: ${acl.status} (${acl.tool})${aclDetail}`);
+	if (report.installCapability.remediation) {
+		log(`    → ${report.installCapability.remediation}`);
 	}
 
 	log(`  host-residual: ${report.hostResidual}`);

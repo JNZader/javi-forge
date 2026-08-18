@@ -9,7 +9,8 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { CLAUDE_HOOK_ASSETS_DIR } from "../constants.js";
 import {
@@ -31,6 +32,7 @@ import {
 	planManagedClaudeHookMerge,
 	type SettingsClassification,
 	type SettingsIdentityManifest,
+	scanExecutionFlags,
 } from "./claude-hook-settings.js";
 import { safeReadFile } from "./safe-read.js";
 import { selectSecureFs } from "./secure-fs-posix.js";
@@ -94,7 +96,7 @@ export interface ClaudeHookDoctorReport {
 	coverage: typeof COVERAGE;
 	hostResidual: string;
 	remediation: readonly string[];
-	// Slice 4 adds: execution: { status; blockers; unknownSources }.
+	execution: ExecutionReport;
 }
 
 // The single non-`safe-read` fs surface, confined to one helper.
@@ -309,14 +311,297 @@ function remediationFor(
 	return REMEDIATION[state]?.replace("$", component);
 }
 
+// =============================================================================
+// Effective-execution verdict (Slice 4b) — fail-closed
+// =============================================================================
+
+/**
+ * The honest effective-execution verdict. `status` is derived by precedence
+ * (blocked > inconclusive > runnable); `runnable` is reached only when every
+ * relevant local source read clear AND the managed guard is current. `residual`
+ * carries CONSTANT honest caveats (server-delivered policy, session safe-mode)
+ * that are always shown but never gate the status — otherwise `runnable` would
+ * be unreachable.
+ */
+export interface ExecutionReport {
+	status: "runnable" | "blocked" | "inconclusive";
+	blockers: string[];
+	unknownSources: string[];
+	residual: string[];
+}
+
+/** Injectable seams so units never hard-read real `/etc` or `/Library`. */
+export interface ExecutionProbeEnv {
+	platform?: NodeJS.Platform;
+	homeDir?: string;
+	env?: NodeJS.ProcessEnv;
+	/** Override the managed OS file (null → no managed file at all). */
+	managedFile?: string | null;
+	/** Override the managed drop-in dir (null → no drop-ins). */
+	managedDropInDir?: string | null;
+	/** Override the drop-in directory listing (defaults to a confined readdir). */
+	listDir?: (dir: string) => Promise<string[]>;
+}
+
+/** Per-source read outcome; never promotes an unobservable source to clear. */
+export type ExecutionSourceProbe =
+	| { kind: "clear" }
+	| { kind: "blocking"; flag: "disableAllHooks" | "allowManagedHooksOnly" }
+	| { kind: "unknown"; reason: string };
+
+/** The already-computed component states the guard-currency check consumes. */
+export interface ExecutionComponentStates {
+	asset: ClaudeHookComponentState;
+	settings: ClaudeHookComponentState;
+}
+
+export interface ManagedSettingsPaths {
+	file: string;
+	dropInDir: string;
+}
+
+/** Static managed-settings locations per OS (no fs). WSL reports `linux`. */
+export function resolveManagedSettingsPaths(
+	platform: NodeJS.Platform,
+): ManagedSettingsPaths {
+	if (platform === "darwin") {
+		const base = "/Library/Application Support/ClaudeCode";
+		return {
+			file: `${base}/managed-settings.json`,
+			dropInDir: `${base}/managed-settings.d`,
+		};
+	}
+	if (platform === "win32") {
+		const base = "C:\\Program Files\\ClaudeCode";
+		return {
+			file: `${base}\\managed-settings.json`,
+			dropInDir: `${base}\\managed-settings.d`,
+		};
+	}
+	const base = "/etc/claude-code";
+	return {
+		file: `${base}/managed-settings.json`,
+		dropInDir: `${base}/managed-settings.d`,
+	};
+}
+
+/**
+ * Probe one settings source path for the two documented hook-neutralizing
+ * flags. Fail-closed: only a genuinely-absent path or a cleanly-parsed source
+ * with no flag is `clear`; a symlink, non-regular path, permission/io error,
+ * oversized/binary content, or malformed JSON is `unknown` (unreadable ≠
+ * absent), never `clear`. `disableAllHooks` is preferred over
+ * `allowManagedHooksOnly` when both are set (the former blocks at any source).
+ */
+export async function probeExecutionSource(
+	target: string,
+): Promise<ExecutionSourceProbe> {
+	const stat = await lstatNoFollow(target);
+	if (stat.kind === "enoent") return { kind: "clear" };
+	if (stat.kind === "symlink") return { kind: "unknown", reason: "symlink" };
+	if (stat.kind === "non-regular") {
+		return { kind: "unknown", reason: "non-regular" };
+	}
+	if (stat.kind === "error") return { kind: "unknown", reason: stat.detail };
+
+	const read = await safeReadFile(target, READ_OPTS);
+	if (!read.ok) {
+		if (read.reason === "not-found") return { kind: "clear" };
+		return { kind: "unknown", reason: read.reason };
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(read.content);
+	} catch {
+		return { kind: "unknown", reason: "invalid-json" };
+	}
+
+	const flags = scanExecutionFlags(parsed);
+	if (flags.disableAllHooks) {
+		return { kind: "blocking", flag: "disableAllHooks" };
+	}
+	if (flags.allowManagedHooksOnly) {
+		return { kind: "blocking", flag: "allowManagedHooksOnly" };
+	}
+	return { kind: "clear" };
+}
+
+/**
+ * Confined readdir result of the managed drop-in dir, fail-closed and mirroring
+ * `probeExecutionSource`'s errno classification: a genuinely-absent directory
+ * (ENOENT/ENOTDIR) is the ONLY empty/clear case, so it yields `{ entries: [] }`
+ * (no drop-ins). ANY other readdir failure (EACCES/EIO/ELOOP/…) means the
+ * directory is present-but-unenumerable and MUST NOT be treated as empty — it
+ * yields `{ unreadable: true }` so the caller can degrade the verdict, never
+ * silently report "no drop-ins" (a false `runnable`).
+ */
+export type ManagedDropInListing =
+	| { unreadable?: false; entries: string[] }
+	| { unreadable: true; reason: string };
+
+export async function listManagedDropIns(
+	dir: string,
+	listDir?: (dir: string) => Promise<string[]>,
+): Promise<ManagedDropInListing> {
+	let entries: string[];
+	try {
+		entries = listDir ? await listDir(dir) : await readdir(dir);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		// Only a genuinely-absent directory is "no drop-ins"; every other error
+		// (permission/io/loop/etc.) is an unreadable managed source.
+		if (code === "ENOENT" || code === "ENOTDIR") return { entries: [] };
+		return { unreadable: true, reason: code ?? String(error) };
+	}
+	return {
+		entries: entries
+			.filter((name) => name.endsWith(".json"))
+			.sort()
+			.map((name) => path.join(dir, name)),
+	};
+}
+
+/** CONSTANT honest limits — always rendered, never gate the status. */
+const EXECUTION_RESIDUAL: readonly string[] = [
+	"server-delivered managed policy can disable hooks and is not observable from local files",
+	"session safe-mode (--safe-mode / CLAUDE_CODE_SAFE_MODE) in the diagnosed session is not observable from this process",
+];
+
+function isSafeModeTruthy(env: NodeJS.ProcessEnv): boolean {
+	const value = env.CLAUDE_CODE_SAFE_MODE;
+	if (value === undefined) return false;
+	const normalized = value.trim().toLowerCase();
+	return normalized !== "" && normalized !== "0" && normalized !== "false";
+}
+
+interface ExecutionSourceSpec {
+	label: string;
+	target: string;
+	managed: boolean;
+}
+
+/**
+ * The fail-closed effective-execution verdict. Gathers all sources in stable
+ * order (project, local, user, managed OS file, drop-ins sorted), classifies
+ * each with `probeExecutionSource`, applies the managed-only inertness of
+ * `allowManagedHooksOnly` (blocks only from a managed source — hooks MERGE
+ * elsewhere), folds in the guard-currency blocker and the doctor-process
+ * safe-mode observation, then resolves by precedence
+ * (`blockers` first, then `unknownSources`, else `runnable`). An `unknown` is
+ * NEVER promoted to `runnable`.
+ */
+export async function probeExecution(
+	projectDir: string,
+	componentStates: ExecutionComponentStates,
+	env: ExecutionProbeEnv = {},
+): Promise<ExecutionReport> {
+	const platform = env.platform ?? process.platform;
+	const homeDir = env.homeDir ?? os.homedir();
+	const processEnv = env.env ?? process.env;
+	const resolved = resolveManagedSettingsPaths(platform);
+	const managedFile =
+		env.managedFile !== undefined ? env.managedFile : resolved.file;
+	const dropInDir =
+		env.managedDropInDir !== undefined
+			? env.managedDropInDir
+			: resolved.dropInDir;
+
+	const specs: ExecutionSourceSpec[] = [
+		{
+			label: "project",
+			target: path.join(projectDir, ".claude", "settings.json"),
+			managed: false,
+		},
+		{
+			label: "local",
+			target: path.join(projectDir, ".claude", "settings.local.json"),
+			managed: false,
+		},
+		{
+			label: "user",
+			target: path.join(homeDir, ".claude", "settings.json"),
+			managed: false,
+		},
+	];
+	if (managedFile) {
+		specs.push({ label: "managed", target: managedFile, managed: true });
+	}
+	// A present-but-unenumerable drop-in dir is an `unknown` managed source, NOT
+	// "no drop-ins" — fold it into unknownSources so a blocking drop-in policy we
+	// cannot read can never be mistaken for a clear (false `runnable`) verdict.
+	let dropInDirUnknown: string | undefined;
+	if (dropInDir) {
+		const listing = await listManagedDropIns(dropInDir, env.listDir);
+		if (listing.unreadable) {
+			dropInDirUnknown = `managed:${dropInDir} (${listing.reason})`;
+		} else {
+			for (const target of listing.entries) {
+				specs.push({ label: "managed", target, managed: true });
+			}
+		}
+	}
+
+	const blockers: string[] = [];
+	const unknownSources: string[] = [];
+
+	for (const spec of specs) {
+		const probe = await probeExecutionSource(spec.target);
+		if (probe.kind === "clear") continue;
+		if (probe.kind === "unknown") {
+			unknownSources.push(`${spec.label}:${spec.target} (${probe.reason})`);
+			continue;
+		}
+		// `allowManagedHooksOnly` is inert outside a managed source (hooks merge).
+		if (probe.flag === "allowManagedHooksOnly" && !spec.managed) continue;
+		blockers.push(`policy:${probe.flag}@${spec.label}`);
+	}
+	if (dropInDirUnknown) unknownSources.push(dropInDirUnknown);
+
+	// Guard-currency: a not-installed / drifted guard cannot fire, so it blocks.
+	if (componentStates.asset !== "managed-current") {
+		blockers.push(`guard:asset=${componentStates.asset}`);
+	}
+	if (componentStates.settings !== "managed-current") {
+		blockers.push(`guard:settings=${componentStates.settings}`);
+	}
+
+	// Safe-mode observed in THIS doctor process is a real per-run unknown (the
+	// diagnosed session's own safe-mode remains a constant residual).
+	if (isSafeModeTruthy(processEnv)) {
+		unknownSources.push(
+			"safe-mode:CLAUDE_CODE_SAFE_MODE (observed in doctor process only)",
+		);
+	}
+
+	const status: ExecutionReport["status"] =
+		blockers.length > 0
+			? "blocked"
+			: unknownSources.length > 0
+				? "inconclusive"
+				: "runnable";
+
+	return {
+		status,
+		blockers,
+		unknownSources,
+		residual: [...EXECUTION_RESIDUAL],
+	};
+}
+
 /**
  * Assemble the read-only component-level doctor report (no writes). `healthy` is
  * exactly: both components `managed-current`, matcher and command shape exact,
  * Node `>=22`. `assetSettingsConsistent` is a reported advisory, NOT part of it.
+ * The `execution` verdict is INDEPENDENT of `healthy`.
  */
 export async function doctorClaudePreToolUse(
 	projectDir: string,
-	options?: { manifest?: Manifest; nodeVersion?: string },
+	options?: {
+		manifest?: Manifest;
+		nodeVersion?: string;
+		execution?: ExecutionProbeEnv;
+	},
 ): Promise<ClaudeHookDoctorReport> {
 	const manifest = options?.manifest ?? (await readManifest());
 	const currentAssetSha = manifest.asset.sha256;
@@ -365,6 +650,12 @@ export async function doctorClaudePreToolUse(
 		signals.commandShapeExact &&
 		node.satisfiesMinimum;
 
+	const execution = await probeExecution(
+		projectDir,
+		{ asset: asset.state, settings: settings.state },
+		options?.execution ?? {},
+	);
+
 	return {
 		healthy,
 		settings: {
@@ -386,6 +677,7 @@ export async function doctorClaudePreToolUse(
 		coverage: COVERAGE,
 		hostResidual: HOST_RESIDUAL,
 		remediation: [...remediation].sort(),
+		execution,
 	};
 }
 

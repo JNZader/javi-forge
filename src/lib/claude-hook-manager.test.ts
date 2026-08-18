@@ -326,6 +326,39 @@ describe("doctorClaudePreToolUse (read-only component report)", () => {
 			before.claudeDir,
 		);
 	});
+
+	it("reports an execution verdict independent of healthy (healthy + inconclusive)", async () => {
+		writeCurrent(REAL_ASSET_SHA);
+		const home = fs.mkdtempSync(
+			path.join(os.tmpdir(), "javi-forge-exec-home-"),
+		);
+		const managedDir = fs.mkdtempSync(
+			path.join(os.tmpdir(), "javi-forge-exec-mgd-"),
+		);
+		const managedFile = path.join(managedDir, "managed-settings.json");
+		// Present-but-unreadable managed source (a directory at the file path)
+		// forces inconclusive while the install itself is healthy + current.
+		fs.mkdirSync(managedFile);
+		try {
+			const report = await doctorClaudePreToolUse(dir, {
+				manifest: syntheticManifest(),
+				nodeVersion: "22.5.0",
+				execution: {
+					platform: "linux",
+					homeDir: home,
+					env: {},
+					managedFile,
+					managedDropInDir: path.join(managedDir, "managed-settings.d"),
+				},
+			});
+			expect(report.healthy).toBe(true);
+			expect(report.execution.status).toBe("inconclusive");
+			expect(report.execution.unknownSources.length).toBeGreaterThan(0);
+		} finally {
+			fs.rmSync(home, { recursive: true, force: true });
+			fs.rmSync(managedDir, { recursive: true, force: true });
+		}
+	});
 });
 
 const txClock = () => new Date("2026-08-16T19:00:00.123Z");

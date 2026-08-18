@@ -28,6 +28,12 @@ function doctorReport(
 		coverage: ["Bash", "PowerShell", "Read", "Write", "Edit"],
 		hostResidual: "spawn/start/timeout failures continue through Claude flow",
 		remediation: [],
+		execution: {
+			status: "runnable",
+			blockers: [],
+			unknownSources: [],
+			residual: [],
+		},
 		...overrides,
 	} as ClaudeHookDoctorReport;
 }
@@ -131,12 +137,118 @@ describe("runClaudeHookCommand", () => {
 		expect(text).toContain("managed-current");
 	});
 
-	it("doctor: unhealthy report still returns 0 and prints remediation", async () => {
+	it("doctor: blocked execution returns 1 and prints the blocking source", async () => {
 		const doctor = vi.fn().mockResolvedValue(
 			doctorReport({
 				healthy: false,
 				asset: { state: "edited-managed", detail: "edited-managed" },
 				remediation: ["repair the managed asset with --force (Slice 3)"],
+				execution: {
+					status: "blocked",
+					blockers: ["guard:asset=edited-managed"],
+					unknownSources: [],
+					residual: [],
+				},
+			}),
+		);
+		const { out, deps } = harness({ doctor });
+
+		const code = await runClaudeHookCommand("doctor", "/proj", {}, deps);
+
+		expect(code).toBe(1);
+		const text = out.join("\n");
+		expect(text).toContain("blocked");
+		expect(text).toContain("guard:asset=edited-managed");
+		expect(text).toContain("repair the managed asset with --force");
+	});
+
+	it("doctor: runnable execution returns 0 and prints runnable", async () => {
+		const doctor = vi.fn().mockResolvedValue(
+			doctorReport({
+				healthy: true,
+				execution: {
+					status: "runnable",
+					blockers: [],
+					unknownSources: [],
+					residual: [],
+				},
+			}),
+		);
+		const { out, deps } = harness({ doctor });
+
+		const code = await runClaudeHookCommand("doctor", "/proj", {}, deps);
+
+		expect(code).toBe(0);
+		expect(out.join("\n")).toContain("runnable");
+	});
+
+	it("doctor: inconclusive execution returns 2 and lists the unknown source", async () => {
+		const doctor = vi.fn().mockResolvedValue(
+			doctorReport({
+				healthy: true,
+				execution: {
+					status: "inconclusive",
+					blockers: [],
+					unknownSources: [
+						"managed:/etc/claude-code/managed-settings.json (EACCES)",
+					],
+					residual: [],
+				},
+			}),
+		);
+		const { out, deps } = harness({ doctor });
+
+		const code = await runClaudeHookCommand("doctor", "/proj", {}, deps);
+
+		expect(code).toBe(2);
+		const text = out.join("\n");
+		expect(text).toContain("inconclusive");
+		expect(text).toContain(
+			"managed:/etc/claude-code/managed-settings.json (EACCES)",
+		);
+		expect(text).not.toContain("runnable");
+	});
+
+	it("doctor: renders blockers in stable committed order", async () => {
+		const doctor = vi.fn().mockResolvedValue(
+			doctorReport({
+				execution: {
+					status: "blocked",
+					blockers: [
+						"policy:disableAllHooks@project",
+						"policy:disableAllHooks@user",
+						"guard:asset=edited-managed",
+					],
+					unknownSources: [],
+					residual: [],
+				},
+			}),
+		);
+		const { out, deps } = harness({ doctor });
+
+		await runClaudeHookCommand("doctor", "/proj", {}, deps);
+
+		const text = out.join("\n");
+		const iProject = text.indexOf("policy:disableAllHooks@project");
+		const iUser = text.indexOf("policy:disableAllHooks@user");
+		const iGuard = text.indexOf("guard:asset=edited-managed");
+		expect(iProject).toBeGreaterThanOrEqual(0);
+		expect(iProject).toBeLessThan(iUser);
+		expect(iUser).toBeLessThan(iGuard);
+	});
+
+	it("doctor: always prints residual caveats regardless of status", async () => {
+		const doctor = vi.fn().mockResolvedValue(
+			doctorReport({
+				execution: {
+					status: "runnable",
+					blockers: [],
+					unknownSources: [],
+					residual: [
+						"server-delivered policy caveat",
+						"session safe-mode caveat",
+					],
+				},
 			}),
 		);
 		const { out, deps } = harness({ doctor });
@@ -145,28 +257,8 @@ describe("runClaudeHookCommand", () => {
 
 		expect(code).toBe(0);
 		const text = out.join("\n");
-		expect(text).toContain("edited-managed");
-		expect(text).toContain("repair the managed asset with --force");
-	});
-
-	it("doctor: prints execution inconclusive and NEVER RUNNABLE (healthy fixture)", async () => {
-		const doctor = vi.fn().mockResolvedValue(doctorReport({ healthy: true }));
-		const { out, deps } = harness({ doctor });
-
-		await runClaudeHookCommand("doctor", "/proj", {}, deps);
-
-		const text = out.join("\n");
-		expect(text).toContain("inconclusive");
-		expect(text).not.toContain("RUNNABLE");
-	});
-
-	it("doctor: NEVER prints RUNNABLE (unhealthy fixture)", async () => {
-		const doctor = vi.fn().mockResolvedValue(doctorReport({ healthy: false }));
-		const { out, deps } = harness({ doctor });
-
-		await runClaudeHookCommand("doctor", "/proj", {}, deps);
-
-		expect(out.join("\n")).not.toContain("RUNNABLE");
+		expect(text).toContain("server-delivered policy caveat");
+		expect(text).toContain("session safe-mode caveat");
 	});
 
 	it("repair: without --force on edited-managed refuses and returns 1", async () => {

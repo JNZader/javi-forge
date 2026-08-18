@@ -1,3 +1,9 @@
+## [1.35.0](https://github.com/JNZader/javi-forge/compare/v1.34.1...v1.35.0) (2026-08-18)
+
+### Features
+
+* **hooks:** extend guard sensitive-path policy for Linux + rotate asset ([0bba0bb](https://github.com/JNZader/javi-forge/commit/0bba0bbbf004f03ae66fcb9f768bf2f9122b76b8))
+
 ## [1.34.1](https://github.com/JNZader/javi-forge/compare/v1.34.0...v1.34.1) (2026-08-18)
 
 ### Bug Fixes

@@ -51,6 +51,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends acl
 
+      # FIXTURE BASE OUTSIDE /home (both legs). The `ubuntu-latest` image ships
+      # `/home` with a REAL extended ACL entry, and the adapter's ancestor-chain
+      # gate walks from `/` down — so a `$HOME`/`RUNNER_TEMP`-rooted fixture makes
+      # the shipped adapter refuse `extended ACL entry` on the happy path. `/` and
+      # a dir directly under / has the shortest ancestor chain (only /); on GH runners /home carries an extended ACL and /opt is mode 777, so both are unusable; if /
+      # ever carries one, the suite's PRECONDITION names it in one line.
+      - name: Create an ACL-clean private fixture base (both legs)
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /jf-int
+          sudo chown "$(id -u):$(id -g)" /jf-int
+          chmod 700 /jf-int
+
       - name: Assert getfacl is present (with-acl leg)
         if: matrix.leg == 'with-acl'
         run: |
@@ -81,6 +94,7 @@ jobs:
         if: matrix.leg == 'with-acl'
         env:
           JAVI_FORGE_LINUX_INT: "1"
+          JF_INT_BASE: /jf-int
         run: |
           set -euo pipefail
           pnpm vitest run src/__integration__/secure-fs-posix.integration.test.ts
@@ -90,6 +104,7 @@ jobs:
         env:
           JAVI_FORGE_ACL_LEG: absent
           JAVI_FORGE_LINUX_INT: "1"
+          JF_INT_BASE: /jf-int
         run: |
           set -euo pipefail
           pnpm vitest run src/__integration__/secure-fs-posix.integration.test.ts

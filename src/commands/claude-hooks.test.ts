@@ -36,6 +36,7 @@ function doctorReport(
 			residual: [],
 		},
 		installCapability: { acl: { status: "available", tool: "getfacl" } },
+		nodeOnPath: { status: "resolved", version: "v22.11.0", major: 22 },
 		...overrides,
 	} as ClaudeHookDoctorReport;
 }
@@ -48,6 +49,7 @@ function mutationResult(
 		changed: [],
 		backups: [],
 		errors: [],
+		warnings: [],
 		report: doctorReport(),
 		...overrides,
 	};
@@ -119,6 +121,76 @@ describe("runClaudeHookCommand", () => {
 		expect([...out, ...err].join("\n")).toContain(
 			"refuse asset in state edited-managed",
 		);
+	});
+
+	it("doctor: prints the node-on-PATH row as a heuristic, distinct from the node row", async () => {
+		const doctor = vi
+			.fn()
+			.mockResolvedValue(
+				doctorReport({ nodeOnPath: { status: "absent" } as never }),
+			);
+		const { out, deps } = harness({ doctor });
+
+		await runClaudeHookCommand("doctor", "/proj", {}, deps);
+
+		const text = out.join("\n");
+		expect(text).toContain("node-on-PATH: absent");
+		expect(text).toContain("heuristic");
+		// The process' own Node row is still rendered separately.
+		expect(text).toContain("node:     22.0.0");
+	});
+
+	it("doctor: prints the node-on-PATH row when the capability is satisfied too", async () => {
+		const doctor = vi.fn().mockResolvedValue(doctorReport());
+		const { out, deps } = harness({ doctor });
+		await runClaudeHookCommand("doctor", "/proj", {}, deps);
+		expect(out.join("\n")).toContain("node-on-PATH: resolved v22.11.0");
+	});
+
+	it("install: a warning is rendered distinctly from errors and does NOT fail", async () => {
+		const install = vi.fn().mockResolvedValue(
+			mutationResult({
+				ok: true,
+				changed: ["/proj/.claude/settings.json"],
+				warnings: ["node did not resolve on this process' PATH (heuristic)"],
+			}),
+		);
+		const { out, err, deps } = harness({ install });
+
+		const code = await runClaudeHookCommand("install", "/proj", {}, deps);
+
+		// Non-blocking: the install succeeded, so the exit code is unchanged.
+		expect(code).toBe(0);
+		const text = out.join("\n");
+		expect(text).toContain("warnings:");
+		expect(text).toContain("node did not resolve");
+		// A warning is never rendered as a refusal/error line.
+		expect(err.join("\n")).not.toContain("node did not resolve");
+		expect(text).not.toContain("refused");
+	});
+
+	it("repair: warnings are rendered on a refusal too, without changing the code", async () => {
+		const repair = vi.fn().mockResolvedValue(
+			mutationResult({
+				ok: false,
+				errors: ["refuse asset in state edited-managed"],
+				warnings: ["node did not resolve on this process' PATH (heuristic)"],
+			}),
+		);
+		const { out, err, deps } = harness({ repair });
+
+		const code = await runClaudeHookCommand("repair", "/proj", {}, deps);
+
+		expect(code).toBe(1);
+		expect(err.join("\n")).toContain("refuse asset in state edited-managed");
+		expect(out.join("\n")).toContain("node did not resolve");
+	});
+
+	it("prints no warnings section when there are none", async () => {
+		const install = vi.fn().mockResolvedValue(mutationResult({ ok: true }));
+		const { out, deps } = harness({ install });
+		await runClaudeHookCommand("install", "/proj", {}, deps);
+		expect(out.join("\n")).not.toContain("warnings:");
 	});
 
 	it("doctor: healthy report prints per-component state + remediation, returns 0", async () => {

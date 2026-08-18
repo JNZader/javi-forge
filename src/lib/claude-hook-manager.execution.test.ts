@@ -7,10 +7,13 @@ import {
 	type ExecutionProbeEnv,
 	type ExecutionReport,
 	listManagedDropIns,
+	type NodeOnPathProbe,
 	probeExecution,
 	probeExecutionSource,
+	probeNodeOnPath,
 	resolveManagedSettingsPaths,
 } from "./claude-hook-manager.js";
+import type { SpawnFn, SpawnOutcome } from "./secure-fs-posix.js";
 
 // -----------------------------------------------------------------------------
 // Host-independent fixtures: every source is a temp path injected through
@@ -44,6 +47,13 @@ function baseEnv(
 		env: {},
 		managedFile: managedFile(),
 		managedDropInDir: dropInDir(),
+		// Stubbed by default so no test spawns the host's real `node`: the probe
+		// is host-dependent by nature, and the tests that care inject their own.
+		nodeProbe: async () => ({
+			status: "resolved",
+			version: "v22.11.0",
+			major: 22,
+		}),
 		...overrides,
 	};
 }
@@ -160,6 +170,22 @@ describe("probeExecutionSource (fail-closed read outcomes)", () => {
 			kind: "blocking",
 			flag: "disableAllHooks",
 		});
+	});
+
+	it("reports blocking WITH an invalid-shape detail for a non-boolean value", async () => {
+		const target = path.join(root, "invalid.json");
+		writeJson(target, { disableAllHooks: "true" });
+		expect(await probeExecutionSource(target)).toEqual({
+			kind: "blocking",
+			flag: "disableAllHooks",
+			detail: "invalid value: string → treated as true",
+		});
+	});
+
+	it("reports clear for an explicit boolean false (a definitive clear)", async () => {
+		const target = path.join(root, "false.json");
+		writeJson(target, { disableAllHooks: false, allowManagedHooksOnly: false });
+		expect(await probeExecutionSource(target)).toEqual({ kind: "clear" });
 	});
 
 	it("reports clear for a parsed source with unrelated keys only", async () => {
@@ -406,5 +432,224 @@ describe("probeExecution — fail-closed verdict matrix", () => {
 			baseEnv(),
 		);
 		expect(r.status).not.toBe("runnable");
+	});
+});
+
+describe("probeNodeOnPath (read-only heuristic, injected spawn)", () => {
+	const spawnOf = (outcome: SpawnOutcome): SpawnFn => {
+		return async (cmd, args) => {
+			expect(cmd).toBe("node");
+			expect(args).toEqual(["--version"]);
+			return outcome;
+		};
+	};
+
+	it("reports resolved with the parsed major for a clean `node --version`", async () => {
+		const r = await probeNodeOnPath(spawnOf({ code: 0, stdout: "v22.11.0\n" }));
+		expect(r).toEqual({ status: "resolved", version: "v22.11.0", major: 22 });
+	});
+
+	it("reports absent on a spawn ENOENT (node does not resolve on PATH)", async () => {
+		const r = await probeNodeOnPath(
+			spawnOf({ spawnError: true, code: null, stdout: "" }),
+		);
+		expect(r).toEqual({ status: "absent" });
+	});
+
+	it("reports unknown on timeout", async () => {
+		const r = await probeNodeOnPath(
+			spawnOf({ timedOut: true, code: null, stdout: "" }),
+		);
+		expect(r).toEqual({ status: "unknown", detail: "node --version timeout" });
+	});
+
+	it("reports unknown on a non-zero exit", async () => {
+		const r = await probeNodeOnPath(spawnOf({ code: 3, stdout: "" }));
+		expect(r).toEqual({ status: "unknown", detail: "node --version exit 3" });
+	});
+
+	it("reports unknown for unparseable output, never a fabricated version", async () => {
+		const r = await probeNodeOnPath(
+			spawnOf({ code: 0, stdout: "not a version\n" }),
+		);
+		expect(r).toEqual({
+			status: "unknown",
+			detail: "node --version output unparseable",
+		});
+	});
+});
+
+describe("probeExecution — node-on-PATH heuristic (Slice C)", () => {
+	const nodeEnv = (probe: NodeOnPathProbe): ExecutionProbeEnv =>
+		baseEnv({ nodeProbe: async () => probe });
+
+	it("an unresolvable node blocks, naming the heuristic and its evidence", async () => {
+		const r = await probeExecution(
+			projectDir(),
+			CURRENT,
+			nodeEnv({ status: "absent" }),
+		);
+		expect(r.status).toBe("blocked");
+		expect(r.blockers).toEqual([
+			"runtime:node-not-on-PATH (heuristic: this process' PATH)",
+		]);
+		expect(r.unknownSources).toEqual([]);
+	});
+
+	it("a resolvable node below the minimum major blocks", async () => {
+		const r = await probeExecution(
+			projectDir(),
+			CURRENT,
+			nodeEnv({ status: "resolved", version: "v18.20.4", major: 18 }),
+		);
+		expect(r.status).toBe("blocked");
+		expect(r.blockers).toEqual(["runtime:node-on-PATH v18 (<22, heuristic)"]);
+	});
+
+	it("an unknown probe outcome degrades to inconclusive, never blocked", async () => {
+		const r = await probeExecution(
+			projectDir(),
+			CURRENT,
+			nodeEnv({ status: "unknown", detail: "node --version timeout" }),
+		);
+		expect(r.status).toBe("inconclusive");
+		expect(r.blockers).toEqual([]);
+		expect(r.unknownSources).toEqual([
+			"runtime:node-on-PATH (heuristic: node --version timeout)",
+		]);
+	});
+
+	it("a successful probe contributes NOTHING (it grants no confidence)", async () => {
+		const r = await probeExecution(
+			projectDir(),
+			CURRENT,
+			nodeEnv({ status: "resolved", version: "v22.11.0", major: 22 }),
+		);
+		expect(r.status).toBe("runnable");
+		expect(r.blockers).toEqual([]);
+		expect(r.unknownSources).toEqual([]);
+	});
+
+	it("a successful probe never clears a pre-existing unknown source", async () => {
+		const badUser = path.join(homeDir(), ".claude", "settings.json");
+		fs.mkdirSync(path.dirname(badUser), { recursive: true });
+		fs.writeFileSync(badUser, "{ broken ]");
+		const r = await probeExecution(
+			projectDir(),
+			CURRENT,
+			nodeEnv({ status: "resolved", version: "v22.11.0", major: 22 }),
+		);
+		expect(r.status).toBe("inconclusive");
+		expect(r.unknownSources.join("\n")).toContain("user:");
+	});
+
+	it("orders the node blocker after the guard-currency blockers (stable)", async () => {
+		const r = await probeExecution(
+			projectDir(),
+			{ asset: "absent", settings: "absent" },
+			nodeEnv({ status: "absent" }),
+		);
+		expect(r.blockers).toEqual([
+			"guard:asset=absent",
+			"guard:settings=absent",
+			"runtime:node-not-on-PATH (heuristic: this process' PATH)",
+		]);
+	});
+
+	it("always carries the exec-form residual line, even when runnable", async () => {
+		const r = await probeExecution(
+			projectDir(),
+			CURRENT,
+			nodeEnv({ status: "resolved", version: "v22.11.0", major: 22 }),
+		);
+		expect(r.status).toBe("runnable");
+		const residual = r.residual.join("\n");
+		expect(residual).toContain("exec-form");
+		expect(residual.toLowerCase()).toContain("path");
+	});
+});
+
+describe("probeExecution — invalid flag values (Slice C: invalid ⇒ true)", () => {
+	// Claude Code treats an INVALID (non-boolean) flag value as `true`, so a
+	// source carrying one is never clear. The blocker names the source AND the
+	// shape, so an operator can see WHY a string "false" did not clear.
+	const INVALID_SHAPES: [name: string, value: unknown, shape: string][] = [
+		["string 'true'", "true", "string"],
+		["string 'false'", "false", "string"],
+		["number 1", 1, "number"],
+		["number 0", 0, "number"],
+		["null", null, "null"],
+		["object", {}, "object"],
+		["array", [], "array"],
+	];
+
+	it.each(
+		INVALID_SHAPES,
+	)("disableAllHooks %s at project blocks with the shape named", async (_name, value, shape) => {
+		writeJson(path.join(projectDir(), ".claude", "settings.json"), {
+			disableAllHooks: value,
+		});
+		const r = await probeExecution(projectDir(), CURRENT, baseEnv());
+		expect(r.status).toBe("blocked");
+		expect(r.blockers).toEqual([
+			`policy:disableAllHooks@project (invalid value: ${shape} → treated as true)`,
+		]);
+	});
+
+	it.each(
+		INVALID_SHAPES,
+	)("allowManagedHooksOnly %s at managed blocks with the shape named", async (_name, value, shape) => {
+		writeJson(managedFile(), { allowManagedHooksOnly: value });
+		const r = await probeExecution(projectDir(), CURRENT, baseEnv());
+		expect(r.status).toBe("blocked");
+		expect(r.blockers).toEqual([
+			`policy:allowManagedHooksOnly@managed (invalid value: ${shape} → treated as true)`,
+		]);
+	});
+
+	it("keeps an explicit `true` blocker free of any invalid-shape suffix", async () => {
+		writeJson(path.join(projectDir(), ".claude", "settings.json"), {
+			disableAllHooks: true,
+		});
+		const r = await probeExecution(projectDir(), CURRENT, baseEnv());
+		expect(r.blockers).toEqual(["policy:disableAllHooks@project"]);
+	});
+
+	it("an explicit boolean false at every source still reaches runnable", async () => {
+		for (const target of [
+			path.join(projectDir(), ".claude", "settings.json"),
+			path.join(homeDir(), ".claude", "settings.json"),
+			managedFile(),
+		]) {
+			writeJson(target, {
+				disableAllHooks: false,
+				allowManagedHooksOnly: false,
+			});
+		}
+		const r = await probeExecution(projectDir(), CURRENT, baseEnv());
+		expect(r.status).toBe("runnable");
+		expect(r.blockers).toEqual([]);
+	});
+
+	it("an INVALID allowManagedHooksOnly stays inert outside a managed source", async () => {
+		// The flag has no authority where hooks merge, so an invalid value there
+		// grants it none either: inert, exactly as an explicit `true` would be.
+		writeJson(path.join(projectDir(), ".claude", "settings.json"), {
+			allowManagedHooksOnly: "true",
+		});
+		const r = await probeExecution(projectDir(), CURRENT, baseEnv());
+		expect(r.status).toBe("runnable");
+		expect(r.blockers).toEqual([]);
+	});
+
+	it("prefers disableAllHooks when a source carries both invalid values", async () => {
+		writeJson(managedFile(), {
+			disableAllHooks: 1,
+			allowManagedHooksOnly: "true",
+		});
+		const r = await probeExecution(projectDir(), CURRENT, baseEnv());
+		expect(r.blockers).toEqual([
+			"policy:disableAllHooks@managed (invalid value: number → treated as true)",
+		]);
 	});
 });

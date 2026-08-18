@@ -94,24 +94,57 @@ export function validateSettingsShape(parsed: unknown): boolean {
  * manager, which knows each source's provenance.
  */
 export interface ExecutionFlagScan {
-	disableAllHooks: boolean;
-	allowManagedHooksOnly: boolean;
+	disableAllHooks: FlagVerdict;
+	allowManagedHooksOnly: FlagVerdict;
+}
+
+/**
+ * One flag's verdict for one source. `set` answers "does this source neutralize
+ * the hook?"; `reason` says whether that came from a documented boolean or from
+ * the documented fallback for an INVALID value.
+ */
+export type FlagVerdict =
+	| { set: false }
+	| { set: true; reason: "explicit" }
+	| { set: true; reason: "invalid"; shape: string };
+
+const NOT_SET: FlagVerdict = { set: false };
+const EXPLICIT: FlagVerdict = { set: true, reason: "explicit" };
+
+/** Name the observed JSON shape for the operator-facing blocker detail. */
+function shapeOf(value: unknown): string {
+	if (value === null) return "null";
+	if (Array.isArray(value)) return "array";
+	return typeof value;
+}
+
+/**
+ * Classify one present value per the documented Claude Code semantics: a
+ * boolean `true` sets the flag, a boolean `false` (or an absent/`undefined` key)
+ * definitively clears it, and ANY other present value is INVALID — which Claude
+ * Code treats as `true`, so it sets the flag with the shape named. That includes
+ * the counterintuitive string `"false"`: it is not a boolean, so it does not
+ * clear.
+ */
+function classifyFlag(value: unknown): FlagVerdict {
+	if (value === undefined || value === false) return NOT_SET;
+	if (value === true) return EXPLICIT;
+	return { set: true, reason: "invalid", shape: shapeOf(value) };
 }
 
 /**
  * Classify an already-parsed settings container for the two documented
- * hook-neutralizing flags. Strict `=== true` only: a truthy-but-not-`true`
- * value (`"true"`, `1`), a missing key, or a non-object input is NOT a flag.
- * A false here is a definitive "this source does not set the flag", never an
- * "unknown" — unreadability is decided upstream by the fs probe, not here.
+ * hook-neutralizing flags. A `{ set: false }` here is a definitive "this source
+ * does not set the flag", never an "unknown" — unreadability is decided upstream
+ * by the fs probe, not here, so a non-object input is "not a flag".
  */
 export function scanExecutionFlags(parsed: unknown): ExecutionFlagScan {
 	if (!isPlainObject(parsed)) {
-		return { disableAllHooks: false, allowManagedHooksOnly: false };
+		return { disableAllHooks: NOT_SET, allowManagedHooksOnly: NOT_SET };
 	}
 	return {
-		disableAllHooks: parsed.disableAllHooks === true,
-		allowManagedHooksOnly: parsed.allowManagedHooksOnly === true,
+		disableAllHooks: classifyFlag(parsed.disableAllHooks),
+		allowManagedHooksOnly: classifyFlag(parsed.allowManagedHooksOnly),
 	};
 }
 

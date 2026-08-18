@@ -4,11 +4,14 @@
  * three lib fns to human output + exit codes; it adds NO new security logic and
  * never touches `runTransaction`/secure-fs directly.
  *
- * Honest-execution constraint (spec Requirement "…never fabricates execution
- * status"): the doctor renderer reports effective execution as `inconclusive`
- * only. It MUST NOT print, imply, or default to `RUNNABLE` — real host-probing
- * is Slice 4b. Exit 2 (INCONCLUSIVE gate semantics) is likewise reserved for 4b
- * and never emitted here.
+ * Honest-execution gate (Slice 4b): the doctor renderer prints the real
+ * `execution` verdict computed by the library — `runnable`, `blocked`, or
+ * `inconclusive` — plus its `blockers`, `unknownSources`, and the constant
+ * `residual` caveats, in committed stable order. The doctor exit code follows
+ * `execution.status` (runnable → 0, blocked → 1, inconclusive → 2), independent
+ * of `report.healthy`. The renderer never fabricates `runnable`: the library
+ * only reports it when every relevant local source read clear and the guard is
+ * current.
  */
 
 import {
@@ -66,15 +69,32 @@ function renderDoctor(
 	log(
 		`  node:     ${report.node.version ?? "unavailable"} (min-satisfied: ${report.node.satisfiesMinimum})`,
 	);
-	// Honest stub: 4a cannot confirm the guard is live. Never RUNNABLE.
-	log("  execution: inconclusive (effective-execution probe deferred to 4b)");
+
+	const execution = report.execution;
+	log(`  execution: ${execution.status}`);
+	if (execution.blockers.length > 0) {
+		log("  blockers:");
+		for (const b of execution.blockers) log(`    - ${b}`);
+	}
+	if (execution.unknownSources.length > 0) {
+		log("  unknown-sources:");
+		for (const u of execution.unknownSources) log(`    - ${u}`);
+	}
+	if (execution.residual.length > 0) {
+		log("  execution-residual:");
+		for (const r of execution.residual) log(`    - ${r}`);
+	}
+
 	log(`  host-residual: ${report.hostResidual}`);
 	if (report.remediation.length > 0) {
 		log("  remediation:");
 		for (const r of report.remediation) log(`    - ${r}`);
 	}
-	// Doctor is informational, not a gate — always exit 0 (spec Scenario
-	// "Doctor reports component health").
+
+	// The doctor exit code follows the effective-execution verdict, independent
+	// of component health: runnable → 0, blocked → 1, inconclusive → 2.
+	if (execution.status === "blocked") return 1;
+	if (execution.status === "inconclusive") return 2;
 	return 0;
 }
 
@@ -82,7 +102,8 @@ function renderDoctor(
  * Run one Claude-hook subcommand against `projectDir`. Returns the process exit
  * code (the dispatcher calls `process.exit`, not this fn):
  *   - install/repair: 0 when `ok`, 1 on refusal/failure.
- *   - doctor: always 0 (informational).
+ *   - doctor: follows `execution.status` — runnable → 0, blocked → 1,
+ *     inconclusive → 2.
  */
 export async function runClaudeHookCommand(
 	sub: ClaudeHookSub,

@@ -33,6 +33,7 @@ import {
 	planManagedClaudeHookRemoval,
 	MANAGED_MATCHER as SETTINGS_MANAGED_MATCHER,
 	type SettingsIdentityManifest,
+	scanExecutionFlags,
 	validateSettingsShape,
 } from "./claude-hook-settings.js";
 
@@ -531,5 +532,57 @@ describe("buildManagedContainer (Slice 3a container synthesis)", () => {
 		expect(
 			classifySettingsEntry(container, SAMPLE_ASSET_SHA256, identity).state,
 		).toBe("managed-current");
+	});
+});
+
+describe("scanExecutionFlags (Slice 4b pure flag classifier)", () => {
+	it("flags disableAllHooks only for strict boolean true", () => {
+		expect(scanExecutionFlags({ disableAllHooks: true })).toEqual({
+			disableAllHooks: true,
+			allowManagedHooksOnly: false,
+		});
+	});
+
+	it("flags allowManagedHooksOnly only for strict boolean true", () => {
+		expect(scanExecutionFlags({ allowManagedHooksOnly: true })).toEqual({
+			disableAllHooks: false,
+			allowManagedHooksOnly: true,
+		});
+	});
+
+	it("flags both when both are strict boolean true", () => {
+		expect(
+			scanExecutionFlags({
+				disableAllHooks: true,
+				allowManagedHooksOnly: true,
+			}),
+		).toEqual({ disableAllHooks: true, allowManagedHooksOnly: true });
+	});
+
+	it("does NOT flag truthy-but-not-true values", () => {
+		for (const v of ["true", 1, {}, [], "yes"]) {
+			expect(
+				scanExecutionFlags({ disableAllHooks: v, allowManagedHooksOnly: v }),
+			).toEqual({ disableAllHooks: false, allowManagedHooksOnly: false });
+		}
+	});
+
+	it("does NOT flag false, absent keys, or non-object input", () => {
+		expect(
+			scanExecutionFlags({
+				disableAllHooks: false,
+				allowManagedHooksOnly: false,
+			}),
+		).toEqual({ disableAllHooks: false, allowManagedHooksOnly: false });
+		expect(scanExecutionFlags({})).toEqual({
+			disableAllHooks: false,
+			allowManagedHooksOnly: false,
+		});
+		for (const notObj of [null, undefined, 42, "x", [], true]) {
+			expect(scanExecutionFlags(notObj)).toEqual({
+				disableAllHooks: false,
+				allowManagedHooksOnly: false,
+			});
+		}
 	});
 });

@@ -85,6 +85,36 @@ export function validateSettingsShape(parsed: unknown): boolean {
 	return true;
 }
 
+// Effective-execution flag classification (Slice 4b) — pure, zero fs.
+
+/**
+ * The two documented scalar flags a settings source can set that neutralize the
+ * managed hook. `disableAllHooks: true` at ANY source is a blocker; the
+ * source→blocker mapping for `allowManagedHooksOnly` (managed-only) lives in the
+ * manager, which knows each source's provenance.
+ */
+export interface ExecutionFlagScan {
+	disableAllHooks: boolean;
+	allowManagedHooksOnly: boolean;
+}
+
+/**
+ * Classify an already-parsed settings container for the two documented
+ * hook-neutralizing flags. Strict `=== true` only: a truthy-but-not-`true`
+ * value (`"true"`, `1`), a missing key, or a non-object input is NOT a flag.
+ * A false here is a definitive "this source does not set the flag", never an
+ * "unknown" — unreadability is decided upstream by the fs probe, not here.
+ */
+export function scanExecutionFlags(parsed: unknown): ExecutionFlagScan {
+	if (!isPlainObject(parsed)) {
+		return { disableAllHooks: false, allowManagedHooksOnly: false };
+	}
+	return {
+		disableAllHooks: parsed.disableAllHooks === true,
+		allowManagedHooksOnly: parsed.allowManagedHooksOnly === true,
+	};
+}
+
 // Canonical identity (Decision ②)
 
 const ASSET_SHA_TOKEN = /^[0-9a-f]{64}$/;

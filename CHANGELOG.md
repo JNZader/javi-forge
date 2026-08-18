@@ -1,3 +1,10 @@
+## [1.34.0](https://github.com/JNZader/javi-forge/compare/v1.33.0...v1.34.0) (2026-08-18)
+
+### Features
+
+* **hooks:** ACL install-capability probe, actionable remediation, init decouple (linux-hardening 1/3) [size:exception] ([38fa329](https://github.com/JNZader/javi-forge/commit/38fa3293023bec2a43465cc248ba60cca13a30f4))
+* **hooks:** node-on-PATH heuristic probe + invalid-flag semantics (linux-hardening 3/3) [size:exception] ([0ac6b76](https://github.com/JNZader/javi-forge/commit/0ac6b76908de45eb41f589cbb6135612ee389961))
+
 ## [1.33.0](https://github.com/JNZader/javi-forge/compare/v1.32.0...v1.33.0) (2026-08-18)
 
 ### Features

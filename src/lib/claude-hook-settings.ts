@@ -14,6 +14,7 @@ import {
 	ASSET_SHA_PLACEHOLDER,
 	LEGACY_COHORT,
 	LEGACY_FILE_SHA256,
+	MANAGED_AGENT_ARG,
 	MANAGED_ASSET_ARG,
 	MANAGED_MATCHER,
 	MANAGED_STATUS_PREFIX,
@@ -22,6 +23,7 @@ import {
 export {
 	ASSET_SHA_PLACEHOLDER,
 	LEGACY_FILE_SHA256,
+	MANAGED_AGENT_ARG,
 	MANAGED_ASSET_ARG,
 	MANAGED_MATCHER,
 	MANAGED_STATUS_PREFIX,
@@ -493,7 +495,7 @@ const MANAGED_TIMEOUT = 30;
 export interface ManagedHandler {
 	type: "command";
 	command: "node";
-	args: [string];
+	args: [string, string];
 	timeout: number;
 	statusMessage: string;
 }
@@ -670,7 +672,7 @@ export function buildManagedContainer(currentAssetSha: string): {
 						{
 							type: "command",
 							command: "node",
-							args: [MANAGED_ASSET_ARG],
+							args: [MANAGED_ASSET_ARG, MANAGED_AGENT_ARG],
 							timeout: MANAGED_TIMEOUT,
 							statusMessage: `${MANAGED_STATUS_PREFIX}${currentAssetSha}`,
 						},

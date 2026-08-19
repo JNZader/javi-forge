@@ -10,6 +10,7 @@ import {
 	L2_BASH_SENSITIVE_READ,
 	L3_WRITE_EDIT_PROTECTED,
 	L4_BASH_POST_SECRET_SCAN,
+	MANAGED_AGENT_ARG,
 	MANAGED_ASSET_ARG,
 	MANAGED_MATCHER,
 	MANAGED_STATUS_PREFIX,
@@ -302,7 +303,7 @@ describe("canonical serialization — deterministic and asset-SHA independent", 
 				{
 					statusMessage: managedStatusMessage(),
 					timeout: 30,
-					args: [MANAGED_ASSET_ARG],
+					args: [MANAGED_ASSET_ARG, MANAGED_AGENT_ARG],
 					command: "node",
 					type: "command",
 				},
@@ -516,7 +517,7 @@ describe("buildManagedContainer (Slice 3a container synthesis)", () => {
 		expect(group.hooks[0].statusMessage).toBe(
 			`${MANAGED_STATUS_PREFIX}${SAMPLE_ASSET_SHA256}`,
 		);
-		expect(group.hooks[0].args).toEqual([MANAGED_ASSET_ARG]);
+		expect(group.hooks[0].args).toEqual([MANAGED_ASSET_ARG, MANAGED_AGENT_ARG]);
 	});
 
 	it("produces a container that classifies as managed-current for its own SHA", () => {

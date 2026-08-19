@@ -191,13 +191,34 @@ export interface TransactionComponent {
 	wasAbsent: boolean;
 }
 
+/**
+ * Optional non-Claude container topology (Codex adapter, agnostic slice 2). When
+ * present it FULLY REPLACES the default `.claude`/`.claude/hooks` + [asset,settings]
+ * wiring; every proof primitive (ancestor gate, managed-container proof,
+ * capture/stage/commit/rollback) runs unchanged over the supplied dirs/components.
+ * When absent, the transaction behaves byte-identically to before this seam.
+ */
+export interface TransactionLayout {
+	/** Managed containers to ensure/prove/create, ordered PARENT-FIRST (absolute). */
+	containers: string[];
+	/** Ordered write components (captured/staged/committed in array order). */
+	components: TransactionComponent[];
+}
+
 export interface RunTransactionInput extends TransactionDeps {
-	/** Existing project directory; `.claude` / `.claude/hooks` are created under it. */
+	/**
+	 * Existing base directory; the ancestor chain root..projectDir is gated. The
+	 * default topology creates `.claude` / `.claude/hooks` under it; a `layout`
+	 * (Codex) uses it only as the gated ancestor-chain leaf (its containers are
+	 * absolute and supplied directly).
+	 */
 	projectDir: string;
-	/** Committed first. */
-	asset: TransactionComponent;
-	/** Committed second. */
-	settings: TransactionComponent;
+	/** Committed first (default Claude topology; ignored when `layout` is present). */
+	asset?: TransactionComponent;
+	/** Committed second (default Claude topology; ignored when `layout` is present). */
+	settings?: TransactionComponent;
+	/** Non-Claude container topology; overrides `asset`/`settings` when present. */
+	layout?: TransactionLayout;
 }
 
 export interface TransactionOutcome {
@@ -283,14 +304,38 @@ interface CommittedEntry {
 export async function runTransaction(
 	input: RunTransactionInput,
 ): Promise<TransactionOutcome> {
+	// Seam validation (fail-closed): the topology is EITHER a `layout` OR the
+	// default Claude pair [asset, settings]. A caller with neither would deref
+	// `undefined.desired` deep in the engine — refuse up front with a clear error.
+	if (!input.layout && !(input.asset && input.settings)) {
+		throw new TxAbort(
+			"validate",
+			"runTransaction requires `layout` or both `asset` and `settings`",
+		);
+	}
+
 	const { secureFs, clock, nonce, projectDir } = input;
-	const claudeDir = path.join(projectDir, ".claude");
-	const hooksDir = path.join(claudeDir, "hooks");
+	// Container topology + write components. The default (no `layout`) is the exact
+	// Claude `.claude` → `.claude/hooks` nesting with [asset, settings]; a `layout`
+	// (Codex) supplies absolute containers parent-first and an ordered component
+	// list. Either way the proof primitives below are identical.
+	const containers = input.layout
+		? input.layout.containers
+		: [
+				path.join(projectDir, ".claude"),
+				path.join(projectDir, ".claude", "hooks"),
+			];
+	const components = input.layout
+		? input.layout.components
+		: [
+				input.asset as TransactionComponent,
+				input.settings as TransactionComponent,
+			];
 	// The dirs the tool OWNS: their children include the executed asset and the
 	// settings it is referenced from. Fixed and known to the core regardless of
 	// the per-run write plan; each existing member is proved on EVERY anyWrite run
 	// (Round-4/5 / JDA-401 + JDB5-001).
-	const managedContainers = new Set<string>([claudeDir, hooksDir]);
+	const managedContainers = new Set<string>(containers);
 
 	const heldByPath = new Map<string, SecureDirHandle>();
 	const heldOrder: SecureDirHandle[] = [];
@@ -300,7 +345,16 @@ export async function runTransaction(
 	const backups: string[] = [];
 
 	const needsWrite = (c: TransactionComponent): boolean => c.desired !== null;
-	const anyWrite = needsWrite(input.asset) || needsWrite(input.settings);
+	const anyWrite = components.some(needsWrite);
+	// A component writes into `container` when its parent dir IS the container or a
+	// descendant of it — used to decide which absent containers to create.
+	const writesInto = (container: string): boolean =>
+		components.some(
+			(c) =>
+				needsWrite(c) &&
+				(path.dirname(c.path) === container ||
+					path.dirname(c.path).startsWith(`${container}${path.sep}`)),
+		);
 
 	// The uniform per-held-dir gate. It runs the LENIENT ancestor ACL predicate on
 	// EVERY held dir — including managed containers, which are ALSO proved strict by
@@ -414,30 +468,27 @@ export async function runTransaction(
 		// pre-commit); one that is absent is CREATED only when a child is written
 		// into it this run, else left alone (nothing to secure).
 		if (anyWrite) {
-			const projectHandle = heldByPath.get(projectDir) as SecureDirHandle;
-			// .claude always ensured on anyWrite (holds settings; grandparent of
-			// the asset). createIfAbsent=true never returns null (opens, creates, or
-			// throws) → narrow non-null before passing as parent (JDA6-003).
-			const claudeHandle = await ensureManagedContainer(
-				projectHandle,
-				claudeDir,
-				/* createIfAbsent */ true,
-			);
-			if (!claudeHandle) {
-				throw new TxAbort(`container ${claudeDir}`, "unexpected null handle");
+			// Ensure every managed container PARENT-FIRST. Each container's parent is
+			// already held (its dirname was gated in preflight or ensured by an earlier
+			// iteration). A container is CREATED only when a component writes into it
+			// or a descendant container this run; otherwise it is proved IF present,
+			// else left alone (JDB5-001). This generalizes the former hardcoded
+			// `.claude` → `.claude/hooks` pair without changing any proof primitive.
+			for (const container of containers) {
+				const parentHandle = heldByPath.get(path.dirname(container));
+				if (!parentHandle) {
+					throw new TxAbort(`container ${container}`, "parent chain not held");
+				}
+				await ensureManagedContainer(
+					parentHandle,
+					container,
+					/* createIfAbsent */ writesInto(container),
+				);
 			}
-			// .claude/hooks: create when the asset writes into it; otherwise prove
-			// IF it exists (settings-only repair must still secure the hook's
-			// container — JDB5-001).
-			await ensureManagedContainer(
-				claudeHandle,
-				hooksDir,
-				/* createIfAbsent */ needsWrite(input.asset),
-			);
 		}
 
-		// --- CAPTURE + (FORCED) BACKUP + STAGE, asset then settings ---
-		for (const component of [input.asset, input.settings]) {
+		// --- CAPTURE + (FORCED) BACKUP + STAGE, in component order ---
+		for (const component of components) {
 			if (!needsWrite(component)) continue;
 			const parentPath = path.dirname(component.path);
 			const dir = heldByPath.get(parentPath) as SecureDirHandle;

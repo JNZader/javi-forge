@@ -8,9 +8,11 @@ import type { CLI } from "./types.js";
 
 const runHook = vi.fn();
 const runClaudeHookCommand = vi.fn();
+const runCodexHookCommand = vi.fn();
 
 vi.mock("../../commands/hooks.js", () => ({ runHook }));
 vi.mock("../../commands/claude-hooks.js", () => ({ runClaudeHookCommand }));
+vi.mock("../../commands/codex-hooks.js", () => ({ runCodexHookCommand }));
 
 const cliStub = (input: string[], flags: Record<string, unknown> = {}): CLI =>
 	({ input, flags }) as unknown as CLI;
@@ -47,6 +49,7 @@ describe("hooks dispatch", () => {
 		vi.restoreAllMocks();
 		runHook.mockReset();
 		runClaudeHookCommand.mockReset();
+		runCodexHookCommand.mockReset();
 	});
 
 	it("dispatches `hooks run pre-commit` to runHook and exits with its code", async () => {
@@ -126,19 +129,44 @@ describe("hooks dispatch", () => {
 		expect(exitCode).toBe(0);
 	});
 
-	it("rejects a wrong target with usage + exit 1, never calling the command", async () => {
-		const { err, exitCode } = await run(["hooks", "install", "foo"]);
+	it("routes `hooks install codex` and exits with its code", async () => {
+		runCodexHookCommand.mockResolvedValue(0);
 
+		const { exitCode } = await run(["hooks", "install", "codex"]);
+
+		expect(runCodexHookCommand).toHaveBeenCalledWith("install", process.cwd(), {
+			force: false,
+		});
 		expect(runClaudeHookCommand).not.toHaveBeenCalled();
-		expect(err.join("\n")).toContain("javi-forge hooks install claude");
+		expect(exitCode).toBe(0);
+	});
+
+	it("routes `hooks doctor codex` propagating its exit code", async () => {
+		runCodexHookCommand.mockResolvedValue(1);
+
+		const { exitCode } = await run(["hooks", "doctor", "codex"]);
+
+		expect(runCodexHookCommand).toHaveBeenCalledWith("doctor", process.cwd(), {
+			force: false,
+		});
 		expect(exitCode).toBe(1);
 	});
 
-	it("rejects a missing target with usage + exit 1", async () => {
+	it("rejects an unknown agent with usage + exit 1, never calling any command", async () => {
+		const { err, exitCode } = await run(["hooks", "install", "foo"]);
+
+		expect(runClaudeHookCommand).not.toHaveBeenCalled();
+		expect(runCodexHookCommand).not.toHaveBeenCalled();
+		expect(err.join("\n")).toContain("javi-forge hooks install <claude|codex>");
+		expect(exitCode).toBe(1);
+	});
+
+	it("rejects a missing agent with usage + exit 1", async () => {
 		const { err, exitCode } = await run(["hooks", "doctor"]);
 
 		expect(runClaudeHookCommand).not.toHaveBeenCalled();
-		expect(err.join("\n")).toContain("javi-forge hooks doctor claude");
+		expect(runCodexHookCommand).not.toHaveBeenCalled();
+		expect(err.join("\n")).toContain("javi-forge hooks doctor <claude|codex>");
 		expect(exitCode).toBe(1);
 	});
 });

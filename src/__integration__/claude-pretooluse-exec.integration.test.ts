@@ -7,6 +7,9 @@ import { describe, expect, it } from "vitest";
 import { CLAUDE_HOOK_ASSETS_DIR } from "../constants.js";
 
 const ASSET = path.join(CLAUDE_HOOK_ASSETS_DIR, "javi-forge-skillguard-pre-tool-use.mjs");
+// Asset-relative project root (the .mjs lives at <root>/.claude/hooks/…): the anchor
+// Claude's managed-config checks fall back to when CLAUDE_PROJECT_DIR is unset.
+const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
 const LIMIT = 1_048_576;
 // /etc/* and /proc/*/environ shell reads are matched by shell.sensitive-read ONLY
 // after realpath canonicalization. On a non-Linux host that prepends the current
@@ -20,11 +23,16 @@ interface RunResult { code: number | null; stdout: Buffer; stderr: Buffer; elaps
 function payload(tool_name: string, tool_input: Record<string, unknown>, extra: Record<string, unknown> = {}): Buffer {
 	return Buffer.from(JSON.stringify({ hook_event_name: "PreToolUse", tool_name, tool_input, cwd: process.cwd(), ...extra }));
 }
-function run(input: Buffer, options: { args?: string[]; keepOpen?: boolean; asset?: string; cwd?: string } = {}): Promise<RunResult> {
+function run(input: Buffer, options: { args?: string[]; keepOpen?: boolean; asset?: string; cwd?: string; agent?: string | null; env?: Record<string, string> } = {}): Promise<RunResult> {
 	return new Promise((resolve, reject) => {
 		const started = performance.now();
-		const child = spawn(process.execPath, [options.asset ?? ASSET, ...(options.args ?? [])], {
-			cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"], env: { PATH: path.dirname(process.execPath) },
+		// The installed hook is invoked as `node <asset> --agent=claude`; default to
+		// that so the packaged process resolves the Claude adapter config. `agent: null`
+		// omits the selector to prove the fail-closed refusal (S0).
+		const agent = options.agent === undefined ? "claude" : options.agent;
+		const agentArgs = agent === null ? [] : [`--agent=${agent}`];
+		const child = spawn(process.execPath, [options.asset ?? ASSET, ...agentArgs, ...(options.args ?? [])], {
+			cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"], env: { PATH: path.dirname(process.execPath), ...(options.env ?? {}) },
 		});
 		const stdout: Buffer[] = [];
 		const stderr: Buffer[] = [];
@@ -198,6 +206,125 @@ describe("protected ambiguity diagnostics and corrected orderings", () => {
 	it.each(["sh", "bash", "zsh", "dash", "ksh"])("S39 decode into downstream %s is denied", async (shell) => {
 		expect(await run(payload("Bash", { command: `base64 -d payload | ${shell}` }))).toMatchObject({ code: 2, stdout: Buffer.alloc(0) });
 	});
+});
+describe("S0 agent selector — fail-closed and Claude byte-identical", () => {
+	const safe = payload("Bash", { command: "pnpm test" });
+	it("denies with exit 2 when --agent is missing (no agent config = refuse)", async () => {
+		const result = await run(safe, { agent: null });
+		expect(result.code).toBe(2);
+		expect(result.stdout).toHaveLength(0);
+		expect(result.stderr.toString()).toContain("invalid-config");
+	});
+	it("denies with exit 2 for an unknown --agent id", async () => {
+		const result = await run(safe, { agent: "bogus" });
+		expect(result.code).toBe(2);
+		expect(result.stdout).toHaveLength(0);
+		expect(result.stderr.toString()).toContain("invalid-config");
+	});
+	it("evaluates normally (exit 0) under --agent=claude", async () => {
+		expect(await run(safe, { agent: "claude" })).toMatchObject({ code: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
+	});
+});
+describe("F2 per-agent projectRoot fallback — managed-config protection parity", () => {
+	// The buggy S0 fallback resolved projectRoot = cwd when CLAUDE_PROJECT_DIR was
+	// unset, so a managed write anchored at the asset-relative root flipped DENY->ALLOW
+	// whenever cwd != that root. The fix re-anchors Claude to the asset-relative
+	// PROJECT_ROOT (byte-identical to the pre-extraction guard), env set OR unset.
+	const managedWrite = (tool: "Write" | "Edit"): Buffer =>
+		payload(tool, { file_path: path.join(ROOT, ".claude/settings.json"), new_string: "SECRET_F2" }, { cwd: os.tmpdir() });
+	it.each(["Write", "Edit"] as const)("--agent=claude denies a managed write with CLAUDE_PROJECT_DIR UNSET and cwd off-root (%s)", async (tool) => {
+		const result = await run(managedWrite(tool));
+		expect(result.code).toBe(2);
+		expect(result.stdout).toHaveLength(0);
+		expect(result.stderr.toString()).toContain("path.managed-config");
+		expect(result.stderr.toString()).not.toContain("SECRET_F2");
+	});
+	it.each(["Write", "Edit"] as const)("--agent=claude denies the same managed write with CLAUDE_PROJECT_DIR SET (%s)", async (tool) => {
+		const result = await run(managedWrite(tool), { env: { CLAUDE_PROJECT_DIR: ROOT } });
+		expect(result.code).toBe(2);
+		expect(result.stdout).toHaveLength(0);
+		expect(result.stderr.toString()).toContain("path.managed-config");
+	});
+	it("--agent=codex protects a managed path under the envelope cwd (codex has no env var, fallback=cwd)", async () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "javi-forge-codex-root-"));
+		try {
+			const input = payload("Write", { file_path: path.join(root, ".claude/settings.json"), new_string: "SECRET_F2" }, { cwd: root });
+			const result = await run(input, { agent: "codex", env: { CLAUDE_PROJECT_DIR: "/should/be/ignored/by/codex" } });
+			expect(result.code).toBe(2);
+			expect(result.stdout).toHaveLength(0);
+			expect(result.stderr.toString()).toContain("path.managed-config");
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+describe("S1 apply_patch file-write shim — Codex managed-config protection (real packaged process)", () => {
+	// Codex delivers file writes as tool_name:"apply_patch", patch text in
+	// tool_input.command, NO file_path. Grammar VERIFIED against a REAL captured
+	// codex-cli 0.147.0 envelope (2026-08-18). Under --agent=codex projectRoot = the
+	// envelope cwd, so managed paths are expressed relative to a real temp root.
+	const patch = (...body: string[]): string => ["*** Begin Patch", ...body, "*** End Patch"].join("\n");
+	function withRoot(fn: (root: string) => Promise<void>): () => Promise<void> {
+		return async () => {
+			const root = fs.mkdtempSync(path.join(os.tmpdir(), "javi-forge-codex-ap-"));
+			try { await fn(root); } finally { fs.rmSync(root, { recursive: true, force: true }); }
+		};
+	}
+	const codex = (command: string, root: string): Buffer => payload("apply_patch", { command }, { cwd: root });
+	it("denies an apply_patch that ADDS a managed path (.claude/settings.json)", withRoot(async (root) => {
+		const result = await run(codex(patch("*** Add File: .claude/settings.json", "+SECRET_AP"), root), { agent: "codex" });
+		expect(result.code).toBe(2);
+		expect(result.stdout).toHaveLength(0);
+		expect(result.stderr.toString()).toContain("path.managed-config");
+		expect(result.stderr.toString()).not.toContain("SECRET_AP");
+	}));
+	it.each([
+		["UPDATE managed CLAUDE.md", patch("*** Update File: CLAUDE.md", "@@", "-a", "+SECRET_AP")],
+		["DELETE managed .javi-forge/ci.yaml", patch("*** Delete File: .javi-forge/ci.yaml")],
+		["ADD the Codex-managed .codex/hooks.json itself", patch("*** Add File: .codex/hooks.json", "+SECRET_AP")],
+		["ADD under a managed prefix .claude/hooks/", patch("*** Add File: .claude/hooks/evil.sh", "+SECRET_AP")],
+		["rename a benign source ONTO a managed path via Move to", patch("*** Update File: notes.txt", "*** Move to: .claude/settings.json", "@@", " x")],
+		["multi-file patch where ONLY ONE path is managed", patch("*** Update File: src/a.ts", "@@", " a", "*** Add File: .claude/settings.json", "+SECRET_AP")],
+		["escape via ../ into a managed path", patch("*** Add File: sub/../.claude/settings.json", "+SECRET_AP")],
+	])("denies apply_patch: %s", (_name, command) => withRoot(async (root) => {
+		const result = await run(codex(command, root), { agent: "codex" });
+		expect(result.code).toBe(2);
+		expect(result.stdout).toHaveLength(0);
+		expect(result.stderr.toString()).toContain("path.managed-config");
+		expect(result.stderr.toString()).not.toContain("SECRET_AP");
+	})());
+	it.each([
+		["ADD a benign source file", patch("*** Add File: src/feature.ts", "+export const y = 2;")],
+		["UPDATE a benign file", patch("*** Update File: README.md", "@@", "-old", "+new")],
+		["multi-file patch touching only benign paths", patch("*** Update File: src/a.ts", "@@", " a", "*** Add File: src/b.ts", "+b")],
+		["rename benign to benign via Move to", patch("*** Update File: src/a.ts", "*** Move to: src/b.ts", "@@", " x")],
+	])("allows apply_patch: %s", (_name, command) => withRoot(async (root) => {
+		expect(await run(codex(command, root), { agent: "codex" })).toMatchObject({ code: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
+	})());
+	it.each([
+		["missing Begin Patch header", "*** Add File: .claude/settings.json\n+SECRET_AP\n*** End Patch"],
+		["missing End Patch (truncated) could hide a managed write", "*** Begin Patch\n*** Add File: .claude/settings.json\n+SECRET_AP"],
+		["zero extractable paths (body only)", "*** Begin Patch\n@@\n+orphan\n*** End Patch"],
+		["NUL byte in the patch", "*** Begin Patch\n*** Add File: x\0.ts\n*** End Patch"],
+		["empty command", ""],
+	])("fails closed (deny, exit 2) on %s", (_name, command) => withRoot(async (root) => {
+		const result = await run(codex(command, root), { agent: "codex" });
+		expect(result.code).toBe(2);
+		expect(result.stdout).toHaveLength(0);
+		expect(result.stderr.toString()).toContain("invalid-event");
+		expect(result.stderr.toString()).not.toContain("SECRET_AP");
+	})());
+	it("fails closed when apply_patch tool_input.command is not a string", withRoot(async (root) => {
+		const input = payload("apply_patch", { command: { not: "a string" } }, { cwd: root });
+		const result = await run(input, { agent: "codex" });
+		expect(result.code).toBe(2);
+		expect(result.stdout).toHaveLength(0);
+		expect(result.stderr.toString()).toContain("invalid-event");
+	}));
+	it("does not treat apply_patch as invalid-event under --agent=claude either (agnostic branch, benign allowed)", withRoot(async (root) => {
+		// Claude never emits apply_patch, but the branch must not misfire: a benign patch is allowed.
+		expect(await run(codex(patch("*** Add File: src/feature.ts", "+export const y = 2;"), root), { agent: "claude" })).toMatchObject({ code: 0, stdout: Buffer.alloc(0) });
+	}));
 });
 describe("documented host boundary", () => {
 	it("does not represent pre-start spawn/parse/timeout failures as evaluator denials", () => {

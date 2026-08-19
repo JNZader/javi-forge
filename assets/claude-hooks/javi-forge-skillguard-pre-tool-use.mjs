@@ -10,6 +10,22 @@ export const INPUT_LIMIT_BYTES = 1_048_576;
 export const SUPPORTED_TOOLS = Object.freeze(["Bash", "PowerShell", "Read", "Write", "Edit"]);
 export const POLICY_REGISTRY = Object.freeze({ schemaVersion: 1, policyVersion: 1, diagnosticsMaxBytes: 240 });
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+// Per-agent adapter config (S0 core-extraction): every agent-specific input the guard needs
+// (the isManaged protected-path set, the project-dir source, the managed marker) is resolved by
+// the --agent selector instead of a baked-in literal. The pure evaluate*/utility engine stays
+// agent-independent. Claude's entry holds today's EXACT values so its observable behavior is
+// byte-identical; codex is defined so the map is agent-generic but wired end-to-end only in a later slice.
+const CLAUDE_MANAGED_SET = Object.freeze({ exact: Object.freeze([".claude/settings.json", ".claude/settings.local.json", ".claude/CLAUDE.md", "CLAUDE.md", ".javi-forge/ci.yaml"]), prefixes: Object.freeze([".claude/hooks/", ".claude/agents/", ".claude/skills/"]), caseFoldExact: Object.freeze(["claude.md", ".claude/claude.md"]) });
+const CODEX_MANAGED_SET = Object.freeze({ exact: Object.freeze([".codex/hooks.json", ".claude/settings.json", ".claude/settings.local.json", ".claude/CLAUDE.md", "CLAUDE.md", ".javi-forge/ci.yaml"]), prefixes: Object.freeze([".claude/hooks/", ".claude/agents/", ".claude/skills/"]), caseFoldExact: Object.freeze(["claude.md", ".claude/claude.md"]) });
+export const AGENT_CONFIGS = Object.freeze({ claude: Object.freeze({ id: "claude", managedSet: CLAUDE_MANAGED_SET, projectDir: Object.freeze({ envVar: "CLAUDE_PROJECT_DIR", fallback: "asset-root" }), marker: MANAGED_MARKER }), codex: Object.freeze({ id: "codex", managedSet: CODEX_MANAGED_SET, projectDir: Object.freeze({ envVar: null, fallback: "cwd" }), marker: "// javi-forge-managed: codex-pretooluse v1" }) });
+// Fail-closed agent selector: a missing/unknown --agent means we cannot know what to protect, so refuse.
+function resolveAgentConfig(argv) { const arg = argv.find((value) => typeof value === "string" && value.startsWith("--agent=")); const id = arg === undefined ? undefined : arg.slice("--agent=".length); const config = id === undefined ? undefined : AGENT_CONFIGS[id]; if (!config) fail("invalid-config"); return config; }
+// Project root per agent: the env var when set (Claude = CLAUDE_PROJECT_DIR); otherwise the per-agent
+// fallback decides. "asset-root" anchors to the asset-relative PROJECT_ROOT so Claude is byte-identical
+// to the pre-extraction guard whether the env var is set OR unset (closing the cwd-divergence gap);
+// "cwd" uses the envelope cwd (codex, whose user-global asset has no asset-relative project root and no
+// env var). Fail-safe: an unknown/missing fallback anchors to the stricter PROJECT_ROOT, never looser.
+function resolveProjectRoot(config, cwd) { const envVar = config.projectDir.envVar; if (envVar) { const value = process.env[envVar]; if (typeof value === "string" && value.length > 0) return value; } if (config.projectDir.fallback === "cwd") return cwd ?? PROJECT_ROOT; return PROJECT_ROOT; }
 const POSIX_ABSOLUTE = /^\//;
 const WINDOWS_DRIVE = /^[a-zA-Z]:[\\/]/;
 const WINDOWS_UNC = /^\\\\[^\\]+\\[^\\]+/;
@@ -59,9 +75,8 @@ function nativeRealpath(input) {
 		fail("path-resolution-failed");
 	}
 }
-export function canonicalizePolicyPath(input, options = {}) {
+export function lexicalizePolicyPath(input, options = {}) {
 	if (typeof input !== "string" || input.includes("\0")) fail("invalid-event");
-	const platform = options.platform ?? process.platform;
 	let expanded = input;
 	if (options.base) {
 		expanded = expanded.replace(/^\$\{CLAUDE_PROJECT_DIR\}|^\$CLAUDE_PROJECT_DIR/, options.projectRoot ?? PROJECT_ROOT);
@@ -70,6 +85,11 @@ export function canonicalizePolicyPath(input, options = {}) {
 			expanded = path.resolve(options.base, expanded);
 		}
 	}
+	return expanded;
+}
+export function canonicalizePolicyPath(input, options = {}) {
+	const platform = options.platform ?? process.platform;
+	let expanded = lexicalizePolicyPath(input, options);
 	// Strip Windows device aliases (\??\, \\?\, \\.\) BEFORE native realpath:
 	// on a real win32 host nativeRealpath resolves an unstripped \??\ against the
 	// current drive (D:\??\C:\...), so the alias must be canonicalized first or a
@@ -114,21 +134,21 @@ export function isSensitivePolicyKey(key, platform = process.platform) {
 	if (SENSITIVE_DIRECTORY_SUFFIXES.some((directory) => key.endsWith(directory) || key.includes(`${directory}/`))) return true;
 	return platform === "win32" || platform === "darwin" ? basename.toLowerCase() === "serviceaccountkey.json" : basename === "serviceAccountKey.json";
 }
-function isManaged(key) {
-	const project = canonicalizePolicyPath(PROJECT_ROOT);
+function isManaged(key, managedSet = CLAUDE_MANAGED_SET, projectRoot = PROJECT_ROOT) {
+	const project = canonicalizePolicyPath(projectRoot);
 	if (!key.startsWith(`${project}/`) && key !== project) return false;
 	const relative = key.slice(project.length + 1);
 	// On case-insensitive platforms lexicalNormalize folds the key to lowercase,
 	// so the mixed-case CLAUDE.md literals must be matched case-insensitively too
 	// (the other literals are already lowercase). Otherwise CLAUDE.md and
 	// .claude/CLAUDE.md lose managed-config protection on macOS/Windows.
-	const foldedClaudeMd = (process.platform === "win32" || process.platform === "darwin") && (relative === "claude.md" || relative === ".claude/claude.md");
-	return foldedClaudeMd || relative === ".claude/settings.json" || relative === ".claude/settings.local.json" || relative === ".claude/CLAUDE.md" || relative === "CLAUDE.md" || relative === ".javi-forge/ci.yaml" || relative.startsWith(".claude/hooks/") || relative.startsWith(".claude/agents/") || relative.startsWith(".claude/skills/");
+	const foldedClaudeMd = (process.platform === "win32" || process.platform === "darwin") && managedSet.caseFoldExact.includes(relative);
+	return foldedClaudeMd || managedSet.exact.includes(relative) || managedSet.prefixes.some((prefix) => relative.startsWith(prefix));
 }
-function evaluateFile(toolName, filePath) {
+function evaluateFile(toolName, filePath, config = AGENT_CONFIGS.claude, projectRoot = PROJECT_ROOT) {
 	const keys = policyPathKeys(filePath);
 	if (keys.some((key) => isSensitivePolicyKey(key))) return { allowed: false, ruleId: "path.sensitive" };
-	if (toolName !== "Read" && keys.some(isManaged)) return { allowed: false, ruleId: "path.managed-config" };
+	if (toolName !== "Read" && keys.some((key) => isManaged(key, config.managedSet, projectRoot))) return { allowed: false, ruleId: "path.managed-config" };
 	return { allowed: true };
 }
 function lex(command, powershell = false) {
@@ -628,21 +648,21 @@ function reduceWrappers(input, powershell = false) {
 	}
 	return { tokens };
 }
-function hasSensitiveLiteral(tokens, cwd) {
+function hasSensitiveLiteral(tokens, cwd, projectRoot = PROJECT_ROOT) {
 	return tokens.some((token) => {
 		if ((token.startsWith("-") && !/^-(?:LiteralPath|Path):/i.test(token)) || !/[\\/.~$]/.test(token)) return false;
 		try {
-			return isSensitivePolicyKey(canonicalizePolicyPath(token.replace(/^(?:-LiteralPath:|-Path:)/i, "").replace(/[;,]$/, ""), { base: cwd, projectRoot: PROJECT_ROOT }));
+			return isSensitivePolicyKey(canonicalizePolicyPath(token.replace(/^(?:-LiteralPath:|-Path:)/i, "").replace(/[;,]$/, ""), { base: cwd, projectRoot }));
 		} catch {
 			return false;
 		}
 	});
 }
-function hasManagedLiteral(tokens, cwd) {
+function hasManagedLiteral(tokens, cwd, config = AGENT_CONFIGS.claude, projectRoot = PROJECT_ROOT) {
 	return tokens.some((token) => {
 		if ((token.startsWith("-") && !/^-(?:LiteralPath|Path):/i.test(token)) || !/[\\/.]/.test(token)) return false;
 		try {
-			return isManaged(canonicalizePolicyPath(token.replace(/^(?:-LiteralPath:|-Path:)/i, "").replace(/[;,]$/, ""), { base: cwd, projectRoot: PROJECT_ROOT }));
+			return isManaged(canonicalizePolicyPath(token.replace(/^(?:-LiteralPath:|-Path:)/i, "").replace(/[;,]$/, ""), { base: cwd, projectRoot }), config.managedSet, projectRoot);
 		} catch {
 			return false;
 		}
@@ -681,9 +701,9 @@ function bashSubstitutions(command) {
 	}
 	return bodies;
 }
-function evaluateBash(command, cwd, depth = 0) {
+function evaluateBash(command, cwd, config = AGENT_CONFIGS.claude, projectRoot = PROJECT_ROOT, depth = 0) {
 	if (depth > 4) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
-	try { for (const body of bashSubstitutions(command)) { const nested = evaluateBash(body, cwd, depth + 1); if (!nested.allowed) return nested; } } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
+	try { for (const body of bashSubstitutions(command)) { const nested = evaluateBash(body, cwd, config, projectRoot, depth + 1); if (!nested.allowed) return nested; } } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
 	if (/^\s*:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:\s*$/.test(command)) return { allowed: false, ruleId: "shell.destructive-root" };
 	let parsed;
 	try { parsed = lex(command); } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
@@ -712,20 +732,20 @@ function evaluateBash(command, cwd, depth = 0) {
 				if (decision) return decision;
 			} else if (/^(?:curl|wget)$/.test(executable) && shellSink) return { allowed: false, ruleId: "shell.pipe-to-shell" };
 		}
-		if (["cat", "less", "more", "head", "tail", "bat", "grep", "rg", "sed", "awk", "source", ".", "cp", "install"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "shell.sensitive-read" };
-		if (tokens.some((token) => token === "<") && hasSensitiveLiteral(tokens, cwd)) return { allowed: false, ruleId: "shell.sensitive-read" };
+		if (["cat", "less", "more", "head", "tail", "bat", "grep", "rg", "sed", "awk", "source", ".", "cp", "install"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd, projectRoot)) return { allowed: false, ruleId: "shell.sensitive-read" };
+		if (tokens.some((token) => token === "<") && hasSensitiveLiteral(tokens, cwd, projectRoot)) return { allowed: false, ruleId: "shell.sensitive-read" };
 		if (executable === "git" && tokens[1]?.toLowerCase() === "push" && tokens.some((token) => ["-f", "--force", "--force-with-lease"].includes(token.toLowerCase()))) return { allowed: false, ruleId: "shell.force-push" };
-		if (["rm", "mv", "cp", "install", "truncate", "touch", "chmod", "chown", "tee"].includes(executable) && hasManagedLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "shell.managed-config-tamper" };
-		if ((/^(?:sed|perl)$/.test(executable) && tokens.some((token) => token.startsWith("-i")) && hasManagedLiteral(tokens, cwd)) || (tokens.includes(">") && hasManagedLiteral(tokens, cwd))) return { allowed: false, ruleId: "shell.managed-config-tamper" };
+		if (["rm", "mv", "cp", "install", "truncate", "touch", "chmod", "chown", "tee"].includes(executable) && hasManagedLiteral(tokens.slice(1), cwd, config, projectRoot)) return { allowed: false, ruleId: "shell.managed-config-tamper" };
+		if ((/^(?:sed|perl)$/.test(executable) && tokens.some((token) => token.startsWith("-i")) && hasManagedLiteral(tokens, cwd, config, projectRoot)) || (tokens.includes(">") && hasManagedLiteral(tokens, cwd, config, projectRoot))) return { allowed: false, ruleId: "shell.managed-config-tamper" };
 		if (/^(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) && tokens.some((token) => /^-(?:enc|encodedcommand)$/i.test(token))) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
 		if (/^(?:bash|sh|zsh|dash|ksh)$/.test(executable)) {
 			const flag = tokens.findIndex((token) => /^-[^-]*c[^-]*$/.test(token));
-			if (flag >= 0) { const body = tokens[flag + 1]; if (!body || /\$(?!\()/.test(body)) return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; const nested = evaluateBash(body, cwd, depth + 1); if (!nested.allowed) return nested; }
+			if (flag >= 0) { const body = tokens[flag + 1]; if (!body || /\$(?!\()/.test(body)) return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; const nested = evaluateBash(body, cwd, config, projectRoot, depth + 1); if (!nested.allowed) return nested; }
 		}
 	}
 	return { allowed: true };
 }
-function evaluatePowerShell(command, cwd) {
+function evaluatePowerShell(command, cwd, config = AGENT_CONFIGS.claude, projectRoot = PROJECT_ROOT) {
 	const parsed = lex(command, true);
 	for (let index = 0; index < parsed.commands.length; index++) {
 		const reduced = reduceWrappers(parsed.commands[index], true);
@@ -734,23 +754,69 @@ function evaluatePowerShell(command, cwd) {
 		const executable = (tokens[0] ?? "").toLowerCase();
 		if ((["remove-item", "rm", "del", "erase", "rmdir", "rd"].includes(executable) && tokens.some((token) => /^-(?:r|recurse)$/i.test(token)) && tokens.some((token) => /^-(?:fo|force)$/i.test(token)) && tokens.some((token) => /^(?:[a-z]:\\?|[/~]|\$HOME)$/i.test(token))) || ["format-volume", "clear-disk", "initialize-disk"].includes(executable)) return { allowed: false, ruleId: "powershell.destructive-root" };
 		if (parsed.separators[index] === "|" && /^(?:invoke-webrequest|iwr|curl|wget|invoke-restmethod|irm)$/.test(executable) && /^(?:invoke-expression|iex)$/.test(((reduceWrappers(parsed.commands[index + 1] ?? [], true).tokens ?? [])[0] ?? "").toLowerCase())) return { allowed: false, ruleId: "powershell.pipe-to-shell" };
-		if (["get-content", "gc", "cat", "type", "select-string", "copy-item", "cp", "copy"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "powershell.sensitive-read" };
+		if (["get-content", "gc", "cat", "type", "select-string", "copy-item", "cp", "copy"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd, projectRoot)) return { allowed: false, ruleId: "powershell.sensitive-read" };
 		if (executable === "git" && tokens[1]?.toLowerCase() === "push" && tokens.some((token) => ["-f", "--force", "--force-with-lease"].includes(token.toLowerCase()))) return { allowed: false, ruleId: "powershell.force-push" };
-		if (["set-content", "add-content", "out-file", "clear-content", "remove-item", "move-item", "copy-item", "rename-item", "new-item"].includes(executable) && hasManagedLiteral(tokens.slice(1), cwd)) return { allowed: false, ruleId: "powershell.managed-config-tamper" };
-		if (tokens.includes(">") && hasManagedLiteral(tokens, cwd)) return { allowed: false, ruleId: "powershell.managed-config-tamper" };
+		if (["set-content", "add-content", "out-file", "clear-content", "remove-item", "move-item", "copy-item", "rename-item", "new-item"].includes(executable) && hasManagedLiteral(tokens.slice(1), cwd, config, projectRoot)) return { allowed: false, ruleId: "powershell.managed-config-tamper" };
+		if (tokens.includes(">") && hasManagedLiteral(tokens, cwd, config, projectRoot)) return { allowed: false, ruleId: "powershell.managed-config-tamper" };
 		if (/^(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) && tokens.some((token) => /^-(?:enc|encodedcommand)$/i.test(token))) return { allowed: false, ruleId: "powershell.obfuscated-interpreter" };
 	}
 	return { allowed: true };
 }
-export function evaluateEvent(input) {
-	if (!isObject(input) || input.hook_event_name !== "PreToolUse" || !SUPPORTED_TOOLS.includes(input.tool_name) || !isObject(input.tool_input)) fail("invalid-event");
+// Codex file-write shim (S1, security-critical): Codex delivers file writes as
+// tool_name:"apply_patch" with the target path(s) inside the tool_input.command patch
+// text and NO file_path field, so evaluateFile's managed-config protection cannot fire
+// without first parsing the header paths out of the patch. This is a WRITE-class surface:
+// a parse miss = a managed-config file-write bypass, so every unresolved shape fails
+// closed (throw -> main() catch -> denyAndExit, exit 2). Grammar VERIFIED against a REAL
+// captured codex-cli 0.147.0 envelope (2026-08-18): first line is `*** Begin Patch`,
+// closed by `*** End Patch`, with `*** Add File:` / `*** Update File:` / `*** Delete File:`
+// headers AND `*** Move to:` for a rename target -- the last one CONFIRMED emitted (a
+// rename can retarget a benign source onto a managed path, so its destination is checked too).
+export function parseApplyPatchPaths(command) {
+	if (typeof command !== "string" || command.includes("\0")) fail("invalid-event");
+	const lines = command.split(/\r?\n/);
+	if ((lines[0] ?? "").trim() !== "*** Begin Patch") fail("invalid-event"); // header-less patch -> cannot prove safe
+	let seenEnd = false;
+	const paths = [];
+	for (let index = 1; index < lines.length; index++) {
+		const line = lines[index];
+		if (line.trim() === "*** End Patch") { seenEnd = true; break; }
+		const file = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/.exec(line);
+		if (file) { paths.push(file[1].trim()); continue; }
+		const move = /^\*\*\* Move to: (.+)$/.exec(line); // rename target (verified present)
+		if (move) { paths.push(move[1].trim()); continue; }
+		// body lines (+/-/space/@@/index) carry no header path and are ignored
+	}
+	if (!seenEnd) fail("invalid-event");             // truncated patch could hide a managed write
+	if (paths.length === 0) fail("invalid-event");   // zero extractable paths -> fail closed
+	for (const target of paths) if (target.length === 0 || target.includes("\0")) fail("invalid-event");
+	return paths;
+}
+export function evaluateEvent(input, config = AGENT_CONFIGS.claude) {
+	if (!isObject(input) || input.hook_event_name !== "PreToolUse" || !isObject(input.tool_input)) fail("invalid-event");
+	const applyPatch = input.tool_name === "apply_patch";
+	if (!applyPatch && !SUPPORTED_TOOLS.includes(input.tool_name)) fail("invalid-event");
+	const cwd = typeof input.cwd === "string" && isAbsolutePolicyPath(input.cwd) ? input.cwd : PROJECT_ROOT;
+	const projectRoot = resolveProjectRoot(config, cwd);
+	if (applyPatch) {
+		if (typeof input.tool_input.command !== "string") fail("invalid-event");
+		// apply_patch is a WRITE tool (not "Read"), so the managed-config rule fires. Each header
+		// path is made absolute LEXICALLY (no realpath) vs the envelope cwd and handed to evaluateFile
+		// exactly like Write/Edit's raw file_path, so policyPathKeys owns the dual lexical+realpath
+		// canonicalization. Realpath-ing here first would collapse a symlinked managed dir onto its
+		// target and drop the protective lexical key -> managed-config write bypass.
+		for (const target of parseApplyPatchPaths(input.tool_input.command)) {
+			const decision = evaluateFile("apply_patch", lexicalizePolicyPath(target, { base: cwd, projectRoot }), config, projectRoot);
+			if (!decision.allowed) return decision;
+		}
+		return { allowed: true };
+	}
 	if (input.tool_name === "Bash" || input.tool_name === "PowerShell") {
 		if (typeof input.tool_input.command !== "string") fail("invalid-event");
-		const cwd = typeof input.cwd === "string" && isAbsolutePolicyPath(input.cwd) ? input.cwd : PROJECT_ROOT;
-		return input.tool_name === "Bash" ? evaluateBash(input.tool_input.command, cwd) : evaluatePowerShell(input.tool_input.command, cwd);
+		return input.tool_name === "Bash" ? evaluateBash(input.tool_input.command, cwd, config, projectRoot) : evaluatePowerShell(input.tool_input.command, cwd, config, projectRoot);
 	}
 	if (typeof input.tool_input.file_path !== "string" || !isAbsolutePolicyPath(input.tool_input.file_path)) fail("invalid-event");
-	return evaluateFile(input.tool_name, input.tool_input.file_path);
+	return evaluateFile(input.tool_name, input.tool_input.file_path, config, projectRoot);
 }
 export function parseAndEvaluateInput(input) {
 	if (!Buffer.isBuffer(input) || input.length === 0) fail("invalid-json");
@@ -769,6 +835,7 @@ function diagnostic(error) {
 	const messages = {
 		"invalid-json": "input is not a valid JSON object",
 		"invalid-event": "input does not match the supported event schema",
+		"invalid-config": "missing or unknown --agent selector (expected --agent=<id>)",
 		"oversized-input": "stdin exceeds 1048576 bytes",
 		"missing-policy": "embedded policy registry is unavailable",
 		"internal-error": "policy evaluation could not complete",
@@ -830,6 +897,7 @@ export function readBoundedStdin(stream = process.stdin) {
 }
 export async function main() {
 	try {
+		const config = resolveAgentConfig(process.argv);
 		const fault = process.argv.find((arg) => arg.startsWith("--javi-forge-test-fault="))?.split("=")[1];
 		if (fault === "missing-policy") throw new Error("missing-policy");
 		if (POLICY_REGISTRY.schemaVersion !== 1 || POLICY_REGISTRY.policyVersion !== 1) throw new Error("missing-policy");
@@ -841,7 +909,7 @@ export async function main() {
 			throw new Error("invalid-json");
 		}
 		if (fault === "evaluator-throw") throw new Error("internal-error");
-		const decision = evaluateEvent(parsed);
+		const decision = evaluateEvent(parsed, config);
 		if (!decision.allowed) denyAndExit(denialDiagnostic(parsed.tool_name, decision));
 		process.exitCode = 0;
 	} catch (error) {

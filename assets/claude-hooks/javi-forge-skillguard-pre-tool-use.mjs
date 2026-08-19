@@ -75,9 +75,8 @@ function nativeRealpath(input) {
 		fail("path-resolution-failed");
 	}
 }
-export function canonicalizePolicyPath(input, options = {}) {
+export function lexicalizePolicyPath(input, options = {}) {
 	if (typeof input !== "string" || input.includes("\0")) fail("invalid-event");
-	const platform = options.platform ?? process.platform;
 	let expanded = input;
 	if (options.base) {
 		expanded = expanded.replace(/^\$\{CLAUDE_PROJECT_DIR\}|^\$CLAUDE_PROJECT_DIR/, options.projectRoot ?? PROJECT_ROOT);
@@ -86,6 +85,11 @@ export function canonicalizePolicyPath(input, options = {}) {
 			expanded = path.resolve(options.base, expanded);
 		}
 	}
+	return expanded;
+}
+export function canonicalizePolicyPath(input, options = {}) {
+	const platform = options.platform ?? process.platform;
+	let expanded = lexicalizePolicyPath(input, options);
 	// Strip Windows device aliases (\??\, \\?\, \\.\) BEFORE native realpath:
 	// on a real win32 host nativeRealpath resolves an unstripped \??\ against the
 	// current drive (D:\??\C:\...), so the alias must be canonicalized first or a
@@ -758,10 +762,55 @@ function evaluatePowerShell(command, cwd, config = AGENT_CONFIGS.claude, project
 	}
 	return { allowed: true };
 }
+// Codex file-write shim (S1, security-critical): Codex delivers file writes as
+// tool_name:"apply_patch" with the target path(s) inside the tool_input.command patch
+// text and NO file_path field, so evaluateFile's managed-config protection cannot fire
+// without first parsing the header paths out of the patch. This is a WRITE-class surface:
+// a parse miss = a managed-config file-write bypass, so every unresolved shape fails
+// closed (throw -> main() catch -> denyAndExit, exit 2). Grammar VERIFIED against a REAL
+// captured codex-cli 0.147.0 envelope (2026-08-18): first line is `*** Begin Patch`,
+// closed by `*** End Patch`, with `*** Add File:` / `*** Update File:` / `*** Delete File:`
+// headers AND `*** Move to:` for a rename target -- the last one CONFIRMED emitted (a
+// rename can retarget a benign source onto a managed path, so its destination is checked too).
+export function parseApplyPatchPaths(command) {
+	if (typeof command !== "string" || command.includes("\0")) fail("invalid-event");
+	const lines = command.split(/\r?\n/);
+	if ((lines[0] ?? "").trim() !== "*** Begin Patch") fail("invalid-event"); // header-less patch -> cannot prove safe
+	let seenEnd = false;
+	const paths = [];
+	for (let index = 1; index < lines.length; index++) {
+		const line = lines[index];
+		if (line.trim() === "*** End Patch") { seenEnd = true; break; }
+		const file = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/.exec(line);
+		if (file) { paths.push(file[1].trim()); continue; }
+		const move = /^\*\*\* Move to: (.+)$/.exec(line); // rename target (verified present)
+		if (move) { paths.push(move[1].trim()); continue; }
+		// body lines (+/-/space/@@/index) carry no header path and are ignored
+	}
+	if (!seenEnd) fail("invalid-event");             // truncated patch could hide a managed write
+	if (paths.length === 0) fail("invalid-event");   // zero extractable paths -> fail closed
+	for (const target of paths) if (target.length === 0 || target.includes("\0")) fail("invalid-event");
+	return paths;
+}
 export function evaluateEvent(input, config = AGENT_CONFIGS.claude) {
-	if (!isObject(input) || input.hook_event_name !== "PreToolUse" || !SUPPORTED_TOOLS.includes(input.tool_name) || !isObject(input.tool_input)) fail("invalid-event");
+	if (!isObject(input) || input.hook_event_name !== "PreToolUse" || !isObject(input.tool_input)) fail("invalid-event");
+	const applyPatch = input.tool_name === "apply_patch";
+	if (!applyPatch && !SUPPORTED_TOOLS.includes(input.tool_name)) fail("invalid-event");
 	const cwd = typeof input.cwd === "string" && isAbsolutePolicyPath(input.cwd) ? input.cwd : PROJECT_ROOT;
 	const projectRoot = resolveProjectRoot(config, cwd);
+	if (applyPatch) {
+		if (typeof input.tool_input.command !== "string") fail("invalid-event");
+		// apply_patch is a WRITE tool (not "Read"), so the managed-config rule fires. Each header
+		// path is made absolute LEXICALLY (no realpath) vs the envelope cwd and handed to evaluateFile
+		// exactly like Write/Edit's raw file_path, so policyPathKeys owns the dual lexical+realpath
+		// canonicalization. Realpath-ing here first would collapse a symlinked managed dir onto its
+		// target and drop the protective lexical key -> managed-config write bypass.
+		for (const target of parseApplyPatchPaths(input.tool_input.command)) {
+			const decision = evaluateFile("apply_patch", lexicalizePolicyPath(target, { base: cwd, projectRoot }), config, projectRoot);
+			if (!decision.allowed) return decision;
+		}
+		return { allowed: true };
+	}
 	if (input.tool_name === "Bash" || input.tool_name === "PowerShell") {
 		if (typeof input.tool_input.command !== "string") fail("invalid-event");
 		return input.tool_name === "Bash" ? evaluateBash(input.tool_input.command, cwd, config, projectRoot) : evaluatePowerShell(input.tool_input.command, cwd, config, projectRoot);

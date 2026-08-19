@@ -59,6 +59,33 @@ const run = (
 		settings: s,
 	});
 
+describe("runTransaction — seam validation (R-4)", () => {
+	it("throws a clear error when neither `layout` nor asset+settings is supplied", async () => {
+		const fake = freshFake();
+		await expect(
+			runTransaction({
+				secureFs: fake,
+				clock,
+				nonce: makeNonce(),
+				projectDir: PROJECT,
+			}),
+		).rejects.toThrow(/layout|asset|settings/);
+	});
+
+	it("throws when only `asset` is supplied (settings missing)", async () => {
+		const fake = freshFake();
+		await expect(
+			runTransaction({
+				secureFs: fake,
+				clock,
+				nonce: makeNonce(),
+				projectDir: PROJECT,
+				asset: asset(),
+			}),
+		).rejects.toThrow(/layout|asset|settings/);
+	});
+});
+
 describe("runTransaction — fresh install (host-independent fake)", () => {
 	it("creates both segments at 0o700 one at a time and commits asset then settings", async () => {
 		const fake = freshFake();

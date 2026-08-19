@@ -1,3 +1,14 @@
+## [1.36.0](https://github.com/JNZader/javi-forge/compare/v1.35.1...v1.36.0) (2026-08-19)
+
+### Features
+
+* **hooks:** Codex apply_patch file-write shim (agnostic S1) [size:exception] ([1f02a60](https://github.com/JNZader/javi-forge/commit/1f02a60d6dfd41c18264b5c56b482b95e5f14ba2))
+* **hooks:** Codex install/doctor/repair adapter + agent registry (agnostic S2) [size:exception] ([1740bf6](https://github.com/JNZader/javi-forge/commit/1740bf6206bb881ca0379abe7c07561449a46986))
+
+### Refactoring
+
+* **hooks:** extract per-agent config from the guard asset via --agent (agnostic S0) [size:exception] ([e2dff62](https://github.com/JNZader/javi-forge/commit/e2dff62f96255ee02d4b24142521157b0dbccf10))
+
 ## [1.35.1](https://github.com/JNZader/javi-forge/compare/v1.35.0...v1.35.1) (2026-08-18)
 
 ### Bug Fixes

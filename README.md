@@ -372,6 +372,11 @@ npx javi-forge doctor
 - **Project Manifest** — Reads `.javi-forge/manifest.json`
 - **Installed Modules** — engram, obsidian-brain, memory-simple, ghagga
 
+
+## macOS CI-Local support
+
+macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate your workflow. Existing installed guards are not removed in 1.x; Darwin code removal is planned separately for 2.0.
+
 ## Requirements
 
 - **Node.js** >= 22 (required by ink 7; previous versions ran on >= 18)

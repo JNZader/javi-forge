@@ -723,4 +723,58 @@ describe("_run — install seam wiring (fake secureFs, host-independent)", () =>
 		expect(res.changed).toEqual([]);
 		expect(res.report).toBeDefined();
 	});
+	it.each(["install", "repair"] as const)("refuses exact Darwin %s before doctor, probes, secure-fs selection, or mutation", async (mode) => {
+		const secureFs = makeFakeSecureFs();
+		const openDirNoFollow = vi.spyOn(secureFs, "openDirNoFollow");
+		const nodeProbe = vi.fn(async () => {
+			throw new Error("Darwin refusal must not probe node");
+		});
+		const aclProbe = vi.fn(async () => {
+			throw new Error("Darwin refusal must not probe ACL capability");
+		});
+		const doctor = vi.fn(async () => {
+			throw new Error("Darwin refusal must not invoke doctor");
+		});
+		const result = await _run(dir, mode, {}, {
+			platform: "darwin",
+			secureFs,
+			nodeProbe,
+			aclProbe,
+			doctor,
+		});
+		expect(result).toMatchObject({
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: ["macos-lifecycle-unsupported"],
+		});
+		expect(result.report).toBeUndefined();
+		expect(result.lifecycleRefusal).toMatchObject({
+			platform: "darwin",
+			state: "macos-deprecated",
+			lifecycle: "unsupported",
+			refusalCode: "macos-lifecycle-unsupported",
+		});
+		expect(openDirNoFollow).not.toHaveBeenCalled();
+		expect(nodeProbe).not.toHaveBeenCalled();
+		expect(aclProbe).not.toHaveBeenCalled();
+		expect(doctor).not.toHaveBeenCalled();
+		expect(result.warnings.join("\n")).toContain(
+			"pin a supported release or migrate",
+		);
+	});
+
+});
+
+
+describe("doctor platform support advisory", () => {
+	it("reports exact Darwin support data without changing report semantics", async () => {
+		const darwin = await doctor(dir, { platform: "darwin" });
+		const linux = await doctor(dir, { platform: "linux" });
+		expect(darwin.platformSupport).toMatchObject({ state: "macos-deprecated", lifecycle: "unsupported", refusalCode: "macos-lifecycle-unsupported", guidance: expect.stringContaining("pin a supported release or migrate") });
+		expect(linux.platformSupport).toBeUndefined();
+		expect(darwin.healthy).toBe(linux.healthy);
+		expect(darwin.execution).toEqual(linux.execution);
+		expect(darwin.remediation).toEqual(linux.remediation);
+	});
 });

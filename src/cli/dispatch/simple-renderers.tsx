@@ -9,6 +9,7 @@
  */
 
 import { render } from "ink";
+import { resolvePlatformSupport } from "../../lib/platform-support.js";
 import React from "react";
 import type { CIProvider, MemoryOption, Stack } from "../../types/index.js";
 import AnalyzeUI from "../../ui/AnalyzeUI.js";
@@ -91,6 +92,12 @@ export function handlePlugin(cli: CLI, ctx: RendererCtx): void {
 }
 
 export function handleInitDefault(cli: CLI, ctx: RendererCtx): void {
+    const platformSupport = resolvePlatformSupport(process.platform);
+    if (platformSupport) {
+        console.error(`${platformSupport.refusalCode}: ${platformSupport.guidance}`);
+        process.exitCode = 1;
+        return;
+    }
 	const presetStack = VALID_STACKS.includes(cli.flags.stack)
 		? (cli.flags.stack as Stack)
 		: undefined;

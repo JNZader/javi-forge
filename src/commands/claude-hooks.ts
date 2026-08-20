@@ -86,6 +86,7 @@ function renderDoctor(
 	log: (m: string) => void,
 ): number {
 	log(`doctor claude: ${report.healthy ? "healthy" : "unhealthy"}`);
+	if (report.platformSupport) log(`  platform-support: ${report.platformSupport.state} — ${report.platformSupport.guidance}`);
 	log(`  settings: ${report.settings.state} — ${report.settings.detail}`);
 	log(`  asset:    ${report.asset.state} — ${report.asset.detail}`);
 	log(

@@ -1,4 +1,5 @@
 import { ensureDirExists } from "../lib/common.js";
+import { resolvePlatformSupport, type PlatformSupport } from "../lib/platform-support.js";
 import type { InitOptions } from "../types/index.js";
 import { stepAgentSkills } from "./init/steps/agent-skills.js";
 import { stepAISync } from "./init/steps/ai-sync.js";
@@ -24,10 +25,21 @@ import type { StepCallback, StepContext } from "./init/types.js";
  *
  * Pure dispatch: every step lives in src/commands/init/steps/.
  */
+export type InitProjectResult = { ok: true } | { ok: false; refusalCode: string; platformSupport: PlatformSupport };
+
 export async function initProject(
 	options: InitOptions,
 	onStep: StepCallback,
-): Promise<void> {
+): Promise<InitProjectResult> {
+	const platformSupport = resolvePlatformSupport(process.platform);
+	if (platformSupport) {
+		return {
+			ok: false,
+			refusalCode: platformSupport.refusalCode,
+			platformSupport,
+		};
+	}
+
 	const { projectDir, dryRun } = options;
 
 	// Ensure project directory exists before any steps
@@ -56,4 +68,5 @@ export async function initProject(
 	await stepLocalAi(ctx);
 	await stepAgentSkills(ctx);
 	await stepManifest(ctx);
+	return { ok: true };
 }

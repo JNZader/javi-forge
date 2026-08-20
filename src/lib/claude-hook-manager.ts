@@ -9,6 +9,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { resolvePlatformSupport, type PlatformSupport } from "./platform-support.js";
 import { createHash, randomBytes } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import os from "node:os";
@@ -87,6 +88,7 @@ export interface ClaudeHookAssetClassification {
 
 export interface ClaudeHookDoctorReport {
 	healthy: boolean;
+	platformSupport?: PlatformSupport;
 	settings: {
 		state: ClaudeHookComponentState;
 		version?: number;
@@ -752,6 +754,7 @@ export async function doctorClaudePreToolUse(
 		execution?: ExecutionProbeEnv;
 		/** Injectable read-only ACL capability probe (defaults to the real one). */
 		aclProbe?: () => Promise<AclCapability>;
+        platform?: NodeJS.Platform;
 	},
 ): Promise<ClaudeHookDoctorReport> {
 	const manifest = options?.manifest ?? (await readManifest());
@@ -829,7 +832,9 @@ export async function doctorClaudePreToolUse(
 		remediation.add(aclRemediation);
 	}
 
+	const platformSupport = resolvePlatformSupport(options?.platform ?? process.platform);
 	return {
+		...(platformSupport ? { platformSupport } : {}),
 		healthy,
 		settings: {
 			state: settings.state,
@@ -873,11 +878,11 @@ async function readManifest(): Promise<Manifest> {
 // classify (Slice 2) -> plan (Slice-2 planners + Slice-3a helpers) -> serialize
 // -> delegate the irreversible I/O to runTransaction (opens no handle itself).
 
-export interface ClaudeHookMutationResult {
+interface ClaudeHookMutationResultWithReport {
 	ok: boolean;
 	changed: string[]; // absolute paths actually written/renamed
 	backups: string[]; // absolute PERSISTENT backup paths — forced ops only
-	report: ClaudeHookDoctorReport; // post-mutation doctor snapshot
+	report: ClaudeHookDoctorReport; // real post-mutation doctor snapshot
 	errors: string[]; // refusal/failure messages
 	/**
 	 * NON-BLOCKING operator notices. A warning never changes `ok`: refusing to
@@ -885,7 +890,23 @@ export interface ClaudeHookMutationResult {
 	 * which is strictly worse than an exec-form guard that may not resolve.
 	 */
 	warnings: string[];
+	lifecycleRefusal?: never;
 }
+
+interface ClaudeHookLifecycleRefusal {
+	ok: false;
+	changed: string[];
+	backups: string[];
+	errors: string[];
+	warnings: string[];
+	/** The lifecycle gate refused before any doctor or installed-state probe. */
+	lifecycleRefusal: PlatformSupport;
+	report?: never;
+}
+
+export type ClaudeHookMutationResult =
+	| ClaudeHookMutationResultWithReport
+	| ClaudeHookLifecycleRefusal;
 
 /** Injectable deps so tests drive `_run` with a fake `PlatformSecureFs`. */
 export interface ClaudeHookRunDeps {
@@ -902,6 +923,7 @@ export interface ClaudeHookRunDeps {
 	aclProbe?: () => Promise<AclCapability>;
 	/** Injectable node-on-PATH heuristic, shared by the warning and the report. */
 	nodeProbe?: () => Promise<NodeOnPathProbe>;
+	doctor?: typeof doctorClaudePreToolUse;
 }
 
 /**
@@ -1085,8 +1107,20 @@ export async function _run(
 	options: { force?: boolean },
 	deps: ClaudeHookRunDeps,
 ): Promise<ClaudeHookMutationResult> {
-	const manifest = deps.manifest ?? (await readManifest());
 	const platform = deps.platform ?? process.platform;
+	const platformSupport = resolvePlatformSupport(platform);
+	if (platformSupport) {
+		return {
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: [platformSupport.refusalCode],
+			warnings: [platformSupport.guidance],
+			lifecycleRefusal: platformSupport,
+		};
+	}
+	const doctorFn = deps.doctor ?? doctorClaudePreToolUse;
+	const manifest = deps.manifest ?? (await readManifest());
 	const secureFs =
 		deps.secureFs !== undefined ? deps.secureFs : selectSecureFs(platform);
 	const clock = deps.clock ?? (() => new Date());
@@ -1101,7 +1135,7 @@ export async function _run(
 	// report row and the verdict can never disagree about the same PATH.
 	const nodeOnPath = await (deps.nodeProbe ?? probeNodeOnPath)();
 	const doctor = (): Promise<ClaudeHookDoctorReport> =>
-		doctorClaudePreToolUse(projectDir, {
+		doctorFn(projectDir, {
 			manifest,
 			aclProbe: deps.aclProbe,
 			execution: { nodeProbe: async () => nodeOnPath },

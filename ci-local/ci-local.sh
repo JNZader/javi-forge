@@ -11,7 +11,20 @@
 #   ./ci-local.sh detect       # Mostrar stack detectado
 # =============================================================================
 
-set -e
+function ci_local_main() {
+    local platform="${1:?platform required}"
+    shift
+
+    if [ "$platform" = "Darwin" ]; then
+        printf '%s\n' 'macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate. Existing installed guards are not removed; Darwin code removal is planned separately for 2.0.'
+        return 1
+    fi
+
+    ci_local_startup_body "$@"
+}
+
+function ci_local_startup_body() {
+    set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -390,3 +403,8 @@ esac
 
 echo -e "\n${GREEN}CI Local completed successfully!${NC}"
 echo -e "${GREEN}  Safe to push - CI should pass.${NC}\n"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    ci_local_main "$(/usr/bin/uname -s)" "$@"
+fi

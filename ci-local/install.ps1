@@ -14,6 +14,20 @@
 [CmdletBinding()]
 param()
 
+function Invoke-CiLocalMain {
+    param([Parameter(Mandatory)][string]$Platform)
+
+    if ($Platform -eq 'Darwin') {
+        Write-Host 'macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate. Existing installed guards are not removed; Darwin code removal is planned separately for 2.0.'
+        return 1
+    }
+
+    Invoke-CiLocalStartupBody -Platform $Platform
+}
+
+function Invoke-CiLocalStartupBody {
+    param([string]$Platform)
+
 # Defense-in-depth: #Requires is parsed by some hosts AFTER the script body.
 # 7.2 is the minimum because FileSystemInfo.ResolveLinkTarget($true) is .NET 6+,
 # which shipped with pwsh 7.2. Earlier pwsh 7.x runs on .NET 5 and the method
@@ -364,4 +378,13 @@ try {
 
 } finally {
     Pop-Location
+}
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    $platform = if ($IsMacOS) { 'Darwin' } else { 'Windows' }
+    $exitCode = & ${function:Invoke-CiLocalMain} -Platform $platform
+    if ($exitCode -is [int] -and $exitCode -ne 0) {
+        exit $exitCode
+    }
 }

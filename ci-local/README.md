@@ -34,21 +34,26 @@ cp -r lib /path/to/new-project/
 
 # En el nuevo proyecto
 cd /path/to/new-project
-./.ci-local/install.sh      # Linux/Mac/WSL
+./.ci-local/install.sh      # Linux/WSL
 # o
 .\.ci-local\install.ps1     # Windows (PowerShell 7+)
 ```
 
-> **Importante:** CI-Local depende de `lib/common.sh` (Linux/Mac) y/o `lib/common.psm1` (Windows). Copiá ambos junto con el directorio `ci-local/`.
+> **Importante:** CI-Local depende de `lib/common.sh` (Linux/WSL) y/o `lib/common.psm1` (Windows). Copiá ambos junto con el directorio `ci-local/`. macOS está deprecated y se rechaza para instalaciones o arranques nuevos.
 
 El installer (ambas variantes) falla con mensaje claro si `javi-forge` no está en el PATH.
+
+
+## macOS deprecation
+
+macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate your workflow. Existing installed guards are not removed in 1.x; Darwin code removal is planned separately for 2.0.
 
 ### Soporte cross-platform
 
 | Plataforma | Installer | Runner | Hooks | Requisitos |
 |---|---|---|---|---|
 | Linux | `install.sh` | `ci-local.sh` | bash | bash, perl, docker (opcional) |
-| macOS | `install.sh` | `ci-local.sh` | bash | bash, perl, docker (opcional) |
+| macOS | Unsupported: pin a supported release or migrate | Refused before startup | Existing installed guards retained | No new install or startup |
 | WSL | `install.sh` | `ci-local.sh` | bash | bash, perl, docker (opcional) |
 | Windows nativo | `install.ps1` | `ci-local.ps1` | bash | PowerShell 7+, Git for Windows (MSYS2 bash), docker (opcional) |
 
@@ -117,7 +122,7 @@ Si tu modelo de amenaza requiere defensa contra adversarios motivados, usá
 .\.ci-local\ci-local.ps1 shell    # Shell en entorno CI
 .\.ci-local\ci-local.ps1 detect   # Ver stack detectado
 
-# Linux/Mac
+# Linux/WSL
 ./.ci-local/ci-local.sh quick
 ./.ci-local/ci-local.sh full
 ./.ci-local/ci-local.sh shell
@@ -164,9 +169,9 @@ Developer workflow:
 ```
 .ci-local/
 ├── ci-local.ps1      # Script principal (Windows)
-├── ci-local.sh       # Script principal (Linux/Mac)
+├── ci-local.sh       # Script principal (Linux/WSL)
 ├── install.ps1       # Instalador Windows
-├── install.sh        # Instalador Linux/Mac
+├── install.sh        # Instalador Linux/WSL
 ├── semgrep.yml       # Reglas de seguridad
 ├── README.md         # Esta guía
 ├── hooks/

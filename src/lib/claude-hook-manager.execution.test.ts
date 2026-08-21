@@ -67,28 +67,23 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 
 describe("resolveManagedSettingsPaths", () => {
-	it("maps darwin to the Library ClaudeCode paths", () => {
-		const p = resolveManagedSettingsPaths("darwin");
-		expect(p.file).toBe(
-			"/Library/Application Support/ClaudeCode/managed-settings.json",
-		);
-		expect(p.dropInDir).toBe(
-			"/Library/Application Support/ClaudeCode/managed-settings.d",
-		);
+	it("returns no managed-settings paths for unsupported hosts", () => {
+		expect(resolveManagedSettingsPaths("darwin")).toBeNull();
+		expect(resolveManagedSettingsPaths("freebsd")).toBeNull();
 	});
 
 	it("maps linux (and WSL, which reports linux) to /etc/claude-code", () => {
-		const p = resolveManagedSettingsPaths("linux");
-		expect(p.file).toBe("/etc/claude-code/managed-settings.json");
-		expect(p.dropInDir).toBe("/etc/claude-code/managed-settings.d");
+		expect(resolveManagedSettingsPaths("linux")).toEqual({
+			file: "/etc/claude-code/managed-settings.json",
+			dropInDir: "/etc/claude-code/managed-settings.d",
+		});
 	});
 
 	it("maps win32 to the Program Files ClaudeCode paths", () => {
-		const p = resolveManagedSettingsPaths("win32");
-		expect(p.file).toBe("C:\\Program Files\\ClaudeCode\\managed-settings.json");
-		expect(p.dropInDir).toBe(
-			"C:\\Program Files\\ClaudeCode\\managed-settings.d",
-		);
+		expect(resolveManagedSettingsPaths("win32")).toEqual({
+			file: "C:\\Program Files\\ClaudeCode\\managed-settings.json",
+			dropInDir: "C:\\Program Files\\ClaudeCode\\managed-settings.d",
+		});
 	});
 });
 

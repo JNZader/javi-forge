@@ -47,6 +47,10 @@ import {
 	isPlainObject,
 	validateSettingsShape,
 } from "./claude-hook-settings.js";
+import {
+	type PlatformSupport,
+	resolvePlatformSupport,
+} from "./platform-support.js";
 import { safeReadFile } from "./safe-read.js";
 import { type SpawnFn, selectSecureFs } from "./secure-fs-posix.js";
 import {
@@ -355,6 +359,7 @@ export type CodexTrustState = "trusted" | "untrusted";
 
 export interface CodexHookDoctorReport {
 	healthy: boolean;
+	platformSupport?: PlatformSupport;
 	hooksJson: { state: ClaudeHookComponentState; detail?: string };
 	config: {
 		featuresHooks: "true" | "false" | "absent";
@@ -383,6 +388,7 @@ async function readText(
 }
 
 export interface CodexDoctorOptions {
+	platform?: NodeJS.Platform;
 	manifest?: Manifest;
 	assetPath?: string;
 	nodeVersion?: string;
@@ -494,7 +500,11 @@ export async function doctorCodexPreToolUse(
 	}
 	if (!node.satisfiesMinimum) remediation.push("install Node 22 or newer");
 
+	const platformSupport = resolvePlatformSupport(
+		options.platform ?? process.platform,
+	);
 	return {
+		...(platformSupport ? { platformSupport } : {}),
 		healthy: status === "runnable",
 		hooksJson,
 		config: { featuresHooks, readable: configReadable },
@@ -519,14 +529,31 @@ export async function doctorCodexPreToolUse(
 // Install / repair (secure-fs transaction — SAME ancestor gate as Claude)
 // =============================================================================
 
-export interface CodexHookMutationResult {
+interface CodexHookMutationResultWithReport {
 	ok: boolean;
 	changed: string[];
 	backups: string[];
+	/** Real post-mutation doctor snapshot. */
 	report: CodexHookDoctorReport;
 	errors: string[];
 	warnings: string[];
+	lifecycleRefusal?: never;
 }
+
+interface CodexHookLifecycleRefusal {
+	ok: false;
+	changed: string[];
+	backups: string[];
+	errors: string[];
+	warnings: string[];
+	/** The lifecycle gate refused before any doctor or installed-state probe. */
+	lifecycleRefusal: PlatformSupport;
+	report?: never;
+}
+
+export type CodexHookMutationResult =
+	| CodexHookMutationResultWithReport
+	| CodexHookLifecycleRefusal;
 
 export interface CodexHookRunDeps {
 	secureFs?: PlatformSecureFs | null;
@@ -537,6 +564,7 @@ export interface CodexHookRunDeps {
 	assetPath?: string;
 	nodeProbe?: () => Promise<NodeOnPathProbe>;
 	nodeSpawn?: SpawnFn;
+	doctor?: typeof doctorCodexPreToolUse;
 }
 
 function serialize(container: unknown): Buffer {
@@ -549,8 +577,20 @@ export async function _runCodex(
 	_options: { force?: boolean },
 	deps: CodexHookRunDeps,
 ): Promise<CodexHookMutationResult> {
-	const manifest = deps.manifest ?? (await readManifest());
 	const platform = deps.platform ?? process.platform;
+	const platformSupport = resolvePlatformSupport(platform);
+	if (platformSupport) {
+		return {
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: [platformSupport.refusalCode],
+			warnings: [platformSupport.guidance],
+			lifecycleRefusal: platformSupport,
+		};
+	}
+	const doctorFn = deps.doctor ?? doctorCodexPreToolUse;
+	const manifest = deps.manifest ?? (await readManifest());
 	const secureFs =
 		deps.secureFs !== undefined ? deps.secureFs : selectSecureFs(platform);
 	const clock = deps.clock ?? (() => new Date());
@@ -563,7 +603,7 @@ export async function _runCodex(
 
 	const nodeOnPath = await (deps.nodeProbe ?? probeNodeOnPath)();
 	const doctor = (): Promise<CodexHookDoctorReport> =>
-		doctorCodexPreToolUse(homeDir, {
+		doctorFn(homeDir, {
 			manifest,
 			assetPath,
 			nodeProbe: async () => nodeOnPath,

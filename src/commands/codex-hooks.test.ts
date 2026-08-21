@@ -25,8 +25,17 @@ const baseReport = (
 	...over,
 });
 
+interface CodexMutationResultOverrides {
+	ok?: boolean;
+	changed?: string[];
+	backups?: string[];
+	errors?: string[];
+	warnings?: string[];
+	report?: CodexHookDoctorReport;
+}
+
 const mutation = (
-	over: Partial<CodexHookMutationResult> = {},
+	over: CodexMutationResultOverrides = {},
 ): CodexHookMutationResult => ({
 	ok: true,
 	changed: ["/h/.codex/hooks.json", "/h/.codex/config.toml"],
@@ -125,5 +134,72 @@ describe("runCodexHookCommand", () => {
 		);
 		expect(code).toBe(1);
 		expect(err.join("\n")).toContain("install codex: refused");
+	});
+	it.each([
+		"install",
+		"repair",
+	] as const)("%s renders the Darwin refusal code and guidance with exit 1", async (sub) => {
+		const refusal: CodexHookMutationResult = {
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: ["macos-lifecycle-unsupported"],
+			warnings: ["pin a supported release or migrate"],
+			lifecycleRefusal: {
+				platform: "darwin",
+				state: "macos-deprecated",
+				lifecycle: "unsupported",
+				refusalCode: "macos-lifecycle-unsupported",
+				guidance: "pin a supported release or migrate",
+			},
+		};
+		const action = vi.fn(async () => refusal);
+		const out: string[] = [];
+		const err: string[] = [];
+		expect(
+			await runCodexHookCommand(
+				sub,
+				process.cwd(),
+				{},
+				sub === "install"
+					? {
+							install: action,
+							log: (m) => out.push(m),
+							logError: (m) => err.push(m),
+						}
+					: {
+							repair: action,
+							log: (m) => out.push(m),
+							logError: (m) => err.push(m),
+						},
+			),
+		).toBe(1);
+		expect(err.join("\n")).toContain("macos-lifecycle-unsupported");
+		expect(out.join("\n")).toContain("pin a supported release or migrate");
+	});
+
+	it("doctor renders Darwin advisory without changing its exit mapping", async () => {
+		const out: string[] = [];
+		const report = baseReport({
+			platformSupport: {
+				state: "macos-deprecated",
+				lifecycle: "unsupported",
+				refusalCode: "macos-lifecycle-unsupported",
+				guidance: "pin a supported release or migrate",
+				platform: "darwin",
+			},
+		} as never);
+		const code = await runCodexHookCommand(
+			"doctor",
+			process.cwd(),
+			{},
+			{
+				doctor: vi.fn().mockResolvedValue(report),
+				log: (m) => out.push(m),
+				logError: () => {},
+			},
+		);
+		expect(code).toBe(0);
+		expect(out.join("\n")).toContain("platform-support: macos-deprecated");
 	});
 });

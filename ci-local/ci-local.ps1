@@ -21,6 +21,30 @@ param(
     [string]$Mode = 'full'
 )
 
+function Invoke-CiLocalMain {
+    param(
+        [Parameter(Mandatory)][string]$Platform,
+        [ref]$ExitCode
+    )
+
+    if ($Platform -eq 'Darwin') {
+        Write-Host 'macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate. Existing installed guards are not removed; Darwin code removal is planned separately for 2.0.'
+        if ($PSBoundParameters.ContainsKey('ExitCode')) {
+            $ExitCode.Value = 1
+            return
+        }
+        return 1
+    }
+
+    Invoke-CiLocalStartupBody -Platform $Platform
+    if ($PSBoundParameters.ContainsKey('ExitCode')) {
+        $ExitCode.Value = 0
+    }
+}
+
+function Invoke-CiLocalStartupBody {
+    param([string]$Platform)
+
 # See install.ps1 for the rationale behind 7.2 minimum (ResolveLinkTarget).
 if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion -lt [Version]'7.2') {
     Write-Host 'ERROR: ci-local.ps1 requires PowerShell 7.2+ (pwsh).' -ForegroundColor Red
@@ -441,3 +465,13 @@ Write-Host ''
 Write-Host 'CI Local completed successfully!' -ForegroundColor Green
 Write-Host '  Safe to push - CI should pass.' -ForegroundColor Green
 Write-Host ''
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    $platform = if ($IsMacOS) { 'Darwin' } else { 'Windows' }
+    $exitCode = 0
+    & ${function:Invoke-CiLocalMain} -Platform $platform -ExitCode ([ref]$exitCode)
+    if ($exitCode -ne 0) {
+        exit $exitCode
+    }
+}

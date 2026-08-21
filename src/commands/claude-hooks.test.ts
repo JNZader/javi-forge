@@ -41,8 +41,17 @@ function doctorReport(
 	} as ClaudeHookDoctorReport;
 }
 
+interface ClaudeMutationResultOverrides {
+	ok?: boolean;
+	changed?: string[];
+	backups?: string[];
+	errors?: string[];
+	warnings?: string[];
+	report?: ClaudeHookDoctorReport;
+}
+
 function mutationResult(
-	overrides: Partial<ClaudeHookMutationResult> = {},
+	overrides: ClaudeMutationResultOverrides = {},
 ): ClaudeHookMutationResult {
 	return {
 		ok: true,
@@ -493,5 +502,56 @@ describe("runClaudeHookCommand", () => {
 
 		expect(repair).toHaveBeenCalledWith("/proj", { force: true });
 		expect(code).toBe(0);
+	});
+	it.each([
+		"install",
+		"repair",
+	] as const)("%s renders the Darwin refusal code and guidance with exit 1", async (sub) => {
+		const refusal: ClaudeHookMutationResult = {
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: ["macos-lifecycle-unsupported"],
+			warnings: ["pin a supported release or migrate"],
+			lifecycleRefusal: {
+				platform: "darwin",
+				state: "macos-deprecated",
+				lifecycle: "unsupported",
+				refusalCode: "macos-lifecycle-unsupported",
+				guidance: "pin a supported release or migrate",
+			},
+		};
+		const action = vi.fn().mockResolvedValue(refusal);
+		const { out, err, deps } = harness(
+			sub === "install" ? { install: action } : { repair: action },
+		);
+		expect(await runClaudeHookCommand(sub, "/proj", {}, deps)).toBe(1);
+		expect(err.join("\n")).toContain("macos-lifecycle-unsupported");
+		expect(out.join("\n")).toContain("pin a supported release or migrate");
+	});
+
+	it("doctor renders Darwin advisory without changing its exit mapping", async () => {
+		const out: string[] = [];
+		const report = doctorReport({
+			platformSupport: {
+				state: "macos-deprecated",
+				lifecycle: "unsupported",
+				refusalCode: "macos-lifecycle-unsupported",
+				guidance: "pin a supported release or migrate",
+				platform: "darwin",
+			},
+		} as never);
+		const code = await runClaudeHookCommand(
+			"doctor",
+			"/proj",
+			{},
+			{
+				doctor: vi.fn().mockResolvedValue(report),
+				log: (m) => out.push(m),
+				logError: () => {},
+			},
+		);
+		expect(code).toBe(0);
+		expect(out.join("\n")).toContain("platform-support: macos-deprecated");
 	});
 });

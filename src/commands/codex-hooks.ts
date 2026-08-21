@@ -72,6 +72,10 @@ function renderDoctor(
 	log: (m: string) => void,
 ): number {
 	log(`doctor codex: ${report.healthy ? "healthy" : "unhealthy"}`);
+	if (report.platformSupport)
+		log(
+			`  platform-support: ${report.platformSupport.state} — ${report.platformSupport.guidance}`,
+		);
 	log(`  hooks.json: ${report.hooksJson.state}`);
 	log(
 		`  config:    [features] hooks=${report.config.featuresHooks} (readable: ${report.config.readable})`,

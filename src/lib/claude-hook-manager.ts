@@ -483,17 +483,10 @@ export interface ManagedSettingsPaths {
 	dropInDir: string;
 }
 
-/** Static managed-settings locations per OS (no fs). WSL reports `linux`. */
+/** Static managed-settings locations for supported hosts only (no fs). */
 export function resolveManagedSettingsPaths(
 	platform: NodeJS.Platform,
-): ManagedSettingsPaths {
-	if (platform === "darwin") {
-		const base = "/Library/Application Support/ClaudeCode";
-		return {
-			file: `${base}/managed-settings.json`,
-			dropInDir: `${base}/managed-settings.d`,
-		};
-	}
+): ManagedSettingsPaths | null {
 	if (platform === "win32") {
 		const base = "C:\\Program Files\\ClaudeCode";
 		return {
@@ -501,6 +494,7 @@ export function resolveManagedSettingsPaths(
 			dropInDir: `${base}\\managed-settings.d`,
 		};
 	}
+	if (platform !== "linux") return null;
 	const base = "/etc/claude-code";
 	return {
 		file: `${base}/managed-settings.json`,
@@ -638,11 +632,11 @@ export async function probeExecution(
 	const processEnv = env.env ?? process.env;
 	const resolved = resolveManagedSettingsPaths(platform);
 	const managedFile =
-		env.managedFile !== undefined ? env.managedFile : resolved.file;
+		env.managedFile !== undefined ? env.managedFile : resolved?.file;
 	const dropInDir =
 		env.managedDropInDir !== undefined
 			? env.managedDropInDir
-			: resolved.dropInDir;
+			: resolved?.dropInDir;
 
 	const specs: ExecutionSourceSpec[] = [
 		{

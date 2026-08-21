@@ -1,3 +1,10 @@
+## [1.37.0](https://github.com/JNZader/javi-forge/compare/v1.36.0...v1.37.0) (2026-08-21)
+
+### Features
+
+* **ci-local:** deprecate macOS support ([6d4d50c](https://github.com/JNZader/javi-forge/commit/6d4d50c6b739dafdcbb70c12cb5f2d0b5bde4c6c))
+* **hooks:** deprecate macOS lifecycle support ([4960a8e](https://github.com/JNZader/javi-forge/commit/4960a8e4d1b47a2ffdf48213f65fb3f8ad3920dd))
+
 ## [1.36.0](https://github.com/JNZader/javi-forge/compare/v1.35.1...v1.36.0) (2026-08-19)
 
 ### Features

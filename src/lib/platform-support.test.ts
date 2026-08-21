@@ -17,10 +17,12 @@ describe("resolvePlatformSupport", () => {
 		});
 	});
 
-	it.each(["linux", "win32", "darwin-arm64", "unknown"])(
-		"does not alias %s to Darwin",
-		(platform) => {
-			expect(resolvePlatformSupport(platform)).toBeUndefined();
-		},
-	);
+	it.each([
+		"linux",
+		"win32",
+		"darwin-arm64",
+		"unknown",
+	])("does not alias %s to Darwin", (platform) => {
+		expect(resolvePlatformSupport(platform)).toBeUndefined();
+	});
 });

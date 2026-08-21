@@ -9,7 +9,6 @@
  */
 
 import { execFile } from "node:child_process";
-import { resolvePlatformSupport, type PlatformSupport } from "./platform-support.js";
 import { createHash, randomBytes } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import os from "node:os";
@@ -38,6 +37,10 @@ import {
 	type SettingsIdentityManifest,
 	scanExecutionFlags,
 } from "./claude-hook-settings.js";
+import {
+	type PlatformSupport,
+	resolvePlatformSupport,
+} from "./platform-support.js";
 import { safeReadFile } from "./safe-read.js";
 import {
 	ACL_DETAIL,
@@ -754,7 +757,7 @@ export async function doctorClaudePreToolUse(
 		execution?: ExecutionProbeEnv;
 		/** Injectable read-only ACL capability probe (defaults to the real one). */
 		aclProbe?: () => Promise<AclCapability>;
-        platform?: NodeJS.Platform;
+		platform?: NodeJS.Platform;
 	},
 ): Promise<ClaudeHookDoctorReport> {
 	const manifest = options?.manifest ?? (await readManifest());
@@ -832,7 +835,9 @@ export async function doctorClaudePreToolUse(
 		remediation.add(aclRemediation);
 	}
 
-	const platformSupport = resolvePlatformSupport(options?.platform ?? process.platform);
+	const platformSupport = resolvePlatformSupport(
+		options?.platform ?? process.platform,
+	);
 	return {
 		...(platformSupport ? { platformSupport } : {}),
 		healthy,

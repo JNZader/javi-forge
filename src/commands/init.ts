@@ -1,5 +1,8 @@
 import { ensureDirExists } from "../lib/common.js";
-import { resolvePlatformSupport, type PlatformSupport } from "../lib/platform-support.js";
+import {
+	type PlatformSupport,
+	resolvePlatformSupport,
+} from "../lib/platform-support.js";
 import type { InitOptions } from "../types/index.js";
 import { stepAgentSkills } from "./init/steps/agent-skills.js";
 import { stepAISync } from "./init/steps/ai-sync.js";
@@ -25,7 +28,9 @@ import type { StepCallback, StepContext } from "./init/types.js";
  *
  * Pure dispatch: every step lives in src/commands/init/steps/.
  */
-export type InitProjectResult = { ok: true } | { ok: false; refusalCode: string; platformSupport: PlatformSupport };
+export type InitProjectResult =
+	| { ok: true }
+	| { ok: false; refusalCode: string; platformSupport: PlatformSupport };
 
 export async function initProject(
 	options: InitOptions,

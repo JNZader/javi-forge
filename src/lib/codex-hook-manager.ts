@@ -30,7 +30,6 @@
  */
 
 import os from "node:os";
-import { resolvePlatformSupport, type PlatformSupport } from "./platform-support.js";
 import path from "node:path";
 import { CLAUDE_HOOK_ASSETS_DIR } from "../constants.js";
 import { ASSET_NAME } from "./__fixtures__/claude-hook-ownership.js";
@@ -48,6 +47,10 @@ import {
 	isPlainObject,
 	validateSettingsShape,
 } from "./claude-hook-settings.js";
+import {
+	type PlatformSupport,
+	resolvePlatformSupport,
+} from "./platform-support.js";
 import { safeReadFile } from "./safe-read.js";
 import { type SpawnFn, selectSecureFs } from "./secure-fs-posix.js";
 import {
@@ -497,7 +500,9 @@ export async function doctorCodexPreToolUse(
 	}
 	if (!node.satisfiesMinimum) remediation.push("install Node 22 or newer");
 
-	const platformSupport = resolvePlatformSupport(options.platform ?? process.platform);
+	const platformSupport = resolvePlatformSupport(
+		options.platform ?? process.platform,
+	);
 	return {
 		...(platformSupport ? { platformSupport } : {}),
 		healthy: status === "runnable",

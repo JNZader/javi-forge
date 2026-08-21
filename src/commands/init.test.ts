@@ -86,10 +86,10 @@ vi.mock("../lib/stack-detector.js", () => ({
 }));
 
 import fs from "fs-extra";
+import { ensureDirExists } from "../lib/common.js";
 import { execFileAsync } from "../lib/exec.js";
 import { generateCIWorkflow } from "../lib/template.js";
 import { initProject } from "./init.js";
-import { ensureDirExists } from "../lib/common.js";
 
 const mockedFs = vi.mocked(fs);
 const mockedExecFileAsync = vi.mocked(execFileAsync);
@@ -311,14 +311,20 @@ describe("initProject", () => {
 	});
 });
 
-
 it("Darwin initProject refuses before ensureDirExists or lifecycle steps", async () => {
 	const original = process.platform;
-	Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+	Object.defineProperty(process, "platform", {
+		value: "darwin",
+		configurable: true,
+	});
 	const onStep = vi.fn();
 	try {
 		const result = await initProject(makeOptions(), onStep);
-		expect(result).toMatchObject({ ok: false, refusalCode: "macos-lifecycle-unsupported", platformSupport: { state: "macos-deprecated" } });
+		expect(result).toMatchObject({
+			ok: false,
+			refusalCode: "macos-lifecycle-unsupported",
+			platformSupport: { state: "macos-deprecated" },
+		});
 		expect(vi.mocked(ensureDirExists)).not.toHaveBeenCalled();
 		expect(onStep).not.toHaveBeenCalled();
 		expect(mockedFs.pathExists).not.toHaveBeenCalled();
@@ -326,5 +332,10 @@ it("Darwin initProject refuses before ensureDirExists or lifecycle steps", async
 		expect(mockedFs.writeJson).not.toHaveBeenCalled();
 		expect(mockedFs.copy).not.toHaveBeenCalled();
 		expect(mockedExecFileAsync).not.toHaveBeenCalled();
-	} finally { Object.defineProperty(process, "platform", { value: original, configurable: true }); }
+	} finally {
+		Object.defineProperty(process, "platform", {
+			value: original,
+			configurable: true,
+		});
+	}
 });

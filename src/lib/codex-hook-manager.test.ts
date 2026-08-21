@@ -383,7 +383,8 @@ describe("codex install (secure-fs transaction)", () => {
 		const fake = makeFakeSecureFs();
 		mirror(fake);
 		const result = await runInstall(fake);
-		if (!result.ok) throw new Error(`unexpected refusal: ${result.errors.join(", ")}`);
+		if (!result.ok)
+			throw new Error(`unexpected refusal: ${result.errors.join(", ")}`);
 		expect(result.report.trust.state).toBe("untrusted");
 		expect(result.report.trust.grantCommand).toContain("codex");
 		expect(result.warnings.join("\n")).toMatch(/trust|approve/i);
@@ -598,7 +599,10 @@ describe("codex install edge cases", () => {
 		expect(result.ok).toBe(false);
 		expect(result.errors).toContain("windows-secure-object-unavailable");
 	});
-	it.each(["install", "repair"] as const)("refuses exact Darwin %s before doctor, probes, secure-fs selection, or mutation", async (mode) => {
+	it.each([
+		"install",
+		"repair",
+	] as const)("refuses exact Darwin %s before doctor, probes, secure-fs selection, or mutation", async (mode) => {
 		const secureFs = makeFakeSecureFs();
 		const openDirNoFollow = vi.spyOn(secureFs, "openDirNoFollow");
 		const nodeProbe = vi.fn(async () => {
@@ -607,12 +611,17 @@ describe("codex install edge cases", () => {
 		const doctor = vi.fn(async () => {
 			throw new Error("Darwin refusal must not invoke doctor");
 		});
-		const result = await _runCodex(home, mode, {}, {
-			platform: "darwin",
-			secureFs,
-			nodeProbe,
-			doctor,
-		});
+		const result = await _runCodex(
+			home,
+			mode,
+			{},
+			{
+				platform: "darwin",
+				secureFs,
+				nodeProbe,
+				doctor,
+			},
+		);
 		expect(result).toMatchObject({
 			ok: false,
 			changed: [],
@@ -633,15 +642,26 @@ describe("codex install edge cases", () => {
 			"pin a supported release or migrate",
 		);
 	});
-
 });
-
 
 describe("doctor platform support advisory", () => {
 	it("reports exact Darwin support data without changing report semantics", async () => {
-		const darwin = await doctorCodexPreToolUse(home, { manifest: manifest(), nodeProbe: STUB_NODE_PROBE, platform: "darwin" });
-		const linux = await doctorCodexPreToolUse(home, { manifest: manifest(), nodeProbe: STUB_NODE_PROBE, platform: "linux" });
-		expect(darwin.platformSupport).toMatchObject({ state: "macos-deprecated", lifecycle: "unsupported", refusalCode: "macos-lifecycle-unsupported", guidance: expect.stringContaining("pin a supported release or migrate") });
+		const darwin = await doctorCodexPreToolUse(home, {
+			manifest: manifest(),
+			nodeProbe: STUB_NODE_PROBE,
+			platform: "darwin",
+		});
+		const linux = await doctorCodexPreToolUse(home, {
+			manifest: manifest(),
+			nodeProbe: STUB_NODE_PROBE,
+			platform: "linux",
+		});
+		expect(darwin.platformSupport).toMatchObject({
+			state: "macos-deprecated",
+			lifecycle: "unsupported",
+			refusalCode: "macos-lifecycle-unsupported",
+			guidance: expect.stringContaining("pin a supported release or migrate"),
+		});
 		expect(linux.platformSupport).toBeUndefined();
 		expect(darwin.healthy).toBe(linux.healthy);
 		expect(darwin.execution).toEqual(linux.execution);

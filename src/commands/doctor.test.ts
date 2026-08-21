@@ -123,6 +123,37 @@ describe("runDoctor", () => {
 		expect(allOk).toBe(true);
 	});
 
+	it("uses where.exe and the first resolved path on win32", async () => {
+		mockedExecFile.mockImplementation((...callArgs: unknown[]) => {
+			const cmd = String(callArgs[0]);
+			if (cmd === "where.exe") {
+				return respond(
+					callArgs,
+					null,
+					"C:\\Program Files\\Git\\cmd\\git.exe\r\nC:\\Windows\\git.exe\r\n",
+				);
+			}
+			if (cmd === "git") return respond(callArgs, new Error("no version"), "");
+			return respond(callArgs, null, "v1.0.0");
+		});
+
+		const result = await runDoctor(tmpDir, { platform: "win32" });
+		const toolSection = result.sections.find(
+			(s) => s.title === "System Tools",
+		)!;
+
+		expect(toolSection.checks[0]).toMatchObject({
+			label: "Git",
+			status: "ok",
+			detail: "found at C:\\Program Files\\Git\\cmd\\git.exe",
+		});
+		expect(
+			mockedExecFile.mock.calls
+				.filter(([cmd]) => cmd === "where.exe")
+				.map(([, args]) => args),
+		).toEqual([["git"], ["docker"], ["semgrep"], ["node"], ["pnpm"]]);
+	});
+
 	it("reports fail for missing required tool (git)", async () => {
 		execFileMissing("git");
 

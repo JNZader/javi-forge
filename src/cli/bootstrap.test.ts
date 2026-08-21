@@ -5,6 +5,18 @@ import { describe, expect, it, vi } from "vitest";
 import { bootstrapCli } from "./bootstrap.js";
 
 describe("bootstrapCli", () => {
+	it("invokes the supported CLI implementation only after classification", async () => {
+		const runCli = vi.fn();
+		const load = vi.fn(async () => ({ runCli }));
+
+		expect(await bootstrapCli("linux", load, vi.fn())).toEqual({
+			state: "supported",
+			exitCode: 0,
+		});
+		expect(load).toHaveBeenCalledOnce();
+		expect(runCli).toHaveBeenCalledOnce();
+	});
+
 	it.each([
 		"linux",
 		"win32",

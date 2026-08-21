@@ -32,14 +32,21 @@ export interface DoctorDeps {
 	contextRefresher?: typeof refreshContextDir;
 }
 
-/** Resolve a binary name to its full path, returns null if not found */
+/** Resolve a binary name to its first full path, returns null if not found. */
 async function which(
 	bin: string,
 	exec: typeof execFileAsync,
+	platform: string,
 ): Promise<string | null> {
 	try {
-		const { stdout } = await exec("which", [bin]);
-		return stdout.trim() || null;
+		const command = platform === "win32" ? "where.exe" : "which";
+		const { stdout } = await exec(command, [bin]);
+		return (
+			stdout
+				.split(/\r?\n/)
+				.map((entry) => entry.trim())
+				.find(Boolean) ?? null
+		);
 	} catch {
 		return null;
 	}
@@ -147,6 +154,7 @@ async function commitSigningCheck(
 async function branchProtectionCheck(
 	cwd: string,
 	exec: typeof execFileAsync,
+	platform: string,
 ): Promise<DoctorCheck> {
 	const remote = parseRemote(
 		await gitConfigValue(cwd, "remote.origin.url", exec),
@@ -161,7 +169,7 @@ async function branchProtectionCheck(
 				"no GitHub/GitLab origin — verify branch protection in the forge UI",
 		};
 	}
-	if (remote.host === "gitlab" || !(await which("gh", exec))) {
+	if (remote.host === "gitlab" || !(await which("gh", exec, platform))) {
 		return {
 			label,
 			status: "skip",
@@ -208,9 +216,8 @@ export async function runDoctor(
 	projectDir?: string,
 	deps: DoctorDeps = {},
 ): Promise<DoctorResult> {
-	const platformSupport = resolvePlatformSupport(
-		deps.platform ?? process.platform,
-	);
+	const platform = deps.platform ?? process.platform;
+	const platformSupport = resolvePlatformSupport(platform);
 	if (platformSupport) {
 		return {
 			state: "unsupported-platform",
@@ -238,7 +245,7 @@ export async function runDoctor(
 	];
 
 	for (const tool of tools) {
-		const bin = await which(tool.name, exec);
+		const bin = await which(tool.name, exec, platform);
 		if (bin) {
 			// Try to get version
 			let version = "";
@@ -269,7 +276,7 @@ export async function runDoctor(
 	// (hook-consolidation D9): doctor reports, nothing blocks.
 	const securityChecks: DoctorCheck[] = [
 		await commitSigningCheck(cwd, exec),
-		await branchProtectionCheck(cwd, exec),
+		await branchProtectionCheck(cwd, exec, platform),
 	];
 	sections.push({ title: "Security", checks: securityChecks });
 

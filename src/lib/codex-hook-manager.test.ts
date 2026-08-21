@@ -2,23 +2,26 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLAUDE_HOOK_ASSETS_DIR } from "../constants.js";
 import { ASSET_NAME } from "./__fixtures__/claude-hook-ownership.js";
 import { makeFakeSecureFs } from "./__fixtures__/fake-secure-fs.js";
 import {
 	_runCodex,
+	type CodexHookDoctorReport,
 	classifyCodexHooksJson,
 	codexConfigPaths,
 	codexTrustGrantCommand,
 	doctorCodexPreToolUse,
 	expectedCodexCommand,
 	hasCodexTrustEntry,
+	installCodexPreToolUse,
 	type Manifest,
 	mergeFeaturesHooksTrue,
 	type NodeOnPathProbe,
 	parseFeaturesHooks,
 	removeCodexTrustEntries,
+	repairCodexPreToolUse,
 } from "./codex-hook-manager.js";
 
 const REAL_ASSET = path.join(CLAUDE_HOOK_ASSETS_DIR, ASSET_NAME);
@@ -46,6 +49,14 @@ const STUB_NODE_PROBE = async (): Promise<NodeOnPathProbe> => ({
 	version: "v22.11.0",
 	major: 22,
 });
+
+const supportedDoctor = async (
+	...args: Parameters<typeof doctorCodexPreToolUse>
+): Promise<CodexHookDoctorReport> => {
+	const result = await doctorCodexPreToolUse(...args);
+	if ("state" in result) throw new Error("expected supported doctor report");
+	return result;
+};
 
 let home: string;
 const codexDir = () => path.join(home, ".codex");
@@ -252,7 +263,7 @@ describe("codex install (secure-fs transaction)", () => {
 		// Persist the transaction's bytes and confirm the doctor reverts honestly.
 		fs.writeFileSync(hooksFile(), fake.fileText(hooksFile()) as string);
 		fs.writeFileSync(configFile(), writtenConfig);
-		const report = await doctorCodexPreToolUse(home, {
+		const report = await supportedDoctor(home, {
 			manifest: manifest(),
 			nodeProbe: STUB_NODE_PROBE,
 		});
@@ -420,8 +431,20 @@ describe("codex doctor (execution matrix)", () => {
 	const trustText = () =>
 		`[features]\nhooks = true\n[hooks.state."${hooksFile()}:pre_tool_use:0:0"]\ntrusted_hash = "x"\n`;
 
+	const supportedReport = (
+		result: Awaited<ReturnType<typeof doctorCodexPreToolUse>>,
+	): CodexHookDoctorReport => {
+		if ("state" in result) throw new Error("expected supported doctor report");
+		return result;
+	};
+
+	const supportedDoctor = async (
+		...args: Parameters<typeof doctorCodexPreToolUse>
+	): Promise<CodexHookDoctorReport> =>
+		supportedReport(await doctorCodexPreToolUse(...args));
+
 	const doctor = (m: Manifest = manifest()) =>
-		doctorCodexPreToolUse(home, { manifest: m, nodeProbe: STUB_NODE_PROBE });
+		supportedDoctor(home, { manifest: m, nodeProbe: STUB_NODE_PROBE });
 
 	it("S2.2 features hooks=false → blocked", async () => {
 		writeManagedHooks();
@@ -487,7 +510,7 @@ describe("codex doctor (execution matrix)", () => {
 	it("node absent on PATH → blocked", async () => {
 		writeManagedHooks();
 		writeConfig(trustText());
-		const report = await doctorCodexPreToolUse(home, {
+		const report = await supportedDoctor(home, {
 			manifest: manifest(),
 			nodeProbe: async () => ({ status: "absent" }),
 		});
@@ -498,7 +521,7 @@ describe("codex doctor (execution matrix)", () => {
 	it("node-on-PATH unknown → inconclusive (never promoted to runnable)", async () => {
 		writeManagedHooks();
 		writeConfig(trustText());
-		const report = await doctorCodexPreToolUse(home, {
+		const report = await supportedDoctor(home, {
 			manifest: manifest(),
 			nodeProbe: async () => ({ status: "unknown", detail: "timeout" }),
 		});
@@ -517,7 +540,7 @@ describe("codex doctor (execution matrix)", () => {
 	it("R-5 node-on-PATH resolved but major < 22 → blocked (heuristic)", async () => {
 		writeManagedHooks();
 		writeConfig(trustText());
-		const report = await doctorCodexPreToolUse(home, {
+		const report = await supportedDoctor(home, {
 			manifest: manifest(),
 			nodeProbe: async () => ({
 				status: "resolved",
@@ -626,45 +649,86 @@ describe("codex install edge cases", () => {
 			ok: false,
 			changed: [],
 			backups: [],
-			errors: ["macos-lifecycle-unsupported"],
+			errors: ["unsupported-platform"],
 		});
 		expect(result.report).toBeUndefined();
 		expect(result.lifecycleRefusal).toMatchObject({
-			platform: "darwin",
-			state: "macos-deprecated",
-			lifecycle: "unsupported",
-			refusalCode: "macos-lifecycle-unsupported",
+			state: "unsupported-platform",
+			refusalCode: "unsupported-platform",
 		});
 		expect(openDirNoFollow).not.toHaveBeenCalled();
 		expect(nodeProbe).not.toHaveBeenCalled();
 		expect(doctor).not.toHaveBeenCalled();
 		expect(result.warnings.join("\n")).toContain(
-			"pin a supported release or migrate",
+			"javi-forge supports Linux and Windows only.",
 		);
 	});
 });
 
 describe("doctor platform support advisory", () => {
+	it("preserves the zero-argument API and returns a discriminated unsupported result before resolving home", async () => {
+		const zeroArgumentDoctor: () => ReturnType<typeof doctorCodexPreToolUse> =
+			doctorCodexPreToolUse;
+		const homedir = vi.spyOn(os, "homedir");
+		const result = await doctorCodexPreToolUse(undefined, {
+			platform: "darwin",
+		});
+
+		expect(zeroArgumentDoctor).toBe(doctorCodexPreToolUse);
+		expect(result).toMatchObject({
+			state: "unsupported-platform",
+			healthy: false,
+			platformSupport: { refusalCode: "unsupported-platform" },
+		});
+		expect(homedir).not.toHaveBeenCalled();
+	});
+
 	it("reports exact Darwin support data without changing report semantics", async () => {
 		const darwin = await doctorCodexPreToolUse(home, {
 			manifest: manifest(),
 			nodeProbe: STUB_NODE_PROBE,
 			platform: "darwin",
 		});
-		const linux = await doctorCodexPreToolUse(home, {
+		const linux = await supportedDoctor(home, {
 			manifest: manifest(),
 			nodeProbe: STUB_NODE_PROBE,
 			platform: "linux",
 		});
-		expect(darwin.platformSupport).toMatchObject({
-			state: "macos-deprecated",
-			lifecycle: "unsupported",
-			refusalCode: "macos-lifecycle-unsupported",
-			guidance: expect.stringContaining("pin a supported release or migrate"),
+		expect(darwin).toMatchObject({
+			state: "unsupported-platform",
+			platformSupport: {
+				state: "unsupported-platform",
+				refusalCode: "unsupported-platform",
+				guidance: expect.stringContaining(
+					"javi-forge supports Linux and Windows only.",
+				),
+			},
 		});
-		expect(linux.platformSupport).toBeUndefined();
-		expect(darwin.healthy).toBe(linux.healthy);
-		expect(darwin.execution).toEqual(linux.execution);
-		expect(darwin.remediation).toEqual(linux.remediation);
+		expect(darwin.healthy).toBe(false);
+		expect("state" in linux).toBe(false);
+		expect("report" in darwin).toBe(false);
+	});
+});
+
+describe("public wrapper platform boundary", () => {
+	it.each([
+		(deps: Parameters<typeof installCodexPreToolUse>[1]) =>
+			installCodexPreToolUse(undefined, deps),
+		(deps: Parameters<typeof repairCodexPreToolUse>[2]) =>
+			repairCodexPreToolUse(undefined, undefined, deps),
+	])("refuses before lazy home on synthetic unsupported input", async (run) => {
+		let homeRead = false;
+		const result = await run({
+			platform: "darwin",
+			homeDirProvider: () => {
+				homeRead = true;
+				throw new Error("home touched");
+			},
+		});
+		expect(result).toMatchObject({
+			ok: false,
+			errors: ["unsupported-platform"],
+		});
+		expect(homeRead).toBe(false);
 	});
 });

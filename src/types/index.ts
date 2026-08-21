@@ -89,9 +89,13 @@ export interface DoctorSection {
 	checks: DoctorCheck[];
 }
 
-export interface DoctorResult {
-	sections: DoctorSection[];
-}
+export type DoctorResult =
+	| { state: "supported"; sections: DoctorSection[] }
+	| {
+			state: "unsupported-platform";
+			guidance: string;
+			sections: [];
+	  };
 
 // ── Plugin Marketplace ──────────────────────────────────────────────────────
 

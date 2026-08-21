@@ -21,6 +21,14 @@ const STATUS_COLOR: Record<CheckStatus, string> = {
 	skip: theme.muted,
 };
 
+export function unsupportedDoctorMessage(
+	result: DoctorResult,
+): string | undefined {
+	return result.state === "unsupported-platform"
+		? `unsupported-platform: ${result.guidance}`
+		: undefined;
+}
+
 export default function Doctor() {
 	const { exit } = useApp();
 	const isCI = useCIMode();
@@ -63,6 +71,18 @@ export default function Doctor() {
 		},
 		{ isActive: !isCI },
 	);
+
+	const unsupportedMessage = result
+		? unsupportedDoctorMessage(result)
+		: undefined;
+	if (unsupportedMessage) {
+		return (
+			<Box flexDirection="column" padding={1}>
+				<Header subtitle="doctor" />
+				<Text color={theme.error}>{unsupportedMessage}</Text>
+			</Box>
+		);
+	}
 
 	// Compute health score
 	const allChecks = result?.sections.flatMap((s) => s.checks) ?? [];

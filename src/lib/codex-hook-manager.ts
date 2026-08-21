@@ -359,7 +359,6 @@ export type CodexTrustState = "trusted" | "untrusted";
 
 export interface CodexHookDoctorReport {
 	healthy: boolean;
-	platformSupport?: PlatformSupport;
 	hooksJson: { state: ClaudeHookComponentState; detail?: string };
 	config: {
 		featuresHooks: "true" | "false" | "absent";
@@ -372,6 +371,16 @@ export interface CodexHookDoctorReport {
 	trust: { state: CodexTrustState; grantCommand: string };
 	remediation: string[];
 }
+
+export interface CodexHookDoctorRefusal {
+	state: "unsupported-platform";
+	healthy: false;
+	platformSupport: PlatformSupport;
+}
+
+export type CodexHookDoctorResult =
+	| CodexHookDoctorReport
+	| CodexHookDoctorRefusal;
 
 const EXECUTION_RESIDUAL: readonly string[] = [
 	'the installed hook is command-form (command: "node …"): node is resolved from Codex\'s PATH, which this process cannot observe — the node-on-PATH row is a heuristic proxy, never proof the guard will spawn',
@@ -406,12 +415,23 @@ async function readManifest(): Promise<Manifest> {
 }
 
 export async function doctorCodexPreToolUse(
-	homeDir: string = os.homedir(),
+	homeDir?: string,
 	options: CodexDoctorOptions = {},
-): Promise<CodexHookDoctorReport> {
+): Promise<CodexHookDoctorResult> {
+	const platformSupport = resolvePlatformSupport(
+		options.platform ?? process.platform,
+	);
+	if (platformSupport) {
+		return {
+			state: "unsupported-platform",
+			healthy: false,
+			platformSupport,
+		};
+	}
+	const resolvedHomeDir = homeDir ?? os.homedir();
 	const manifest = options.manifest ?? (await readManifest());
 	const assetPath = options.assetPath ?? SHIPPED_CODEX_ASSET;
-	const { hooksFile, configFile } = codexConfigPaths(homeDir);
+	const { hooksFile, configFile } = codexConfigPaths(resolvedHomeDir);
 	const expectedCommand = expectedCodexCommand(assetPath);
 
 	// hooks.json registration.
@@ -500,11 +520,7 @@ export async function doctorCodexPreToolUse(
 	}
 	if (!node.satisfiesMinimum) remediation.push("install Node 22 or newer");
 
-	const platformSupport = resolvePlatformSupport(
-		options.platform ?? process.platform,
-	);
 	return {
-		...(platformSupport ? { platformSupport } : {}),
 		healthy: status === "runnable",
 		hooksJson,
 		config: { featuresHooks, readable: configReadable },
@@ -556,6 +572,7 @@ export type CodexHookMutationResult =
 	| CodexHookLifecycleRefusal;
 
 export interface CodexHookRunDeps {
+	homeDirProvider?: () => string;
 	secureFs?: PlatformSecureFs | null;
 	clock?: () => Date;
 	nonce?: () => string;
@@ -602,12 +619,19 @@ export async function _runCodex(
 	const expectedCommand = expectedCodexCommand(assetPath);
 
 	const nodeOnPath = await (deps.nodeProbe ?? probeNodeOnPath)();
-	const doctor = (): Promise<CodexHookDoctorReport> =>
-		doctorFn(homeDir, {
+	const doctor = async (): Promise<CodexHookDoctorReport> => {
+		const result = await doctorFn(homeDir, {
 			manifest,
 			assetPath,
 			nodeProbe: async () => nodeOnPath,
 		});
+		if ("state" in result) {
+			throw new Error(
+				"supported Codex lifecycle received unsupported doctor result",
+			);
+		}
+		return result;
+	};
 
 	if (!secureFs) {
 		return {
@@ -737,15 +761,42 @@ export async function _runCodex(
 	};
 }
 
+function unsupportedCodexLifecycle(
+	platformSupport: PlatformSupport,
+): CodexHookMutationResult {
+	return {
+		ok: false,
+		changed: [],
+		backups: [],
+		errors: [platformSupport.refusalCode],
+		warnings: [platformSupport.guidance],
+		lifecycleRefusal: platformSupport,
+	};
+}
+
 export function installCodexPreToolUse(
-	homeDir: string = os.homedir(),
+	homeDir?: string,
+	deps: CodexHookRunDeps = {},
 ): Promise<CodexHookMutationResult> {
-	return _runCodex(homeDir, "install", {}, {});
+	const platformSupport = resolvePlatformSupport(
+		deps.platform ?? process.platform,
+	);
+	if (platformSupport)
+		return Promise.resolve(unsupportedCodexLifecycle(platformSupport));
+	const resolvedHomeDir = homeDir ?? (deps.homeDirProvider ?? os.homedir)();
+	return _runCodex(resolvedHomeDir, "install", {}, deps);
 }
 
 export function repairCodexPreToolUse(
-	homeDir: string = os.homedir(),
+	homeDir?: string,
 	options?: { force?: boolean },
+	deps: CodexHookRunDeps = {},
 ): Promise<CodexHookMutationResult> {
-	return _runCodex(homeDir, "repair", options ?? {}, {});
+	const platformSupport = resolvePlatformSupport(
+		deps.platform ?? process.platform,
+	);
+	if (platformSupport)
+		return Promise.resolve(unsupportedCodexLifecycle(platformSupport));
+	const resolvedHomeDir = homeDir ?? (deps.homeDirProvider ?? os.homedir)();
+	return _runCodex(resolvedHomeDir, "repair", options ?? {}, deps);
 }

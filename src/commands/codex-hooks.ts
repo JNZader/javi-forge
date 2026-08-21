@@ -13,15 +13,18 @@
 
 import {
 	type CodexHookDoctorReport,
+	type CodexHookDoctorResult,
 	type CodexHookMutationResult,
 	doctorCodexPreToolUse,
 	installCodexPreToolUse,
 	repairCodexPreToolUse,
 } from "../lib/codex-hook-manager.js";
+import { resolvePlatformSupport } from "../lib/platform-support.js";
 
 export type CodexHookSub = "install" | "doctor" | "repair";
 
 export interface CodexHookCmdDeps {
+	platform?: string;
 	install?: typeof installCodexPreToolUse;
 	doctor?: typeof doctorCodexPreToolUse;
 	repair?: typeof repairCodexPreToolUse;
@@ -68,14 +71,17 @@ function renderMutation(
 }
 
 function renderDoctor(
-	report: CodexHookDoctorReport,
+	result: CodexHookDoctorResult,
 	log: (m: string) => void,
 ): number {
-	log(`doctor codex: ${report.healthy ? "healthy" : "unhealthy"}`);
-	if (report.platformSupport)
+	if ("state" in result) {
 		log(
-			`  platform-support: ${report.platformSupport.state} — ${report.platformSupport.guidance}`,
+			`${result.platformSupport.refusalCode}: ${result.platformSupport.guidance}`,
 		);
+		return 1;
+	}
+	const report: CodexHookDoctorReport = result;
+	log(`doctor codex: ${report.healthy ? "healthy" : "unhealthy"}`);
 	log(`  hooks.json: ${report.hooksJson.state}`);
 	log(
 		`  config:    [features] hooks=${report.config.featuresHooks} (readable: ${report.config.readable})`,
@@ -127,6 +133,13 @@ export async function runCodexHookCommand(
 ): Promise<number> {
 	const log = deps.log ?? ((m: string) => console.log(m));
 	const logError = deps.logError ?? ((m: string) => console.error(m));
+	const platformSupport = resolvePlatformSupport(
+		deps.platform ?? process.platform,
+	);
+	if (platformSupport) {
+		logError(`${platformSupport.refusalCode}: ${platformSupport.guidance}`);
+		return 1;
+	}
 	const install = deps.install ?? installCodexPreToolUse;
 	const doctor = deps.doctor ?? doctorCodexPreToolUse;
 	const repair = deps.repair ?? repairCodexPreToolUse;

@@ -15,12 +15,15 @@ import {
 import { makeFakeSecureFs } from "./__fixtures__/fake-secure-fs.js";
 import {
 	_run,
+	type ClaudeHookDoctorReport,
 	classifyAssetState,
 	classifySettingsFile,
 	detectNode,
 	doctorClaudePreToolUse,
+	installClaudePreToolUse,
 	type Manifest,
 	type NodeOnPathProbe,
+	repairClaudePreToolUse,
 } from "./claude-hook-manager.js";
 import { canonicalizeSettingsEntry } from "./claude-hook-settings.js";
 import { ACL_PACKAGE_REMEDIATION } from "./secure-refusal-remediation.js";
@@ -69,7 +72,7 @@ const STUB_NODE_PROBE = async (): Promise<NodeOnPathProbe> => ({
 	version: "v22.11.0",
 	major: 22,
 });
-const doctor = (
+const doctorResult = (
 	projectDir: string,
 	options: DoctorOptions = {},
 ): ReturnType<typeof doctorClaudePreToolUse> =>
@@ -78,6 +81,15 @@ const doctor = (
 		...options,
 		execution: { nodeProbe: STUB_NODE_PROBE, ...(options.execution ?? {}) },
 	});
+
+const doctor = async (
+	projectDir: string,
+	options: DoctorOptions = {},
+): Promise<ClaudeHookDoctorReport> => {
+	const result = await doctorResult(projectDir, options);
+	if ("state" in result) throw new Error("expected supported doctor report");
+	return result;
+};
 
 let dir: string;
 const assetPath = (): string => path.join(dir, ".claude", "hooks", ASSET_NAME);
@@ -754,38 +766,54 @@ describe("_run — install seam wiring (fake secureFs, host-independent)", () =>
 			ok: false,
 			changed: [],
 			backups: [],
-			errors: ["macos-lifecycle-unsupported"],
+			errors: ["unsupported-platform"],
 		});
 		expect(result.report).toBeUndefined();
 		expect(result.lifecycleRefusal).toMatchObject({
-			platform: "darwin",
-			state: "macos-deprecated",
-			lifecycle: "unsupported",
-			refusalCode: "macos-lifecycle-unsupported",
+			state: "unsupported-platform",
+			refusalCode: "unsupported-platform",
 		});
 		expect(openDirNoFollow).not.toHaveBeenCalled();
 		expect(nodeProbe).not.toHaveBeenCalled();
 		expect(aclProbe).not.toHaveBeenCalled();
 		expect(doctor).not.toHaveBeenCalled();
 		expect(result.warnings.join("\n")).toContain(
-			"pin a supported release or migrate",
+			"javi-forge supports Linux and Windows only.",
 		);
 	});
 });
 
 describe("doctor platform support advisory", () => {
 	it("reports exact Darwin support data without changing report semantics", async () => {
-		const darwin = await doctor(dir, { platform: "darwin" });
+		const darwin = await doctorResult(dir, { platform: "darwin" });
 		const linux = await doctor(dir, { platform: "linux" });
-		expect(darwin.platformSupport).toMatchObject({
-			state: "macos-deprecated",
-			lifecycle: "unsupported",
-			refusalCode: "macos-lifecycle-unsupported",
-			guidance: expect.stringContaining("pin a supported release or migrate"),
+		expect(darwin).toMatchObject({
+			state: "unsupported-platform",
+			platformSupport: {
+				state: "unsupported-platform",
+				refusalCode: "unsupported-platform",
+				guidance: expect.stringContaining(
+					"javi-forge supports Linux and Windows only.",
+				),
+			},
 		});
-		expect(linux.platformSupport).toBeUndefined();
-		expect(darwin.healthy).toBe(linux.healthy);
-		expect(darwin.execution).toEqual(linux.execution);
-		expect(darwin.remediation).toEqual(linux.remediation);
+		expect("state" in linux).toBe(false);
+		expect(darwin.healthy).toBe(false);
+		expect("report" in darwin).toBe(false);
+	});
+});
+
+describe("public wrapper platform boundary", () => {
+	it.each([
+		(deps: Parameters<typeof installClaudePreToolUse>[1]) =>
+			installClaudePreToolUse("/project", deps),
+		(deps: Parameters<typeof repairClaudePreToolUse>[2]) =>
+			repairClaudePreToolUse("/project", undefined, deps),
+	])("passes exposed run-deps to the early unsupported guard", async (run) => {
+		const result = await run({ platform: "freebsd" });
+		expect(result).toMatchObject({
+			ok: false,
+			errors: ["unsupported-platform"],
+		});
 	});
 });

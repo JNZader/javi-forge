@@ -32,11 +32,18 @@ export type InitProjectResult =
 	| { ok: true }
 	| { ok: false; refusalCode: string; platformSupport: PlatformSupport };
 
+export interface InitProjectDeps {
+	platform?: string;
+}
+
 export async function initProject(
 	options: InitOptions,
 	onStep: StepCallback,
+	deps: InitProjectDeps = {},
 ): Promise<InitProjectResult> {
-	const platformSupport = resolvePlatformSupport(process.platform);
+	const platformSupport = resolvePlatformSupport(
+		deps.platform ?? process.platform,
+	);
 	if (platformSupport) {
 		return {
 			ok: false,

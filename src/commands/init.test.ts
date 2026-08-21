@@ -322,8 +322,8 @@ it("Darwin initProject refuses before ensureDirExists or lifecycle steps", async
 		const result = await initProject(makeOptions(), onStep);
 		expect(result).toMatchObject({
 			ok: false,
-			refusalCode: "macos-lifecycle-unsupported",
-			platformSupport: { state: "macos-deprecated" },
+			refusalCode: "unsupported-platform",
+			platformSupport: { state: "unsupported-platform" },
 		});
 		expect(vi.mocked(ensureDirExists)).not.toHaveBeenCalled();
 		expect(onStep).not.toHaveBeenCalled();
@@ -338,4 +338,22 @@ it("Darwin initProject refuses before ensureDirExists or lifecycle steps", async
 			configurable: true,
 		});
 	}
+});
+
+it.each([
+	"darwin",
+	"darwin-arm64",
+	"freebsd",
+	"unknown",
+])("%s initProject refuses through the public ingress before lifecycle work", async (platform) => {
+	const onStep = vi.fn();
+	const result = await initProject(makeOptions(), onStep, {
+		platform,
+	} as never);
+	expect(result).toMatchObject({
+		ok: false,
+		refusalCode: "unsupported-platform",
+	});
+	expect(vi.mocked(ensureDirExists)).not.toHaveBeenCalled();
+	expect(onStep).not.toHaveBeenCalled();
 });

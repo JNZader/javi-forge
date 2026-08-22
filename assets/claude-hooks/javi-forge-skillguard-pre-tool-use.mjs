@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 export const MANAGED_MARKER = "// javi-forge-managed: claude-pretooluse v1";
 export const INPUT_LIMIT_BYTES = 1_048_576;
 export const SUPPORTED_TOOLS = Object.freeze(["Bash", "PowerShell", "Read", "Write", "Edit"]);
-export const POLICY_REGISTRY = Object.freeze({ schemaVersion: 1, policyVersion: 1, diagnosticsMaxBytes: 240 });
+export const POLICY_REGISTRY = Object.freeze({ schemaVersion: 1, policyVersion: 2, diagnosticsMaxBytes: 240 });
+export function resolvePlatformSupport(platform = process.platform) { return platform === "linux" || platform === "win32" ? { supported: true } : { supported: false, reason: "unsupported-platform" }; }
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 // Per-agent adapter config (S0 core-extraction): every agent-specific input the guard needs
 // (the isManaged protected-path set, the project-dir source, the managed marker) is resolved by
@@ -57,7 +58,7 @@ function lexicalNormalize(input, platform) {
 		else parts.push(part);
 	}
 	value = `${root}${root.endsWith("/") || parts.length === 0 ? "" : "/"}${parts.join("/")}`;
-	if (windows || platform === "darwin") value = value.normalize("NFC").toLowerCase();
+	if (windows) value = value.normalize("NFC").toLowerCase();
 	return value;
 }
 function nativeRealpath(input) {
@@ -109,7 +110,7 @@ function policyPathKeys(input, options = {}) {
 function isAbsolutePolicyPath(value) { return POSIX_ABSOLUTE.test(value) || WINDOWS_DRIVE.test(value) || WINDOWS_UNC.test(value) || /^\\(?:\\\?|\?\?|\\\.)\\/i.test(value); }
 // Home-relative credential files, matched as a path SUFFIX (never an expanded
 // literal home) so one rule holds for every user, container and HOME. Literals
-// stay lowercase because lexicalNormalize folds keys on darwin/win32.
+// stay lowercase because lexicalNormalize folds keys on win32.
 const SENSITIVE_PATH_SUFFIXES = Object.freeze(["/.aws/credentials", "/.kube/config", "/.config/gcloud/application_default_credentials.json", "/.docker/config.json", "/.config/gh/hosts.yml"]);
 // Absolute system secrets: the shadow suite holds every local account's password
 // hash, and passwd/vipw leave the "-" backup beside it holding the same secret.
@@ -132,17 +133,16 @@ export function isSensitivePolicyKey(key, platform = process.platform) {
 	if (SENSITIVE_ABSOLUTE_KEYS.includes(key) || PROC_ENVIRON_KEY.test(key)) return true;
 	if (SENSITIVE_PATH_SUFFIXES.some((suffix) => key.endsWith(suffix))) return true;
 	if (SENSITIVE_DIRECTORY_SUFFIXES.some((directory) => key.endsWith(directory) || key.includes(`${directory}/`))) return true;
-	return platform === "win32" || platform === "darwin" ? basename.toLowerCase() === "serviceaccountkey.json" : basename === "serviceAccountKey.json";
+	return platform === "win32" ? basename.toLowerCase() === "serviceaccountkey.json" : basename === "serviceAccountKey.json";
 }
 function isManaged(key, managedSet = CLAUDE_MANAGED_SET, projectRoot = PROJECT_ROOT) {
 	const project = canonicalizePolicyPath(projectRoot);
 	if (!key.startsWith(`${project}/`) && key !== project) return false;
 	const relative = key.slice(project.length + 1);
-	// On case-insensitive platforms lexicalNormalize folds the key to lowercase,
-	// so the mixed-case CLAUDE.md literals must be matched case-insensitively too
-	// (the other literals are already lowercase). Otherwise CLAUDE.md and
-	// .claude/CLAUDE.md lose managed-config protection on macOS/Windows.
-	const foldedClaudeMd = (process.platform === "win32" || process.platform === "darwin") && managedSet.caseFoldExact.includes(relative);
+	// On win32 lexicalNormalize folds the key to lowercase, so the mixed-case
+	// CLAUDE.md literals must be matched case-insensitively too. Otherwise
+	// CLAUDE.md and .claude/CLAUDE.md lose managed-config protection.
+	const foldedClaudeMd = process.platform === "win32" && managedSet.caseFoldExact.includes(relative);
 	return foldedClaudeMd || managedSet.exact.includes(relative) || managedSet.prefixes.some((prefix) => relative.startsWith(prefix));
 }
 function evaluateFile(toolName, filePath, config = AGENT_CONFIGS.claude, projectRoot = PROJECT_ROOT) {
@@ -259,7 +259,7 @@ export function normalizeLiteralUtilityIdentity(rawToken) {
 	// Lexical-only: split on "/" without path/realpath/PATH/alias resolution.
 	// Basename compare is case-insensitive and host-independent so inherited
 	// deny families still fire for CHMOD/ENV/BASE64 on case-insensitive
-	// filesystems, mirroring the darwin/win32 path folding lexicalNormalize
+	// filesystems, mirroring the win32 path folding lexicalNormalize
 	// already applies. The canonical lowercase utility feeds profile lookup.
 	const token = typeof rawToken === "string" ? rawToken : "";
 	const literal = token.length > 0 && !NON_LITERAL_IDENTITY_MARKERS.test(token);
@@ -837,6 +837,7 @@ function diagnostic(error) {
 		"invalid-event": "input does not match the supported event schema",
 		"invalid-config": "missing or unknown --agent selector (expected --agent=<id>)",
 		"oversized-input": "stdin exceeds 1048576 bytes",
+		"unsupported-platform": "Linux and Windows are supported hosts",
 		"missing-policy": "embedded policy registry is unavailable",
 		"internal-error": "policy evaluation could not complete",
 	};
@@ -897,10 +898,11 @@ export function readBoundedStdin(stream = process.stdin) {
 }
 export async function main() {
 	try {
+		if (!resolvePlatformSupport().supported) throw new Error("unsupported-platform");
 		const config = resolveAgentConfig(process.argv);
 		const fault = process.argv.find((arg) => arg.startsWith("--javi-forge-test-fault="))?.split("=")[1];
 		if (fault === "missing-policy") throw new Error("missing-policy");
-		if (POLICY_REGISTRY.schemaVersion !== 1 || POLICY_REGISTRY.policyVersion !== 1) throw new Error("missing-policy");
+		if (POLICY_REGISTRY.schemaVersion !== 1 || POLICY_REGISTRY.policyVersion !== 2) throw new Error("missing-policy");
 		const input = await readBoundedStdin();
 		let parsed;
 		try {

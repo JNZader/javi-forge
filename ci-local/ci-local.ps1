@@ -27,8 +27,8 @@ function Invoke-CiLocalMain {
         [ref]$ExitCode
     )
 
-    if ($Platform -eq 'Darwin') {
-        Write-Host 'macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate. Existing installed guards are not removed; Darwin code removal is planned separately for 2.0.'
+    if ($Platform -notin @('Linux', 'Windows')) {
+        Write-Host 'unsupported-platform: javi-forge supports Linux and Windows only.'
         if ($PSBoundParameters.ContainsKey('ExitCode')) {
             $ExitCode.Value = 1
             return
@@ -36,15 +36,22 @@ function Invoke-CiLocalMain {
         return 1
     }
 
-    Invoke-CiLocalStartupBody -Platform $Platform
+    $bodyExitCode = 0
+    & ${function:Invoke-CiLocalStartupBody} -Platform $Platform -ExitCode ([ref]$bodyExitCode)
     if ($PSBoundParameters.ContainsKey('ExitCode')) {
-        $ExitCode.Value = 0
+        $ExitCode.Value = $bodyExitCode
+    } elseif ($bodyExitCode -ne 0) {
+        return $bodyExitCode
     }
 }
 
 function Invoke-CiLocalStartupBody {
-    param([string]$Platform)
+    param(
+        [string]$Platform,
+        [ref]$ExitCode
+    )
 
+    $ExitCode.Value = 0
 # See install.ps1 for the rationale behind 7.2 minimum (ResolveLinkTarget).
 if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion -lt [Version]'7.2') {
     Write-Host 'ERROR: ci-local.ps1 requires PowerShell 7.2+ (pwsh).' -ForegroundColor Red
@@ -291,12 +298,15 @@ function Confirm-DockerImage {
             $buildArgs += @('--build-arg', "JAVA_VERSION=$($Cfg.JavaVersion)")
         }
         & docker build @buildArgs -f $dockerfile -t $imageName (Join-Path $ScriptDir 'docker')
-        if ($LASTEXITCODE -ne 0) { throw 'docker build failed' }
+        if ($LASTEXITCODE -ne 0) {
+            $ExitCode.Value = $LASTEXITCODE
+            return
+        }
     }
 }
 
 # Convert a host path to the form expected by docker run -v.
-# Linux/macOS:  /path/to/x         -> /path/to/x  (pass through)
+# Linux/WSL:    /path/to/x         -> /path/to/x  (pass through)
 # Windows:      C:\Users\foo\proj  -> /c/Users/foo/proj  (Docker Desktop format)
 # WSL inside Windows is the bash side and never reaches this code.
 function ConvertTo-DockerHostPath {
@@ -348,7 +358,10 @@ function Invoke-InCi {
         -v "${hostMount}:/home/runner/work" `
         -e CI=true `
         $imageName timeout $timeout bash -c $Cmd
-    if ($LASTEXITCODE -ne 0) { throw "step failed with exit $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) {
+        $ExitCode.Value = $LASTEXITCODE
+        return
+    }
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────
@@ -385,21 +398,25 @@ switch ($Mode) {
 
     'quick' {
         Confirm-DockerImage -Cfg $cfg
+        if ($ExitCode.Value -ne 0) { return }
         Write-Host ''
         Write-Host 'Running quick check...' -ForegroundColor Yellow
 
         if ($cfg.LintCmd) {
             Write-Host "Lint: $($cfg.LintCmd)" -ForegroundColor Cyan
             Invoke-InCi -Cfg $cfg -Cmd "cd /home/runner/work && $($cfg.LintCmd)"
+            if ($ExitCode.Value -ne 0) { return }
         }
         if ($cfg.CompileCmd) {
             Write-Host "Compile: $($cfg.CompileCmd)" -ForegroundColor Cyan
             Invoke-InCi -Cfg $cfg -Cmd "cd /home/runner/work && $($cfg.CompileCmd)" -RunUser 'root'
+            if ($ExitCode.Value -ne 0) { return }
         }
     }
 
     'shell' {
         Confirm-DockerImage -Cfg $cfg
+        if ($ExitCode.Value -ne 0) { return }
         Write-Host ''
         Write-Host 'Opening shell in CI environment...' -ForegroundColor Yellow
         $imageName = Get-ImageName -StackType $cfg.StackType
@@ -408,11 +425,16 @@ switch ($Mode) {
             -v "${hostMount}:/home/runner/work" `
             -e CI=true `
             $imageName 'cd /home/runner/work && bash'
+        if ($LASTEXITCODE -ne 0) {
+            $ExitCode.Value = $LASTEXITCODE
+            return
+        }
     }
 
     Default {
         # 'full'
         Confirm-DockerImage -Cfg $cfg
+        if ($ExitCode.Value -ne 0) { return }
         Write-Host ''
         Write-Host 'Running full CI simulation...' -ForegroundColor Yellow
 
@@ -429,6 +451,7 @@ switch ($Mode) {
             Write-Host "Step $step/$total`: Lint" -ForegroundColor Yellow
             Write-Host "  $($cfg.LintCmd)" -ForegroundColor Cyan
             Invoke-InCi -Cfg $cfg -Cmd "cd /home/runner/work && $($cfg.LintCmd)"
+            if ($ExitCode.Value -ne 0) { return }
             $step++
         }
 
@@ -437,6 +460,7 @@ switch ($Mode) {
             Write-Host "Step $step/$total`: Compile" -ForegroundColor Yellow
             Write-Host "  $($cfg.CompileCmd)" -ForegroundColor Cyan
             Invoke-InCi -Cfg $cfg -Cmd "cd /home/runner/work && $($cfg.CompileCmd)" -RunUser 'root'
+            if ($ExitCode.Value -ne 0) { return }
             $step++
         }
 
@@ -445,6 +469,7 @@ switch ($Mode) {
             Write-Host "Step $step/$total`: Test" -ForegroundColor Yellow
             Write-Host "  $($cfg.TestCmd)" -ForegroundColor Cyan
             Invoke-InCi -Cfg $cfg -Cmd "cd /home/runner/work && $($cfg.TestCmd)"
+            if ($ExitCode.Value -ne 0) { return }
             $step++
         }
 
@@ -455,7 +480,8 @@ switch ($Mode) {
             & ghagga review --plain --exit-on-issues
             if ($LASTEXITCODE -ne 0) {
                 Write-Host 'GHAGGA review found issues!' -ForegroundColor Red
-                exit 1
+                $ExitCode.Value = $LASTEXITCODE
+                return
             }
         }
     }
@@ -468,7 +494,7 @@ Write-Host ''
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    $platform = if ($IsMacOS) { 'Darwin' } else { 'Windows' }
+    $platform = if ($IsWindows) { 'Windows' } elseif ($IsLinux) { 'Linux' } else { 'unsupported' }
     $exitCode = 0
     & ${function:Invoke-CiLocalMain} -Platform $platform -ExitCode ([ref]$exitCode)
     if ($exitCode -ne 0) {

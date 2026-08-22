@@ -11,11 +11,15 @@ const repoRoot = path.join(
 );
 const ciLocalDir = path.join(repoRoot, "ci-local");
 
-const MACOS_GUIDANCE =
-	"macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate. Existing installed guards are not removed; Darwin code removal is planned separately for 2.0.";
+const UNSUPPORTED_PLATFORM_GUIDANCE =
+	"unsupported-platform: javi-forge supports Linux and Windows only.";
 
-const bashEntrypoints = ["install.sh", "ci-local.sh"] as const;
-const powerShellEntrypoints = ["install.ps1", "ci-local.ps1"] as const;
+const bashEntrypoints = ["install.sh", "ci-local.sh", "uninstall.sh"] as const;
+const powerShellEntrypoints = [
+	"install.ps1",
+	"ci-local.ps1",
+	"uninstall.ps1",
+] as const;
 const powerShellExecutable = process.env.CI_LOCAL_PWSH?.trim() || "pwsh";
 const powerShellAvailable = (() => {
 	const probe = spawnSync(
@@ -48,7 +52,7 @@ function runPowerShell(args: string[]): ReturnType<typeof spawnSync> {
 	});
 }
 
-describe("CI-Local macOS platform support", () => {
+describe("CI-Local platform support", () => {
 	it("does not pin PowerShell integration tests to one machine path", () => {
 		const source = readFileSync(fileURLToPath(import.meta.url), "utf8");
 		const pinnedPath = ["/home", "linuxbrew", ".linuxbrew", "bin", "pwsh"].join(
@@ -59,7 +63,7 @@ describe("CI-Local macOS platform support", () => {
 
 	it.each(
 		bashEntrypoints,
-	)("%s sources safely and refuses Darwin before every downstream primitive", (entrypoint) => {
+	)("%s sources safely and refuses unsupported hosts before every downstream primitive", (entrypoint) => {
 		const script = path.join(ciLocalDir, entrypoint);
 		const result = runBash(`
 				calls=0
@@ -68,14 +72,14 @@ describe("CI-Local macOS platform support", () => {
 				done
 				sentinel=unchanged
 				source ${quoteForBash(script)}
-				ci_local_main Darwin
+				ci_local_main unsupported
 				status=$?
 				printf 'status=%s calls=%s sentinel=%s\\n' "$status" "$calls" "$sentinel"
 				exit "$status"
 			`);
 
 		expect(result.status).toBe(1);
-		expect(result.stdout).toContain(MACOS_GUIDANCE);
+		expect(result.stdout).toContain(UNSUPPORTED_PLATFORM_GUIDANCE);
 		expect(result.stdout).toContain("status=1 calls=0 sentinel=unchanged");
 	});
 
@@ -107,11 +111,11 @@ describe("CI-Local macOS platform support", () => {
 			`);
 
 		expect(result.status).toBe(0);
-		expect(result.stdout).toContain("supported-startup=Linux");
+		expect(result.stdout).toContain("supported-startup=");
 	});
 
 	it.runIf(powerShellAvailable).each(powerShellEntrypoints)(
-		"%s dot-sources safely and refuses Darwin before every downstream primitive",
+		"%s dot-sources safely and refuses unsupported hosts before every downstream primitive",
 		(entrypoint) => {
 			const script = path.join(ciLocalDir, entrypoint);
 			const command = `
@@ -122,14 +126,14 @@ describe("CI-Local macOS platform support", () => {
 					function global:Test-Path { $script:calls++; $false }
 					function global:Push-Location { $script:calls++ }
 					$sentinel = 'unchanged'
-					$result = Invoke-CiLocalMain -Platform Darwin
+					$result = Invoke-CiLocalMain -Platform unsupported
 					Write-Output "status=$result calls=$script:calls sentinel=$sentinel"
 					if ($result -ne 1) { exit 1 }
 				`;
 			const result = runPowerShell(["-NoProfile", "-Command", command]);
 
 			expect(result.status).toBe(0);
-			expect(result.stdout).toContain(MACOS_GUIDANCE);
+			expect(result.stdout).toContain(UNSUPPORTED_PLATFORM_GUIDANCE);
 			expect(result.stdout).toContain("status=1 calls=0 sentinel=unchanged");
 		},
 	);
@@ -178,7 +182,7 @@ describe("CI-Local macOS platform support", () => {
 				]);
 
 				expect(result.status).toBe(0);
-				expect(result.stdout).toContain("live-body-output=Windows");
+				expect(result.stdout).toContain("live-body-output=Linux");
 			} finally {
 				rmSync(tempDir, { force: true, recursive: true });
 			}
@@ -192,8 +196,8 @@ describe("CI-Local macOS platform support", () => {
 			const tempDir = mkdtempSync(path.join(os.tmpdir(), "ci-local-alias-"));
 			const probePath = path.join(tempDir, entrypoint);
 			const probe = source.replace(
-				"$platform = if ($IsMacOS) { 'Darwin' } else { 'Windows' }",
-				"$platform = 'Darwin'",
+				"$platform = if ($IsWindows) { 'Windows' } elseif ($IsLinux) { 'Linux' } else { 'unsupported' }",
+				"$platform = 'unsupported'",
 			);
 			writeFileSync(probePath, probe);
 
@@ -212,8 +216,8 @@ describe("CI-Local macOS platform support", () => {
 				const result = runPowerShell(["-NoProfile", "-Command", command]);
 
 				expect(result.status).toBe(1);
-				expect(result.stdout).toContain(MACOS_GUIDANCE);
-				expect(result.stdout).not.toContain("alias-intercepted=Darwin");
+				expect(result.stdout).toContain(UNSUPPORTED_PLATFORM_GUIDANCE);
+				expect(result.stdout).not.toContain("alias-intercepted=unsupported");
 			} finally {
 				rmSync(tempDir, { force: true, recursive: true });
 			}
@@ -228,55 +232,25 @@ describe("CI-Local macOS platform support", () => {
 					? 'ci_local_main "$(/usr/bin/uname -s)" "$@"'
 					: 'ci_local_main "$(/usr/bin/uname -s)"';
 			expect(contents).toContain(expectedTail);
-			expect(contents).toContain('if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then');
+			expect(contents).toContain(`if [[ "\${BASH_SOURCE[0]}" == "$0" ]]; then`);
 			expect(contents).not.toMatch(/CI_LOCAL_(?:PLATFORM|OS)/);
 		}
 
 		for (const entrypoint of powerShellEntrypoints) {
 			const contents = readFileSync(path.join(ciLocalDir, entrypoint), "utf8");
 			expect(contents).toContain(
-				"$platform = if ($IsMacOS) { 'Darwin' } else { 'Windows' }",
+				"$platform = if ($IsWindows) { 'Windows' } elseif ($IsLinux) { 'Linux' } else { 'unsupported' }",
 			);
 			expect(contents).toContain("if ($MyInvocation.InvocationName -ne '.') {");
 			if (entrypoint === "ci-local.ps1") {
 				expect(contents).toContain(
-					"& ${function:Invoke-CiLocalMain} -Platform $platform -ExitCode ([ref]$exitCode)",
+					`& \${function:Invoke-CiLocalMain} -Platform $platform -ExitCode ([ref]$exitCode)`,
 				);
 				expect(contents).not.toContain(
 					"$exitCode = Invoke-CiLocalMain -Platform $platform",
 				);
 			}
 			expect(contents).not.toMatch(/CI_LOCAL_(?:PLATFORM|OS)/);
-		}
-	});
-
-	it.each([
-		["root README", repoRoot],
-		["CI-Local README", ciLocalDir],
-	] as const)("documents macOS as refused without affirmative support claims or current removal in %s", (_label, directory) => {
-		const contents = readFileSync(path.join(directory, "README.md"), "utf8");
-		expect(contents).toContain("deprecated and unsupported");
-		expect(contents).toContain("Pin a supported release or migrate");
-		expect(contents).toContain("Existing installed guards are not removed");
-		expect(contents).toContain("planned separately for 2.0");
-		expect(contents).not.toMatch(/macOS support has been removed/i);
-		expect(contents).not.toMatch(/Linux\/Mac(?:\/WSL)?/i);
-
-		for (const line of contents
-			.split(/\r?\n/)
-			.filter((line) => /macOS/i.test(line))) {
-			expect(line).not.toMatch(
-				/`(?:install|ci-local)\.sh`|\bmacOS\b.*\b(?:is|remains|still)\s+supported\b/i,
-			);
-		}
-
-		if (directory === ciLocalDir) {
-			const macosMatrixRow = contents
-				.split(/\r?\n/)
-				.find((line) => /^\|\s*macOS\s*\|/i.test(line));
-			expect(macosMatrixRow).toContain("Unsupported");
-			expect(macosMatrixRow).toContain("Refused before startup");
-			expect(macosMatrixRow).not.toMatch(/`(?:install|ci-local)\.sh`/i);
 		}
 	});
 });

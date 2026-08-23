@@ -13,6 +13,10 @@ npx javi-forge init
 
 An interactive TUI guides you through project setup: pick a stack, CI provider, memory module, and get a production-ready project structure in seconds.
 
+## Platform Support
+
+javi-forge 2.0 supports Linux and Windows only. npm package eligibility enforces this boundary. Source or manual execution on every other host returns generic `unsupported-platform` guidance before probes or mutation; there is no legacy-host migration or compatibility mode.
+
 ## What It Creates
 
 `javi-forge init` bootstraps a complete project with 13 sequential steps:
@@ -373,14 +377,10 @@ npx javi-forge doctor
 - **Installed Modules** — engram, obsidian-brain, memory-simple, ghagga
 
 
-## macOS CI-Local support
-
-macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate your workflow. Existing installed guards are not removed in 1.x; Darwin code removal is planned separately for 2.0.
-
 ## Requirements
 
 - **Node.js** >= 22 (required by ink 7; previous versions ran on >= 18)
-- **Linux only** — the `acl` package (provides `getfacl`) is required to install or repair the Claude PreToolUse guard: the transactional installer proves every controlling directory carries no extended ACL, and refuses fail-closed when `getfacl` is unresolvable. Install with `apt install acl`, `apk add acl`, or `dnf install acl` (slim container images usually omit it). An already-installed guard keeps working without it — `javi-forge hooks doctor claude` reports the capability as its own row.
+- **Linux guard installation/repair** — the `acl` package (provides `getfacl`) is required to install or repair the Claude PreToolUse guard: the transactional installer proves every controlling directory carries no endangering ACL, and refuses fail-closed when `getfacl` is unresolvable. Install with `apt install acl`, `apk add acl`, or `dnf install acl` (slim container images usually omit it). An already-installed guard keeps working without it — `javi-forge hooks doctor claude` reports the capability as its own row.
 - **`node` on `PATH`** — Claude Code spawns the guard in exec form, so `node` must resolve on the `PATH` Claude Code itself uses, not only inside javi-forge.
 
 ## Ecosystem

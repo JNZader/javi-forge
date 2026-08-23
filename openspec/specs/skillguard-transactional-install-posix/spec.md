@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This specification amends `skillguard-pretooluse-hook` with Slice 3a ("Transactional install/repair", POSIX write path). It defines the observable behavior of the two mutation seams `installClaudePreToolUse` and `repairClaudePreToolUse` on Linux and macOS: an idempotent, ownership-safe transaction driven by the Slice-2 nine-state classifier and the design's state→action matrix. It delivers the held-handle parent-chain gate, same-directory exclusive backups, atomic temp/fsync/exact-mode/rename commit, and guarded reverse-order rollback as host-independent library behavior. Windows mutation is defined-but-deferred to Slice 3b. This slice is defense in depth for the installer's write side, not a CLI route, init rewiring, effective-execution matrix, or uninstall command: those remain in Slice 4.
+This specification amends `skillguard-pretooluse-hook` with Slice 3a ("Transactional install/repair", POSIX write path). It defines the observable behavior of the two mutation seams `installClaudePreToolUse` and `repairClaudePreToolUse` on Linux: an idempotent, ownership-safe transaction driven by the Slice-2 nine-state classifier and the design's state→action matrix. It delivers the held-handle parent-chain gate, same-directory exclusive backups, atomic temp/fsync/exact-mode/rename commit, and guarded reverse-order rollback as host-independent library behavior. Windows mutation is defined-but-deferred to Slice 3b. Linux and Windows are the only product-supported hosts; every other host is refused generically before this transaction seam. This slice is defense in depth for the installer's write side, not a CLI route, init rewiring, effective-execution matrix, or uninstall command: those remain in Slice 4.
 
 ## Terms
 
@@ -17,7 +17,7 @@ The following terms are normative:
 | **controlling directory** | Any existing directory from the filesystem root through a target's parent that governs a path component. |
 | **parent-chain gate** | The held-no-follow-handle, identity, ownership, and ACL-absence proof over every controlling directory. |
 | **exact-legacy cohort** | The complete one-of-each set of four v0 legacy objects recognized by Slice 2. |
-| **ACL adapter** | The bounded, locale-`C` platform inspector proving no extended POSIX ACL: Linux `getfacl`, macOS `/bin/ls -lde`. |
+| **ACL adapter** | The bounded, locale-`C` Linux `getfacl` inspector proving no extended POSIX ACL. |
 | **transaction hash** | A SHA-256 the transaction computes over the bytes it wrote to a committed target. |
 | **injectable seam** | The clock, 8-hex nonce source, `PlatformSecureFs`/ACL adapter, and fs-fault points supplied for host-independent tests. |
 | **refuse** | Stop before any target mutation, name an actionable reason and first offending path, and leave every target byte- and mtime-unchanged. |
@@ -70,7 +70,7 @@ On an **ancestor** controlling directory (any controlling directory that is NOT 
 
 On an installer-**managed container** (`.claude`, `.claude/hooks`) the adapter MUST refuse ANY extended ACL entry — named-user, named-group, `mask::`, OR `default:*` — exactly as before; the net guarantee on managed containers is byte-identical.
 
-The ancestor predicate MUST be applied identically at the preflight ancestor gate AND at the pre-commit/rollback re-prove, so an ACL that passes preflight is not refused at commit and vice-versa. Selection between the two predicates MUST be by the managed-container role (the existing managed-containers set), NOT by platform branching in the engine. On macOS the ancestor predicate MAY remain the current strict any-extended-entry behavior (deferred; documented, not a regression of the reported Linux bug).
+The ancestor predicate MUST be applied identically at the preflight ancestor gate AND at the pre-commit/rollback re-prove, so an ACL that passes preflight is not refused at commit and vice-versa. Selection between the two predicates MUST be by the managed-container role (the existing managed-containers set), NOT by platform branching in the engine.
 
 Any tool-absent, parse-error, unsupported-filesystem, or changed-output result MUST refuse with `unsupported-posix-acl`; any inconclusive identity/ownership/writability result MUST refuse with `unsafe-parent-chain`, naming the first offending path, before any target mutation. The system MUST NOT fall back to pathname-only (`lstat`-pair) checks as race protection.
 
@@ -134,13 +134,6 @@ When the refusal cause is that the ACL adapter itself is NOT RESOLVABLE on the h
 - WHEN the pre-commit/rollback `gateStillValid` re-prove evaluates that same ancestor
 - THEN it applies the identical predicate and does not spuriously refuse at commit
 - AND an ancestor ACL that the predicate refuses is refused identically at both points
-
-#### Scenario: macOS ancestor predicate remains strict (deferred)
-
-- GIVEN the host platform is macOS
-- WHEN the ancestor gate evaluates a controlling directory carrying any extended ACL
-- THEN it MAY refuse under the current strict any-extended-entry behavior
-- AND this is a documented deferral, not a regression of the reported Linux bug
 
 #### Scenario: Identity drift around a mutation aborts
 

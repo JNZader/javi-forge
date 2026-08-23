@@ -94,9 +94,8 @@ export interface PlatformSecureFs {
 	 * ones (a lone mask, an effective-non-write or x-only or trusted named entry, a
 	 * `default:*`). Called by the engine on ANCESTOR (non-managed) controlling dirs
 	 * only; managed containers keep the strict proof. Selection is by the
-	 * managed-containers role, NEVER by `process.platform`. On win32 this mirrors
-	 * the ratified Predicate A (already lenient on ancestors); on darwin it is the
-	 * strict no-op alias (deferred).
+	 * managed-containers role, NEVER by `process.platform`. Supported adapters
+	 * implement the same role contract without host branching in this engine.
 	 */
 	proveNoEndangeringAcl(target: string): Promise<SecureResult<void>>;
 

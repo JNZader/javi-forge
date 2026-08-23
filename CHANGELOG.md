@@ -1,3 +1,16 @@
+## [1.38.0](https://github.com/JNZader/javi-forge/compare/v1.37.1...v1.38.0) (2026-08-23)
+
+### Features
+
+* **ci-local:** restrict hosts to linux and win32 ([0ad671b](https://github.com/JNZader/javi-forge/commit/0ad671bfdd8b8fd5fa6dbb617a320a4c18c1e0e9))
+* **hooks:** enforce supported host boundaries ([6d82747](https://github.com/JNZader/javi-forge/commit/6d827475675ffa2c6ba09034933dd584fff224f9))
+* **hooks:** remove macOS guard runtime support ([cc6c89e](https://github.com/JNZader/javi-forge/commit/cc6c89ef66cc8221f6c1eb8484a76c481dbf1fba))
+* **hooks:** remove macOS secure filesystem support ([94dcfda](https://github.com/JNZader/javi-forge/commit/94dcfda91c6d478f6ce983b152513214aa1ae1b2))
+
+### Bug Fixes
+
+* **hooks:** close supported host boundary gaps ([e51718c](https://github.com/JNZader/javi-forge/commit/e51718c153719eaf524c576065629c75b7f782b3))
+
 ## [1.37.1](https://github.com/JNZader/javi-forge/compare/v1.37.0...v1.37.1) (2026-08-23)
 
 ### Bug Fixes

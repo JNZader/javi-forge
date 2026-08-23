@@ -30,9 +30,6 @@ describe("remediationForRefusal", () => {
 
 	it.each([
 		["getfacl timeout", ACL_DETAIL.getfaclTimeout],
-		["macOS /bin/ls absent", ACL_DETAIL.macosLsAbsent],
-		["macOS ACL flag", ACL_DETAIL.macosAclFlag],
-		["macOS ACE listed", ACL_DETAIL.macosAceListed],
 	])("gives no package remediation for %s", (_name, detail) => {
 		expect(remediationForRefusal("unsupported-posix-acl", detail)).toBe(
 			undefined,

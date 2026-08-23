@@ -24,6 +24,7 @@ import {
 	type Manifest,
 	type NodeOnPathProbe,
 	repairClaudePreToolUse,
+	resolveManagedSettingsPaths,
 } from "./claude-hook-manager.js";
 import { canonicalizeSettingsEntry } from "./claude-hook-settings.js";
 import { ACL_PACKAGE_REMEDIATION } from "./secure-refusal-remediation.js";
@@ -94,6 +95,24 @@ const doctor = async (
 let dir: string;
 const assetPath = (): string => path.join(dir, ".claude", "hooks", ASSET_NAME);
 const settingsPath = (): string => path.join(dir, ".claude", "settings.json");
+
+describe("resolveManagedSettingsPaths", () => {
+	it("returns no managed-settings locations for unsupported hosts", () => {
+		expect(resolveManagedSettingsPaths("darwin")).toBeNull();
+		expect(resolveManagedSettingsPaths("freebsd")).toBeNull();
+	});
+
+	it("preserves managed-settings locations for Linux and Windows", () => {
+		expect(resolveManagedSettingsPaths("linux")).toEqual({
+			file: "/etc/claude-code/managed-settings.json",
+			dropInDir: "/etc/claude-code/managed-settings.d",
+		});
+		expect(resolveManagedSettingsPaths("win32")).toEqual({
+			file: "C:\\Program Files\\ClaudeCode\\managed-settings.json",
+			dropInDir: "C:\\Program Files\\ClaudeCode\\managed-settings.d",
+		});
+	});
+});
 
 beforeEach(() => {
 	dir = fs.mkdtempSync(path.join(os.tmpdir(), "javi-forge-claude-mgr-"));

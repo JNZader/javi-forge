@@ -11,23 +11,40 @@
 #   ./ci-local.sh detect       # Mostrar stack detectado
 # =============================================================================
 
-function ci_local_main() {
+
+CI_LOCAL_ENTRYPOINT_SOURCE="${BASH_SOURCE[0]}"
+if [[ "$CI_LOCAL_ENTRYPOINT_SOURCE" == /* ]]; then
+    CI_LOCAL_ENTRYPOINT_PATH="$CI_LOCAL_ENTRYPOINT_SOURCE"
+else
+    CI_LOCAL_ENTRYPOINT_PATH="$PWD/$CI_LOCAL_ENTRYPOINT_SOURCE"
+fi
+CI_LOCAL_ENTRYPOINT_DIR="${CI_LOCAL_ENTRYPOINT_PATH%/*}"
+
+function ci_local_normalize_platform() {
     local platform="${1:?platform required}"
+
+    case "$platform" in
+        MINGW*_NT-*|MSYS*|CYGWIN*) printf '%s\n' 'Windows' ;;
+        *) printf '%s\n' "$platform" ;;
+    esac
+}
+
+function ci_local_main() {
+    local platform
+    platform="$(ci_local_normalize_platform "${1:?platform required}")"
     shift
 
-    if [ "$platform" = "Darwin" ]; then
-        printf '%s\n' 'macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate. Existing installed guards are not removed; Darwin code removal is planned separately for 2.0.'
-        return 1
-    fi
-
-    ci_local_startup_body "$@"
+    case "$platform" in
+        Linux|Windows) ci_local_startup_body "$@" ;;
+        *) printf '%s\n' 'unsupported-platform: javi-forge supports Linux and Windows only.'; return 1 ;;
+    esac
 }
 
 function ci_local_startup_body() {
     set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+SCRIPT_DIR="$CI_LOCAL_ENTRYPOINT_DIR"
+PROJECT_DIR="${SCRIPT_DIR%/*}"
 
 # Require realpath: load-bearing for the lib symlink check below.
 if ! command -v realpath >/dev/null 2>&1; then

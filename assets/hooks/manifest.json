@@ -14,8 +14,8 @@
 		]
 	},
 	"pre-push": {
-		"version": 3,
-		"sha256": "c396387a15c3c448d524f68597a993f6b4341ae06143d2d5907ad914823d0ad0",
+		"version": 4,
+		"sha256": "ffe1b5dd0931617df3c9fea37947dac84dffd11c490c39590459e861b404148d",
 		"historical": [
 			{
 				"sha256": "7de58640aeef33085a49f31f1d9d0c8bacde0069d6d3265ae41aa8d3cd14d7a5",
@@ -28,6 +28,10 @@
 			{
 				"sha256": "c396387a15c3c448d524f68597a993f6b4341ae06143d2d5907ad914823d0ad0",
 				"firstCommit": "0779d746b23ad614a13181d60f1fe3aa034e91dd"
+			},
+			{
+				"sha256": "ffe1b5dd0931617df3c9fea37947dac84dffd11c490c39590459e861b404148d",
+				"firstCommit": "6b5799d9d9e8c528fad9dc1f7b641afbd3a60637"
 			}
 		]
 	},

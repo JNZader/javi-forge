@@ -4,13 +4,211 @@
 # Default: quick native CI gate (setup + lint + compile + gates — no tests, no coverage).
 # Requires javi-forge on PATH (npx fallback; offline npx fails -> hook fails closed).
 # To skip: git push --no-verify
-set -e
-if command -v javi-forge >/dev/null 2>&1; then
-  javi-forge hooks run pre-push
-else
-  npx javi-forge hooks run pre-push
-fi || {
+fail_pre_push() {
+  message=$1
+  status=${2:-1}
   echo ""
-  echo "pre-push FAILED - fix the issues above."
-  exit 1
+  echo "pre-push FAILED - $message"
+  exit "$status"
 }
+
+hash_required_file() {
+  target=$1
+  if [ -L "$target" ] || [ ! -f "$target" ]; then
+    return 1
+  fi
+  git hash-object --no-filters "$target"
+}
+
+hash_optional_file() {
+  target=$1
+  if [ -L "$target" ]; then
+    return 1
+  fi
+  if [ -f "$target" ]; then
+    git hash-object --no-filters "$target"
+    return $?
+  fi
+  if [ -e "$target" ]; then
+    return 1
+  fi
+  printf '%s\n' absent
+}
+
+# Git exports repository-local targeting variables to hooks. Preserve every
+# path needed for this repository before clearing the complete Git-owned set.
+if ! repository_root=$(git rev-parse --show-toplevel) || [ -z "$repository_root" ]; then
+  fail_pre_push "Could not resolve the repository root."
+fi
+if ! cd "$repository_root"; then
+  fail_pre_push "Could not return to the repository root."
+fi
+if ! git_dir=$(git rev-parse --absolute-git-dir) || [ -z "$git_dir" ]; then
+  fail_pre_push "Could not resolve the worktree Git directory."
+fi
+if ! common_dir=$(git rev-parse --path-format=absolute --git-common-dir) || [ -z "$common_dir" ]; then
+  fail_pre_push "Could not resolve the common Git directory."
+fi
+if ! index_path=$(git rev-parse --path-format=absolute --git-path index) || [ -z "$index_path" ]; then
+  fail_pre_push "Could not resolve the worktree index."
+fi
+if ! worktree_config_path=$(git rev-parse --path-format=absolute --git-path config.worktree) || [ -z "$worktree_config_path" ]; then
+  fail_pre_push "Could not resolve the worktree-local Git config."
+fi
+
+if ! git_local_env_vars=$(git rev-parse --local-env-vars); then
+  fail_pre_push "Could not discover Git-local environment variables."
+fi
+
+git_local_env_count=0
+invalid_git_local_env_var=
+saved_ifs=$IFS
+IFS='
+'
+for git_local_env_var in $git_local_env_vars; do
+  git_local_env_count=$((git_local_env_count + 1))
+  case "$git_local_env_var" in
+    GIT_*) ;;
+    *) invalid_git_local_env_var=$git_local_env_var ;;
+  esac
+  case "$git_local_env_var" in
+    *[!A-Za-z0-9_]*) invalid_git_local_env_var=$git_local_env_var ;;
+  esac
+  if [ -n "$invalid_git_local_env_var" ]; then
+    break
+  fi
+done
+IFS=$saved_ifs
+
+if [ "$git_local_env_count" -eq 0 ]; then
+  fail_pre_push "Git returned no Git-local environment variables."
+fi
+if [ -n "$invalid_git_local_env_var" ]; then
+  fail_pre_push "Invalid Git-local environment variable name: $invalid_git_local_env_var"
+fi
+
+# A bounded canary protects the metadata proven vulnerable in the incident.
+common_config_path="$common_dir/config"
+head_path="$git_dir/HEAD"
+packed_refs_path="$common_dir/packed-refs"
+
+if ! common_config_before=$(hash_required_file "$common_config_path"); then
+  fail_pre_push "Could not snapshot the common Git config."
+fi
+if ! head_before=$(hash_required_file "$head_path"); then
+  fail_pre_push "Could not snapshot HEAD."
+fi
+if ! index_before=$(hash_required_file "$index_path"); then
+  fail_pre_push "Could not snapshot the worktree index."
+fi
+if ! worktree_config_before=$(hash_optional_file "$worktree_config_path"); then
+  fail_pre_push "Could not snapshot the worktree-local Git config."
+fi
+if ! packed_refs_before=$(hash_optional_file "$packed_refs_path"); then
+  fail_pre_push "Could not snapshot packed refs."
+fi
+
+attached_ref=
+ref_path=
+ref_before=detached
+if attached_ref=$(git symbolic-ref -q HEAD); then
+  if ! ref_path=$(git rev-parse --path-format=absolute --git-path "$attached_ref") || [ -z "$ref_path" ]; then
+    fail_pre_push "Could not resolve the attached HEAD ref."
+  fi
+  if ! ref_before=$(hash_optional_file "$ref_path"); then
+    fail_pre_push "Could not snapshot the attached HEAD ref."
+  fi
+  if ! ref_oid_before=$(git rev-parse --verify "$attached_ref"); then
+    fail_pre_push "Could not resolve the attached HEAD ref value."
+  fi
+else
+  symbolic_ref_status=$?
+  if [ "$symbolic_ref_status" -ne 1 ]; then
+    fail_pre_push "Could not determine whether HEAD is attached."
+  fi
+  if ! ref_oid_before=$(git rev-parse --verify HEAD); then
+    fail_pre_push "Could not resolve detached HEAD."
+  fi
+fi
+
+# The scrub lives in a subshell: the hook retains its own targeting context for
+# the post-test canary, while the dispatcher and every descendant start clean.
+if (
+  scrub_ifs=$IFS
+  IFS='
+'
+  for git_local_env_var in $git_local_env_vars; do
+    if ! unset "$git_local_env_var"; then
+      echo "pre-push: could not unset $git_local_env_var"
+      exit 1
+    fi
+    if declare -p "$git_local_env_var" >/dev/null 2>&1; then
+      echo "pre-push: $git_local_env_var remained set after unset"
+      exit 1
+    fi
+  done
+  IFS=$scrub_ifs
+
+  if ! cd "$repository_root"; then
+    echo "pre-push: could not return to the repository root after scrubbing"
+    exit 1
+  fi
+
+  if command -v javi-forge >/dev/null 2>&1; then
+    javi-forge hooks run pre-push
+  else
+    npx javi-forge hooks run pre-push
+  fi
+); then
+  test_status=0
+else
+  test_status=$?
+fi
+
+if ! cd "$repository_root"; then
+  fail_pre_push "Could not return to the repository root after tests."
+fi
+
+if ! common_config_after=$(hash_required_file "$common_config_path"); then
+  fail_pre_push "Could not verify the common Git config after tests."
+fi
+if ! head_after=$(hash_required_file "$head_path"); then
+  fail_pre_push "Could not verify HEAD after tests."
+fi
+if ! index_after=$(hash_required_file "$index_path"); then
+  fail_pre_push "Could not verify the worktree index after tests."
+fi
+if ! worktree_config_after=$(hash_optional_file "$worktree_config_path"); then
+  fail_pre_push "Could not verify the worktree-local Git config after tests."
+fi
+if ! packed_refs_after=$(hash_optional_file "$packed_refs_path"); then
+  fail_pre_push "Could not verify packed refs after tests."
+fi
+
+ref_after=detached
+if [ -n "$attached_ref" ]; then
+  if ! ref_after=$(hash_optional_file "$ref_path"); then
+    fail_pre_push "Could not verify the attached HEAD ref after tests."
+  fi
+  if ! ref_oid_after=$(git rev-parse --verify "$attached_ref"); then
+    fail_pre_push "Could not resolve the attached HEAD ref value after tests."
+  fi
+else
+  if ! ref_oid_after=$(git rev-parse --verify HEAD); then
+    fail_pre_push "Could not resolve detached HEAD after tests."
+  fi
+fi
+
+if [ "$common_config_before" != "$common_config_after" ] ||
+  [ "$head_before" != "$head_after" ] ||
+  [ "$index_before" != "$index_after" ] ||
+  [ "$worktree_config_before" != "$worktree_config_after" ] ||
+  [ "$packed_refs_before" != "$packed_refs_after" ] ||
+  [ "$ref_before" != "$ref_after" ] ||
+  [ "$ref_oid_before" != "$ref_oid_after" ]; then
+  fail_pre_push "Git metadata changed during pre-push tests."
+fi
+
+if [ "$test_status" -ne 0 ]; then
+  fail_pre_push "fix the issues above." "$test_status"
+fi

@@ -37,6 +37,14 @@ interface HookRunResult {
 	stderr: string;
 }
 
+interface RepoMetadataSnapshot {
+	commonConfig: Buffer;
+	head: Buffer;
+	attachedRef: Buffer;
+	index: Buffer;
+	worktreeStatus: string;
+}
+
 let tmpDir: string;
 let stubDir: string;
 let argsLog: string;
@@ -53,15 +61,119 @@ async function writeStub(name: string, exitVar: string): Promise<void> {
 	);
 }
 
+function gitOutput(cwd: string, args: string[]): string {
+	return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+async function snapshotRepoMetadata(
+	cwd: string,
+): Promise<RepoMetadataSnapshot> {
+	const gitDir = gitOutput(cwd, ["rev-parse", "--absolute-git-dir"]);
+	const commonDir = gitOutput(cwd, [
+		"rev-parse",
+		"--path-format=absolute",
+		"--git-common-dir",
+	]);
+	const indexPath = gitOutput(cwd, [
+		"rev-parse",
+		"--path-format=absolute",
+		"--git-path",
+		"index",
+	]);
+	const attachedRef = gitOutput(cwd, ["symbolic-ref", "HEAD"]);
+
+	return {
+		commonConfig: await fs.readFile(path.join(commonDir, "config")),
+		head: await fs.readFile(path.join(gitDir, "HEAD")),
+		attachedRef: await fs.readFile(path.join(commonDir, attachedRef)),
+		index: await fs.readFile(indexPath),
+		worktreeStatus: execFileSync(
+			"git",
+			["status", "--porcelain=v2", "--untracked-files=all"],
+			{ cwd, encoding: "utf8" },
+		),
+	};
+}
+
+async function prepareSacrificialParent(): Promise<void> {
+	execFileSync("git", ["config", "user.name", "Sacrificial Parent"], {
+		cwd: tmpDir,
+	});
+	execFileSync("git", ["config", "user.email", "parent@example.invalid"], {
+		cwd: tmpDir,
+	});
+	await fs.writeFile(path.join(tmpDir, "parent.txt"), "parent\n");
+	execFileSync("git", ["add", "parent.txt"], { cwd: tmpDir });
+	execFileSync("git", ["commit", "-qm", "test: parent baseline"], {
+		cwd: tmpDir,
+	});
+	await fs.appendFile(
+		path.join(tmpDir, ".git", "info", "exclude"),
+		"\npayload-child/\n",
+	);
+}
+
+async function writeGitPayloadStub(exitCode: number): Promise<string> {
+	const childDir = path.join(tmpDir, "payload-child");
+	await fs.writeFile(
+		path.join(stubDir, "javi-forge"),
+		`#!/bin/bash
+set -e
+mkdir -p "$PAYLOAD_CHILD"
+cd "$PAYLOAD_CHILD"
+git init -q
+git config user.name "Sacrificial Child"
+git config user.email "child@example.invalid"
+printf 'child\n' > child.txt
+git add -f child.txt
+git commit --no-verify -qm "test: child payload"
+exit ${exitCode}
+`,
+		{ mode: 0o755 },
+	);
+	return childDir;
+}
+
+async function writeGitDiscoveryStub(
+	mode: "failure" | "malformed",
+): Promise<void> {
+	const discovery =
+		mode === "failure"
+			? "exit 42"
+			: "printf 'GIT_DIR\\nMALFORMED-NAME\\n'\nexit 0";
+	await fs.writeFile(
+		path.join(stubDir, "git"),
+		`#!/bin/bash
+if [ "$1" = "rev-parse" ] && [ "$2" = "--local-env-vars" ]; then
+${discovery}
+fi
+PATH="$REAL_GIT_PATH" exec git "$@"
+`,
+		{ mode: 0o755 },
+	);
+}
+
+async function writePayloadMarkerStub(markerPath: string): Promise<void> {
+	await fs.writeFile(
+		path.join(stubDir, "javi-forge"),
+		`#!/bin/bash
+printf 'ran\n' > "$PAYLOAD_RAN"
+`,
+		{ mode: 0o755 },
+	);
+	await fs.remove(markerPath);
+}
+
 async function runHook(
 	name: string,
 	args: string[] = [],
 	env: Record<string, string> = {},
+	runCwd: string = tmpDir,
 ): Promise<HookRunResult> {
 	const hookPath = path.join(tmpDir, ".git", "hooks", name);
 	try {
 		const { stdout, stderr } = await execFileAsync(hookPath, args, {
-			cwd: tmpDir,
+			cwd: runCwd,
 			env: {
 				...process.env,
 				PATH: `${stubDir}${path.delimiter}${process.env.PATH ?? ""}`,
@@ -98,6 +210,17 @@ describe("installed hooks — executed", () => {
 	beforeEach(async () => {
 		tmpDir = await createTempDir("javi-forge-hooks-exec-");
 		execFileSync("git", ["init"], { cwd: tmpDir });
+		execFileSync("git", ["config", "user.name", "Hook Fixture"], {
+			cwd: tmpDir,
+		});
+		execFileSync("git", ["config", "user.email", "fixture@example.invalid"], {
+			cwd: tmpDir,
+		});
+		await fs.writeFile(path.join(tmpDir, "fixture.txt"), "fixture\n");
+		execFileSync("git", ["add", "fixture.txt"], { cwd: tmpDir });
+		execFileSync("git", ["commit", "--no-verify", "-qm", "test: fixture"], {
+			cwd: tmpDir,
+		});
 		stubDir = path.join(tmpDir, "stub-bin");
 		await fs.ensureDir(stubDir);
 		argsLog = path.join(tmpDir, "stub-args.log");
@@ -201,9 +324,141 @@ describe("installed hooks — executed", () => {
 	it("pre-push aborts when the dispatcher exits non-zero", async () => {
 		const result = await runHook("pre-push", [], { STUB_EXIT_CLI: "5" });
 
-		expect(result.exitCode).toBe(1);
+		expect(result.exitCode).toBe(5);
 		expect(result.stdout).toContain("pre-push FAILED");
 		// The dispatcher really ran before the propagated abort.
 		expect(await readArgsLog()).toEqual([FROZEN_PRE_PUSH_ARGS]);
+	});
+
+	it("pre-push scrubs hook-local Git targeting before a real-Git test payload", async () => {
+		await prepareSacrificialParent();
+		const childDir = await writeGitPayloadStub(0);
+		const before = await snapshotRepoMetadata(tmpDir);
+
+		const result = await runHook("pre-push", [], {
+			GIT_DIR: path.join(tmpDir, ".git"),
+			GIT_COMMON_DIR: path.join(tmpDir, ".git"),
+			GIT_INDEX_FILE: path.join(tmpDir, ".git", "index"),
+			GIT_WORK_TREE: tmpDir,
+			PAYLOAD_CHILD: childDir,
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(await snapshotRepoMetadata(tmpDir)).toEqual(before);
+		expect(await fs.pathExists(path.join(childDir, ".git"))).toBe(true);
+		expect(gitOutput(childDir, ["log", "-1", "--format=%s"])).toBe(
+			"test: child payload",
+		);
+	});
+
+	it("pre-push preserves the real-Git test payload exit code", async () => {
+		await prepareSacrificialParent();
+		const childDir = await writeGitPayloadStub(7);
+
+		const result = await runHook("pre-push", [], {
+			GIT_DIR: path.join(tmpDir, ".git"),
+			GIT_COMMON_DIR: path.join(tmpDir, ".git"),
+			GIT_INDEX_FILE: path.join(tmpDir, ".git", "index"),
+			GIT_WORK_TREE: tmpDir,
+			PAYLOAD_CHILD: childDir,
+		});
+
+		expect(result.exitCode).toBe(7);
+		expect(result.stdout).toContain("pre-push FAILED");
+		expect(await fs.pathExists(path.join(childDir, ".git"))).toBe(true);
+	});
+
+	it.each([
+		"failure",
+		"malformed",
+	] as const)("pre-push fails closed when Git-local variable discovery is %s", async (mode) => {
+		const payloadMarker = path.join(tmpDir, `payload-ran-${mode}`);
+		await writeGitDiscoveryStub(mode);
+		await writePayloadMarkerStub(payloadMarker);
+
+		const result = await runHook("pre-push", [], {
+			PAYLOAD_RAN: payloadMarker,
+			REAL_GIT_PATH: process.env.PATH ?? "",
+		});
+
+		expect(result.exitCode).toBe(1);
+		expect(await fs.pathExists(payloadMarker)).toBe(false);
+		expect(result.stdout).toContain(
+			mode === "failure"
+				? "Could not discover Git-local environment variables"
+				: "Invalid Git-local environment variable name",
+		);
+	});
+
+	it("pre-push canary fails closed when the test payload changes common config", async () => {
+		await prepareSacrificialParent();
+		const configPath = path.join(tmpDir, ".git", "config");
+		await fs.writeFile(
+			path.join(stubDir, "javi-forge"),
+			`#!/bin/bash
+git config --file "$CANARY_CONFIG" canary.mutated true
+`,
+			{ mode: 0o755 },
+		);
+
+		const result = await runHook("pre-push", [], {
+			CANARY_CONFIG: configPath,
+		});
+
+		expect(result.exitCode).toBe(1);
+		expect(result.stdout).toContain(
+			"Git metadata changed during pre-push tests",
+		);
+	});
+
+	it("pre-push canary fails closed when a linked-worktree payload changes config.worktree", async () => {
+		const linkedRoot = await createTempDir("javi-forge-hooks-linked-");
+		const linkedDir = path.join(linkedRoot, "worktree");
+		execFileSync("git", ["config", "extensions.worktreeConfig", "true"], {
+			cwd: tmpDir,
+		});
+		execFileSync(
+			"git",
+			["worktree", "add", "-q", "-b", "linked-fixture", linkedDir],
+			{ cwd: tmpDir },
+		);
+		execFileSync("git", ["config", "--worktree", "canary.baseline", "true"], {
+			cwd: linkedDir,
+		});
+		const worktreeConfigPath = gitOutput(linkedDir, [
+			"rev-parse",
+			"--path-format=absolute",
+			"--git-path",
+			"config.worktree",
+		]);
+		const commonConfigPath = path.join(tmpDir, ".git", "config");
+		const commonConfigBefore = await fs.readFile(commonConfigPath);
+		const worktreeConfigBefore = await fs.readFile(worktreeConfigPath);
+
+		await fs.writeFile(
+			path.join(stubDir, "javi-forge"),
+			`#!/bin/bash
+git config --worktree canary.mutated true
+`,
+			{ mode: 0o755 },
+		);
+
+		try {
+			const result = await runHook("pre-push", [], {}, linkedDir);
+
+			expect(result.exitCode).toBe(1);
+			expect(result.stdout).toContain(
+				"Git metadata changed during pre-push tests",
+			);
+			expect(await fs.readFile(commonConfigPath)).toEqual(commonConfigBefore);
+			expect(await fs.readFile(worktreeConfigPath)).not.toEqual(
+				worktreeConfigBefore,
+			);
+		} finally {
+			execFileSync("git", ["worktree", "remove", "--force", linkedDir], {
+				cwd: tmpDir,
+			});
+			await cleanupTempDir(linkedRoot);
+		}
 	});
 });

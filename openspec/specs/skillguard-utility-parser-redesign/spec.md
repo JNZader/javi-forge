@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This specification amends the bounded Bash policy in `skillguard-pretooluse-hook` so `env`, `chmod`, and `base64` option semantics cannot hide an inherited denied operation. It defines host-independent observable decisions and acceptance evidence without requiring full utility emulation or general command validation.
+This specification amends the bounded Bash policy in `skillguard-pretooluse-hook` so `env`, `chmod`, and `base64` option semantics cannot hide an inherited denied operation. It defines host-independent observable decisions and acceptance evidence without requiring full utility emulation or general command validation. Linux and Windows remain the only supported hosts; committed Apple utility profiles are syntax data evaluated on supported hosts and do not grant host eligibility.
 
 ## Terms and Decision Classes
 
@@ -77,7 +77,7 @@ If any supported profile accepts an invocation as dangerous, the overall result 
 
 #### Scenario: Environment cannot select a weaker decision
 
-- GIVEN the same command string and committed profile set are evaluated on Linux, macOS, and Windows
+- GIVEN the same command string and committed profile set are evaluated under different host environments
 - WHEN `LANG`, `PATH`, the host utility version, or host utility availability differs
 - THEN the classification, exit code, and stable diagnostic category are identical
 
@@ -430,7 +430,7 @@ A profile change MUST update the profile identifier or documented version bindin
 
 The redesign MUST preserve every prior safe corpus case except a case explicitly documented as protected-sink ambiguity under this specification. It MUST preserve every inherited parent denial, including all denial families already fixed before `69823570`. It MUST close the exact residual families in `JD-S1-FR3-001` and `JD-S1-FR3-002` without duplicating their IDs or declaring them closed.
 
-For a fixed command string and committed profile set, exact decisions MUST be identical on Linux, macOS, and Windows and MUST be independent of `LANG`, `PATH`, host utility presence, and host utility version.
+For a fixed command string and committed profile set, exact decisions MUST be host-independent and MUST be independent of `LANG`, `PATH`, host utility presence, and host utility version.
 
 #### Scenario: Prior safe corpus remains safe
 

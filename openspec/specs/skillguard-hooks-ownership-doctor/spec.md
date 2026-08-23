@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This specification amends `skillguard-pretooluse-hook` with Slice 2 ("Ownership and doctor", read-only). It defines exact, fixture-backed recognition of the managed Claude `PreToolUse` guard so a later transactional slice can trust ownership state instead of inventing it at mutation time. It delivers, as host-independent library behavior, the nine-state ownership classifier for both managed components, exact v0 legacy recognition, deterministic canonical settings-entry identity, and a component-level read-only doctor report. It is defense in depth for the installer, not a mutation, install, repair, CLI route, or effective-execution inventory: those remain in later slices.
+This specification amends `skillguard-pretooluse-hook` with Slice 2 ("Ownership and doctor", read-only). It defines exact, fixture-backed recognition of the managed Claude `PreToolUse` guard so a later transactional slice can trust ownership state instead of inventing it at mutation time. It delivers, as host-independent library behavior, the nine-state ownership classifier for both managed components, exact v0 legacy recognition, deterministic canonical settings-entry identity, and a component-level read-only doctor report. Linux and Windows are the only supported hosts; public doctor and lifecycle boundaries refuse every other host generically before invoking this component inspection. It is defense in depth for the installer, not a mutation, install, repair, CLI route, or effective-execution inventory: those remain in later slices.
 
 ## Terms and Decision Classes
 
@@ -191,9 +191,9 @@ The canonical serialization used to compute the settings-entry `canonicalSha256`
 - WHEN each is canonically serialized with the fixed key order
 - THEN both produce identical canonical bytes and identical `canonicalSha256`
 
-#### Scenario: Canonical serialization is host-independent
+#### Scenario: Canonical serialization is environment-independent
 
-- GIVEN the same managed settings group is canonicalized on Linux, macOS, and Windows under differing `LANG` and `PATH`
+- GIVEN the same managed settings group is canonicalized under differing supported-host `LANG` and `PATH` environments
 - WHEN the canonical hash is computed on each host
 - THEN the canonical bytes and `canonicalSha256` are identical across hosts
 

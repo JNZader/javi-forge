@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	ACL_DETAIL,
 	createLinuxAclAdapter,
-	createMacosAclAdapter,
 	createPosixSecureFs,
 	type PosixAclAdapter,
 	probeAclCapability,
@@ -278,74 +277,6 @@ describe("createLinuxAclAdapter.proveNoEndangeringAcl (lenient ancestor predicat
 	});
 });
 
-describe("createMacosAclAdapter (/bin/ls -lde, mocked spawn — never skipped)", () => {
-	it("refuses when /bin/ls is absent", async () => {
-		const acl = createMacosAclAdapter(
-			spawnReturning({ spawnError: true, code: null, stdout: "" }),
-		);
-		expect((await acl.proveClean("/x")).refusal).toBe("unsupported-posix-acl");
-	});
-
-	it("refuses on non-zero exit and on timeout", async () => {
-		expect(
-			(
-				await createMacosAclAdapter(
-					spawnReturning({ code: 2, stdout: "" }),
-				).proveClean("/x")
-			).refusal,
-		).toBe("unsupported-posix-acl");
-		expect(
-			(
-				await createMacosAclAdapter(
-					spawnReturning({ timedOut: true, code: null, stdout: "" }),
-				).proveClean("/x")
-			).refusal,
-		).toBe("unsupported-posix-acl");
-	});
-
-	it("refuses on a trailing + flag on the mode line", async () => {
-		const acl = createMacosAclAdapter(
-			spawnReturning(clean("-rw-r--r--+ 1 user staff 10 Jan 1 file")),
-		);
-		expect((await acl.proveClean("/x")).refusal).toBe("unsupported-posix-acl");
-	});
-
-	it("refuses on a numbered ACE line", async () => {
-		const acl = createMacosAclAdapter(
-			spawnReturning(
-				clean(
-					"-rw-r--r-- 1 user staff 10 Jan 1 file\n 0: user:root allow read",
-				),
-			),
-		);
-		expect((await acl.proveClean("/x")).refusal).toBe("unsupported-posix-acl");
-	});
-
-	it("accepts a plain mode line with no + and no ACEs", async () => {
-		const acl = createMacosAclAdapter(
-			spawnReturning(clean("-rw-r--r-- 1 user staff 10 Jan 1 file")),
-		);
-		expect((await acl.proveClean("/x")).ok).toBe(true);
-	});
-
-	it("proveNoEndangeringAcl is the strict no-op on darwin (deferred; same as proveClean)", async () => {
-		// darwin ancestors stay strict = status-quo over-refusal, not the reported
-		// Linux bug. proveNoEndangeringAcl must mirror proveClean exactly.
-		const withAce = createMacosAclAdapter(
-			spawnReturning(
-				clean(
-					"-rw-r--r-- 1 user staff 10 Jan 1 file\n 0: user:root allow read",
-				),
-			),
-		);
-		expect((await withAce.proveNoEndangeringAcl("/x")).ok).toBe(false);
-		const clean0 = createMacosAclAdapter(
-			spawnReturning(clean("-rw-r--r-- 1 user staff 10 Jan 1 file")),
-		);
-		expect((await clean0.proveNoEndangeringAcl("/x")).ok).toBe(true);
-	});
-});
-
 describe("probeAclCapability (read-only capability probe, mocked spawn)", () => {
 	it("exports the stable detail tokens the adapters emit", () => {
 		expect(ACL_DETAIL.getfaclAbsent).toBe("getfacl absent");
@@ -378,41 +309,18 @@ describe("probeAclCapability (read-only capability probe, mocked spawn)", () => 
 		expect(capability).toMatchObject({ tool: "getfacl" });
 	});
 
-	it("never names an argv the platform does not run in the timeout detail", async () => {
-		// darwin runs `/bin/ls -ld /`, never `--version`: the detail must not lie.
-		const capability = await probeAclCapability(
-			spawnReturning({ timedOut: true, code: null, stdout: "" }),
-			"darwin",
-		);
-		expect(capability.status).toBe("unknown");
-		const detail = (capability as { detail: string }).detail;
-		expect(detail).not.toContain("--version");
-		expect(detail).toContain("/bin/ls");
-	});
-
-	it("reports unknown on a non-zero exit", async () => {
-		const capability = await probeAclCapability(
-			spawnReturning({ code: 3, stdout: "" }),
-			"linux",
-		);
-		expect(capability.status).toBe("unknown");
-		expect((capability as { detail: string }).detail).toContain("3");
-	});
-
-	it("reports unknown when the version output is unparseable", async () => {
-		const capability = await probeAclCapability(
-			spawnReturning(clean("something else entirely\n")),
-			"linux",
-		);
-		expect(capability.status).toBe("unknown");
-	});
-
-	it("probes /bin/ls on darwin", async () => {
-		const capability = await probeAclCapability(
-			spawnReturning(clean("drwx------ 2 user staff 64 Jan 1 /\n")),
-			"darwin",
-		);
-		expect(capability).toEqual({ status: "available", tool: "/bin/ls" });
+	it("does not probe an unsupported host", async () => {
+		let spawned = false;
+		const capability = await probeAclCapability(async () => {
+			spawned = true;
+			return clean("getfacl 2.3.1\n");
+		}, "darwin");
+		expect(capability).toEqual({
+			status: "unknown",
+			tool: "darwin",
+			detail: "no POSIX ACL adapter for platform darwin",
+		});
+		expect(spawned).toBe(false);
 	});
 
 	it("is not-applicable on win32 and never spawns", async () => {
@@ -451,9 +359,9 @@ describe("selectSecureFs platform selection", () => {
 		expect(selectSecureFs("sunos")).toBeNull();
 	});
 
-	it("returns an adapter on linux, darwin and win32 (Slice 3b wiring)", () => {
+	it("returns adapters only on supported hosts", () => {
 		expect(selectSecureFs("linux")).not.toBeNull();
-		expect(selectSecureFs("darwin")).not.toBeNull();
+		expect(selectSecureFs("darwin")).toBeNull();
 		// Phase 4: win32 now returns the windows adapter over a lazily-spawned
 		// digest-bound .ps1 session (was null pre-3b). Constructing it spawns
 		// nothing — host-independent on the Linux dev box.

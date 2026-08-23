@@ -123,6 +123,37 @@ describe("runDoctor", () => {
 		expect(allOk).toBe(true);
 	});
 
+	it("uses where.exe and the first resolved path on win32", async () => {
+		mockedExecFile.mockImplementation((...callArgs: unknown[]) => {
+			const cmd = String(callArgs[0]);
+			if (cmd === "where.exe") {
+				return respond(
+					callArgs,
+					null,
+					"C:\\Program Files\\Git\\cmd\\git.exe\r\nC:\\Windows\\git.exe\r\n",
+				);
+			}
+			if (cmd === "git") return respond(callArgs, new Error("no version"), "");
+			return respond(callArgs, null, "v1.0.0");
+		});
+
+		const result = await runDoctor(tmpDir, { platform: "win32" });
+		const toolSection = result.sections.find(
+			(s) => s.title === "System Tools",
+		)!;
+
+		expect(toolSection.checks[0]).toMatchObject({
+			label: "Git",
+			status: "ok",
+			detail: "found at C:\\Program Files\\Git\\cmd\\git.exe",
+		});
+		expect(
+			mockedExecFile.mock.calls
+				.filter(([cmd]) => cmd === "where.exe")
+				.map(([, args]) => args),
+		).toEqual([["git"], ["docker"], ["semgrep"], ["node"], ["pnpm"]]);
+	});
+
 	it("reports fail for missing required tool (git)", async () => {
 		execFileMissing("git");
 
@@ -423,5 +454,75 @@ describe("runDoctor — Security advisories", () => {
 		const bp = sec.checks.find((c) => c.label === "Branch protection")!;
 		expect(bp.status).toBe("skip");
 		expect(bp.detail).toContain("forge UI");
+	});
+});
+
+describe("runDoctor unsupported-platform dependency boundary", () => {
+	it.each([
+		"darwin",
+		"darwin-arm64",
+		"freebsd",
+		"unknown",
+	])("returns a minimal refusal before cwd or semantic effects on %s", async (platform) => {
+		const originalCwd = process.cwd();
+		const before = new Map<string, Buffer>();
+		const snapshot = async (root: string) => {
+			for (const relative of [
+				".context/INDEX.md",
+				".context/nested/data.txt",
+				".javi-forge/manifest.json",
+			]) {
+				before.set(relative, await fs.readFile(path.join(root, relative)));
+			}
+		};
+		await fs.ensureDir(path.join(tmpDir, ".context", "nested"));
+		await fs.writeFile(
+			path.join(tmpDir, ".context", "INDEX.md"),
+			"raw-index\\n",
+		);
+		await fs.writeFile(
+			path.join(tmpDir, ".context", "nested", "data.txt"),
+			Buffer.from([0, 255, 1]),
+		);
+		await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
+		await fs.writeFile(
+			path.join(tmpDir, ".javi-forge", "manifest.json"),
+			"{ updatedAt: before }\n",
+		);
+		await snapshot(tmpDir);
+		const fail = vi.fn(() => {
+			throw new Error("unsupported doctor invoked an effect");
+		});
+		process.chdir(tmpDir);
+		try {
+			const result = await runDoctor(undefined, {
+				platform,
+				cwd: fail,
+				filesystem: fail,
+				exec: fail,
+				stackDetector: fail,
+				pluginLister: fail,
+				contextRefresher: fail,
+			} as never);
+			expect(result).toEqual({
+				state: "unsupported-platform",
+				guidance: "javi-forge supports Linux and Windows only.",
+				sections: [],
+			});
+			expect(fail).not.toHaveBeenCalled();
+			for (const [relative, bytes] of before)
+				expect(await fs.readFile(path.join(tmpDir, relative))).toEqual(bytes);
+		} finally {
+			process.chdir(originalCwd);
+		}
+	});
+
+	it.each([
+		"linux",
+		"win32",
+	])("reads cwd only after supported classification on %s", async (platform) => {
+		const cwd = vi.fn(() => tmpDir);
+		await runDoctor(undefined, { platform, cwd } as never);
+		expect(cwd).toHaveBeenCalledOnce();
 	});
 });

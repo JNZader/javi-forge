@@ -9,6 +9,7 @@ import {
 import { detectStack } from "../lib/common.js";
 import { refreshContextDir } from "../lib/context.js";
 import { execFileAsync } from "../lib/exec.js";
+import { resolvePlatformSupport } from "../lib/platform-support.js";
 import { listInstalledPlugins } from "../lib/plugin.js";
 import type {
 	DoctorCheck,
@@ -19,38 +20,70 @@ import type {
 
 export type CheckStatus = "ok" | "fail" | "skip";
 
-/** Resolve a binary name to its full path, returns null if not found */
-async function which(bin: string): Promise<string | null> {
+type DoctorFilesystem = Pick<typeof fs, "pathExists" | "readJson" | "readdir">;
+
+export interface DoctorDeps {
+	platform?: string;
+	cwd?: () => string;
+	filesystem?: DoctorFilesystem;
+	exec?: typeof execFileAsync;
+	stackDetector?: typeof detectStack;
+	pluginLister?: typeof listInstalledPlugins;
+	contextRefresher?: typeof refreshContextDir;
+}
+
+/** Resolve a binary name to its first full path, returns null if not found. */
+async function which(
+	bin: string,
+	exec: typeof execFileAsync,
+	platform: string,
+): Promise<string | null> {
 	try {
-		const { stdout } = await execFileAsync("which", [bin]);
-		return stdout.trim() || null;
+		const command = platform === "win32" ? "where.exe" : "which";
+		const { stdout } = await exec(command, [bin]);
+		return (
+			stdout
+				.split(/\r?\n/)
+				.map((entry) => entry.trim())
+				.find(Boolean) ?? null
+		);
 	} catch {
 		return null;
 	}
 }
 
 /** Read the forge manifest from a project directory */
-async function readManifest(projectDir: string): Promise<ForgeManifest | null> {
+async function readManifest(
+	projectDir: string,
+	filesystem: DoctorFilesystem,
+): Promise<ForgeManifest | null> {
 	const manifestPath = path.join(projectDir, ".javi-forge", "manifest.json");
-	if (!(await fs.pathExists(manifestPath))) return null;
+	if (!(await filesystem.pathExists(manifestPath))) return null;
 	try {
-		return (await fs.readJson(manifestPath)) as ForgeManifest;
+		return (await filesystem.readJson(manifestPath)) as ForgeManifest;
 	} catch {
 		return null;
 	}
 }
 
 /** Count entries in a directory */
-async function countDir(dir: string): Promise<number> {
-	if (!(await fs.pathExists(dir))) return 0;
-	const entries = await fs.readdir(dir);
+async function countDir(
+	dir: string,
+	filesystem: DoctorFilesystem,
+): Promise<number> {
+	if (!(await filesystem.pathExists(dir))) return 0;
+	const entries = await filesystem.readdir(dir);
 	return entries.filter((e) => !e.startsWith(".")).length;
 }
 
 /** Read a single git config value, "" when unset or on any error. */
-async function gitConfigValue(cwd: string, key: string): Promise<string> {
+async function gitConfigValue(
+	cwd: string,
+	key: string,
+	exec: typeof execFileAsync,
+): Promise<string> {
 	try {
-		const { stdout } = await execFileAsync("git", ["config", "--get", key], {
+		const { stdout } = await exec("git", ["config", "--get", key], {
 			cwd,
 		});
 		return stdout.trim();
@@ -90,9 +123,12 @@ export function parseRemote(url: string): RemoteInfo | null {
  * a recommendation, never a gate (a hook enforcing it was trivially bypassed
  * with `--no-verify`).
  */
-async function commitSigningCheck(cwd: string): Promise<DoctorCheck> {
-	const gpgSign = await gitConfigValue(cwd, "commit.gpgsign");
-	const signingKey = await gitConfigValue(cwd, "user.signingkey");
+async function commitSigningCheck(
+	cwd: string,
+	exec: typeof execFileAsync,
+): Promise<DoctorCheck> {
+	const gpgSign = await gitConfigValue(cwd, "commit.gpgsign", exec);
+	const signingKey = await gitConfigValue(cwd, "user.signingkey", exec);
 	if (gpgSign === "true" && signingKey) {
 		return {
 			label: "Commit signing",
@@ -115,8 +151,14 @@ async function commitSigningCheck(cwd: string): Promise<DoctorCheck> {
  * probe or protection is a non-alarming `skip` (advisory, not a failure).
  * GitLab or no `gh` → `skip` with a note to verify in the forge UI.
  */
-async function branchProtectionCheck(cwd: string): Promise<DoctorCheck> {
-	const remote = parseRemote(await gitConfigValue(cwd, "remote.origin.url"));
+async function branchProtectionCheck(
+	cwd: string,
+	exec: typeof execFileAsync,
+	platform: string,
+): Promise<DoctorCheck> {
+	const remote = parseRemote(
+		await gitConfigValue(cwd, "remote.origin.url", exec),
+	);
 	const label = "Branch protection";
 
 	if (!remote || remote.host === "other") {
@@ -127,7 +169,7 @@ async function branchProtectionCheck(cwd: string): Promise<DoctorCheck> {
 				"no GitHub/GitLab origin — verify branch protection in the forge UI",
 		};
 	}
-	if (remote.host === "gitlab" || !(await which("gh"))) {
+	if (remote.host === "gitlab" || !(await which("gh", exec, platform))) {
 		return {
 			label,
 			status: "skip",
@@ -138,7 +180,7 @@ async function branchProtectionCheck(cwd: string): Promise<DoctorCheck> {
 	// gh + GitHub: resolve the default branch, then probe protection.
 	let branch = "main";
 	try {
-		const { stdout } = await execFileAsync(
+		const { stdout } = await exec(
 			"git",
 			["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
 			{ cwd },
@@ -149,7 +191,7 @@ async function branchProtectionCheck(cwd: string): Promise<DoctorCheck> {
 	}
 
 	try {
-		await execFileAsync("gh", [
+		await exec("gh", [
 			"api",
 			`repos/${remote.owner}/${remote.repo}/branches/${branch}/protection`,
 		]);
@@ -170,8 +212,26 @@ async function branchProtectionCheck(cwd: string): Promise<DoctorCheck> {
 /**
  * Run comprehensive health checks for the project and framework.
  */
-export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
-	const cwd = projectDir ?? process.cwd();
+export async function runDoctor(
+	projectDir?: string,
+	deps: DoctorDeps = {},
+): Promise<DoctorResult> {
+	const platform = deps.platform ?? process.platform;
+	const platformSupport = resolvePlatformSupport(platform);
+	if (platformSupport) {
+		return {
+			state: "unsupported-platform",
+			guidance: platformSupport.guidance,
+			sections: [],
+		};
+	}
+
+	const cwd = projectDir ?? (deps.cwd ?? process.cwd)();
+	const filesystem = deps.filesystem ?? fs;
+	const exec = deps.exec ?? execFileAsync;
+	const stackDetector = deps.stackDetector ?? detectStack;
+	const pluginLister = deps.pluginLister ?? listInstalledPlugins;
+	const contextRefresher = deps.contextRefresher ?? refreshContextDir;
 	const sections: DoctorSection[] = [];
 
 	// ── 1. System Tools ────────────────────────────────────────────────────────
@@ -185,12 +245,12 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 	];
 
 	for (const tool of tools) {
-		const bin = await which(tool.name);
+		const bin = await which(tool.name, exec, platform);
 		if (bin) {
 			// Try to get version
 			let version = "";
 			try {
-				const { stdout } = await execFileAsync(tool.name, ["--version"]);
+				const { stdout } = await exec(tool.name, ["--version"]);
 				version = stdout.trim().split("\n")[0] ?? "";
 			} catch {
 				/* ignore */
@@ -215,8 +275,8 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 	// L4/L6 (commit signing) and L5 (branch protection) are advisories, NOT hooks
 	// (hook-consolidation D9): doctor reports, nothing blocks.
 	const securityChecks: DoctorCheck[] = [
-		await commitSigningCheck(cwd),
-		await branchProtectionCheck(cwd),
+		await commitSigningCheck(cwd, exec),
+		await branchProtectionCheck(cwd, exec, platform),
 	];
 	sections.push({ title: "Security", checks: securityChecks });
 
@@ -230,8 +290,8 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 	];
 
 	for (const dir of expectedDirs) {
-		if (await fs.pathExists(dir.path)) {
-			const count = await countDir(dir.path);
+		if (await filesystem.pathExists(dir.path)) {
+			const count = await countDir(dir.path, filesystem);
 			structureChecks.push({
 				label: dir.label,
 				status: "ok",
@@ -249,7 +309,7 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 
 	// ── 3. Stack Detection ─────────────────────────────────────────────────────
 	const stackChecks: DoctorCheck[] = [];
-	const detection = await detectStack(cwd);
+	const detection = await stackDetector(cwd);
 	if (detection) {
 		stackChecks.push({
 			label: "Detected stack",
@@ -267,7 +327,7 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 
 	// ── 4. Project Manifest ────────────────────────────────────────────────────
 	const manifestChecks: DoctorCheck[] = [];
-	const manifest = await readManifest(cwd);
+	const manifest = await readManifest(cwd, filesystem);
 	if (manifest) {
 		manifestChecks.push({
 			label: "Forge manifest",
@@ -301,7 +361,7 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 	const moduleNames = ["engram", "obsidian-brain", "memory-simple", "ghagga"];
 	for (const mod of moduleNames) {
 		const modPath = path.join(cwd, ".javi-forge", "modules", mod);
-		if (await fs.pathExists(modPath)) {
+		if (await filesystem.pathExists(modPath)) {
 			moduleChecks.push({ label: mod, status: "ok", detail: "installed" });
 		} else {
 			moduleChecks.push({
@@ -315,9 +375,9 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 
 	// ── 6. Plugins ─────────────────────────────────────────────────────────────
 	const pluginChecks: DoctorCheck[] = [];
-	const pluginsDirExists = await fs.pathExists(PLUGINS_DIR);
+	const pluginsDirExists = await filesystem.pathExists(PLUGINS_DIR);
 	if (pluginsDirExists) {
-		const plugins = await listInstalledPlugins();
+		const plugins = await pluginLister();
 		if (plugins.length > 0) {
 			for (const plugin of plugins) {
 				pluginChecks.push({
@@ -345,7 +405,7 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 	// ── 7. Context Directory Refresh ───────────────────────────────────────────
 	const contextChecks: DoctorCheck[] = [];
 	try {
-		const result = await refreshContextDir(cwd);
+		const result = await contextRefresher(cwd);
 		if (result) {
 			contextChecks.push({
 				label: ".context/ refresh",
@@ -377,5 +437,5 @@ export async function runDoctor(projectDir?: string): Promise<DoctorResult> {
 	}
 	sections.push({ title: "Context Directory", checks: contextChecks });
 
-	return { sections };
+	return { state: "supported", sections };
 }

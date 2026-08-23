@@ -1,28 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
-	LIFECYCLE_SUPPORT,
-	PLATFORM_REFUSAL,
-	PLATFORM_SUPPORT_STATE,
-	resolvePlatformSupport,
+	classifyHostPlatform,
+	HOST_SUPPORT_GUIDANCE,
+	HOST_SUPPORT_STATE,
 } from "./platform-support.js";
 
-describe("resolvePlatformSupport", () => {
-	it("returns the stable deprecated lifecycle policy for exact darwin", () => {
-		expect(resolvePlatformSupport("darwin")).toEqual({
-			platform: "darwin",
-			state: PLATFORM_SUPPORT_STATE.MACOS_DEPRECATED,
-			lifecycle: LIFECYCLE_SUPPORT.UNSUPPORTED,
-			refusalCode: PLATFORM_REFUSAL.MACOS_LIFECYCLE_UNSUPPORTED,
-			guidance: expect.stringContaining("pin a supported release or migrate"),
+describe("classifyHostPlatform", () => {
+	it.each(["linux", "win32"] as const)("supports exact %s", (platform) => {
+		expect(classifyHostPlatform(platform)).toEqual({
+			state: HOST_SUPPORT_STATE.SUPPORTED,
+			platform,
 		});
 	});
 
 	it.each([
-		"linux",
-		"win32",
+		"darwin",
 		"darwin-arm64",
+		"freebsd",
 		"unknown",
-	])("does not alias %s to Darwin", (platform) => {
-		expect(resolvePlatformSupport(platform)).toBeUndefined();
+	])("refuses unsupported %s with the same stable unsupported-platform outcome", (platform) => {
+		expect(classifyHostPlatform(platform)).toEqual({
+			state: HOST_SUPPORT_STATE.UNSUPPORTED,
+			refusalCode: "unsupported-platform",
+			guidance: HOST_SUPPORT_GUIDANCE,
+		});
 	});
 });

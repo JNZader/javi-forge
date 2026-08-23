@@ -91,7 +91,6 @@ export interface ClaudeHookAssetClassification {
 
 export interface ClaudeHookDoctorReport {
 	healthy: boolean;
-	platformSupport?: PlatformSupport;
 	settings: {
 		state: ClaudeHookComponentState;
 		version?: number;
@@ -127,6 +126,16 @@ export interface ClaudeHookDoctorReport {
 	 */
 	nodeOnPath: NodeOnPathProbe;
 }
+
+export interface ClaudeHookDoctorRefusal {
+	state: "unsupported-platform";
+	healthy: false;
+	platformSupport: PlatformSupport;
+}
+
+export type ClaudeHookDoctorResult =
+	| ClaudeHookDoctorReport
+	| ClaudeHookDoctorRefusal;
 
 // The single non-`safe-read` fs surface, confined to one helper.
 type LstatKind =
@@ -474,17 +483,10 @@ export interface ManagedSettingsPaths {
 	dropInDir: string;
 }
 
-/** Static managed-settings locations per OS (no fs). WSL reports `linux`. */
+/** Static managed-settings locations for supported hosts only (no fs). */
 export function resolveManagedSettingsPaths(
 	platform: NodeJS.Platform,
-): ManagedSettingsPaths {
-	if (platform === "darwin") {
-		const base = "/Library/Application Support/ClaudeCode";
-		return {
-			file: `${base}/managed-settings.json`,
-			dropInDir: `${base}/managed-settings.d`,
-		};
-	}
+): ManagedSettingsPaths | null {
 	if (platform === "win32") {
 		const base = "C:\\Program Files\\ClaudeCode";
 		return {
@@ -492,6 +494,7 @@ export function resolveManagedSettingsPaths(
 			dropInDir: `${base}\\managed-settings.d`,
 		};
 	}
+	if (platform !== "linux") return null;
 	const base = "/etc/claude-code";
 	return {
 		file: `${base}/managed-settings.json`,
@@ -629,11 +632,11 @@ export async function probeExecution(
 	const processEnv = env.env ?? process.env;
 	const resolved = resolveManagedSettingsPaths(platform);
 	const managedFile =
-		env.managedFile !== undefined ? env.managedFile : resolved.file;
+		env.managedFile !== undefined ? env.managedFile : resolved?.file;
 	const dropInDir =
 		env.managedDropInDir !== undefined
 			? env.managedDropInDir
-			: resolved.dropInDir;
+			: resolved?.dropInDir;
 
 	const specs: ExecutionSourceSpec[] = [
 		{
@@ -759,7 +762,18 @@ export async function doctorClaudePreToolUse(
 		aclProbe?: () => Promise<AclCapability>;
 		platform?: NodeJS.Platform;
 	},
-): Promise<ClaudeHookDoctorReport> {
+): Promise<ClaudeHookDoctorResult> {
+	const platformSupport = resolvePlatformSupport(
+		options?.platform ?? process.platform,
+	);
+	if (platformSupport) {
+		return {
+			state: "unsupported-platform",
+			healthy: false,
+			platformSupport,
+		};
+	}
+
 	const manifest = options?.manifest ?? (await readManifest());
 	const currentAssetSha = manifest.asset.sha256;
 
@@ -835,11 +849,7 @@ export async function doctorClaudePreToolUse(
 		remediation.add(aclRemediation);
 	}
 
-	const platformSupport = resolvePlatformSupport(
-		options?.platform ?? process.platform,
-	);
 	return {
-		...(platformSupport ? { platformSupport } : {}),
 		healthy,
 		settings: {
 			state: settings.state,
@@ -1139,12 +1149,19 @@ export async function _run(
 	// report, so the run never spawns `node --version` twice and the warning, the
 	// report row and the verdict can never disagree about the same PATH.
 	const nodeOnPath = await (deps.nodeProbe ?? probeNodeOnPath)();
-	const doctor = (): Promise<ClaudeHookDoctorReport> =>
-		doctorFn(projectDir, {
+	const doctor = async (): Promise<ClaudeHookDoctorReport> => {
+		const result = await doctorFn(projectDir, {
 			manifest,
 			aclProbe: deps.aclProbe,
 			execution: { nodeProbe: async () => nodeOnPath },
 		});
+		if ("state" in result) {
+			throw new Error(
+				"supported Claude lifecycle received unsupported doctor result",
+			);
+		}
+		return result;
+	};
 
 	// Non-blocking runtime notice, computed once and carried by EVERY outcome
 	// (success, no-op and refusal alike) — it never gates the mutation.
@@ -1267,13 +1284,15 @@ export async function _run(
 
 export function installClaudePreToolUse(
 	projectDir: string,
+	deps: ClaudeHookRunDeps = {},
 ): Promise<ClaudeHookMutationResult> {
-	return _run(projectDir, "install", {}, {});
+	return _run(projectDir, "install", {}, deps);
 }
 
 export function repairClaudePreToolUse(
 	projectDir: string,
 	options?: { force?: boolean },
+	deps: ClaudeHookRunDeps = {},
 ): Promise<ClaudeHookMutationResult> {
-	return _run(projectDir, "repair", options ?? {}, {});
+	return _run(projectDir, "repair", options ?? {}, deps);
 }

@@ -1,4 +1,6 @@
 // biome-ignore-all format: compact table-driven policy corpus keeps the security review slice bounded.
+
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,6 +15,7 @@ interface Runtime {
 	MANAGED_MARKER: string;
 	POLICY_REGISTRY: { schemaVersion: number; policyVersion: number; diagnosticsMaxBytes: number };
 	SUPPORTED_TOOLS: readonly string[];
+	resolvePlatformSupport(platform?: string): { supported: boolean; reason?: string };
 	canonicalizePolicyPath(input: string, options?: { base?: string; platform?: string; projectRoot?: string }): string;
 	isSensitivePolicyKey(input: string, platform?: string): boolean;
 	evaluateEvent(input: unknown): Decision;
@@ -62,6 +65,7 @@ const PRE_S1_ASSET_SHA256 = "3581862f0567cce75a58b693c9ade80d39ee7d58add11537a34
 // the protective lexical key. This outgoing released identity MUST land in historical[]
 // so already-installed copies classify `released-outdated`, never `edited-managed`.
 const S1_OUTGOING_ASSET_SHA256 = "54a270f28b068450b79547a88ec6f2d4854514392fd5f38ed1d6174ea093d7aa";
+const WU3_OUTGOING_ASSET_SHA256 = "9a565cec31d9e091e3fb9420b86685f824733bc1ebe479f086b2b955aba6ef3e";
 const PRIOR_SETTINGS_CANONICAL_SHA256 = "038c59a91bf8967f6908afed74c465f1e7030254e11e4f8738975d6d708424d4";
 const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
 // Decision ②: placeholder-normalized canonical hash of the exact managed matcher
@@ -101,8 +105,8 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(runtime.MANAGED_MARKER).toBe("// javi-forge-managed: claude-pretooluse v1");
 		expect(runtime.SUPPORTED_TOOLS).toEqual(TOOLS);
 		expect(runtime.INPUT_LIMIT_BYTES).toBe(1_048_576);
-		expect(runtime.POLICY_REGISTRY).toEqual({ schemaVersion: 1, policyVersion: 1, diagnosticsMaxBytes: 240 });
-		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 1, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256, PRE_S1_ASSET_SHA256, S1_OUTGOING_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
+		expect(runtime.POLICY_REGISTRY).toEqual({ schemaVersion: 1, policyVersion: 2, diagnosticsMaxBytes: 240 });
+		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 2, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256, PRE_S1_ASSET_SHA256, S1_OUTGOING_ASSET_SHA256, WU3_OUTGOING_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
 		expect(manifest.asset.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
 		// A rotated asset must not still claim any outgoing hash as current, and every
 		// outgoing hash must remain reachable as historical (auto-upgradable) bodies.
@@ -111,11 +115,13 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(manifest.asset.sha256).not.toBe(F2_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.sha256).not.toBe(PRE_S1_ASSET_SHA256);
 		expect(manifest.asset.sha256).not.toBe(S1_OUTGOING_ASSET_SHA256);
+		expect(manifest.asset.sha256).not.toBe(WU3_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PRIOR_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(F2_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PRE_S1_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(S1_OUTGOING_ASSET_SHA256);
+		expect(manifest.asset.historical).toContain(WU3_OUTGOING_ASSET_SHA256);
 		// The bundled win32 helper on disk MUST hash to its manifest binding (mirrors the .mjs asset sha assertion above).
 		const ps1Bytes = fs.readFileSync(path.join(CLAUDE_HOOK_ASSETS_DIR, WINDOWS_SECURE_OBJECT_NAME));
 		expect(manifest.installerHelpers.windowsSecureObject.sha256).toBe(createHash("sha256").update(ps1Bytes).digest("hex"));
@@ -130,6 +136,22 @@ describe("packaged Claude PreToolUse asset contract", () => {
 	it("settingsHistoryViolations flags a silently rewritten released hash", () => {
 		expect(settingsHistoryViolations({ current: "a".repeat(64), historical: ["a".repeat(64)] }, { current: { canonicalSha256: "a".repeat(64) }, historical: [{ canonicalSha256: "b".repeat(64) }] })).toEqual(["settingsEntries.historical[] no longer starts with the released list (append-only violated)"]);
 		expect(settingsHistoryViolations({ current: "a".repeat(64), historical: [] }, { current: { canonicalSha256: "b".repeat(64) }, historical: [{ canonicalSha256: "a".repeat(64) }, { canonicalSha256: "b".repeat(64) }] })).toEqual([]);
+	});
+	it("accepts Linux and Windows while refusing Darwin before runtime policy evaluation", () => {
+		expect(runtime.resolvePlatformSupport("linux")).toEqual({ supported: true });
+		expect(runtime.resolvePlatformSupport("win32")).toEqual({ supported: true });
+		expect(runtime.resolvePlatformSupport("darwin")).toEqual({ supported: false, reason: "unsupported-platform" });
+		expect(runtime.resolvePlatformSupport("freebsd")).toEqual({ supported: false, reason: "unsupported-platform" });
+	});
+	it("enforces the host boundary in the real standalone runtime", () => {
+		const input = JSON.stringify(event("Read", { file_path: "/tmp/allowed" }));
+		for (const platform of ["linux", "win32"]) {
+			const result = spawnSync(process.execPath, ["--input-type=module", "--eval", `process.argv.push("--agent=claude"); Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} }); const runtime = await import(${JSON.stringify(pathToFileURL(ASSET).href)}); await runtime.main();`], { input, encoding: "utf8" });
+			expect(result.status).toBe(0);
+		}
+		const unsupported = spawnSync(process.execPath, ["--input-type=module", "--eval", `process.argv.push("--agent=claude"); Object.defineProperty(process, "platform", { value: "darwin" }); const runtime = await import(${JSON.stringify(pathToFileURL(ASSET).href)}); await runtime.main();`], { input, encoding: "utf8" });
+		expect(unsupported.status).toBe(2);
+		expect(unsupported.stderr).toContain("unsupported-platform");
 	});
 	// biome-ignore format: compact security corpus keeps the review slice bounded.
 	it.each([
@@ -168,7 +190,6 @@ describe("cross-platform file-tool policy", () => {
 		expect(runtime.evaluateEvent(event("Read", { file_path: input }))).toEqual({ allowed: false, ruleId: "path.sensitive" });
 	});
 	it("rejects unsupported Windows devices", () => expect(() => runtime.canonicalizePolicyPath("\\\\?\\GLOBALROOT\\Device\\Disk", { platform: "win32" })).toThrow(/unsupported-device-path/));
-	it("normalizes Darwin aliases", () => expect(runtime.canonicalizePolicyPath("/Users/ME/.GNUPG/e\u0301", { platform: "darwin" })).toBe("/users/me/.gnupg/é"));
 	it("realpaths the nearest existing ancestor", () => {
 		fs.mkdirSync(path.join(temp, "real"));
 		fs.symlinkSync(path.join(temp, "real"), path.join(temp, "alias"), "dir");
@@ -205,10 +226,6 @@ describe("cross-platform file-tool policy", () => {
 		for (const tool of ["Read", "Write", "Edit"]) {
 			expect(runtime.evaluateEvent(event(tool, { file_path }))).toEqual(allowed ? { allowed: true } : { allowed: false, ruleId: "path.sensitive" });
 		}
-	});
-	it("JD-S1-008 retains the Darwin service-account basename after case folding", () => {
-		const key = runtime.canonicalizePolicyPath("/Users/me/serviceAccountKey.json", { platform: "darwin" });
-		expect(runtime.isSensitivePolicyKey(key, "darwin")).toBe(true);
 	});
 });
 describe("separate deterministic shell corpora", () => {

@@ -21,8 +21,34 @@ import Plugin from "../../ui/Plugin.js";
 import { VALID_CI, VALID_MEMORY, VALID_STACKS } from "../validators.js";
 import type { CLI, RendererCtx } from "./types.js";
 
-export function handleDoctor(_cli: CLI, ctx: RendererCtx): void {
-	render(
+export interface RendererDeps {
+	platform?: string;
+	render?: typeof render;
+	error?: (message: string) => void;
+	setExitCode?: (code: number) => void;
+}
+
+export function handleDoctor(
+	_cli: CLI,
+	ctx: RendererCtx,
+	deps: RendererDeps = {},
+): void {
+	const platformSupport = resolvePlatformSupport(
+		deps.platform ?? process.platform,
+	);
+	if (platformSupport) {
+		(deps.error ?? console.error)(
+			`${platformSupport.refusalCode}: ${platformSupport.guidance}`,
+		);
+		(
+			deps.setExitCode ??
+			((code) => {
+				process.exitCode = code;
+			})
+		)(1);
+		return;
+	}
+	(deps.render ?? render)(
 		<CIContextProvider isCI={ctx.isCI}>
 			<Doctor />
 		</CIContextProvider>,

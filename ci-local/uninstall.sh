@@ -13,10 +13,40 @@
 #   ./uninstall.sh --purge               # also rm -rf ci-local/ + lib/common.sh
 # =============================================================================
 
-set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+CI_LOCAL_ENTRYPOINT_SOURCE="${BASH_SOURCE[0]}"
+if [[ "$CI_LOCAL_ENTRYPOINT_SOURCE" == /* ]]; then
+    CI_LOCAL_ENTRYPOINT_PATH="$CI_LOCAL_ENTRYPOINT_SOURCE"
+else
+    CI_LOCAL_ENTRYPOINT_PATH="$PWD/$CI_LOCAL_ENTRYPOINT_SOURCE"
+fi
+CI_LOCAL_ENTRYPOINT_DIR="${CI_LOCAL_ENTRYPOINT_PATH%/*}"
+
+function ci_local_normalize_platform() {
+    local platform="${1:?platform required}"
+
+    case "$platform" in
+        MINGW*_NT-*|MSYS*|CYGWIN*) printf '%s\n' 'Windows' ;;
+        *) printf '%s\n' "$platform" ;;
+    esac
+}
+
+function ci_local_main() {
+    local platform
+    platform="$(ci_local_normalize_platform "${1:?platform required}")"
+    shift
+
+    case "$platform" in
+        Linux|Windows) ci_local_startup_body "$@" ;;
+        *) printf '%s\n' 'unsupported-platform: javi-forge supports Linux and Windows only.'; return 1 ;;
+    esac
+}
+
+function ci_local_startup_body() {
+    set -e
+
+SCRIPT_DIR="$CI_LOCAL_ENTRYPOINT_DIR"
+PROJECT_DIR="${SCRIPT_DIR%/*}"
 
 # Source colors if available; degrade gracefully if not.
 if [ -f "$SCRIPT_DIR/../lib/common.sh" ]; then
@@ -93,3 +123,8 @@ fi
 echo -e ""
 echo -e "${GREEN}Uninstall complete!${NC}"
 echo -e ""
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    ci_local_main "$(/usr/bin/uname -s)" "$@"
+fi

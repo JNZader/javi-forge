@@ -1,7 +1,7 @@
 /**
  * POSIX `PlatformSecureFs` adapters for the SkillGuard transactional installer
- * (Slice 3a). This is the ONLY place a shell tool runs (`getfacl` on Linux,
- * `/bin/ls -lde` on macOS) and the ONLY place `os`/`fs` ownership bits are
+ * (Slice 3a). This is the ONLY place a shell tool runs (`getfacl` on Linux)
+ * and the ONLY place `os`/`fs` ownership bits are interpreted.
  * interpreted. Everything fails closed: a missing/erroring/timed-out ACL tool,
  * an extended/named/mask/default/inherited ACL entry, a foreign-owned or
  * group/other-writable directory, or any inconclusive result refuses rather than
@@ -70,7 +70,7 @@ export interface PosixAclAdapter {
 	 * mask) `w`, OR any named-group with effective `w`. Everything else (base
 	 * entries, a lone `mask::`, effective-non-write named entries, x-only, trusted
 	 * named users, `default:*`) proceeds. Same fail-closed spawn edges as
-	 * `proveClean`. On darwin this is the no-op alias of `proveClean` (deferred).
+	 * `proveClean`.
 	 */
 	proveNoEndangeringAcl(target: string): Promise<SecureResult<void>>;
 }
@@ -132,10 +132,6 @@ export const ACL_DETAIL = {
 	getfaclAbsent: "getfacl absent",
 	getfaclTimeout: "getfacl timeout",
 	extendedAclEntry: "extended ACL entry",
-	macosLsAbsent: "/bin/ls absent",
-	macosLsTimeout: "ls timeout",
-	macosAclFlag: "ACL present (+ flag)",
-	macosAceListed: "ACE listed",
 } as const;
 
 // --- Linux getfacl adapter (Algorithm D) -------------------------------------
@@ -293,44 +289,6 @@ export function createLinuxAclAdapter(
 	};
 }
 
-// --- macOS /bin/ls -lde adapter (Algorithm E) --------------------------------
-
-const MACOS_ACE_LINE = /^\s*\d+:\s/;
-
-export function createMacosAclAdapter(
-	spawn: SpawnFn = defaultSpawn,
-): PosixAclAdapter {
-	const adapter: PosixAclAdapter = {
-		async proveClean(target) {
-			const res = await spawn("/bin/ls", ["-lde", "--", target]);
-			if (res.spawnError)
-				return refuse("unsupported-posix-acl", ACL_DETAIL.macosLsAbsent);
-			if (res.timedOut)
-				return refuse("unsupported-posix-acl", ACL_DETAIL.macosLsTimeout);
-			if (res.code !== 0) {
-				return refuse("unsupported-posix-acl", `ls exit ${res.code}`);
-			}
-			const lines = res.stdout.split("\n");
-			const modeLine = lines[0] ?? "";
-			if (modeLine[10] === "+") {
-				return refuse("unsupported-posix-acl", ACL_DETAIL.macosAclFlag);
-			}
-			if (lines.some((line) => MACOS_ACE_LINE.test(line))) {
-				return refuse("unsupported-posix-acl", ACL_DETAIL.macosAceListed);
-			}
-			return ok();
-		},
-		// DEFERRED (user: Linux only): darwin ancestors stay STRICT = status-quo
-		// over-refusal, not the reported Linux bug. `/bin/ls -lde` ACE text carries
-		// no numeric mask to compute effective rights from, so the path-endangering
-		// narrowing is a documented follow-up. Alias to the strict proof.
-		proveNoEndangeringAcl(target) {
-			return adapter.proveClean(target);
-		},
-	};
-	return adapter;
-}
-
 // --- read-only ACL capability probe ------------------------------------------
 
 /**
@@ -339,8 +297,8 @@ export function createMacosAclAdapter(
  * decides whether a target is safe and never gates a mutation.
  */
 export type AclCapability =
-	| { status: "available"; tool: "getfacl" | "/bin/ls" }
-	| { status: "absent"; tool: "getfacl" | "/bin/ls" }
+	| { status: "available"; tool: "getfacl" }
+	| { status: "absent"; tool: "getfacl" }
 	| { status: "unknown"; tool: string; detail: string }
 	| { status: "not-applicable"; tool: "windows-secure-object" };
 
@@ -360,7 +318,7 @@ export async function probeAclCapability(
 	if (platform === "win32") {
 		return { status: "not-applicable", tool: "windows-secure-object" };
 	}
-	if (platform !== "linux" && platform !== "darwin") {
+	if (platform !== "linux") {
 		return {
 			status: "unknown",
 			tool: platform,
@@ -368,22 +326,20 @@ export async function probeAclCapability(
 		};
 	}
 
-	const tool = platform === "linux" ? "getfacl" : "/bin/ls";
-	const args = platform === "linux" ? ["--version"] : ["-ld", "/"];
+	const tool = "getfacl";
+	const args = ["--version"];
 	const res = await spawn(tool, args);
 
 	if (res.spawnError) return { status: "absent", tool };
 	if (res.timedOut) {
-		// The argv differs per platform (`getfacl --version` on linux, `/bin/ls -ld /`
-		// on darwin), so the detail names the probe, not a hardcoded flag.
 		return { status: "unknown", tool, detail: `${tool} probe timeout` };
 	}
 	if (res.code !== 0) {
 		return { status: "unknown", tool, detail: `${tool} exit ${res.code}` };
 	}
-	// Linux only: a zero exit whose banner does not name getfacl is a foreign
-	// binary on PATH, not proof of the adapter — report ignorance, not success.
-	if (platform === "linux" && !res.stdout.toLowerCase().includes("getfacl")) {
+	// A zero exit whose banner does not name getfacl is a foreign binary on PATH,
+	// not proof of the adapter — report ignorance, not success.
+	if (!res.stdout.toLowerCase().includes("getfacl")) {
 		return {
 			status: "unknown",
 			tool,
@@ -654,9 +610,9 @@ export function createPosixSecureFs(acl: PosixAclAdapter): PlatformSecureFs {
 }
 
 /**
- * Select the secure filesystem for the host platform. Linux uses the `getfacl`
- * adapter, macOS uses `/bin/ls -lde`, and win32 uses the digest-bound PowerShell
- * helper over a lazily-spawned session (Slice 3b). Every other platform returns
+ * Select the secure filesystem for supported hosts. Linux uses the `getfacl`
+ * adapter and win32 uses the digest-bound PowerShell helper over a lazily-spawned
+ * session (Slice 3b). Every other platform returns
  * `null` so the manager refuses with `windows-secure-object-unavailable` and
  * mutates nothing.
  *
@@ -672,8 +628,6 @@ export function selectSecureFs(
 	platform: NodeJS.Platform = process.platform,
 ): PlatformSecureFs | null {
 	if (platform === "linux") return createPosixSecureFs(createLinuxAclAdapter());
-	if (platform === "darwin")
-		return createPosixSecureFs(createMacosAclAdapter());
 	if (platform === "win32") return createWindowsSecureFs(createPs1Session());
 	return null;
 }

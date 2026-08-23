@@ -7,7 +7,7 @@
 #   .\install.ps1
 #
 # Behaviour MUST match install.sh. Diff against the bash version on every
-# change. Test on real Windows + WSL + macOS pwsh before tagging a release.
+# change. Test on supported Windows and WSL hosts before tagging a release.
 # =============================================================================
 
 #Requires -Version 7.2
@@ -15,19 +15,36 @@
 param()
 
 function Invoke-CiLocalMain {
-    param([Parameter(Mandatory)][string]$Platform)
+    param(
+        [Parameter(Mandatory)][string]$Platform,
+        [ref]$ExitCode
+    )
 
-    if ($Platform -eq 'Darwin') {
-        Write-Host 'macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate. Existing installed guards are not removed; Darwin code removal is planned separately for 2.0.'
+    if ($Platform -notin @('Linux', 'Windows')) {
+        Write-Host 'unsupported-platform: javi-forge supports Linux and Windows only.'
+        if ($PSBoundParameters.ContainsKey('ExitCode')) {
+            $ExitCode.Value = 1
+            return
+        }
         return 1
     }
 
-    Invoke-CiLocalStartupBody -Platform $Platform
+    $bodyExitCode = 0
+    & ${function:Invoke-CiLocalStartupBody} -Platform $Platform -ExitCode ([ref]$bodyExitCode)
+    if ($PSBoundParameters.ContainsKey('ExitCode')) {
+        $ExitCode.Value = $bodyExitCode
+    } elseif ($bodyExitCode -ne 0) {
+        return $bodyExitCode
+    }
 }
 
 function Invoke-CiLocalStartupBody {
-    param([string]$Platform)
+    param(
+        [string]$Platform,
+        [ref]$ExitCode
+    )
 
+    $ExitCode.Value = 0
 # Defense-in-depth: #Requires is parsed by some hosts AFTER the script body.
 # 7.2 is the minimum because FileSystemInfo.ResolveLinkTarget($true) is .NET 6+,
 # which shipped with pwsh 7.2. Earlier pwsh 7.x runs on .NET 5 and the method
@@ -159,9 +176,11 @@ try {
 
     $jfVersionOk     = $true
     $jfVersionOutput = ''
+    $jfVersionExitCode = 1
     try {
         $jfVersionOutput = (& javi-forge --version 2>&1) -join "`n"
-        if ($LASTEXITCODE -ne 0) { $jfVersionOk = $false }
+        $jfVersionExitCode = $LASTEXITCODE
+        if ($jfVersionExitCode -ne 0) { $jfVersionOk = $false }
     } catch {
         $jfVersionOk     = $false
         $jfVersionOutput = $_.Exception.Message
@@ -177,7 +196,8 @@ try {
         Write-Host "ERROR: javi-forge found at $jfPath but '--version' failed" -ForegroundColor Red
         Write-Host "Output: $jfVersionOutput" -ForegroundColor Yellow
         Write-Host 'Reinstall: npm install -g javi-forge' -ForegroundColor Cyan
-        exit 1
+        $ExitCode.Value = $jfVersionExitCode
+        return
     }
 
     # Reject UNC / remote paths outright — a javi-forge symlinked to
@@ -297,12 +317,13 @@ try {
     & git config core.hooksPath $hooksRel
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'ERROR: failed to set core.hooksPath. Are you inside a git repo?' -ForegroundColor Red
-        exit 1
+        $ExitCode.Value = $LASTEXITCODE
+        return
     }
     Write-Host "hooksPath = $hooksRel" -ForegroundColor Green
 
     # Make hooks executable. Different OS, different model:
-    #   - macOS / Linux / WSL: chmod 0755 — POSIX bits, what git expects.
+    #   - Linux / WSL: chmod 0755 — POSIX bits, what git expects.
     #   - Windows native NTFS: chmod is a no-op; lock the ACL via icacls so
     #     only the current user can rewrite the hooks between commits.
     if (Test-CommandExists -Name 'chmod') {
@@ -382,9 +403,10 @@ try {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    $platform = if ($IsMacOS) { 'Darwin' } else { 'Windows' }
-    $exitCode = & ${function:Invoke-CiLocalMain} -Platform $platform
-    if ($exitCode -is [int] -and $exitCode -ne 0) {
+    $platform = if ($IsWindows) { 'Windows' } elseif ($IsLinux) { 'Linux' } else { 'unsupported' }
+    $exitCode = 0
+    & ${function:Invoke-CiLocalMain} -Platform $platform -ExitCode ([ref]$exitCode)
+    if ($exitCode -ne 0) {
         exit $exitCode
     }
 }

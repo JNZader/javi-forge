@@ -16,6 +16,42 @@ param(
     [switch]$Purge
 )
 
+
+function Invoke-CiLocalMain {
+    param(
+        [Parameter(Mandatory)][string]$Platform,
+        [switch]$RestoreBackups,
+        [switch]$Purge,
+        [ref]$ExitCode
+    )
+
+    if ($Platform -notin @('Linux', 'Windows')) {
+        Write-Host 'unsupported-platform: javi-forge supports Linux and Windows only.'
+        if ($PSBoundParameters.ContainsKey('ExitCode')) {
+            $ExitCode.Value = 1
+            return
+        }
+        return 1
+    }
+
+    $bodyExitCode = 0
+    & ${function:Invoke-CiLocalStartupBody} -Platform $Platform -RestoreBackups:$RestoreBackups -Purge:$Purge -ExitCode ([ref]$bodyExitCode)
+    if ($PSBoundParameters.ContainsKey('ExitCode')) {
+        $ExitCode.Value = $bodyExitCode
+    } elseif ($bodyExitCode -ne 0) {
+        return $bodyExitCode
+    }
+}
+
+function Invoke-CiLocalStartupBody {
+    param(
+        [Parameter(Mandatory)][string]$Platform,
+        [switch]$RestoreBackups,
+        [switch]$Purge,
+        [ref]$ExitCode
+    )
+
+$ExitCode.Value = 0
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -32,6 +68,10 @@ try {
     $current = (& git config --get core.hooksPath 2>$null) -join ''
     if ($current) {
         & git config --unset core.hooksPath
+        if ($LASTEXITCODE -ne 0) {
+            $ExitCode.Value = $LASTEXITCODE
+            return
+        }
         Write-Host "Removed hooksPath = $current" -ForegroundColor Green
     } else {
         Write-Host 'No core.hooksPath was set; nothing to remove' -ForegroundColor Yellow
@@ -82,4 +122,14 @@ try {
 
 } finally {
     Pop-Location
+}
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    $platform = if ($IsWindows) { 'Windows' } elseif ($IsLinux) { 'Linux' } else { 'unsupported' }
+    $exitCode = 0
+    & ${function:Invoke-CiLocalMain} -Platform $platform -RestoreBackups:$RestoreBackups -Purge:$Purge -ExitCode ([ref]$exitCode)
+    if ($exitCode -ne 0) {
+        exit $exitCode
+    }
 }

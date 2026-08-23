@@ -3,22 +3,40 @@
 # CI-LOCAL: Installation Script
 # =============================================================================
 
-function ci_local_main() {
+
+CI_LOCAL_ENTRYPOINT_SOURCE="${BASH_SOURCE[0]}"
+if [[ "$CI_LOCAL_ENTRYPOINT_SOURCE" == /* ]]; then
+    CI_LOCAL_ENTRYPOINT_PATH="$CI_LOCAL_ENTRYPOINT_SOURCE"
+else
+    CI_LOCAL_ENTRYPOINT_PATH="$PWD/$CI_LOCAL_ENTRYPOINT_SOURCE"
+fi
+CI_LOCAL_ENTRYPOINT_DIR="${CI_LOCAL_ENTRYPOINT_PATH%/*}"
+
+function ci_local_normalize_platform() {
     local platform="${1:?platform required}"
 
-    if [ "$platform" = "Darwin" ]; then
-        printf '%s\n' 'macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate. Existing installed guards are not removed; Darwin code removal is planned separately for 2.0.'
-        return 1
-    fi
+    case "$platform" in
+        MINGW*_NT-*|MSYS*|CYGWIN*) printf '%s\n' 'Windows' ;;
+        *) printf '%s\n' "$platform" ;;
+    esac
+}
 
-    ci_local_startup_body "$platform"
+function ci_local_main() {
+    local platform
+    platform="$(ci_local_normalize_platform "${1:?platform required}")"
+    shift
+
+    case "$platform" in
+        Linux|Windows) ci_local_startup_body "$@" ;;
+        *) printf '%s\n' 'unsupported-platform: javi-forge supports Linux and Windows only.'; return 1 ;;
+    esac
 }
 
 function ci_local_startup_body() {
     set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+SCRIPT_DIR="$CI_LOCAL_ENTRYPOINT_DIR"
+PROJECT_DIR="${SCRIPT_DIR%/*}"
 
 # ─── Required tools (fail-closed) ──────────────────────────────────
 # realpath is load-bearing for the symlink-traversal checks below. If it's
@@ -27,7 +45,6 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 if ! command -v realpath >/dev/null 2>&1; then
     printf 'ERROR: realpath is required for ci-local install (symlink checks).\n' >&2
     printf '  Linux/WSL: install coreutils\n' >&2
-    printf '  macOS:     brew install coreutils, then add gnubin to PATH\n' >&2
     exit 1
 fi
 
@@ -208,5 +225,5 @@ echo -e ""
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    ci_local_main "$(/usr/bin/uname -s)"
+    ci_local_main "$(/usr/bin/uname -s)" "$@"
 fi

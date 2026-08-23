@@ -39,21 +39,18 @@ cd /path/to/new-project
 .\.ci-local\install.ps1     # Windows (PowerShell 7+)
 ```
 
-> **Importante:** CI-Local depende de `lib/common.sh` (Linux/WSL) y/o `lib/common.psm1` (Windows). Copiá ambos junto con el directorio `ci-local/`. macOS está deprecated y se rechaza para instalaciones o arranques nuevos.
+> **Importante:** CI-Local depende de `lib/common.sh` (Linux/WSL) y/o `lib/common.psm1` (Windows). Copiá ambos junto con el directorio `ci-local/`.
 
 El installer (ambas variantes) falla con mensaje claro si `javi-forge` no está en el PATH.
 
 
-## macOS deprecation
+## Plataformas compatibles
 
-macOS is deprecated and unsupported for new CI-Local install/startup. Pin a supported release or migrate your workflow. Existing installed guards are not removed in 1.x; Darwin code removal is planned separately for 2.0.
-
-### Soporte cross-platform
+CI-Local soporta Linux/WSL y Windows nativo. Cualquier otro host recibe `unsupported-platform` antes de ejecutar comandos, probes, instalación o mutaciones. No existe un modo de compatibilidad ni un flujo de migración para hosts no soportados.
 
 | Plataforma | Installer | Runner | Hooks | Requisitos |
 |---|---|---|---|---|
 | Linux | `install.sh` | `ci-local.sh` | bash | bash, perl, docker (opcional) |
-| macOS | Unsupported: pin a supported release or migrate | Refused before startup | Existing installed guards retained | No new install or startup |
 | WSL | `install.sh` | `ci-local.sh` | bash | bash, perl, docker (opcional) |
 | Windows nativo | `install.ps1` | `ci-local.ps1` | bash | PowerShell 7+, Git for Windows (MSYS2 bash), docker (opcional) |
 

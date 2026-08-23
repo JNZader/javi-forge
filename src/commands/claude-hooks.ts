@@ -16,17 +16,20 @@
 
 import {
 	type ClaudeHookDoctorReport,
+	type ClaudeHookDoctorResult,
 	type ClaudeHookMutationResult,
 	doctorClaudePreToolUse,
 	installClaudePreToolUse,
 	repairClaudePreToolUse,
 } from "../lib/claude-hook-manager.js";
+import { resolvePlatformSupport } from "../lib/platform-support.js";
 import { remediationForMessage } from "../lib/secure-refusal-remediation.js";
 
 export type ClaudeHookSub = "install" | "doctor" | "repair";
 
 /** Injectable seams for tests; each defaults to the real implementation. */
 export interface ClaudeHookCmdDeps {
+	platform?: string;
 	install?: typeof installClaudePreToolUse;
 	doctor?: typeof doctorClaudePreToolUse;
 	repair?: typeof repairClaudePreToolUse;
@@ -82,14 +85,17 @@ function renderMutation(
 }
 
 function renderDoctor(
-	report: ClaudeHookDoctorReport,
+	result: ClaudeHookDoctorResult,
 	log: (m: string) => void,
 ): number {
-	log(`doctor claude: ${report.healthy ? "healthy" : "unhealthy"}`);
-	if (report.platformSupport)
+	if ("state" in result) {
 		log(
-			`  platform-support: ${report.platformSupport.state} — ${report.platformSupport.guidance}`,
+			`${result.platformSupport.refusalCode}: ${result.platformSupport.guidance}`,
 		);
+		return 1;
+	}
+	const report: ClaudeHookDoctorReport = result;
+	log(`doctor claude: ${report.healthy ? "healthy" : "unhealthy"}`);
 	log(`  settings: ${report.settings.state} — ${report.settings.detail}`);
 	log(`  asset:    ${report.asset.state} — ${report.asset.detail}`);
 	log(
@@ -163,6 +169,13 @@ export async function runClaudeHookCommand(
 ): Promise<number> {
 	const log = deps.log ?? ((m: string) => console.log(m));
 	const logError = deps.logError ?? ((m: string) => console.error(m));
+	const platformSupport = resolvePlatformSupport(
+		deps.platform ?? process.platform,
+	);
+	if (platformSupport) {
+		logError(`${platformSupport.refusalCode}: ${platformSupport.guidance}`);
+		return 1;
+	}
 	const install = deps.install ?? installClaudePreToolUse;
 	const doctor = deps.doctor ?? doctorClaudePreToolUse;
 	const repair = deps.repair ?? repairClaudePreToolUse;

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("ink", () => ({ render: vi.fn() }));
 
 import { render } from "ink";
-import { handleInitDefault } from "./simple-renderers.js";
+import { handleDoctor, handleInitDefault } from "./simple-renderers.js";
 
 describe("handleInitDefault", () => {
 	it("refuses Darwin without rendering Ink", () => {
@@ -30,5 +30,33 @@ describe("handleInitDefault", () => {
 			process.exitCode = oldExitCode;
 			error.mockRestore();
 		}
+	});
+});
+
+describe("unsupported-platform renderer boundary", () => {
+	it.each([
+		"darwin",
+		"darwin-arm64",
+		"freebsd",
+		"unknown",
+	])("refuses doctor before Ink render on %s", (platform) => {
+		const renderDependency = vi.fn(() => {
+			throw new Error("Ink must not render");
+		});
+		const errors: string[] = [];
+		const exits: number[] = [];
+		handleDoctor(
+			{ flags: {}, input: [] } as never,
+			{ isCI: false } as never,
+			{
+				platform,
+				render: renderDependency,
+				error: (message: string) => errors.push(message),
+				setExitCode: (code: number) => exits.push(code),
+			} as never,
+		);
+		expect(renderDependency).not.toHaveBeenCalled();
+		expect(errors.join("\\n")).toContain("unsupported-platform");
+		expect(exits).toEqual([1]);
 	});
 });

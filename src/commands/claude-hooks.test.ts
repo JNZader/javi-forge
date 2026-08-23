@@ -511,14 +511,12 @@ describe("runClaudeHookCommand", () => {
 			ok: false,
 			changed: [],
 			backups: [],
-			errors: ["macos-lifecycle-unsupported"],
-			warnings: ["pin a supported release or migrate"],
+			errors: ["unsupported-platform"],
+			warnings: ["javi-forge supports Linux and Windows only."],
 			lifecycleRefusal: {
-				platform: "darwin",
-				state: "macos-deprecated",
-				lifecycle: "unsupported",
-				refusalCode: "macos-lifecycle-unsupported",
-				guidance: "pin a supported release or migrate",
+				state: "unsupported-platform",
+				refusalCode: "unsupported-platform",
+				guidance: "javi-forge supports Linux and Windows only.",
 			},
 		};
 		const action = vi.fn().mockResolvedValue(refusal);
@@ -526,21 +524,23 @@ describe("runClaudeHookCommand", () => {
 			sub === "install" ? { install: action } : { repair: action },
 		);
 		expect(await runClaudeHookCommand(sub, "/proj", {}, deps)).toBe(1);
-		expect(err.join("\n")).toContain("macos-lifecycle-unsupported");
-		expect(out.join("\n")).toContain("pin a supported release or migrate");
+		expect(err.join("\n")).toContain("unsupported-platform");
+		expect(out.join("\n")).toContain(
+			"javi-forge supports Linux and Windows only.",
+		);
 	});
 
-	it("doctor renders Darwin advisory without changing its exit mapping", async () => {
+	it("doctor renders the generic unsupported-platform refusal with exit 1", async () => {
 		const out: string[] = [];
-		const report = doctorReport({
+		const report = {
+			state: "unsupported-platform",
+			healthy: false,
 			platformSupport: {
-				state: "macos-deprecated",
-				lifecycle: "unsupported",
-				refusalCode: "macos-lifecycle-unsupported",
-				guidance: "pin a supported release or migrate",
-				platform: "darwin",
+				state: "unsupported-platform",
+				refusalCode: "unsupported-platform",
+				guidance: "javi-forge supports Linux and Windows only.",
 			},
-		} as never);
+		};
 		const code = await runClaudeHookCommand(
 			"doctor",
 			"/proj",
@@ -551,7 +551,33 @@ describe("runClaudeHookCommand", () => {
 				logError: () => {},
 			},
 		);
-		expect(code).toBe(0);
-		expect(out.join("\n")).toContain("platform-support: macos-deprecated");
+		expect(code).toBe(1);
+		expect(out.join("\n")).toContain(
+			"unsupported-platform: javi-forge supports Linux and Windows only.",
+		);
+	});
+});
+
+describe("public platform ingress", () => {
+	it.each([
+		"install",
+		"repair",
+		"doctor",
+	] as const)("refuses %s before the Claude manager on an unsupported synthetic platform", async (sub) => {
+		const action = vi.fn(async () => {
+			throw new Error("manager must not run");
+		});
+		const errors: string[] = [];
+		expect(
+			await runClaudeHookCommand(sub, "/proj", {}, {
+				platform: "darwin-arm64",
+				install: action,
+				repair: action,
+				doctor: action,
+				logError: (message: string) => errors.push(message),
+			} as never),
+		).toBe(1);
+		expect(action).not.toHaveBeenCalled();
+		expect(errors.join("\\n")).toContain("unsupported-platform");
 	});
 });

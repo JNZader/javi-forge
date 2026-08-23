@@ -1,35 +1,44 @@
-export const PLATFORM_SUPPORT_STATE = {
-	MACOS_DEPRECATED: "macos-deprecated",
+export const HOST_SUPPORT_STATE = {
+	SUPPORTED: "supported",
+	UNSUPPORTED: "unsupported-platform",
 } as const;
 
-export const LIFECYCLE_SUPPORT = {
-	UNSUPPORTED: "unsupported",
-} as const;
+export const HOST_SUPPORT_GUIDANCE =
+	"javi-forge supports Linux and Windows only.";
 
-export const PLATFORM_REFUSAL = {
-	MACOS_LIFECYCLE_UNSUPPORTED: "macos-lifecycle-unsupported",
-} as const;
+export type SupportedHostPlatform = "linux" | "win32";
 
-export interface PlatformSupport {
-	platform: "darwin";
-	state: typeof PLATFORM_SUPPORT_STATE.MACOS_DEPRECATED;
-	lifecycle: typeof LIFECYCLE_SUPPORT.UNSUPPORTED;
-	refusalCode: typeof PLATFORM_REFUSAL.MACOS_LIFECYCLE_UNSUPPORTED;
-	guidance: string;
+export interface SupportedHost {
+	state: typeof HOST_SUPPORT_STATE.SUPPORTED;
+	platform: SupportedHostPlatform;
 }
 
-export const MACOS_DEPRECATION_GUIDANCE =
-	"macOS is deprecated and unsupported for install, repair, and init; pin a supported release or migrate. Existing installed guards are not removed; Darwin removal is planned for 2.0.";
+export interface PlatformSupport {
+	state: typeof HOST_SUPPORT_STATE.UNSUPPORTED;
+	refusalCode: typeof HOST_SUPPORT_STATE.UNSUPPORTED;
+	guidance: typeof HOST_SUPPORT_GUIDANCE;
+}
 
+export type HostSupportResult = SupportedHost | PlatformSupport;
+
+/**
+ * Classifies every host value without aliases or fallthrough.
+ */
+export function classifyHostPlatform(platform: string): HostSupportResult {
+	if (platform === "linux" || platform === "win32") {
+		return { state: HOST_SUPPORT_STATE.SUPPORTED, platform };
+	}
+	return {
+		state: HOST_SUPPORT_STATE.UNSUPPORTED,
+		refusalCode: HOST_SUPPORT_STATE.UNSUPPORTED,
+		guidance: HOST_SUPPORT_GUIDANCE,
+	};
+}
+
+/** Returns an unsupported result for legacy callers, otherwise undefined. */
 export function resolvePlatformSupport(
 	platform: string,
 ): PlatformSupport | undefined {
-	if (platform !== "darwin") return undefined;
-	return {
-		platform: "darwin",
-		state: PLATFORM_SUPPORT_STATE.MACOS_DEPRECATED,
-		lifecycle: LIFECYCLE_SUPPORT.UNSUPPORTED,
-		refusalCode: PLATFORM_REFUSAL.MACOS_LIFECYCLE_UNSUPPORTED,
-		guidance: MACOS_DEPRECATION_GUIDANCE,
-	};
+	const result = classifyHostPlatform(platform);
+	return result.state === HOST_SUPPORT_STATE.UNSUPPORTED ? result : undefined;
 }

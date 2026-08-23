@@ -79,7 +79,7 @@ const RELEASED_SNAPSHOT: Record<
  */
 const EXPECTED_VERSION: Record<HookName, number> = {
 	"pre-commit": 2,
-	"pre-push": 3,
+	"pre-push": 4,
 	"commit-msg": 2,
 };
 

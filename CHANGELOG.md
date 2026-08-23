@@ -1,3 +1,9 @@
+## [1.37.1](https://github.com/JNZader/javi-forge/compare/v1.37.0...v1.37.1) (2026-08-23)
+
+### Bug Fixes
+
+* **ci:** isolate pre-push tests from Git metadata ([6b5799d](https://github.com/JNZader/javi-forge/commit/6b5799d9d9e8c528fad9dc1f7b641afbd3a60637))
+
 ## [1.37.0](https://github.com/JNZader/javi-forge/compare/v1.36.0...v1.37.0) (2026-08-21)
 
 ### Features

@@ -39,16 +39,12 @@ log_info() { echo -e "  ${CYAN}[INFO]${NC} $1"; }
 log_step() { echo -e "${YELLOW}$1${NC}"; }
 
 # =============================================================================
-# sed_inplace - Portable sed -i (works on both GNU and BSD/macOS sed)
+# sed_inplace - GNU sed -i for supported Linux/WSL hosts
 # =============================================================================
 # Usage: sed_inplace "s/foo/bar/" file.txt
 # =============================================================================
 sed_inplace() {
-    if sed --version 2>/dev/null | grep -q GNU; then
-        sed -i "$@"
-    else
-        sed -i '' "$@"
-    fi
+    sed -i "$@"
 }
 
 # =============================================================================
@@ -130,7 +126,7 @@ detect_stack() {
         STACK_TYPE="java-gradle"
         BUILD_TOOL="gradle"
 
-        # Detect Java version from build files (compatible with macOS and Linux)
+        # Detect Java version from build files
         if [[ -f "$project_dir/build.gradle.kts" ]]; then
             JAVA_VERSION=$(grep -E 'languageVersion\s*=\s*JavaLanguageVersion\.of\(' "$project_dir/build.gradle.kts" 2>/dev/null | grep -o '[0-9]\+' | head -1 || echo "21")
         elif [[ -f "$project_dir/build.gradle" ]]; then

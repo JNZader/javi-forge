@@ -114,6 +114,27 @@ afterEach(async () => {
 // runDoctor
 // =============================================================================
 
+async function seedContext() {
+	await fs.outputFile(
+		path.join(tmpDir, ".context/INDEX.md"),
+		"# old content\n",
+	);
+	await fs.outputFile(path.join(tmpDir, ".context/summary.md"), "# old\n");
+	await fs.outputJson(path.join(tmpDir, ".javi-forge/manifest.json"), {
+		version: "0.1.0",
+		projectName: "test-project",
+		stack: "node",
+		ciProvider: "github",
+		memory: "engram",
+		createdAt: "2025-01-15T10:00:00Z",
+		updatedAt: "2025-01-15T10:00:00Z",
+		modules: [],
+	});
+	await fs.writeJson(path.join(tmpDir, "package.json"), {
+		name: "test-project",
+	});
+}
+
 describe("runDoctor", () => {
 	it("reports all tools as ok when execFile reports them present", async () => {
 		const result = await runDoctor(tmpDir);
@@ -259,41 +280,78 @@ describe("runDoctor", () => {
 	// count returned for the bundled dir; a unit test for countDir itself
 	// belongs in lib/common.test.ts if we want explicit coverage.
 
-	it("shows context refresh ok when .context/ + manifest are present", async () => {
-		// Round-7 review flagged that the original loose assertion
-		// (`["ok", "skip"]`) made this test pass even if refresh silently
-		// failed. Tighten back to a strict "ok" — when both .context/ and
-		// the manifest exist, the doctor MUST report success or there's a
-		// real regression.
-		await fs.ensureDir(path.join(tmpDir, ".context"));
-		await fs.writeFile(
-			path.join(tmpDir, ".context", "INDEX.md"),
-			"# old content\n",
+	it.each([
+		{ label: "default", options: {} },
+		{ label: "dry-run", options: { dryRun: true } },
+		{
+			label: "refresh dry-run",
+			options: { refreshContext: true, dryRun: true },
+		},
+	])("preserves context and manifest bytes and timestamps in $label", async ({
+		options,
+	}) => {
+		await seedContext();
+		const files = [
+			".context/INDEX.md",
+			".context/summary.md",
+			".javi-forge/manifest.json",
+		];
+		const before = await Promise.all(
+			files.map(async (file) => ({
+				bytes: await fs.readFile(path.join(tmpDir, file)),
+				mtime: (await fs.stat(path.join(tmpDir, file))).mtimeMs,
+			})),
 		);
-		await fs.writeFile(path.join(tmpDir, ".context", "summary.md"), "# old\n");
-		await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
-		await fs.writeJson(path.join(tmpDir, ".javi-forge", "manifest.json"), {
-			version: "0.1.0",
-			projectName: "test-project",
-			stack: "node",
-			ciProvider: "github",
-			memory: "engram",
-			createdAt: "2025-01-15T10:00:00Z",
-			updatedAt: "2025-01-15T10:00:00Z",
-			modules: [],
-		});
-		// detectStack needs a stack marker — without it refreshContextDir
-		// cannot pick a template and falls through to skip.
-		await fs.writeJson(path.join(tmpDir, "package.json"), {
-			name: "test-project",
-		});
-
-		const result = await runDoctor(tmpDir);
-		const ctxSection = result.sections.find(
+		const result = await runDoctor(tmpDir, options);
+		const after = await Promise.all(
+			files.map(async (file) => ({
+				bytes: await fs.readFile(path.join(tmpDir, file)),
+				mtime: (await fs.stat(path.join(tmpDir, file))).mtimeMs,
+			})),
+		);
+		expect(after).toEqual(before);
+		const section = result.sections.find(
 			(s) => s.title === "Context Directory",
 		)!;
-		expect(ctxSection).toBeDefined();
-		expect(ctxSection.checks[0].status).toBe("ok");
+		expect(section.checks[0].detail).not.toContain("updated");
+		expect(section.checks[0].detail).toContain(
+			options.refreshContext ? "would refresh" : "not refreshed",
+		);
+	});
+
+	it("refreshes context only on explicit request", async () => {
+		await seedContext();
+		const result = await runDoctor(tmpDir, { refreshContext: true });
+		expect(
+			await fs.readFile(path.join(tmpDir, ".context/INDEX.md"), "utf8"),
+		).not.toBe("# old content\n");
+		expect(
+			await fs.readFile(path.join(tmpDir, ".context/summary.md"), "utf8"),
+		).not.toBe("# old\n");
+		const manifest = await fs.readJson(
+			path.join(tmpDir, ".javi-forge/manifest.json"),
+		);
+		expect(manifest.updatedAt).not.toBe("2025-01-15T10:00:00Z");
+		const section = result.sections.find(
+			(s) => s.title === "Context Directory",
+		)!;
+		expect(section.checks[0].status).toBe("ok");
+		expect(section.checks[0].detail).toContain("updated");
+	});
+
+	it("reports dependency warnings without rewriting context", async () => {
+		await seedContext();
+		await fs.writeFile(path.join(tmpDir, "package.json"), "{ invalid JSON }");
+		const result = await runDoctor(tmpDir);
+		const section = result.sections.find(
+			(s) => s.title === "Context Directory",
+		)!;
+		expect(section.checks).toContainEqual(
+			expect.objectContaining({ label: "dependency manifest", status: "fail" }),
+		);
+		expect(
+			await fs.readFile(path.join(tmpDir, ".context/INDEX.md"), "utf8"),
+		).toBe("# old content\n");
 	});
 
 	it("shows context refresh skip when no .context/ exists", async () => {

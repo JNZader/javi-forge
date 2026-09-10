@@ -2,7 +2,8 @@
 
 ## init
 
-Bootstrap a new project. This is the default command.
+Bootstrap a new project. This is the default only when no command is supplied.
+Unknown commands exit with a usage error before initialization, including in batch mode.
 
 ```bash
 npx javi-forge init [options]
@@ -145,11 +146,20 @@ npx javi-forge analyze --dry-run
 
 ## doctor
 
-Show a comprehensive health report.
+Show a comprehensive health report without changing project files or refreshing context.
+The update notifier is not started for diagnostics or dry-runs.
 
 ```bash
 npx javi-forge doctor
+npx javi-forge doctor --dry-run
+npx javi-forge doctor --refresh-context --dry-run  # preview context refresh
+npx javi-forge doctor --refresh-context          # explicitly write context updates
 ```
+
+Only `--refresh-context` updates `.context/INDEX.md`, `.context/summary.md`
+and the manifest timestamp. `--dry-run` always prevents those writes. Dependency
+manifest warnings remain visible without refreshing. Existing CI context refresh
+behavior is unchanged. Pressing `r` reruns the current checks with the same options.
 
 ### What it checks
 
@@ -161,6 +171,7 @@ npx javi-forge doctor
 | **Stack Detection** | Looks for package.json, go.mod, Cargo.toml, build.gradle, pom.xml, etc. |
 | **Project Manifest** | `.javi-forge/manifest.json` — project name, stack, creation date |
 | **Installed Modules** | engram, obsidian-brain, memory-simple, ghagga |
+| **Context Directory** | Presence and dependency-manifest warnings; refresh only with `--refresh-context` |
 
 ---
 
@@ -268,6 +279,10 @@ Notes:
 
 Manage javi-forge plugins.
 
+With no action, plugin lists installed plugins. Unknown actions and missing
+required targets fail without calling plugin operations. Reported failures and
+guard refusals exit non-zero; success preserves an earlier non-zero exit status.
+
 ```bash
 npx javi-forge plugin <action> [target] [options]
 ```
@@ -285,6 +300,19 @@ npx javi-forge plugin <action> [target] [options]
 | `export <name>` | Export to Agent Skills spec (`skills.json`) |
 | `export <name> --codex` | Export to Codex-compatible TOML subagent files |
 | `import <dir>` | Import an Agent Skills spec package as a plugin |
+
+On `add`, a replacement is staged before the existing managed installation is moved
+aside. If publication succeeds but backup cleanup cannot be confirmed, installation
+remains successful and prints a warning with a location to inspect. Failed
+publication can retain staging and backup paths for manual recovery. This is not
+a crash-durability or concurrent-installer guarantee.
+
+Removal accepts only a 2–60 character lowercase kebab-case plugin name, not a path.
+The destination must be a direct child of the installed plugins directory, not a
+symlink, and carry a non-symlink `.installed.json` with matching plugin identities.
+Missing, unreadable or mismatched metadata causes refusal; `--dry-run` performs
+the same validation without deleting anything. Broken plugin assets do not need
+to pass installation validation before a legitimate installed plugin can be removed.
 
 ### Examples
 

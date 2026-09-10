@@ -22,7 +22,7 @@ export const HELP_TEXT = `
     tdd pipeline      Enable the TDD pre-push section (--mode strict|warn)
     hooks run         Run a git hook's composed sections (pre-commit | pre-push)
     analyze           Run repoforge skills analysis
-    doctor            Show health report
+    doctor            Show health report (read-only unless --refresh-context)
     workflow show     Render a workflow graph as ASCII (--template <name> or file path)
     workflow validate Validate project state against a workflow graph
     workflow list     List available workflows and built-in templates
@@ -52,6 +52,7 @@ export const HELP_TEXT = `
 
   Options
     --dry-run       Preview changes without writing files
+    --refresh-context  Explicitly refresh context files during doctor (respects --dry-run)
     --stack         Project stack (node, python, go, rust, java-gradle, java-maven, elixir)
     --ci            CI provider (github, gitlab, woodpecker)
     --memory        Memory module (engram, obsidian-brain, memory-simple, none)
@@ -209,6 +210,7 @@ export const FLAGS_SCHEMA = {
 	// `ci --help` can show ci-specific usage instead of the global banner).
 	help: { type: "boolean", shortFlag: "h", default: false },
 	dryRun: { type: "boolean", default: false },
+	refreshContext: { type: "boolean", default: false },
 	stack: { type: "string", default: "" },
 	ci: { type: "string", default: "" },
 	memory: { type: "string", default: "" },

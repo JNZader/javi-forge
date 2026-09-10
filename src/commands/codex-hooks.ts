@@ -6,9 +6,8 @@
  *
  * Doctor exit code follows the effective-execution verdict (runnable → 0,
  * blocked → 1, inconclusive → 2), independent of any component health — the same
- * honest-execution contract as the Claude renderer. The UNTRUSTED state is a
- * `blocked` verdict (an untrusted Codex hook is silently skipped), so a fresh
- * install correctly reports blocked until the user grants trust.
+ * honest-execution contract as the Claude renderer. Unknown provider trust is
+ * inconclusive; a successful registration write is not proof of trust.
  */
 
 import {
@@ -57,7 +56,7 @@ function renderMutation(
 			log("changed: nothing (already up to date)");
 		}
 		log(`trust: ${result.report.trust.state}`);
-		if (result.report.trust.state === "untrusted") {
+		if (result.report.trust.state !== "trusted") {
 			log(`  → ${result.report.trust.grantCommand}`);
 		}
 		renderWarnings(result.warnings, log);
@@ -81,7 +80,9 @@ function renderDoctor(
 		return 1;
 	}
 	const report: CodexHookDoctorReport = result;
-	log(`doctor codex: ${report.healthy ? "healthy" : "unhealthy"}`);
+	log(
+		`doctor codex: ${report.execution.status === "inconclusive" ? "inconclusive" : report.healthy ? "healthy" : "unhealthy"}`,
+	);
 	log(`  hooks.json: ${report.hooksJson.state}`);
 	log(
 		`  config:    [features] hooks=${report.config.featuresHooks} (readable: ${report.config.readable})`,

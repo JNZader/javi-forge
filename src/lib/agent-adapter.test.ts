@@ -24,8 +24,8 @@ describe("agent adapter registry", () => {
 		expect(codex.managedSet).toContain(".codex/hooks.json");
 
 		const trusted = `[hooks.state."${paths.hooksFile}:pre_tool_use:0:0"]\n`;
-		expect(codex.trust?.detect(trusted, paths.hooksFile)).toBe("trusted");
-		expect(codex.trust?.detect("", paths.hooksFile)).toBe("untrusted");
+		expect(codex.trust?.detect(trusted, paths.hooksFile)).toBe("unknown");
+		expect(codex.trust?.detect("", paths.hooksFile)).toBe("unknown");
 
 		expect(AGENT_ADAPTERS.claude.trust).toBeNull();
 		expect(AGENT_ADAPTERS.claude.projectDir.envVar).toBe("CLAUDE_PROJECT_DIR");

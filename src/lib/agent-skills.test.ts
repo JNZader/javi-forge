@@ -23,6 +23,19 @@ vi.mock("fs-extra", () => {
 	return { default: mockFs, ...mockFs };
 });
 
+vi.mock("./plugin-replacement.js", () => ({
+	publishPluginReplacement: vi.fn(
+		async (
+			_root: string,
+			_name: string,
+			prepare: (stage: string) => Promise<void>,
+		) => {
+			await prepare("/fake/plugin-stage");
+			return { success: true, cleanup: "complete" };
+		},
+	),
+}));
+
 // ── Mock skill-scanner (importOriginal: real exports kept, walk doubled) ─────
 vi.mock("./skill-scanner.js", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("./skill-scanner.js")>();
@@ -48,6 +61,7 @@ import {
 	importAgentSkillsPackage,
 	pluginToAgentSkills,
 } from "./agent-skills.js";
+import { publishPluginReplacement } from "./plugin-replacement.js";
 import type { SkillScanResult } from "./skill-scanner.js";
 import { scanSkillsWithCoverage } from "./skill-scanner.js";
 
@@ -283,6 +297,7 @@ describe("importAgentSkillsPackage", () => {
 		expect(result.success).toBe(true);
 		expect(result.name).toBe("imported-skill");
 		expect(mockFs.copy).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.writeJson).not.toHaveBeenCalled();
 	});
 
@@ -329,6 +344,7 @@ describe("importAgentSkillsPackage", () => {
 		expect(result.error).toContain("skills");
 		// existing install preserved — neither remove nor copy ran
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
@@ -344,6 +360,7 @@ describe("importAgentSkillsPackage", () => {
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("skills");
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
@@ -382,6 +399,7 @@ describe("importAgentSkillsPackage", () => {
 		expect(result.error).toContain("invalid manifest name");
 		expect(result.error).toContain("manifest-integrity");
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
@@ -408,6 +426,7 @@ describe("importAgentSkillsPackage", () => {
 		expect(result.error).toContain("invalid manifest name");
 		expect(result.error).toContain("manifest-integrity");
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 });
@@ -470,6 +489,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(result.error).toContain("1 rejected");
 		expect(result.error).toContain("[BLOCK]");
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
@@ -502,6 +522,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("skillguard: install refused");
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
@@ -522,6 +543,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(result.error).toContain("undeclared");
 		expect(result.error).toContain("node_modules/evil/SKILL.md");
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
@@ -541,6 +563,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("symlink");
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
@@ -568,6 +591,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(result.error).toContain("skills/Alpha");
 		expect(result.refused).toBe(true);
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
@@ -589,6 +613,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(result.error).toContain("could not be read");
 		expect(result.error).toContain("locked");
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
@@ -611,6 +636,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 
 		// block + force → still refused
 		mockFs.copy.mockClear();
+		vi.mocked(publishPluginReplacement).mockClear();
 		mockScanner.mockResolvedValue({
 			declared: [scanResult("alpha", "block")],
 			undeclared: [],
@@ -622,6 +648,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		});
 		expect(refused.success).toBe(false);
 		expect(mockFs.copy).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("denies when the scan throws — even with force (D7)", async () => {
@@ -635,6 +662,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("skillguard scan failed");
 		expect(mockFs.remove).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
 	});
 
@@ -664,6 +692,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		// clone, JD-003) and before any placement.
 		expect(mockScanner).not.toHaveBeenCalled();
 		expect(mockFs.copy).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("refuses a declared path whose realpath escapes the package root — realpath branch (JD-012)", async () => {
@@ -691,6 +720,7 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 			expect(result.error).toContain("realpath");
 			expect(mockScanner).not.toHaveBeenCalled();
 			expect(mockFs.copy).not.toHaveBeenCalled();
+			expect(publishPluginReplacement).not.toHaveBeenCalled();
 		} finally {
 			mockFs.realpath.mockImplementation((async (p: string) => p) as never);
 		}
@@ -722,7 +752,8 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(result.refused).toBeUndefined();
 		expect(mockFs.copy).toHaveBeenCalledWith(
 			"/fake/source",
-			expect.any(String),
+			"/fake/plugin-stage",
+			expect.objectContaining({ filter: expect.any(Function) }),
 		);
 	});
 

@@ -49,6 +49,46 @@ const mutation = (
 });
 
 describe("runCodexHookCommand", () => {
+	it("doctor renders unknown trust as inconclusive and returns 2", async () => {
+		const out: string[] = [];
+		const report = baseReport({
+			trust: { state: "unknown", grantCommand: "verify in codex" },
+			execution: {
+				status: "inconclusive",
+				blockers: [],
+				unknownSources: ["trust: verification unavailable"],
+				residual: [],
+			},
+		});
+		const code = await runCodexHookCommand(
+			"doctor",
+			process.cwd(),
+			{},
+			{ doctor: async () => report, log: (m) => out.push(m) },
+		);
+		expect(code).toBe(2);
+		expect(out.join("\n")).toContain("doctor codex: inconclusive");
+		expect(out.join("\n")).toContain("trust:     unknown");
+	});
+	it("successful mutation still renders the verification step for unknown trust", async () => {
+		const out: string[] = [];
+		await runCodexHookCommand(
+			"install",
+			process.cwd(),
+			{},
+			{
+				install: async () =>
+					mutation({
+						report: baseReport({
+							trust: { state: "unknown", grantCommand: "verify in codex" },
+						}),
+					}),
+				log: (m) => out.push(m),
+			},
+		);
+		expect(out.join("\n")).toContain("verify in codex");
+	});
+
 	it("install: renders ok + untrusted trust step and exits 0", async () => {
 		const out: string[] = [];
 		const install = vi.fn(async () => mutation());

@@ -12,9 +12,9 @@ import {
 	classifyCodexHooksJson,
 	codexConfigPaths,
 	codexTrustGrantCommand,
+	detectCodexTrust,
 	doctorCodexPreToolUse,
 	expectedCodexCommand,
-	hasCodexTrustEntry,
 	installCodexPreToolUse,
 	type Manifest,
 	mergeFeaturesHooksTrue,
@@ -122,14 +122,8 @@ describe("codex pure TOML helpers", () => {
 		expect(parseFeaturesHooks(preserved)).toBe("true");
 	});
 
-	it("hasCodexTrustEntry detects the pre_tool_use trust table for the hook path", () => {
-		const p = "/home/u/.codex/hooks.json";
-		const trusted = `[hooks.state."${p}:pre_tool_use:0:0"]\ntrusted_hash = "abc"\n`;
-		expect(hasCodexTrustEntry(trusted, p)).toBe(true);
-		expect(hasCodexTrustEntry("[features]\nhooks = true\n", p)).toBe(false);
-		// A trust entry for a DIFFERENT hook path does not count.
-		const other = `[hooks.state."/elsewhere/hooks.json:pre_tool_use:0:0"]\n`;
-		expect(hasCodexTrustEntry(other, p)).toBe(false);
+	it("does not claim provider trust without an authoritative verifier", () => {
+		expect(detectCodexTrust()).toBe("unknown");
 	});
 
 	it("removeCodexTrustEntries drops OUR hooks.state table but keeps foreign rows + other content", () => {
@@ -144,7 +138,7 @@ describe("codex pure TOML helpers", () => {
 			"",
 		].join("\n");
 		const out = removeCodexTrustEntries(text, p);
-		expect(hasCodexTrustEntry(out, p)).toBe(false);
+		expect(out).not.toContain(`[hooks.state."${p}:pre_tool_use:0:0"]`);
 		// Foreign row + [features] survive untouched.
 		expect(out).toContain("/other/hooks.json:pre_tool_use:0:0");
 		expect(out).toContain('trusted_hash = "keep"');
@@ -160,7 +154,7 @@ describe("codex pure TOML helpers", () => {
 			hooks: {
 				PreToolUse: [
 					{
-						matcher: "*",
+						matcher: "Bash|apply_patch",
 						hooks: [{ type: "command", command: cmd, timeout: 30 }],
 					},
 				],
@@ -218,7 +212,7 @@ describe("codex install (secure-fs transaction)", () => {
 		expect(again.changed).toEqual([]);
 	});
 
-	it("R-1 rewriting hooks.json invalidates the now-stale trust entry (doctor → untrusted/blocked)", async () => {
+	it("R-1 command replacement preserves recorded trust for provider mismatch verification", async () => {
 		// Trusted + installed, but the managed hook references a STALE asset path.
 		fs.mkdirSync(codexDir(), { recursive: true });
 		const staleCmd =
@@ -230,7 +224,7 @@ describe("codex install (secure-fs transaction)", () => {
 					hooks: {
 						PreToolUse: [
 							{
-								matcher: "*",
+								matcher: "Bash|apply_patch",
 								hooks: [{ type: "command", command: staleCmd, timeout: 30 }],
 							},
 						],
@@ -245,18 +239,21 @@ describe("codex install (secure-fs transaction)", () => {
 			`[features]\nhooks = true\n[hooks.state."${hooksFile()}:pre_tool_use:0:0"]\ntrusted_hash = "stale"\n[hooks.state."/other/hooks.json:pre_tool_use:0:0"]\ntrusted_hash = "keep"\n`,
 		);
 
+		const originalConfig = fs.readFileSync(configFile(), "utf8");
 		const fake = makeFakeSecureFs();
 		mirror(fake);
 		// Re-install at the REAL asset path → managed hooks.json content changes.
 		const result = await runInstall(fake);
 		expect(result.ok).toBe(true);
 		expect(result.changed).toContain(hooksFile());
-		expect(result.changed).toContain(configFile());
+		expect(result.changed).not.toContain(configFile());
 
-		// OUR trust table is stripped from the written config; foreign row + the
-		// [features] flag survive.
+		// Preserve ALL trust bytes; no hash is minted or removed by migration.
 		const writtenConfig = fake.fileText(configFile()) as string;
-		expect(hasCodexTrustEntry(writtenConfig, hooksFile())).toBe(false);
+		expect(writtenConfig).toBe(originalConfig);
+		expect(writtenConfig).toContain(
+			`[hooks.state."${hooksFile()}:pre_tool_use:0:0"]`,
+		);
 		expect(writtenConfig).toContain("/other/hooks.json:pre_tool_use:0:0");
 		expect(parseFeaturesHooks(writtenConfig)).toBe("true");
 
@@ -267,12 +264,12 @@ describe("codex install (secure-fs transaction)", () => {
 			manifest: manifest(),
 			nodeProbe: STUB_NODE_PROBE,
 		});
-		expect(report.trust.state).toBe("untrusted");
-		expect(report.execution.status).toBe("blocked");
-		expect(report.execution.blockers.join(",")).toMatch(/trust|untrusted/);
+		expect(report.trust.state).toBe("unknown");
+		expect(report.execution.status).toBe("inconclusive");
+		expect(report.execution.unknownSources.join(",")).toContain("trust");
 	});
 
-	it("R-1 idempotent re-install (no content change) does NOT strip a valid trust entry", async () => {
+	it("R-1 idempotent re-install (no content change) does NOT strip a recorded trust entry", async () => {
 		// Managed-current hooks.json at the REAL asset + trusted + features on.
 		fs.mkdirSync(codexDir(), { recursive: true });
 		const cmd = expectedCodexCommand(REAL_ASSET);
@@ -283,7 +280,7 @@ describe("codex install (secure-fs transaction)", () => {
 					hooks: {
 						PreToolUse: [
 							{
-								matcher: "*",
+								matcher: "Bash|apply_patch",
 								hooks: [{ type: "command", command: cmd, timeout: 30 }],
 							},
 						],
@@ -301,16 +298,16 @@ describe("codex install (secure-fs transaction)", () => {
 		mirror(fake);
 		const result = await runInstall(fake);
 		expect(result.ok).toBe(true);
-		// Nothing rewritten → the valid trust entry is left intact on disk.
+		// Nothing rewritten → the recorded trust entry is left intact on disk.
 		expect(result.changed).toEqual([]);
-		expect(
-			hasCodexTrustEntry(fs.readFileSync(configFile(), "utf8"), hooksFile()),
-		).toBe(true);
+		expect(fs.readFileSync(configFile(), "utf8")).toContain(
+			`[hooks.state."${hooksFile()}:pre_tool_use:0:0"]`,
+		);
 	});
 
 	it("R-3 repair --force captures persistent backups of the prior managed files", async () => {
 		// Existing managed hook at a STALE path + [features] hooks=false → repair
-		// rewrites BOTH files.
+		// rewrites hooks.json only; config enablement remains false.
 		fs.mkdirSync(codexDir(), { recursive: true });
 		const staleCmd =
 			"node /old/javi-forge-skillguard-pre-tool-use.mjs --agent=codex";
@@ -321,7 +318,7 @@ describe("codex install (secure-fs transaction)", () => {
 					hooks: {
 						PreToolUse: [
 							{
-								matcher: "*",
+								matcher: "Bash|apply_patch",
 								hooks: [{ type: "command", command: staleCmd, timeout: 30 }],
 							},
 						],
@@ -347,7 +344,10 @@ describe("codex install (secure-fs transaction)", () => {
 			},
 		);
 		expect(result.ok).toBe(true);
-		expect(result.backups.length).toBeGreaterThan(0);
+		expect(result.backups).toHaveLength(1);
+		expect(result.backups[0]).toContain("hooks.json");
+		expect(result.changed).toEqual([hooksFile()]);
+		expect(fake.fileText(configFile())).toBe("[features]\nhooks = false\n");
 	});
 
 	it("R-3 repair WITHOUT --force writes no persistent backup", async () => {
@@ -361,7 +361,7 @@ describe("codex install (secure-fs transaction)", () => {
 					hooks: {
 						PreToolUse: [
 							{
-								matcher: "*",
+								matcher: "Bash|apply_patch",
 								hooks: [{ type: "command", command: staleCmd, timeout: 30 }],
 							},
 						],
@@ -388,15 +388,17 @@ describe("codex install (secure-fs transaction)", () => {
 		);
 		expect(result.ok).toBe(true);
 		expect(result.backups).toEqual([]);
+		expect(result.changed).toEqual([hooksFile()]);
+		expect(fake.fileText(configFile())).toBe("[features]\nhooks = false\n");
 	});
 
-	it("S2.5 reports untrusted right after install (report-the-trust-step)", async () => {
+	it("S2.5 reports unknown trust right after install (report-the-trust-step)", async () => {
 		const fake = makeFakeSecureFs();
 		mirror(fake);
 		const result = await runInstall(fake);
 		if (!result.ok)
 			throw new Error(`unexpected refusal: ${result.errors.join(", ")}`);
-		expect(result.report.trust.state).toBe("untrusted");
+		expect(result.report.trust.state).toBe("unknown");
 		expect(result.report.trust.grantCommand).toContain("codex");
 		expect(result.warnings.join("\n")).toMatch(/trust|approve/i);
 	});
@@ -417,7 +419,7 @@ describe("codex doctor (execution matrix)", () => {
 					hooks: {
 						PreToolUse: [
 							{
-								matcher: "*",
+								matcher: "Bash|apply_patch",
 								hooks: [{ type: "command", command: cmd, timeout: 30 }],
 							},
 						],
@@ -454,12 +456,12 @@ describe("codex doctor (execution matrix)", () => {
 		expect(report.execution.blockers.join(",")).toMatch(/hooks=false/);
 	});
 
-	it("S2.2 untrusted (no trust entry) → blocked — THE fail-open guard", async () => {
+	it("S2.2 no trust entry without provider identity → inconclusive", async () => {
 		writeManagedHooks();
 		writeConfig("[features]\nhooks = true\n");
 		const report = await doctor();
-		expect(report.execution.status).toBe("blocked");
-		expect(report.execution.blockers.join(",")).toMatch(/trust|untrusted/);
+		expect(report.execution.status).toBe("inconclusive");
+		expect(report.execution.unknownSources.join(",")).toContain("trust");
 	});
 
 	it("S2.2 asset SHA ∉ manifest → blocked", async () => {
@@ -490,12 +492,12 @@ describe("codex doctor (execution matrix)", () => {
 		expect(report.execution.status).toBe("blocked");
 	});
 
-	it("fully trusted + current + node → runnable", async () => {
+	it("recorded hash + current + node → inconclusive", async () => {
 		writeManagedHooks();
 		writeConfig(trustText());
 		const report = await doctor();
-		expect(report.execution.status).toBe("runnable");
-		expect(report.trust.state).toBe("trusted");
+		expect(report.execution.status).toBe("inconclusive");
+		expect(report.trust.state).toBe("unknown");
 	});
 
 	it("codexConfigPaths + grant command are stable", () => {
@@ -730,5 +732,359 @@ describe("public wrapper platform boundary", () => {
 			errors: ["unsupported-platform"],
 		});
 		expect(homeRead).toBe(false);
+	});
+});
+
+describe("Codex registration and trust evidence", () => {
+	const handler = () => ({
+		type: "command",
+		command: expectedCodexCommand(REAL_ASSET),
+		timeout: 30,
+	});
+	const foreign = { type: "command", command: "echo keep" };
+	const group = (
+		matcher: unknown = "Bash|apply_patch",
+		timeout: unknown = 30,
+	) => ({ matcher, hooks: [{ ...handler(), timeout }] });
+	const seed = (groups: unknown[], config = "[features]\nhooks = true\n") => {
+		fs.mkdirSync(codexDir(), { recursive: true });
+		fs.writeFileSync(
+			hooksFile(),
+			JSON.stringify({ hooks: { PreToolUse: groups } }),
+		);
+		fs.writeFileSync(configFile(), config);
+	};
+	it.each([
+		"*",
+		"Read",
+		"Bash",
+		"",
+		"[",
+		null,
+		7,
+	])("never calls matcher %j managed-current", (matcher) => {
+		expect(
+			classifyCodexHooksJson(
+				{ hooks: { PreToolUse: [group(matcher)] } },
+				expectedCodexCommand(REAL_ASSET),
+			).state,
+		).not.toBe("managed-current");
+	});
+	it.each([
+		null,
+		0,
+		-1,
+		"30",
+		31,
+	])("requires the exact managed timeout rather than %j", (timeout) => {
+		expect(
+			classifyCodexHooksJson(
+				{ hooks: { PreToolUse: [group("Bash|apply_patch", timeout)] } },
+				expectedCodexCommand(REAL_ASSET),
+			).state,
+		).not.toBe("managed-current");
+	});
+	it("carries config coordinates across preceding foreign groups and handlers", () => {
+		const value = {
+			hooks: {
+				PreToolUse: [
+					{ matcher: "Read", hooks: [foreign] },
+					{ matcher: "Bash|apply_patch", hooks: [foreign, handler()] },
+				],
+			},
+		};
+		expect(
+			classifyCodexHooksJson(value, expectedCodexCommand(REAL_ASSET)),
+		).toMatchObject({
+			state: "managed-current",
+			groupIndex: 1,
+			handlerIndex: 1,
+		});
+	});
+	it.each([
+		"echo before && ",
+		"after",
+	])("does not own an embedded or suffixed command: %s", (part) => {
+		const command =
+			part === "after"
+				? expectedCodexCommand(REAL_ASSET) + " && echo after"
+				: part + expectedCodexCommand(REAL_ASSET);
+		expect(
+			classifyCodexHooksJson(
+				{
+					hooks: {
+						PreToolUse: [
+							{
+								matcher: "Bash|apply_patch",
+								hooks: [{ ...handler(), command }],
+							},
+						],
+					},
+				},
+				expectedCodexCommand(REAL_ASSET),
+			).state,
+		).toBe("foreign");
+	});
+	it.each([
+		"",
+		'trusted_hash = ""',
+		'trusted_hash = "arbitrary"',
+	])("recorded field %j never proves runnable trust", async (hashLine) => {
+		seed(
+			[
+				{ matcher: "Read", hooks: [foreign] },
+				{ matcher: "Bash|apply_patch", hooks: [foreign, handler()] },
+			],
+			`[features]\nhooks = true\n[hooks.state."${hooksFile()}:pre_tool_use:1:1"]\n${hashLine}\n`,
+		);
+		const report = await supportedDoctor(home, {
+			manifest: manifest(),
+			nodeProbe: STUB_NODE_PROBE,
+		});
+		expect(report.trust.state).toBe("unknown");
+		expect(report.healthy).toBe(false);
+		expect(report.execution.status).toBe("inconclusive");
+	});
+	it.each([
+		"0:0suffix",
+		"0:00:extra",
+	])("preserves colliding trust-key suffix %s", (suffix) => {
+		const text = `[hooks.state."${hooksFile()}:pre_tool_use:${suffix}"]\ntrusted_hash = "foreign"\n`;
+		expect(removeCodexTrustEntries(text, hooksFile())).toBe(text);
+	});
+	it.each([
+		"echo keep",
+		`node /foreign/prefix-${ASSET_NAME} --agent=codex`,
+	])("preserves foreign handler %s when repair is safe", async (command) => {
+		const foreign = { type: "command", command };
+		const value = { hooks: { PreToolUse: [{ hooks: [foreign] }] } };
+		expect(classifyCodexHooksJson(value, handler().command).state).toBe(
+			"foreign",
+		);
+		const original = {
+			matcher: "Bash|apply_patch",
+			hooks: [
+				foreign,
+				{ ...handler(), command: `node /old/${ASSET_NAME} --agent=codex` },
+			],
+			description: "keep group metadata",
+		};
+		seed([original]);
+		const fake = makeFakeSecureFs();
+		mirror(fake);
+		const result = await runInstall(fake);
+		expect(result.ok).toBe(true);
+		const written = JSON.parse(fake.fileText(hooksFile()) as string).hooks
+			.PreToolUse;
+		expect(written).toEqual([{ ...original, hooks: [foreign, handler()] }]);
+	});
+	it.each([
+		"install",
+		"repair",
+	] as const)("refuses %s before writes when a shared matcher would change", async (mode) => {
+		seed(
+			[{ matcher: "Read", hooks: [foreign, handler()] }],
+			`[features]\nhooks = true\n[hooks.state."${hooksFile()}:pre_tool_use:0:0"]\ntrusted_hash = "foreign"\n`,
+		);
+		const before = [
+			fs.readFileSync(hooksFile()),
+			fs.readFileSync(configFile()),
+		];
+		const fake = makeFakeSecureFs();
+		mirror(fake);
+		const result = await _runCodex(
+			home,
+			mode,
+			{ force: true },
+			{ secureFs: fake, manifest: manifest(), nodeProbe: STUB_NODE_PROBE },
+		);
+		expect(result.ok).toBe(false);
+		expect(result.changed).toEqual([]);
+		expect(result.errors.join(" ")).toContain("matcher");
+		expect([
+			fs.readFileSync(hooksFile()),
+			fs.readFileSync(configFile()),
+		]).toEqual(before);
+		expect([fake.fileText(hooksFile()), fake.fileText(configFile())]).toEqual(
+			before.map((bytes) => bytes.toString()),
+		);
+	});
+	it("leaves a canonical mixed registration and its recorded trust untouched", async () => {
+		seed(
+			[{ matcher: "Bash|apply_patch", hooks: [foreign, handler()] }],
+			`[features]\nhooks = true\n[hooks.state."${hooksFile()}:pre_tool_use:0:1"]\ntrusted_hash = "unverified"\n`,
+		);
+		const fake = makeFakeSecureFs();
+		mirror(fake);
+		expect((await runInstall(fake)).changed).toEqual([]);
+	});
+});
+
+describe("selective Codex command migration", () => {
+	const owned = () => ({
+		type: "command",
+		command: "node /old/javi-forge-skillguard-pre-tool-use.mjs --agent=codex",
+		timeout: 30,
+		description: "keep owned metadata",
+	});
+	const foreign = (name: string) => ({
+		type: "command",
+		command: `echo ${name}`,
+		timeout: 17,
+	});
+	const group = (hooks: unknown[]) => ({
+		matcher: "Bash|apply_patch",
+		hooks,
+		description: "keep group metadata",
+	});
+	const seed = (groups: unknown[], config: string) => {
+		const value = {
+			metadata: { preserve: true },
+			hooks: {
+				PreToolUse: groups,
+				PostToolUse: [group([foreign("other-event")])],
+			},
+		};
+		fs.mkdirSync(codexDir(), { recursive: true });
+		fs.writeFileSync(hooksFile(), JSON.stringify(value));
+		fs.writeFileSync(configFile(), config);
+		const fake = makeFakeSecureFs();
+		mirror(fake);
+		return { value, fake };
+	};
+	it.each([
+		"before",
+		"after",
+		"first-sibling",
+		"last-sibling",
+	])("updates only the owned command at its original %s coordinates", async (layout) => {
+		const ours = owned();
+		const other = group([foreign("separate")]);
+		const groups =
+			layout === "before"
+				? [group([ours]), other]
+				: layout === "after"
+					? [other, group([ours])]
+					: [
+							group(
+								layout === "first-sibling"
+									? [ours, foreign("sibling")]
+									: [foreign("sibling"), ours],
+							),
+							other,
+						];
+		const groupIndex = layout === "after" ? 1 : 0;
+		const handlerIndex = layout === "last-sibling" ? 1 : 0;
+		const config = `# preserve formatting\r\n[features]\r\nhooks = true\r\n[hooks.state."${hooksFile()}:pre_tool_use:${groupIndex}:${handlerIndex}"]\r\nenabled = false\r\ntrusted_hash = "old-owned"\r\n[hooks.state."${hooksFile()}:pre_tool_use:9:7"]\r\ntrusted_hash = "foreign"\r\n[other]\r\nvalue = "opaque"\r\n`;
+		const { value, fake } = seed(groups, config);
+		const result = await runInstall(fake);
+		expect(result.ok).toBe(true);
+		expect(result.changed).toEqual([hooksFile()]);
+		ours.command = expectedCodexCommand(REAL_ASSET);
+		expect(JSON.parse(fake.fileText(hooksFile()) as string)).toEqual(value);
+		expect(fake.fileText(configFile())).toBe(config);
+		expect(fs.readFileSync(configFile(), "utf8")).toBe(config);
+		expect(classifyCodexHooksJson(value, ours.command)).toMatchObject({
+			state: "managed-current",
+			groupIndex,
+			handlerIndex,
+		});
+		fs.writeFileSync(hooksFile(), fake.fileText(hooksFile()) as string);
+		const again = makeFakeSecureFs();
+		mirror(again);
+		const second = await runInstall(again);
+		expect(second.ok).toBe(true);
+		expect(second.changed).toEqual([]);
+		expect(second.backups).toEqual([]);
+		expect(again.fileText(configFile())).toBe(config);
+	});
+	it("preserves a disabled feature and never inserts trust", async () => {
+		const config = "# disabled by user\n[features]\nhooks = false\n";
+		const { fake } = seed([group([owned()])], config);
+		const result = await runInstall(fake);
+		if (!result.ok)
+			throw new Error(`unexpected refusal: ${result.errors.join(", ")}`);
+		expect(result.changed).toEqual([hooksFile()]);
+		expect(fake.fileText(configFile())).toBe(config);
+		expect(fake.fileText(configFile())).not.toContain("trusted_hash");
+		expect(result.report.execution.blockers).toContain(
+			"policy:features.hooks=false",
+		);
+	});
+	it.each([
+		"duplicate-groups",
+		"duplicate-siblings",
+		"shared-matcher",
+		"owned-matcher",
+		"owned-timeout",
+		"null-group",
+		"missing-handlers",
+		"unknown-handler",
+		"invalid-handler",
+		"invalid-matcher",
+		"ambiguous-features",
+		"invalid-feature",
+		"missing-feature",
+		"unreadable-config",
+		"initial-disabled",
+		"initial-trust",
+	])("refuses %s before any writes or backups", async (problem) => {
+		let groups: unknown[] = [group([owned()])];
+		let config = "[features]\nhooks = true\n";
+		if (problem === "duplicate-groups") groups.push(group([owned()]));
+		if (problem === "duplicate-siblings") groups = [group([owned(), owned()])];
+		if (problem === "shared-matcher")
+			groups = [{ ...group([foreign("keep"), owned()]), matcher: "Read" }];
+		if (problem === "owned-matcher")
+			groups = [{ ...group([owned()]), matcher: "*" }];
+		if (problem === "owned-timeout")
+			groups = [group([{ ...owned(), timeout: 20 }])];
+		if (problem === "null-group") groups.push(null);
+		if (problem === "missing-handlers") groups.push({ matcher: "Bash" });
+		if (problem === "unknown-handler")
+			groups.push(group([{ type: "unknown", command: "echo keep" }]));
+		if (problem === "invalid-handler")
+			groups.push(group([{ type: "command", command: 7 }]));
+		if (problem === "invalid-matcher")
+			groups.push({ ...group([foreign("keep")]), matcher: 7 });
+		if (problem === "ambiguous-features")
+			config += "[features]\nhooks = false\n";
+		if (problem === "invalid-feature")
+			config = "[features]\nhooks = true trailing-junk\n";
+		if (problem === "missing-feature") config = "[model]\nname = 'untouched'\n";
+		if (problem === "initial-disabled") {
+			groups = [];
+			config = "[features]\nhooks = false\n";
+		}
+		if (problem === "initial-trust") {
+			groups = [];
+			config += `[hooks.state."${hooksFile()}:pre_tool_use:0:0"]\ntrusted_hash = "retain"\n`;
+		}
+		const { fake } = seed(groups, config);
+		if (problem === "unreadable-config") {
+			fs.unlinkSync(configFile());
+			fs.mkdirSync(configFile());
+		}
+		const files = new Map(
+			[...fake.files].map(([name, file]) => [
+				name,
+				{ ...file, bytes: Buffer.from(file.bytes) },
+			]),
+		);
+		const directories = [...fake.dirs];
+		const write = vi.spyOn(fake, "writeExclusive");
+		const result = await _runCodex(
+			home,
+			"repair",
+			{ force: true },
+			{ secureFs: fake, manifest: manifest(), nodeProbe: STUB_NODE_PROBE },
+		);
+		expect(result.ok).toBe(false);
+		expect(result.errors.join(" ")).toContain("refuse");
+		expect(result.changed).toEqual([]);
+		expect(result.backups).toEqual([]);
+		expect(write).not.toHaveBeenCalled();
+		expect(fake.files).toEqual(files);
+		expect([...fake.dirs]).toEqual(directories);
 	});
 });

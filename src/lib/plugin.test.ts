@@ -1,4 +1,6 @@
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PLUGINS_DIR } from "../constants.js";
 import type { PluginManifest } from "../types/index.js";
 
 // ── Mock fs-extra ────────────────────────────────────────────────────────────
@@ -9,12 +11,28 @@ vi.mock("fs-extra", () => {
 		writeJson: vi.fn(),
 		readdir: vi.fn(),
 		ensureDir: vi.fn(),
+		mkdtemp: vi.fn().mockResolvedValue("/tmp/plugins/.tmp/install-exclusive"),
 		remove: vi.fn(),
 		move: vi.fn(),
 		copy: vi.fn(),
+		lstat: vi.fn(),
+		realpath: vi.fn(),
 	};
 	return { default: mockFs, ...mockFs };
 });
+
+vi.mock("./plugin-replacement.js", () => ({
+	publishPluginReplacement: vi.fn(
+		async (
+			_root: string,
+			_name: string,
+			prepare: (stage: string) => Promise<void>,
+		) => {
+			await prepare("/fake/plugin-stage");
+			return { success: true, cleanup: "complete" };
+		},
+	),
+}));
 
 // ── Mock child_process ───────────────────────────────────────────────────────
 vi.mock("child_process", () => ({
@@ -57,6 +75,7 @@ import {
 	syncPlugins,
 	validatePlugin,
 } from "./plugin.js";
+import { publishPluginReplacement } from "./plugin-replacement.js";
 import type { SkillScanResult } from "./skill-scanner.js";
 import { scanSkillsWithCoverage } from "./skill-scanner.js";
 
@@ -425,6 +444,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.error).toContain("1 blocked");
 		expect(result.error).toContain("[BLOCK]");
 		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		// staging cleanup still runs
 		expect(mockFs.remove).toHaveBeenCalled();
 	});
@@ -444,6 +464,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.error).toContain("could not be read");
 		expect(result.error).toContain("locked");
 		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("refuses on unscannable declared skill; force lifts unscannable", async () => {
@@ -460,11 +481,12 @@ describe("installPlugin — skillguard gate", () => {
 		expect(refused.error).toContain("skillguard: install refused");
 		expect(refused.error).toContain("1 unscannable");
 		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 
 		mockScanner.mockClear();
 		const forced = await installPlugin("org/repo", { force: true });
 		expect(forced.success).toBe(true);
-		expect(mockFs.move).toHaveBeenCalled();
+		expect(publishPluginReplacement).toHaveBeenCalled();
 	});
 
 	it("force does NOT lift a block verdict", async () => {
@@ -480,6 +502,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("skillguard: install refused");
 		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("denies when the scan throws — even with force (D7)", async () => {
@@ -490,6 +513,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("skillguard scan failed");
 		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("installs byte-identically when declared skills pass and coverage is clean", async () => {
@@ -504,7 +528,7 @@ describe("installPlugin — skillguard gate", () => {
 		const result = await installPlugin("org/repo");
 		expect(result.success).toBe(true);
 		expect(result.name).toBe("my-plugin");
-		expect(mockFs.move).toHaveBeenCalled();
+		expect(publishPluginReplacement).toHaveBeenCalled();
 	});
 
 	it("refuses an undeclared SKILL.md anywhere in the tree — force never lifts (JD-006/JD-007)", async () => {
@@ -522,6 +546,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.error).toContain("undeclared");
 		expect(result.error).toContain("evil/SKILL.md");
 		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("refuses an ambiguous declared dir (case-colliding on-disk twin) — force never lifts (FU-5)", async () => {
@@ -545,6 +570,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.error).toContain("skills/Alpha");
 		expect(result.refused).toBe(true);
 		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("refuses ANY symlink in the tree — manifest-integrity, force never lifts (JD-007)", async () => {
@@ -562,6 +588,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.error).toContain("symlink");
 		expect(result.error).toContain("linked/SKILL.md");
 		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("declared pass/warn + coverage clean → installs (JD-002 rebind, testing 14/16(e))", async () => {
@@ -578,7 +605,7 @@ describe("installPlugin — skillguard gate", () => {
 
 		const result = await installPlugin("org/repo");
 		expect(result.success).toBe(true);
-		expect(mockFs.move).toHaveBeenCalled();
+		expect(publishPluginReplacement).toHaveBeenCalled();
 	});
 
 	it("does not run the gate in dry-run — scan not called (D3)", async () => {
@@ -649,6 +676,98 @@ describe("installPlugin — skillguard gate", () => {
 // ── removePlugin ─────────────────────────────────────────────────────────────
 
 describe("removePlugin", () => {
+	beforeEach(() => {
+		mockFs.lstat.mockReset().mockResolvedValue({
+			isDirectory: () => true,
+			isFile: () => true,
+			isSymbolicLink: () => false,
+		} as never);
+		mockFs.realpath
+			.mockReset()
+			.mockImplementation((p) => Promise.resolve(String(p)) as never);
+		mockFs.readJson.mockReset().mockResolvedValue({
+			name: "my-plugin",
+			manifest: { name: "my-plugin" },
+		} as never);
+	});
+	it.each([
+		"",
+		".",
+		"..",
+		"../other",
+		"my-plugin/..",
+		"/tmp/plugin",
+		"..\\other",
+		"C:\\plugins",
+		"a",
+		"x".repeat(61),
+	])("rejects invalid name %j before filesystem access", async (name) => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		const result = await removePlugin(name);
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("invalid plugin name");
+		expect(mockFs.pathExists).not.toHaveBeenCalled();
+		expect(mockFs.remove).not.toHaveBeenCalled();
+	});
+	it.each([
+		false,
+		true,
+	])("rejects conflicting installation identity (dryRun=%s)", async (dryRun) => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.readJson.mockResolvedValue({
+			name: "other",
+			manifest: { name: "my-plugin" },
+		} as never);
+		expect((await removePlugin("my-plugin", { dryRun })).success).toBe(false);
+		expect(mockFs.remove).not.toHaveBeenCalled();
+	});
+	it.each([
+		null,
+		{},
+		{ name: "my-plugin", manifest: { name: "other" } },
+	])("rejects incomplete identity %j", async (metadata) => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.readJson.mockResolvedValue(metadata as never);
+		expect((await removePlugin("my-plugin")).success).toBe(false);
+		expect(mockFs.remove).not.toHaveBeenCalled();
+	});
+	it("rejects missing or unreadable metadata without removal", async () => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.readJson.mockRejectedValue(new Error("missing metadata"));
+		expect((await removePlugin("my-plugin")).success).toBe(false);
+		expect(mockFs.remove).not.toHaveBeenCalled();
+	});
+	it("rejects a symlinked plugin directory", async () => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.lstat.mockResolvedValueOnce({
+			isDirectory: () => false,
+			isSymbolicLink: () => true,
+		} as never);
+		expect((await removePlugin("my-plugin")).success).toBe(false);
+		expect(mockFs.remove).not.toHaveBeenCalled();
+	});
+	it("rejects a symlinked installation marker", async () => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.lstat.mockResolvedValueOnce({
+			isDirectory: () => true,
+			isSymbolicLink: () => false,
+		} as never);
+		mockFs.lstat.mockResolvedValueOnce({
+			isFile: () => false,
+			isSymbolicLink: () => true,
+		} as never);
+		expect((await removePlugin("my-plugin")).success).toBe(false);
+		expect(mockFs.remove).not.toHaveBeenCalled();
+	});
+	it("rejects a resolved destination outside the plugin root", async () => {
+		mockFs.pathExists.mockResolvedValue(true as never);
+		mockFs.realpath
+			.mockResolvedValueOnce(PLUGINS_DIR as never)
+			.mockResolvedValueOnce(path.dirname(PLUGINS_DIR) as never);
+		expect((await removePlugin("my-plugin")).success).toBe(false);
+		expect(mockFs.remove).not.toHaveBeenCalled();
+	});
+
 	it("returns error when plugin is not installed", async () => {
 		mockFs.pathExists.mockResolvedValue(false as never);
 
@@ -663,7 +782,9 @@ describe("removePlugin", () => {
 
 		const result = await removePlugin("my-plugin");
 		expect(result.success).toBe(true);
-		expect(mockFs.remove).toHaveBeenCalled();
+		expect(mockFs.remove).toHaveBeenCalledExactlyOnceWith(
+			path.join(PLUGINS_DIR, "my-plugin"),
+		);
 	});
 
 	it("skips removal in dry-run", async () => {
@@ -736,20 +857,22 @@ describe("searchRegistry", () => {
 
 	afterEach(() => {
 		globalThis.fetch = originalFetch;
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
-	it("returns empty array when fetch fails", async () => {
+	it("reports unavailable when fetch fails", async () => {
 		globalThis.fetch = vi.fn().mockRejectedValue(new Error("network error"));
 
 		const result = await searchRegistry("test");
-		expect(result).toEqual([]);
+		expect(result).toEqual({ status: "unavailable" });
 	});
 
-	it("returns empty array when response is not ok", async () => {
+	it("reports unavailable when response is not ok", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({ ok: false });
 
 		const result = await searchRegistry();
-		expect(result).toEqual([]);
+		expect(result).toEqual({ status: "unavailable" });
 	});
 
 	it("returns all plugins when no query provided", async () => {
@@ -777,7 +900,10 @@ describe("searchRegistry", () => {
 		});
 
 		const result = await searchRegistry();
-		expect(result).toHaveLength(2);
+		expect(result).toMatchObject({
+			status: "success",
+			entries: [{ id: "org/alpha" }, { id: "org/beta" }],
+		});
 	});
 
 	it("filters plugins by query matching id", async () => {
@@ -795,8 +921,10 @@ describe("searchRegistry", () => {
 		});
 
 		const result = await searchRegistry("alpha");
-		expect(result).toHaveLength(1);
-		expect(result[0]!.id).toBe("org/alpha");
+		expect(result.status).toBe("success");
+		if (result.status !== "success") throw new Error("expected success");
+		expect(result.entries).toHaveLength(1);
+		expect(result.entries[0]!.id).toBe("org/alpha");
 	});
 
 	it("filters plugins by query matching description", async () => {
@@ -824,8 +952,10 @@ describe("searchRegistry", () => {
 		});
 
 		const result = await searchRegistry("ai tools");
-		expect(result).toHaveLength(1);
-		expect(result[0]!.id).toBe("org/a");
+		expect(result.status).toBe("success");
+		if (result.status !== "success") throw new Error("expected success");
+		expect(result.entries).toHaveLength(1);
+		expect(result.entries[0]!.id).toBe("org/a");
 	});
 
 	it("filters plugins by query matching tags", async () => {
@@ -853,8 +983,177 @@ describe("searchRegistry", () => {
 		});
 
 		const result = await searchRegistry("security");
-		expect(result).toHaveLength(1);
-		expect(result[0]!.id).toBe("org/a");
+		expect(result.status).toBe("success");
+		if (result.status !== "success") throw new Error("expected success");
+		expect(result.entries).toHaveLength(1);
+		expect(result.entries[0]!.id).toBe("org/a");
+	});
+	const entry = {
+		id: "org/demo",
+		repository: "repo",
+		description: "Demo",
+		tags: ["tools"],
+		stars: 3,
+		updatedAt: "2026-01-01",
+	};
+	const registry = (plugins: unknown = [entry]) => ({
+		version: "1",
+		updatedAt: "2026-01-01",
+		plugins,
+	});
+	const respond = (body: unknown) => {
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValue({ ok: true, json: async () => body });
+	};
+	it("preserves entry fields and order; empty and no-match are successful", async () => {
+		respond(registry());
+		expect(await searchRegistry()).toEqual({
+			status: "success",
+			entries: [entry],
+		});
+		expect(await searchRegistry("missing")).toEqual({
+			status: "success",
+			entries: [],
+		});
+		respond(registry([]));
+		expect(await searchRegistry()).toEqual({ status: "success", entries: [] });
+	});
+	it.each([
+		null,
+		{},
+		{ plugins: [] },
+		registry({}),
+		registry([null]),
+		registry([{ ...entry, id: 1 }]),
+		registry([{ ...entry, repository: null }]),
+		registry([{ ...entry, description: 3 }]),
+		registry([{ ...entry, tags: [3] }]),
+		registry([{ ...entry, stars: "3" }]),
+		registry([{ ...entry, updatedAt: 3 }]),
+	])("rejects malformed registry shape %j", async (body) => {
+		respond(body);
+		expect(await searchRegistry()).toEqual({ status: "unavailable" });
+	});
+	it.each([
+		"success",
+		"http",
+		"network",
+		"json",
+		"shape",
+	])("cleans timer/listener after %s", async (terminal) => {
+		vi.useFakeTimers();
+		const caller = new AbortController();
+		const remove = vi.spyOn(caller.signal, "removeEventListener");
+		respond(terminal === "shape" ? {} : registry());
+		if (terminal === "http")
+			globalThis.fetch = vi.fn().mockResolvedValue({ ok: false });
+		if (terminal === "network")
+			globalThis.fetch = vi
+				.fn()
+				.mockRejectedValue(new Error("private transport detail"));
+		if (terminal === "json")
+			globalThis.fetch = vi.fn().mockResolvedValue({
+				ok: true,
+				json: async () => {
+					throw new Error("private JSON detail");
+				},
+			});
+		expect(await searchRegistry(undefined, caller.signal)).toMatchObject({
+			status: terminal === "success" ? "success" : "unavailable",
+		});
+		expect(vi.getTimerCount()).toBe(0);
+		expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+	});
+	it.each([
+		"fetch",
+		"body",
+	])("bounds a noncooperative %s and handles its late rejection", async (phase) => {
+		vi.useFakeTimers();
+		let reject!: (reason: Error) => void;
+		const stalled = new Promise<never>((_resolve, fail) => {
+			reject = fail;
+		});
+		globalThis.fetch = vi
+			.fn()
+			.mockImplementation(() =>
+				phase === "fetch"
+					? stalled
+					: Promise.resolve({ ok: true, json: () => stalled }),
+			);
+		const caller = new AbortController();
+		const remove = vi.spyOn(caller.signal, "removeEventListener");
+		let settled: unknown = "pending";
+		const pending = searchRegistry(undefined, caller.signal).then((result) => {
+			settled = result;
+		});
+		await vi.advanceTimersByTimeAsync(9_999);
+		expect(settled).toBe("pending");
+		await vi.advanceTimersByTimeAsync(1);
+		expect(settled).toEqual({ status: "unavailable" });
+		expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+		expect(vi.getTimerCount()).toBe(0);
+		expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+		reject(new Error("late private rejection"));
+		await pending;
+		await vi.advanceTimersByTimeAsync(0);
+	});
+	it("covers fetch plus body with one overall deadline", async () => {
+		vi.useFakeTimers();
+		const json = vi.fn(() => new Promise<never>(() => {}));
+		globalThis.fetch = vi.fn().mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					setTimeout(() => resolve({ ok: true, json }), 6_000);
+				}),
+		);
+		let settled: unknown = "pending";
+		void searchRegistry().then((result) => {
+			settled = result;
+		});
+		await vi.advanceTimersByTimeAsync(6_000);
+		expect(json).toHaveBeenCalledOnce();
+		await vi.advanceTimersByTimeAsync(4_000);
+		expect(settled).toEqual({ status: "unavailable" });
+		expect(vi.getTimerCount()).toBe(0);
+	});
+	it("does not fetch or allocate a timer on pre-abort", async () => {
+		vi.useFakeTimers();
+		const caller = new AbortController();
+		caller.abort("private caller reason");
+		respond(registry());
+		expect(await searchRegistry(undefined, caller.signal)).toEqual({
+			status: "cancelled",
+		});
+		expect(fetch).not.toHaveBeenCalled();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+	it.each([
+		"fetch",
+		"body",
+	])("settles caller cancellation during %s and removes resources", async (phase) => {
+		vi.useFakeTimers();
+		const stalled = new Promise<never>(() => {});
+		globalThis.fetch = vi
+			.fn()
+			.mockImplementation(() =>
+				phase === "fetch"
+					? stalled
+					: Promise.resolve({ ok: true, json: () => stalled }),
+			);
+		const caller = new AbortController();
+		const remove = vi.spyOn(caller.signal, "removeEventListener");
+		let settled: unknown = "pending";
+		void searchRegistry(undefined, caller.signal).then((result) => {
+			settled = result;
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		caller.abort("private caller reason");
+		await vi.advanceTimersByTimeAsync(0);
+		expect(settled).toEqual({ status: "cancelled" });
+		expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+		expect(vi.getTimerCount()).toBe(0);
+		expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
 	});
 });
 

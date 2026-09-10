@@ -3,6 +3,9 @@ import { configDefaults, defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		globals: true,
+		// Includes are relative to dir, including when --dir src is passed.
+		dir: "src",
+		include: configDefaults.include,
 		// Keep vitest out of agent worktrees under .claude/worktrees — the default
 		// discovery sweeps them and a plain `pnpm test` picks up phantom copies of
 		// the suite from unrelated in-flight branches.
@@ -15,6 +18,8 @@ export default defineConfig({
 		exclude: [
 			...configDefaults.exclude,
 			"**/.claude/**",
+			"**/.worktrees/**",
+			"**/.stryker-tmp/**",
 			...(process.env.JAVI_FORGE_LINUX_INT === "1"
 				? []
 				: ["**/secure-fs-posix.integration.test.ts"]),

@@ -1,7 +1,7 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, open, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	ACL_DETAIL,
 	createLinuxAclAdapter,
@@ -541,5 +541,47 @@ describe("createPosixSecureFs ownership + secure I/O (host-independent, own tmp 
 		await unlink(path.join(dir, "empty", "child"));
 		expect((await fsx.rmdirIfIdentityEmpty(seg.value)).ok).toBe(true);
 		await parent.close();
+	});
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs/promises")>();
+	return { ...actual, rename: vi.fn(actual.rename), open: vi.fn(actual.open) };
+});
+
+describe("POSIX rename mutation versus directory sync", () => {
+	it.each([
+		"success",
+		"rename-reject",
+		"sync-reject",
+	])("classifies %s without claiming rejected rename was unapplied", async (fault) => {
+		vi.clearAllMocks();
+		const acl = createLinuxAclAdapter(
+			spawnReturning(clean("user::rwx\ngroup::r-x\nother::r--")),
+		);
+		const fs = createPosixSecureFs(acl);
+		const dir = {
+			path: "/inert",
+			identity: { dev: 1, ino: 1 },
+			close: async () => {},
+		};
+		if (fault === "rename-reject")
+			vi.mocked(rename).mockRejectedValueOnce(new Error("rename EIO"));
+		else {
+			vi.mocked(rename).mockResolvedValueOnce(undefined);
+			vi.mocked(open).mockResolvedValueOnce({
+				sync: async () => {
+					if (fault === "sync-reject") throw new Error("sync EIO");
+				},
+				close: async () => {},
+			} as Awaited<ReturnType<typeof open>>);
+		}
+		const result = await fs.renameInDir(dir, "from", "to");
+		expect(result.ok).toBe(fault === "success");
+		expect(result.mutation).toBe(
+			fault === "rename-reject" ? "unknown" : "applied",
+		);
+		expect(rename).toHaveBeenCalledExactlyOnceWith("/inert/from", "/inert/to");
+		if (fault === "rename-reject") expect(open).not.toHaveBeenCalled();
 	});
 });

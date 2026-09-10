@@ -1,7 +1,7 @@
 import { Box, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
-import React, { useCallback, useEffect, useState } from "react";
-import { runDoctor } from "../commands/doctor.js";
+import React, { useEffect, useState } from "react";
+import { type DoctorOptions, runDoctor } from "../commands/doctor.js";
 import type { DoctorResult } from "../types/index.js";
 import { useCIMode } from "./CIContext.js";
 import Header from "./Header.js";
@@ -29,18 +29,21 @@ export function unsupportedDoctorMessage(
 		: undefined;
 }
 
-export default function Doctor() {
+export default function Doctor({
+	dryRun = false,
+	refreshContext = false,
+}: DoctorOptions = {}) {
 	const { exit } = useApp();
 	const isCI = useCIMode();
 	const [result, setResult] = useState<DoctorResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 
-	const runCheck = useCallback(() => {
+	const runCheck = () => {
 		setLoading(true);
 		setResult(null);
 		setError(null);
-		runDoctor()
+		runDoctor(undefined, { dryRun, refreshContext })
 			.then((r) => {
 				setResult(r);
 				setLoading(false);
@@ -49,11 +52,11 @@ export default function Doctor() {
 				setError(String(e));
 				setLoading(false);
 			});
-	}, []);
+	};
 
 	useEffect(() => {
 		runCheck();
-	}, [runCheck]);
+	}, [dryRun, refreshContext]);
 
 	// Auto-exit in CI mode once loading finishes
 	useEffect(() => {
@@ -157,7 +160,7 @@ export default function Doctor() {
 			{!loading && (
 				<Box marginTop={1}>
 					<Text color={theme.muted} dimColor>
-						Press r to refresh, q to quit
+						Press r to rerun checks, q to quit
 					</Text>
 				</Box>
 			)}

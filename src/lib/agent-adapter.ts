@@ -20,7 +20,7 @@ import { validateSettingsShape } from "./claude-hook-settings.js";
 import {
 	codexConfigPaths,
 	codexTrustGrantCommand,
-	hasCodexTrustEntry,
+	detectCodexTrust,
 } from "./codex-hook-manager.js";
 
 export type AgentId = "claude" | "codex";
@@ -103,11 +103,7 @@ export const codexAdapter: AgentAdapter = {
 	marker: "// javi-forge-managed: codex-pretooluse v1",
 	emitDeny: "exit2+stderr",
 	trust: {
-		detect(configText, hooksFile) {
-			return hasCodexTrustEntry(configText, hooksFile)
-				? "trusted"
-				: "untrusted";
-		},
+		detect: detectCodexTrust,
 		grantCommand: codexTrustGrantCommand,
 	},
 };

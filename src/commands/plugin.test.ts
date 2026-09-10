@@ -14,6 +14,8 @@ vi.mock("../lib/plugin.js", () => ({
 vi.mock("../lib/agent-skills.js", () => ({
 	exportPluginAsAgentSkills: vi.fn(),
 	importAgentSkillsPackage: vi.fn(),
+	generateProjectSkillsJson: vi.fn(),
+	generateGlobalSkillsJson: vi.fn(),
 }));
 
 vi.mock("../lib/codex-export.js", () => ({
@@ -22,6 +24,8 @@ vi.mock("../lib/codex-export.js", () => ({
 
 import {
 	exportPluginAsAgentSkills,
+	generateGlobalSkillsJson,
+	generateProjectSkillsJson,
 	importAgentSkillsPackage,
 } from "../lib/agent-skills.js";
 import { exportPluginAsCodexToml } from "../lib/codex-export.js";
@@ -35,6 +39,7 @@ import {
 } from "../lib/plugin.js";
 import {
 	runPluginAdd,
+	runPluginCommand,
 	runPluginExport,
 	runPluginExportCodex,
 	runPluginImport,
@@ -90,7 +95,9 @@ describe("runPluginAdd", () => {
 		mockInstall.mockResolvedValue({ success: false, error: "clone failed" });
 		const { steps, onStep } = collectSteps();
 
-		await runPluginAdd("org/repo", false, onStep);
+		expect(await runPluginAdd("org/repo", false, onStep)).toEqual({
+			status: "failure",
+		});
 
 		expect(steps[1]!.status).toBe("error");
 		expect(steps[1]!.detail).toContain("clone failed");
@@ -140,7 +147,9 @@ describe("runPluginRemove", () => {
 		mockRemove.mockResolvedValue({ success: false, error: "not installed" });
 		const { steps, onStep } = collectSteps();
 
-		await runPluginRemove("nonexistent", false, onStep);
+		expect(await runPluginRemove("nonexistent", false, onStep)).toEqual({
+			status: "failure",
+		});
 
 		expect(steps[1]!.status).toBe("error");
 	});
@@ -197,7 +206,7 @@ describe("runPluginList", () => {
 
 describe("runPluginSearch", () => {
 	it("reports empty results", async () => {
-		mockSearch.mockResolvedValue([]);
+		mockSearch.mockResolvedValue({ status: "success", entries: [] });
 		const { steps, onStep } = collectSteps();
 
 		await runPluginSearch("test", onStep);
@@ -206,14 +215,17 @@ describe("runPluginSearch", () => {
 	});
 
 	it("reports search results with count", async () => {
-		mockSearch.mockResolvedValue([
-			{
-				id: "org/plugin",
-				repository: "https://github.com/org/plugin",
-				description: "A plugin",
-				tags: [],
-			},
-		]);
+		mockSearch.mockResolvedValue({
+			status: "success",
+			entries: [
+				{
+					id: "org/plugin",
+					repository: "https://github.com/org/plugin",
+					description: "A plugin",
+					tags: [],
+				},
+			],
+		});
 		const { steps, onStep } = collectSteps();
 
 		await runPluginSearch("plugin", onStep);
@@ -222,13 +234,58 @@ describe("runPluginSearch", () => {
 		expect(steps[1]!.detail).toContain("org/plugin");
 	});
 
-	it("reports registry unreachable when no query and no results", async () => {
-		mockSearch.mockResolvedValue([]);
+	it("reports a genuinely empty registry without implying failure", async () => {
+		mockSearch.mockResolvedValue({ status: "success", entries: [] });
 		const { steps, onStep } = collectSteps();
 
 		await runPluginSearch(undefined, onStep);
 
-		expect(steps[1]!.detail).toContain("registry empty or unreachable");
+		expect(steps[1]!.detail).toBe("registry has no plugins");
+	});
+	it.each([
+		"unavailable",
+		"cancelled",
+	] as const)("maps %s to failure without changing process state", async (status) => {
+		mockSearch.mockResolvedValue({ status });
+		const { steps, onStep } = collectSteps();
+		const previous = process.exitCode;
+		try {
+			process.exitCode = 7;
+			expect(await runPluginSearch(undefined, onStep)).toEqual({
+				status: "failure",
+			});
+			expect(steps.at(-1)).toMatchObject({
+				status: "error",
+				detail:
+					status === "cancelled"
+						? "registry search cancelled"
+						: "registry unavailable; check connectivity and try again",
+			});
+			expect(process.exitCode).toBe(7);
+		} finally {
+			process.exitCode = previous;
+		}
+	});
+	it("does not report real registry transport failure as successful empty search", async () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = vi
+			.fn()
+			.mockRejectedValue(new Error("private network detail"));
+		try {
+			const actual =
+				await vi.importActual<typeof import("../lib/plugin.js")>(
+					"../lib/plugin.js",
+				);
+			mockSearch.mockImplementationOnce(actual.searchRegistry);
+			const { steps, onStep } = collectSteps();
+			expect(await runPluginSearch(undefined, onStep)).toEqual({
+				status: "failure",
+			});
+			expect(steps.at(-1)?.status).toBe("error");
+			expect(steps.at(-1)?.detail).not.toContain("private");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 });
 
@@ -262,7 +319,9 @@ describe("runPluginValidate", () => {
 		});
 		const { steps, onStep } = collectSteps();
 
-		await runPluginValidate("/path/to/plugin", onStep);
+		expect(await runPluginValidate("/path/to/plugin", onStep)).toEqual({
+			status: "failure",
+		});
 
 		expect(steps[1]!.status).toBe("error");
 		expect(steps[1]!.detail).toContain("1 errors");
@@ -342,7 +401,9 @@ describe("runPluginSync", () => {
 		mockSync.mockRejectedValue(new Error("fs exploded") as never);
 		const { steps, onStep } = collectSteps();
 
-		await runPluginSync("/fake/project", false, onStep);
+		expect(await runPluginSync("/fake/project", false, onStep)).toEqual({
+			status: "failure",
+		});
 
 		expect(steps[1]!.status).toBe("error");
 		expect(steps[1]!.detail).toContain("fs exploded");
@@ -374,7 +435,9 @@ describe("runPluginExport", () => {
 		});
 		const { steps, onStep } = collectSteps();
 
-		await runPluginExport("ghost", onStep);
+		expect(await runPluginExport("ghost", onStep)).toEqual({
+			status: "failure",
+		});
 
 		expect(steps[1]!.status).toBe("error");
 		expect(steps[1]!.detail).toContain("not installed");
@@ -412,7 +475,9 @@ describe("runPluginImport", () => {
 		});
 		const { steps, onStep } = collectSteps();
 
-		await runPluginImport("/bad/path", false, onStep);
+		expect(await runPluginImport("/bad/path", false, onStep)).toEqual({
+			status: "failure",
+		});
 
 		expect(steps[1]!.status).toBe("error");
 		expect(steps[1]!.detail).toContain("skills.json not found");
@@ -461,7 +526,9 @@ describe("runPluginExportCodex", () => {
 		});
 		const { steps, onStep } = collectSteps();
 
-		await runPluginExportCodex("ghost", onStep);
+		expect(await runPluginExportCodex("ghost", onStep)).toEqual({
+			status: "failure",
+		});
 
 		expect(steps[1]!.status).toBe("error");
 		expect(steps[1]!.detail).toContain("not installed");
@@ -485,7 +552,7 @@ describe("runPluginExportCodex", () => {
 
 // ── skillguard refusal exit code (FU-1 / R4-002) ────────────────────────────
 
-describe("skillguard refusal exit code (FU-1/R4-002)", () => {
+describe("skillguard refusal result (FU-1/R4-002)", () => {
 	beforeEach(() => {
 		process.exitCode = undefined;
 	});
@@ -494,7 +561,7 @@ describe("skillguard refusal exit code (FU-1/R4-002)", () => {
 		process.exitCode = undefined;
 	});
 
-	it("runPluginAdd: a refused install exits non-zero", async () => {
+	it("runPluginAdd: a refused install returns refused without changing process state", async () => {
 		mockInstall.mockResolvedValue({
 			success: false,
 			refused: true,
@@ -503,30 +570,35 @@ describe("skillguard refusal exit code (FU-1/R4-002)", () => {
 		});
 		const { steps, onStep } = collectSteps();
 
-		await runPluginAdd("org/repo", false, onStep);
+		expect(await runPluginAdd("org/repo", false, onStep)).toEqual({
+			status: "refused",
+		});
 
 		expect(steps[1]!.status).toBe("error");
-		expect(process.exitCode).toBe(1);
+		expect(process.exitCode).toBeUndefined();
 	});
 
-	it("runPluginAdd: success and non-gate failures keep exit 0", async () => {
+	it("runPluginAdd: success and non-gate failures return distinct results without changing process state", async () => {
 		const { onStep } = collectSteps();
 
 		mockInstall.mockResolvedValue({ success: true, name: "my-plugin" });
-		await runPluginAdd("org/repo", false, onStep);
+		expect(await runPluginAdd("org/repo", false, onStep)).toEqual({
+			status: "success",
+		});
 		expect(process.exitCode).toBeUndefined();
 
-		// A plain (non-skillguard) failure — e.g. validation — is NOT a
-		// refusal: pre-FU-1 exit behavior preserved.
+		// Ordinary failures are not guard refusals, but are still failures.
 		mockInstall.mockResolvedValue({
 			success: false,
 			error: "validation failed:\n  name: name is required",
 		});
-		await runPluginAdd("org/repo", false, onStep);
+		expect(await runPluginAdd("org/repo", false, onStep)).toEqual({
+			status: "failure",
+		});
 		expect(process.exitCode).toBeUndefined();
 	});
 
-	it("runPluginImport: a refused import exits non-zero", async () => {
+	it("runPluginImport: a refused import returns refused without changing process state", async () => {
 		mockImport.mockResolvedValue({
 			success: false,
 			refused: true,
@@ -535,24 +607,173 @@ describe("skillguard refusal exit code (FU-1/R4-002)", () => {
 		});
 		const { steps, onStep } = collectSteps();
 
-		await runPluginImport("/path/to/package", false, onStep);
+		expect(await runPluginImport("/path/to/package", false, onStep)).toEqual({
+			status: "refused",
+		});
 
 		expect(steps[1]!.status).toBe("error");
-		expect(process.exitCode).toBe(1);
+		expect(process.exitCode).toBeUndefined();
 	});
 
-	it("runPluginImport: success and non-gate failures keep exit 0", async () => {
+	it("runPluginImport: success and non-gate failures return distinct results without changing process state", async () => {
 		const { onStep } = collectSteps();
 
 		mockImport.mockResolvedValue({ success: true, name: "imported-skill" });
-		await runPluginImport("/path/to/package", false, onStep);
+		expect(await runPluginImport("/path/to/package", false, onStep)).toEqual({
+			status: "success",
+		});
 		expect(process.exitCode).toBeUndefined();
 
 		mockImport.mockResolvedValue({
 			success: false,
 			error: "skills.json not found",
 		});
-		await runPluginImport("/bad/path", false, onStep);
+		expect(await runPluginImport("/bad/path", false, onStep)).toEqual({
+			status: "failure",
+		});
 		expect(process.exitCode).toBeUndefined();
+	});
+});
+
+describe("runPluginCommand", () => {
+	const request = { projectDir: "/project", dryRun: true, force: true };
+	const projectExport = vi.mocked(generateProjectSkillsJson);
+	const globalExport = vi.mocked(generateGlobalSkillsJson);
+	const calls = [
+		mockInstall,
+		mockRemove,
+		mockList,
+		mockSearch,
+		mockValidate,
+		mockSync,
+		mockExport,
+		mockExportCodex,
+		mockImport,
+		projectExport,
+		globalExport,
+	];
+	beforeEach(() => {
+		mockInstall.mockResolvedValue({ success: true });
+		mockRemove.mockResolvedValue({ success: true });
+		mockList.mockResolvedValue([]);
+		mockSearch.mockResolvedValue({ status: "success", entries: [] });
+		mockValidate.mockResolvedValue({ valid: true, errors: [], manifest: null });
+		mockSync.mockResolvedValue({
+			added: [],
+			removed: [],
+			unchanged: [],
+			wired: [],
+			unwired: [],
+		});
+		for (const fn of [
+			mockExport,
+			mockExportCodex,
+			mockImport,
+			projectExport,
+			globalExport,
+		])
+			fn.mockResolvedValue({ success: true, skillCount: 0, pluginCount: 0 });
+	});
+	it.each([
+		[
+			"add",
+			"org/repo",
+			false,
+			mockInstall,
+			["org/repo", { dryRun: true, force: true }],
+		],
+		["remove", "demo", false, mockRemove, ["demo", { dryRun: true }]],
+		[undefined, undefined, false, mockList, []],
+		["list", undefined, false, mockList, []],
+		["search", undefined, false, mockSearch, [undefined]],
+		["validate", "/plugin", false, mockValidate, ["/plugin"]],
+		["sync", undefined, false, mockSync, ["/project", { dryRun: true }]],
+		["export", "demo", false, mockExport, ["demo"]],
+		["export", "demo", true, mockExportCodex, ["demo"]],
+		[
+			"import",
+			"/package",
+			false,
+			mockImport,
+			["/package", { dryRun: true, force: true }],
+		],
+		[
+			"export-skills",
+			undefined,
+			false,
+			projectExport,
+			["/project", { dryRun: true }],
+		],
+		[
+			"export-skills",
+			"/other",
+			false,
+			projectExport,
+			["/other", { dryRun: true }],
+		],
+		["export-skills", "global", false, globalExport, [{ dryRun: true }]],
+	] as const)("forwards %s/%s (codex=%s) once", async (action, target, codex, called, args) => {
+		const { onStep, steps } = collectSteps();
+		const previous = process.exitCode;
+		process.exitCode = 7;
+		try {
+			expect(
+				await runPluginCommand({ ...request, action, target, codex }, onStep),
+			).toEqual({ status: "success" });
+			expect(called).toHaveBeenCalledExactlyOnceWith(...args);
+			expect(calls.reduce((n, fn) => n + fn.mock.calls.length, 0)).toBe(1);
+			expect(steps.at(-1)?.status).toBe("done");
+			expect(process.exitCode).toBe(7);
+		} finally {
+			process.exitCode = previous;
+		}
+	});
+	it.each([
+		"unknown",
+		"",
+		"add",
+		"remove",
+		"validate",
+		"export",
+		"import",
+	])("rejects invalid usage %j without library calls", async (action) => {
+		const { onStep, steps } = collectSteps();
+		expect(await runPluginCommand({ ...request, action }, onStep)).toEqual({
+			status: "failure",
+		});
+		expect(calls.every((fn) => fn.mock.calls.length === 0)).toBe(true);
+		expect(steps.at(-1)?.status).toBe("error");
+	});
+	it.each([
+		"add",
+		"sync",
+	])("catches an unexpected %s rejection once", async (action) => {
+		mockInstall.mockRejectedValue(new Error("unexpected"));
+		mockSync.mockRejectedValue(new Error("unexpected"));
+		const { onStep, steps } = collectSteps();
+		expect(
+			await runPluginCommand({ ...request, action, target: "demo" }, onStep),
+		).toEqual({ status: "failure" });
+		expect(steps.filter((s) => s.status === "error")).toHaveLength(1);
+		expect(calls.reduce((n, fn) => n + fn.mock.calls.length, 0)).toBe(1);
+	});
+});
+
+describe("plugin replacement cleanup warnings", () => {
+	it.each([
+		"install",
+		"import",
+	])("projects %s warning without changing success", async (caller) => {
+		const warning = "backup cleanup requires review at /owned/previous";
+		const result = { success: true, name: "demo", warning };
+		const { steps, onStep } = collectSteps();
+		if (caller === "install") mockInstall.mockResolvedValue(result);
+		else mockImport.mockResolvedValue(result);
+		const outcome =
+			caller === "install"
+				? await runPluginAdd("org/repo", false, onStep)
+				: await runPluginImport("/source", false, onStep);
+		expect(outcome).toEqual({ status: "success" });
+		expect(steps.at(-1)?.detail).toContain(warning);
 	});
 });

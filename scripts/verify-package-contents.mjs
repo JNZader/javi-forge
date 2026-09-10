@@ -33,6 +33,9 @@ const REQUIRED_FILES = [
 	// tarball that silently dropped it would fail closed on every Windows run.
 	// Asserted BY NAME so an omission (or a rename) fails `pnpm package:check`.
 	"assets/claude-hooks/javi-forge-windows-secure-object.ps1",
+	// The guard runtime and its integrity manifest must ship together.
+	"assets/claude-hooks/javi-forge-skillguard-pre-tool-use.mjs",
+	"assets/claude-hooks/manifest.json",
 	"templates/github/ci-node.yml",
 	"modules/engram/install-engram.sh",
 	"workflows/reusable-build-node.yml",

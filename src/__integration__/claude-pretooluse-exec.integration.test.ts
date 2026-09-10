@@ -326,9 +326,27 @@ describe("S1 apply_patch file-write shim — Codex managed-config protection (re
 		expect(await run(codex(patch("*** Add File: src/feature.ts", "+export const y = 2;"), root), { agent: "claude" })).toMatchObject({ code: 0, stdout: Buffer.alloc(0) });
 	}));
 });
+describe("quoted Python heredoc unsupported transport", () => {
+	it.each(["GETs", "GET's"])("refuses %s without echoing opaque content", async (data) => {
+		const command = `python3 - <<'PY'\nvalue = '''${data} SECRET_PY_CONTENT'''\nPY`;
+		for (const agent of ["claude", "codex"]) {
+			const result = await run(payload("Bash", { command }), { agent });
+			expect(result).toMatchObject({ code: 2, stdout: Buffer.alloc(0) });
+			expect(result.stderr.toString()).toBe("javi-forge PreToolUse denied Bash [shell.unsupported-interpreter]: quoted Python heredoc execution is unsupported\n");
+			expect(result.stderr.byteLength).toBeLessThanOrEqual(241);
+			expect(result.stderr.toString()).not.toContain("SECRET_PY_CONTENT");
+		}
+	});
+});
 describe("documented host boundary", () => {
 	it("does not represent pre-start spawn/parse/timeout failures as evaluator denials", () => {
 		const source = fs.readFileSync(ASSET, "utf8");
 		expect(source).toContain("host fail-open residual");
+	});
+});
+describe("quoted cat-data heredoc transport", () => {
+	it.each(["claude", "codex"])("allows inert quoted cat data under --agent=%s", async (agent) => {
+		const command = "cat > assets/example.c <<'EOF'\n// '\nEOF";
+		expect(await run(payload("Bash", { command }), { agent })).toMatchObject({ code: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
 	});
 });

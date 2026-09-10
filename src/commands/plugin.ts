@@ -17,6 +17,26 @@ import type { InitStep } from "../types/index.js";
 
 type StepCallback = (step: InitStep) => void;
 
+export const PLUGIN_COMMAND_STATUS = {
+	SUCCESS: "success",
+	FAILURE: "failure",
+	REFUSED: "refused",
+} as const;
+
+export interface PluginCommandResult {
+	status: (typeof PLUGIN_COMMAND_STATUS)[keyof typeof PLUGIN_COMMAND_STATUS];
+}
+
+export interface PluginCommandRequest {
+	action?: string;
+	target?: string;
+	projectDir: string;
+	dryRun: boolean;
+	codex?: boolean;
+	/** Force only unscannable sources; never override a guard block. */
+	force?: boolean;
+}
+
 function report(
 	onStep: StepCallback,
 	id: string,
@@ -35,7 +55,7 @@ export async function runPluginAdd(
 	dryRun: boolean,
 	onStep: StepCallback,
 	options: { force?: boolean } = {},
-): Promise<void> {
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-add";
 	report(onStep, stepId, `Install plugin: ${source}`, "running");
 
@@ -49,16 +69,14 @@ export async function runPluginAdd(
 			"done",
 			dryRun
 				? `dry-run: would install ${result.name}`
-				: `installed ${result.name}`,
+				: `installed ${result.name}${result.warning ? `; warning: ${result.warning}` : ""}`,
 		);
 	} else {
 		report(onStep, stepId, `Install plugin: ${source}`, "error", result.error);
-		// FU-1 (R4-002): a skillguard refusal must be distinguishable from
-		// success by scripted consumers — exit non-zero. `process.exitCode`
-		// (not `process.exit`) so the Ink tree keeps rendering/unmounting
-		// normally. Non-gate failures (validation, clone errors) keep exit 0.
-		if (result.refused) process.exitCode = 1;
 	}
+	return {
+		status: result.success ? "success" : result.refused ? "refused" : "failure",
+	};
 }
 
 /**
@@ -68,7 +86,7 @@ export async function runPluginRemove(
 	name: string,
 	dryRun: boolean,
 	onStep: StepCallback,
-): Promise<void> {
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-remove";
 	report(onStep, stepId, `Remove plugin: ${name}`, "running");
 
@@ -85,12 +103,15 @@ export async function runPluginRemove(
 	} else {
 		report(onStep, stepId, `Remove plugin: ${name}`, "error", result.error);
 	}
+	return { status: result.success ? "success" : "failure" };
 }
 
 /**
  * List all installed plugins.
  */
-export async function runPluginList(onStep: StepCallback): Promise<void> {
+export async function runPluginList(
+	onStep: StepCallback,
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-list";
 	report(onStep, stepId, "List installed plugins", "running");
 
@@ -114,6 +135,7 @@ export async function runPluginList(onStep: StepCallback): Promise<void> {
 			`${plugins.length} plugins: ${summary}`,
 		);
 	}
+	return { status: "success" };
 }
 
 /**
@@ -122,7 +144,7 @@ export async function runPluginList(onStep: StepCallback): Promise<void> {
 export async function runPluginSearch(
 	query: string | undefined,
 	onStep: StepCallback,
-): Promise<void> {
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-search";
 	report(
 		onStep,
@@ -131,7 +153,20 @@ export async function runPluginSearch(
 		"running",
 	);
 
-	const results = await searchRegistry(query);
+	const result = await searchRegistry(query);
+	if (result.status !== "success") {
+		report(
+			onStep,
+			stepId,
+			`Search plugins${query ? `: ${query}` : ""}`,
+			"error",
+			result.status === "cancelled"
+				? "registry search cancelled"
+				: "registry unavailable; check connectivity and try again",
+		);
+		return { status: "failure" };
+	}
+	const results = result.entries;
 
 	if (results.length === 0) {
 		report(
@@ -139,9 +174,7 @@ export async function runPluginSearch(
 			stepId,
 			`Search plugins${query ? `: ${query}` : ""}`,
 			"done",
-			query
-				? `no plugins matching "${query}"`
-				: "registry empty or unreachable",
+			query ? `no plugins matching "${query}"` : "registry has no plugins",
 		);
 	} else {
 		const summary = results
@@ -155,6 +188,7 @@ export async function runPluginSearch(
 			`${results.length} results:\n  ${summary}`,
 		);
 	}
+	return { status: "success" };
 }
 
 /**
@@ -163,7 +197,7 @@ export async function runPluginSearch(
 export async function runPluginValidate(
 	pluginDir: string,
 	onStep: StepCallback,
-): Promise<void> {
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-validate";
 	report(onStep, stepId, `Validate plugin: ${pluginDir}`, "running");
 
@@ -189,6 +223,7 @@ export async function runPluginValidate(
 			`${result.errors.length} errors:\n${msgs}`,
 		);
 	}
+	return { status: result.valid ? "success" : "failure" };
 }
 
 /**
@@ -198,7 +233,7 @@ export async function runPluginSync(
 	projectDir: string,
 	dryRun: boolean,
 	onStep: StepCallback,
-): Promise<void> {
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-sync";
 	report(onStep, stepId, "Sync plugins", "running");
 
@@ -226,9 +261,11 @@ export async function runPluginSync(
 			"done",
 			`${prefix}${parts.join(" | ")}`,
 		);
+		return { status: "success" };
 	} catch (e: unknown) {
 		const msg = e instanceof Error ? e.message : String(e);
 		report(onStep, stepId, "Sync plugins", "error", msg);
+		return { status: "failure" };
 	}
 }
 
@@ -238,7 +275,7 @@ export async function runPluginSync(
 export async function runPluginExport(
 	name: string,
 	onStep: StepCallback,
-): Promise<void> {
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-export";
 	report(onStep, stepId, `Export plugin: ${name}`, "running");
 
@@ -255,6 +292,7 @@ export async function runPluginExport(
 	} else {
 		report(onStep, stepId, `Export plugin: ${name}`, "error", result.error);
 	}
+	return { status: result.success ? "success" : "failure" };
 }
 
 /**
@@ -263,7 +301,7 @@ export async function runPluginExport(
 export async function runPluginExportCodex(
 	name: string,
 	onStep: StepCallback,
-): Promise<void> {
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-export-codex";
 	report(onStep, stepId, `Export plugin as Codex TOML: ${name}`, "running");
 
@@ -286,6 +324,7 @@ export async function runPluginExportCodex(
 			result.error,
 		);
 	}
+	return { status: result.success ? "success" : "failure" };
 }
 
 /**
@@ -296,7 +335,7 @@ export async function runPluginImport(
 	dryRun: boolean,
 	onStep: StepCallback,
 	options: { force?: boolean } = {},
-): Promise<void> {
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-import";
 	report(
 		onStep,
@@ -318,7 +357,7 @@ export async function runPluginImport(
 			"done",
 			dryRun
 				? `dry-run: would import ${result.name}`
-				: `imported ${result.name}`,
+				: `imported ${result.name}${result.warning ? `; warning: ${result.warning}` : ""}`,
 		);
 	} else {
 		report(
@@ -328,11 +367,10 @@ export async function runPluginImport(
 			"error",
 			result.error,
 		);
-		// FU-1 (R4-002): same exit-code contract as runPluginAdd — a skillguard
-		// refusal (manifest-integrity or verdict) exits non-zero; plain input
-		// errors (skills.json missing/invalid) keep exit 0.
-		if (result.refused) process.exitCode = 1;
 	}
+	return {
+		status: result.success ? "success" : result.refused ? "refused" : "failure",
+	};
 }
 
 /**
@@ -343,7 +381,7 @@ export async function runPluginExportSkillsJson(
 	projectDir: string,
 	dryRun: boolean,
 	onStep: StepCallback,
-): Promise<void> {
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-export-skills-json";
 	report(onStep, stepId, "Generate project skills.json", "running");
 
@@ -367,6 +405,7 @@ export async function runPluginExportSkillsJson(
 			result.error,
 		);
 	}
+	return { status: result.success ? "success" : "failure" };
 }
 
 /**
@@ -375,7 +414,7 @@ export async function runPluginExportSkillsJson(
 export async function runPluginExportGlobalSkillsJson(
 	dryRun: boolean,
 	onStep: StepCallback,
-): Promise<void> {
+): Promise<PluginCommandResult> {
 	const stepId = "plugin-export-global-skills-json";
 	report(onStep, stepId, "Generate global skills.json", "running");
 
@@ -398,5 +437,82 @@ export async function runPluginExportGlobalSkillsJson(
 			"error",
 			result.error,
 		);
+	}
+	return { status: result.success ? "success" : "failure" };
+}
+
+/** Execute one plugin request; the CLI alone owns process exit status. */
+export async function runPluginCommand(
+	request: PluginCommandRequest,
+	onStep: StepCallback,
+): Promise<PluginCommandResult> {
+	const {
+		action = "list",
+		dryRun,
+		projectDir,
+		codex = false,
+		force = false,
+	} = request;
+	const target = request.target ?? "";
+	if (
+		["add", "remove", "validate", "export", "import"].includes(action) &&
+		!target
+	) {
+		const label =
+			action === "add"
+				? "source"
+				: action === "remove" || action === "export"
+					? "name"
+					: "path";
+		report(
+			onStep,
+			"err",
+			"Error",
+			"error",
+			`${label} required: javi-forge plugin ${action} <${label}>`,
+		);
+		return { status: "failure" };
+	}
+	try {
+		switch (action) {
+			case "add":
+				return await runPluginAdd(target, dryRun, onStep, { force });
+			case "remove":
+				return await runPluginRemove(target, dryRun, onStep);
+			case "list":
+				return await runPluginList(onStep);
+			case "search":
+				return await runPluginSearch(request.target, onStep);
+			case "validate":
+				return await runPluginValidate(target, onStep);
+			case "sync":
+				return await runPluginSync(projectDir, dryRun, onStep);
+			case "export":
+				return codex
+					? await runPluginExportCodex(target, onStep)
+					: await runPluginExport(target, onStep);
+			case "import":
+				return await runPluginImport(target, dryRun, onStep, { force });
+			case "export-skills":
+				return target === "global"
+					? await runPluginExportGlobalSkillsJson(dryRun, onStep)
+					: await runPluginExportSkillsJson(
+							request.target ?? projectDir,
+							dryRun,
+							onStep,
+						);
+			default:
+				report(
+					onStep,
+					"err",
+					"Error",
+					"error",
+					`unknown plugin action: ${action}`,
+				);
+				return { status: "failure" };
+		}
+	} catch (error: unknown) {
+		report(onStep, "fatal", "Fatal error", "error", String(error));
+		return { status: "failure" };
 	}
 }

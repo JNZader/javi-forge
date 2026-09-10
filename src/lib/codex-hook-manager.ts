@@ -1,32 +1,12 @@
 /**
- * Codex PreToolUse ownership manager (agent-agnostic slice 2). Installs the
- * SAME shipped SkillGuard `.mjs` asset as a Codex `PreToolUse` hook by writing
- * `~/.codex/hooks.json` + setting `[features] hooks = true` in
- * `~/.codex/config.toml`, through the identical secure-fs transaction the Claude
- * installer uses (no weaker path). It NEVER modifies the guard asset, the pure
- * `evaluate*` engine, or Claude's observable behavior.
+ * Codex PreToolUse registration manager. Mutations use the same secure-fs
+ * transaction as Claude; the guard asset itself is never modified here.
  *
- * TRUST (highest-risk surface — engram id 15743, codex-cli 0.147.0, verified
- * live 2026-08-18): codex hooks are stable + default-ON, but each hook needs a
- * `trusted_hash` recorded in `config.toml` under
- * `[hooks.state."<abs-hook-path>:pre_tool_use:0:0"]`; an UNTRUSTED hook is
- * SILENTLY SKIPPED unless `--dangerously-bypass-hook-trust`. There is NO
- * `codex hooks trust` subcommand (confirmed: `codex --help` has no `hooks`
- * command). So we DO NOT compute-and-write a trusted_hash we cannot prove
- * reproducible (a wrong-but-present hash would leave the hook skipped while
- * making doctor believe it is trusted — the exact fail-open theater this arc
- * exists to kill). Instead: install writes the files + REPORTS the trust step,
- * and the doctor DETECTS the missing trust entry and reports `blocked`
- * (untrusted = NOT running).
- *
- * STALE-HASH INVALIDATION: the trust key path is STABLE across upgrades, so a
- * rewrite of hooks.json (asset/command/timeout change) leaves the recorded
- * `trusted_hash` stale — Codex silently skips the hook while the header
- * persists (doctor would wrongly stay `trusted`). So whenever install/repair
- * REWRITES the managed hooks.json, it REMOVES our `[hooks.state."<hooksFile>:*"]`
- * table(s) in the same transactional config write (foreign rows untouched),
- * reverting the doctor to `untrusted → blocked` until the user re-approves. An
- * idempotent no-op install (unchanged hook content) never touches the table.
+ * Config coordinates and recorded hashes do not establish provider trust.
+ * Without an authoritative identity/hash verifier, trust remains unknown.
+ * Command-only updates retain every registration coordinate and config byte.
+ * The provider must verify any retained hash against the changed command;
+ * this manager never establishes trust or enables a disabled existing hook.
  */
 
 import os from "node:os";
@@ -138,61 +118,41 @@ export function parseFeaturesHooks(text: string): "true" | "false" | "absent" {
 	return "absent";
 }
 
-/**
- * True when `config.toml` records a trust table for THIS hook path, i.e. a
- * `[hooks.state."<hooksFile>:pre_tool_use:0:0"]` header. Fail-closed: a trust
- * entry for a different path does not count.
- *
- * NOTE (fail-open the arc kills): presence of the header is NOT proof the hook
- * is still trusted — Codex records a `trusted_hash` under it, and a hook whose
- * content was rewritten (e.g. an asset/command/timeout upgrade) has a STALE hash
- * → Codex silently skips it and re-prompts. We cannot recompute Codex's hash to
- * compare here, so instead the installer INVALIDATES this table whenever it
- * rewrites the managed hooks.json (see `removeCodexTrustEntries`), reverting the
- * doctor to `untrusted → blocked` until the user re-approves in codex.
- */
-export function hasCodexTrustEntry(text: string, hooksFile: string): boolean {
-	const needle = `${hooksFile}:pre_tool_use:0:0`;
-	for (const line of text.split(/\r?\n/)) {
-		const header = TABLE_HEADER.exec(line);
-		if (!header) continue;
-		const inner = header[1].trim();
-		if (inner.startsWith("hooks.state.") && inner.includes(needle)) return true;
-	}
-	return false;
+/** Provider identity/hash verification is unavailable; presence is not trust. */
+export function detectCodexTrust(): CodexTrustState {
+	return "unknown";
 }
 
-/**
- * Remove every `[hooks.state."<hooksFile>:*"]` table (header + body lines) keyed
- * on OUR managed hooks.json path, preserving all other content — including
- * FOREIGN `hooks.state` rows for other hooks files. Used to invalidate a now-
- * stale `trusted_hash` when the managed hooks.json content is rewritten: the
- * trust-key path is stable across upgrades, so a rewritten hook keeps its old
- * (now wrong) recorded hash and would be silently skipped by Codex while the
- * header persisted. Dropping the table forces the doctor back to `untrusted`
- * until the user re-approves the hook in codex.
- */
+/** Parse a complete quoted table key, never a substring or provider identity. */
+function codexTrustTableKey(header: string): string | null {
+	const match = /^hooks\.state\.("(?:[^"\\]|\\.)*"|'[^']*')$/.exec(header);
+	if (!match) return null;
+	try {
+		return match[1].startsWith("'")
+			? match[1].slice(1, -1)
+			: JSON.parse(match[1]);
+	} catch {
+		return null;
+	}
+}
+
+/** Invalidate only exact same-file PreToolUse records, not colliding keys. */
 export function removeCodexTrustEntries(
 	text: string,
 	hooksFile: string,
 ): string {
-	// Match the quoted path prefix so a path that merely has ours as a string
-	// prefix (a different file) is never removed.
-	const needle = `"${hooksFile}:`;
-	const lines = text.split(/\r?\n/);
+	const prefix = `${hooksFile}:`;
 	const kept: string[] = [];
 	let dropping = false;
-	for (const line of lines) {
+	for (const line of text.split(/\r?\n/)) {
 		const header = TABLE_HEADER.exec(line);
 		if (header) {
-			const inner = header[1].trim();
-			dropping = inner.startsWith("hooks.state.") && inner.includes(needle);
-			if (dropping) continue;
-			kept.push(line);
-			continue;
+			const key = codexTrustTableKey(header[1].trim());
+			dropping =
+				key?.startsWith(prefix) === true &&
+				/^pre_tool_use:\d+:\d+$/.test(key.slice(prefix.length));
 		}
-		if (dropping) continue;
-		kept.push(line);
+		if (!dropping) kept.push(line);
 	}
 	return kept.join("\n");
 }
@@ -243,25 +203,45 @@ export function mergeFeaturesHooksTrue(text: string): string {
 // =============================================================================
 
 const CODEX_CMD_RE =
-	/(?:^|\s)node\s+\S*javi-forge-skillguard-pre-tool-use\.mjs\s+--agent=codex(?:\s|$)/;
+	/^node\s+(?:\S*[/\\])?javi-forge-skillguard-pre-tool-use\.mjs\s+--agent=codex$/;
 
 export interface CodexHooksClassification {
 	state: ClaudeHookComponentState;
 	detail?: string;
+	/** Config locations only, not authoritative Codex trust identities. */
+	groupIndex?: number;
+	handlerIndex?: number;
+}
+interface CodexHandlerLocation {
+	groupIndex: number;
+	handlerIndex: number;
+	group: Record<string, unknown>;
+	handler: Record<string, unknown>;
+}
+function isManagedCodexHandler(handler: unknown): boolean {
+	return (
+		isPlainObject(handler) &&
+		handler.type === "command" &&
+		typeof handler.command === "string" &&
+		CODEX_CMD_RE.test(handler.command)
+	);
 }
 
 /** Every `PreToolUse` handler across all groups, in order. */
-function preToolUseHandlers(value: unknown): Record<string, unknown>[] {
+function preToolUseHandlers(value: unknown): CodexHandlerLocation[] {
 	const hooks = isPlainObject(value) ? value.hooks : undefined;
 	const groups =
 		isPlainObject(hooks) && Array.isArray(hooks.PreToolUse)
 			? hooks.PreToolUse
 			: [];
-	const handlers: Record<string, unknown>[] = [];
-	for (const group of groups) {
+	const handlers: CodexHandlerLocation[] = [];
+	for (const [groupIndex, group] of groups.entries()) {
 		const list =
 			isPlainObject(group) && Array.isArray(group.hooks) ? group.hooks : [];
-		for (const h of list) if (isPlainObject(h)) handlers.push(h);
+		for (const [handlerIndex, handler] of list.entries()) {
+			if (isPlainObject(group) && isPlainObject(handler))
+				handlers.push({ groupIndex, handlerIndex, group, handler });
+		}
 	}
 	return handlers;
 }
@@ -271,8 +251,8 @@ function preToolUseHandlers(value: unknown): Record<string, unknown>[] {
  * validator the Claude classifier uses — the Codex hooks.json schema is
  * identical) and recognizes our managed handler by its exact command string.
  *   - malformed        → not a valid hooks container
- *   - managed-current  → our exact command present
- *   - released-outdated→ our guard present but at a stale asset path
+ *   - managed-current  → one exact command + matcher + timeout registration
+ *   - released-outdated→ owned registration differs from the canonical contract
  *   - foreign          → other PreToolUse handlers, none of them ours
  *   - absent           → no PreToolUse handlers at all (installable)
  */
@@ -282,17 +262,19 @@ export function classifyCodexHooksJson(
 ): CodexHooksClassification {
 	if (!validateSettingsShape(value)) return { state: "malformed" };
 	const handlers = preToolUseHandlers(value);
-	const ours = handlers.filter(
-		(h) =>
-			h.type === "command" &&
-			typeof h.command === "string" &&
-			CODEX_CMD_RE.test(h.command),
-	);
-	if (ours.some((h) => h.command === expectedCommand)) {
-		return { state: "managed-current" };
+	const ours = handlers.filter((entry) => isManagedCodexHandler(entry.handler));
+	if (ours.length === 1) {
+		const { group, handler, groupIndex, handlerIndex } = ours[0];
+		if (
+			handler.command === expectedCommand &&
+			group.matcher === CODEX_MATCHER &&
+			handler.timeout === CODEX_TIMEOUT
+		) {
+			return { state: "managed-current", groupIndex, handlerIndex };
+		}
 	}
 	if (ours.length > 0)
-		return { state: "released-outdated", detail: "stale-path" };
+		return { state: "released-outdated", detail: "noncanonical-registration" };
 	if (handlers.length > 0)
 		return { state: "foreign", detail: "no-managed-hook" };
 	return { state: "absent" };
@@ -319,43 +301,87 @@ function buildCodexHooksContainer(assetPath: string): Record<string, unknown> {
 }
 
 /**
- * Merge our managed group into an existing container: drop any prior managed
- * groups (ours, by command regex) and append a fresh one, preserving every
- * foreign group. A fresh install (no container) yields the clean container.
+ * Replace only a unique owned command in place; append only on initial install.
+ * Callers must reject ambiguous shapes, ownership, matcher and timeout first.
  */
 function mergeCodexHooks(
 	existing: unknown,
 	assetPath: string,
 ): Record<string, unknown> {
 	if (!isPlainObject(existing)) return buildCodexHooksContainer(assetPath);
-	const container = structuredClone(existing) as Record<string, unknown>;
+	const container = structuredClone(existing);
+	const owned = preToolUseHandlers(container).find((entry) =>
+		isManagedCodexHandler(entry.handler),
+	);
+	if (owned) {
+		owned.handler.command = expectedCodexCommand(assetPath);
+		return container;
+	}
 	if (!isPlainObject(container.hooks)) container.hooks = {};
 	const hooks = container.hooks as Record<string, unknown>;
 	const groups = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
-	const kept = groups.filter((group) => {
-		const list =
-			isPlainObject(group) && Array.isArray(group.hooks) ? group.hooks : [];
-		const isOurs = list.some(
-			(h) =>
-				isPlainObject(h) &&
-				h.type === "command" &&
-				typeof h.command === "string" &&
-				CODEX_CMD_RE.test(h.command),
-		);
-		return !isOurs;
-	});
 	const fresh = buildCodexHooksContainer(assetPath).hooks as {
 		PreToolUse: unknown[];
 	};
-	hooks.PreToolUse = [...kept, ...fresh.PreToolUse];
+	hooks.PreToolUse = [...groups, ...fresh.PreToolUse];
 	return container;
+}
+
+/** Structural confidence only; foreign metadata remains opaque and untouched. */
+function preservesCodexCoordinates(value: unknown): boolean {
+	if (!validateSettingsShape(value) || !isPlainObject(value)) return false;
+	if (value.hooks === undefined) return true;
+	return (
+		isPlainObject(value.hooks) &&
+		Object.values(value.hooks).every(
+			(groups) =>
+				Array.isArray(groups) &&
+				groups.every(
+					(group: unknown) =>
+						isPlainObject(group) &&
+						(group.matcher === undefined ||
+							typeof group.matcher === "string") &&
+						Array.isArray(group.hooks) &&
+						group.hooks.every(
+							(handler: unknown) =>
+								isPlainObject(handler) &&
+								handler.type === "command" &&
+								typeof handler.command === "string",
+						),
+				),
+		)
+	);
+}
+
+/** Recognize one explicit feature flag, not arbitrary TOML validity. */
+function hasUnambiguousFeaturesHooks(text: string): boolean {
+	let inFeatures = false;
+	let tables = 0;
+	let flags = 0;
+	for (const line of text.split(/\r?\n/)) {
+		const header = TABLE_HEADER.exec(line);
+		if (header) {
+			inFeatures = header[1].trim() === "features";
+			if (inFeatures) tables++;
+		} else if (inFeatures && /^\s*["']?hooks["']?\s*=/.test(line)) {
+			if (!/^\s*hooks\s*=\s*(true|false)\s*(?:#.*)?$/.test(line)) return false;
+			flags++;
+		}
+	}
+	return tables === 1 && flags === 1;
 }
 
 // =============================================================================
 // Doctor (execution matrix — reuses ExecutionReport runnable|blocked|inconclusive)
 // =============================================================================
 
-export type CodexTrustState = "trusted" | "untrusted";
+const CODEX_TRUST_STATE = {
+	TRUSTED: "trusted",
+	UNTRUSTED: "untrusted",
+	UNKNOWN: "unknown",
+} as const;
+export type CodexTrustState =
+	(typeof CODEX_TRUST_STATE)[keyof typeof CODEX_TRUST_STATE];
 
 export interface CodexHookDoctorReport {
 	healthy: boolean;
@@ -385,7 +411,7 @@ export type CodexHookDoctorResult =
 const EXECUTION_RESIDUAL: readonly string[] = [
 	'the installed hook is command-form (command: "node …"): node is resolved from Codex\'s PATH, which this process cannot observe — the node-on-PATH row is a heuristic proxy, never proof the guard will spawn',
 	"an untrusted hook is silently skipped by Codex unless run with --dangerously-bypass-hook-trust; trust is recorded in ~/.codex/config.toml [hooks.state] and is not settable non-interactively",
-	"a fresh install OR any upgrade that rewrites hooks.json invalidates the recorded trust hash (it would otherwise go stale and be silently skipped) — you MUST re-approve the hook in codex before it runs again",
+	"registration coordinates are config locations only; provider trust identity and hash validity cannot be verified here",
 ];
 
 async function readText(
@@ -460,7 +486,7 @@ export async function doctorCodexPreToolUse(
 	const featuresHooks = configRead.ok
 		? parseFeaturesHooks(configText)
 		: "absent";
-	const trusted = configRead.ok && hasCodexTrustEntry(configText, hooksFile);
+	const trustState = detectCodexTrust();
 
 	// asset currency (SAME shipped asset, hashed against the manifest).
 	const claudeManifest: ClaudeManifest = {
@@ -477,8 +503,9 @@ export async function doctorCodexPreToolUse(
 
 	if (!configReadable) blockers.push("config:unreadable");
 	if (featuresHooks === "false") blockers.push("policy:features.hooks=false");
-	// THE fail-open guard: an untrusted hook is silently skipped → NOT running.
-	if (!trusted) blockers.push("trust:untrusted (hook is silently skipped)");
+	unknownSources.push(
+		"trust: provider identity/hash verification unavailable; recorded entries are not proof",
+	);
 	if (asset.state !== "managed-current")
 		blockers.push(`guard:asset=${asset.state}`);
 	if (hooksJson.state !== "managed-current") {
@@ -512,7 +539,7 @@ export async function doctorCodexPreToolUse(
 			"install the codex guard with: javi-forge hooks install codex",
 		);
 	}
-	if (!trusted) remediation.push(codexTrustGrantCommand(hooksFile));
+	remediation.push(codexTrustGrantCommand(hooksFile));
 	if (featuresHooks === "false") {
 		remediation.push(
 			"remove `[features] hooks = false` from ~/.codex/config.toml",
@@ -534,7 +561,7 @@ export async function doctorCodexPreToolUse(
 			residual: [...EXECUTION_RESIDUAL],
 		},
 		trust: {
-			state: trusted ? "trusted" : "untrusted",
+			state: trustState,
 			grantCommand: codexTrustGrantCommand(hooksFile),
 		},
 		remediation: [...new Set(remediation)],
@@ -680,35 +707,66 @@ export async function _runCodex(
 	const configExisted = configRead.ok;
 	const configText = configRead.ok ? configRead.text : "";
 
-	// Build desired bytes (null = no change for that component).
+	const existing: unknown = hooksRead.ok ? JSON.parse(hooksRead.text) : {};
+	const owned = preToolUseHandlers(existing).filter((entry) =>
+		isManagedCodexHandler(entry.handler),
+	);
+	let refusal: string | undefined;
+	if (!preservesCodexCoordinates(existing))
+		refusal = "unrecognized hooks.json shape";
+	else if (!configRead.ok && configRead.reason !== "not-found")
+		refusal = "unreadable config.toml";
+	else if (owned.length > 1) refusal = "multiple owned registrations";
+	else if (owned.length === 1) {
+		if (
+			owned[0].group.matcher !== CODEX_MATCHER ||
+			owned[0].handler.timeout !== CODEX_TIMEOUT
+		)
+			refusal =
+				"noncanonical matcher or timeout; command-only migration required";
+		else if (!configRead.ok || !hasUnambiguousFeaturesHooks(configText))
+			refusal = "ambiguous features.hooks configuration";
+	} else if (parseFeaturesHooks(configText) === "false") {
+		refusal = "features.hooks=false; initial installation must not enable it";
+	} else if (
+		configText.split(/\r?\n/).some((line) => {
+			const header = TABLE_HEADER.exec(line);
+			return (
+				header !== null &&
+				codexTrustTableKey(header[1].trim())?.startsWith(`${hooksFile}:`) ===
+					true
+			);
+		})
+	) {
+		refusal = "recorded same-file trust without an owned registration";
+	}
+	if (refusal) {
+		return {
+			ok: false,
+			changed: [],
+			backups: [],
+			errors: [`refuse ${refusal} — manual review`],
+			warnings: [],
+			report: await doctor(),
+		};
+	}
+
+	// Retain trust hashes/enablement verbatim. A changed command requires provider
+	// verification; preserving a recorded hash is NOT approval of the new command.
 	const hooksDesired =
 		hooksState.state === "managed-current"
 			? null
-			: serialize(
-					mergeCodexHooks(
-						hooksRead.ok ? JSON.parse(hooksRead.text) : undefined,
-						assetPath,
-					),
-				);
-	// When the managed hooks.json content changes, any recorded trust hash for
-	// OUR hooks path is now stale — Codex would silently skip the rewritten hook
-	// while the header persisted. Invalidate that trust table in the SAME write
-	// so the doctor honestly reverts to `untrusted → blocked` until re-approval.
-	// An idempotent no-op install (hook content unchanged) leaves trust intact.
-	const hookContentChanged = hooksDesired !== null;
-	let nextConfig = configText;
-	if (hookContentChanged) {
-		nextConfig = removeCodexTrustEntries(nextConfig, hooksFile);
-	}
-	nextConfig = mergeFeaturesHooksTrue(nextConfig);
+			: serialize(mergeCodexHooks(existing, assetPath));
+	const nextConfig =
+		owned.length === 1 ? configText : mergeFeaturesHooksTrue(configText);
 	const configDesired =
 		configExisted && nextConfig === configText
 			? null
 			: Buffer.from(nextConfig, "utf8");
 
-	// Untrusted-after-install warning (report-the-trust-step).
+	// Mutation success does not prove provider trust.
 	const warnings: string[] = [
-		`the codex hook is installed but NOT yet trusted — ${codexTrustGrantCommand(hooksFile)}`,
+		`codex hook trust is unverified — ${codexTrustGrantCommand(hooksFile)}`,
 	];
 
 	if (hooksDesired === null && configDesired === null) {

@@ -20,6 +20,10 @@ import { generateAgentSkillsManifest } from "./agent-skills.js";
 import { autoWirePlugins } from "./auto-wire.js";
 import { execFileAsync } from "./exec.js";
 import {
+	type PluginReplacementDiagnostics,
+	publishPluginReplacement,
+} from "./plugin-replacement.js";
+import {
 	evaluateCoverageGate,
 	scanFailureMessage,
 } from "./skill-install-gate.js";
@@ -144,19 +148,21 @@ export async function validatePlugin(
 export async function installPlugin(
 	source: string,
 	options: { dryRun?: boolean; force?: boolean } = {},
-): Promise<{
-	success: boolean;
-	name?: string;
-	error?: string;
-	/**
-	 * FU-1 (R4-002): true when the failure is a skillguard gate refusal
-	 * (manifest-integrity or verdict refusal, incl. a scanner-error deny).
-	 * The CLI layer turns this into a non-zero exit code so scripted
-	 * consumers can tell a refusal apart from success. Plain usage errors
-	 * (invalid source, validation failed) leave it unset.
-	 */
-	refused?: boolean;
-}> {
+): Promise<
+	PluginReplacementDiagnostics & {
+		success: boolean;
+		name?: string;
+		error?: string;
+		/**
+		 * FU-1 (R4-002): true when the failure is a skillguard gate refusal
+		 * (manifest-integrity or verdict refusal, incl. a scanner-error deny).
+		 * The CLI layer turns this into a non-zero exit code so scripted
+		 * consumers can tell a refusal apart from success. Plain usage errors
+		 * (invalid source, validation failed) leave it unset.
+		 */
+		refused?: boolean;
+	}
+> {
 	const { dryRun = false, force = false } = options;
 
 	// Normalize source to a git URL
@@ -169,11 +175,12 @@ export async function installPlugin(
 	}
 
 	// Clone to temp
-	const tmpDir = path.join(PLUGINS_DIR, ".tmp", `install-${Date.now()}`);
+	let tmpDir = "";
 
 	try {
 		if (!dryRun) {
-			await fs.ensureDir(tmpDir);
+			await fs.ensureDir(path.join(PLUGINS_DIR, ".tmp"));
+			tmpDir = await fs.mkdtemp(path.join(PLUGINS_DIR, ".tmp", "install-"));
 			await execFileAsync("git", ["clone", "--depth", "1", gitUrl, tmpDir], {
 				timeout: 60_000,
 			});
@@ -199,8 +206,8 @@ export async function installPlugin(
 			return { success: false, error: `validation failed:\n${msgs}` };
 		}
 
-		const pluginName = validation.manifest.name;
-		const destDir = path.join(PLUGINS_DIR, pluginName);
+		const pluginManifest = validation.manifest;
+		const pluginName = pluginManifest.name;
 
 		if (!dryRun) {
 			// ── SkillGuard runtime gate (D1/D3, JD-006/JD-007) ────────────
@@ -234,28 +241,35 @@ export async function installPlugin(
 				};
 			}
 
-			// Remove existing version if present
-			if (await fs.pathExists(destDir)) {
-				await fs.remove(destDir);
-			}
-			await fs.move(tmpDir, destDir);
+			const publication = await publishPluginReplacement(
+				PLUGINS_DIR,
+				pluginName,
+				async (stage) => {
+					await fs.copy(tmpDir, stage, {
+						filter: (file) =>
+							![
+								path.join(tmpDir, ".installed.json"),
+								path.join(tmpDir, "skills.json"),
+							].includes(file),
+					});
+					const installedPlugin: InstalledPlugin = {
+						name: pluginName,
+						version: pluginManifest.version,
+						installedAt: new Date().toISOString(),
+						source,
+						manifest: pluginManifest,
+					};
+					await fs.writeJson(
+						path.join(stage, ".installed.json"),
+						installedPlugin,
+						{ spaces: 2 },
+					);
 
-			// Write install metadata
-			const installedPlugin: InstalledPlugin = {
-				name: pluginName,
-				version: validation.manifest.version,
-				installedAt: new Date().toISOString(),
-				source,
-				manifest: validation.manifest,
-			};
-			await fs.writeJson(
-				path.join(destDir, ".installed.json"),
-				installedPlugin,
-				{ spaces: 2 },
+					// Generate Agent Skills spec manifest for cross-agent compatibility
+					await generateAgentSkillsManifest(stage, source).catch(() => {});
+				},
 			);
-
-			// Generate Agent Skills spec manifest for cross-agent compatibility
-			await generateAgentSkillsManifest(destDir, source).catch(() => {});
+			return { ...publication, name: pluginName };
 		}
 
 		return { success: true, name: pluginName };
@@ -264,30 +278,90 @@ export async function installPlugin(
 		return { success: false, error: msg };
 	} finally {
 		// Clean up tmp if it still exists (error path)
-		if (!dryRun && (await fs.pathExists(tmpDir))) {
+		if (tmpDir && (await fs.pathExists(tmpDir))) {
 			await fs.remove(tmpDir).catch(() => {});
 		}
 	}
 }
 
 /**
- * Remove an installed plugin by name.
+ * Remove only a directly contained directory with matching install metadata.
+ * This is an identity/containment check, not a revalidation of plugin assets:
+ * an installed plugin with broken assets must still be removable.
  */
 export async function removePlugin(
 	name: string,
 	options: { dryRun?: boolean } = {},
 ): Promise<{ success: boolean; error?: string }> {
-	const pluginDir = path.join(PLUGINS_DIR, name);
-
+	if (!KEBAB_RE.test(name) || name.length < 2 || name.length > 60) {
+		return {
+			success: false,
+			error:
+				"invalid plugin name: expected 2-60 lowercase kebab-case characters",
+		};
+	}
+	const root = path.resolve(PLUGINS_DIR);
+	const pluginDir = path.resolve(root, name);
+	if (path.dirname(pluginDir) !== root) {
+		return {
+			success: false,
+			error:
+				"plugin destination must be a direct child of the plugins directory",
+		};
+	}
 	if (!(await fs.pathExists(pluginDir))) {
 		return { success: false, error: `plugin "${name}" is not installed` };
 	}
 
-	if (!options.dryRun) {
-		await fs.remove(pluginDir);
+	try {
+		const directory = await fs.lstat(pluginDir);
+		if (!directory.isDirectory() || directory.isSymbolicLink()) {
+			return {
+				success: false,
+				error: "plugin destination must be a non-symlink directory",
+			};
+		}
+		const rootReal = await fs.realpath(root);
+		const pluginReal = await fs.realpath(pluginDir);
+		if (pluginReal !== path.join(rootReal, name)) {
+			return {
+				success: false,
+				error: "plugin destination resolves outside its expected directory",
+			};
+		}
+		const metadataPath = path.join(pluginDir, ".installed.json");
+		const marker = await fs.lstat(metadataPath);
+		if (!marker.isFile() || marker.isSymbolicLink()) {
+			return {
+				success: false,
+				error: "plugin installation metadata must be a non-symlink file",
+			};
+		}
+		const metadata: unknown = await fs.readJson(metadataPath);
+		if (
+			typeof metadata !== "object" ||
+			metadata === null ||
+			!("name" in metadata) ||
+			metadata.name !== name ||
+			!("manifest" in metadata) ||
+			typeof metadata.manifest !== "object" ||
+			metadata.manifest === null ||
+			!("name" in metadata.manifest) ||
+			metadata.manifest.name !== name
+		) {
+			return {
+				success: false,
+				error: "plugin installation identity does not match the requested name",
+			};
+		}
+		if (!options.dryRun) await fs.remove(pluginDir);
+		return { success: true };
+	} catch (error: unknown) {
+		return {
+			success: false,
+			error: `cannot remove plugin "${name}": ${error instanceof Error ? error.message : String(error)}`,
+		};
 	}
-
-	return { success: true };
 }
 
 // ── Listing & Search ────────────────────────────────────────────────────────
@@ -317,35 +391,108 @@ export async function listInstalledPlugins(): Promise<InstalledPlugin[]> {
 	return plugins;
 }
 
+export const REGISTRY_SEARCH_STATUS = {
+	SUCCESS: "success",
+	UNAVAILABLE: "unavailable",
+	CANCELLED: "cancelled",
+} as const;
+
+export type RegistrySearchResult =
+	| {
+			status: typeof REGISTRY_SEARCH_STATUS.SUCCESS;
+			entries: PluginRegistryEntry[];
+	  }
+	| { status: typeof REGISTRY_SEARCH_STATUS.UNAVAILABLE }
+	| { status: typeof REGISTRY_SEARCH_STATUS.CANCELLED };
+
+function isRegistryEntry(value: unknown): value is PluginRegistryEntry {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"id" in value &&
+		typeof value.id === "string" &&
+		"repository" in value &&
+		typeof value.repository === "string" &&
+		"description" in value &&
+		typeof value.description === "string" &&
+		"tags" in value &&
+		Array.isArray(value.tags) &&
+		value.tags.every((tag: unknown) => typeof tag === "string") &&
+		(!("stars" in value) ||
+			(typeof value.stars === "number" && Number.isFinite(value.stars))) &&
+		(!("updatedAt" in value) || typeof value.updatedAt === "string")
+	);
+}
+
+function isRegistry(value: unknown): value is PluginRegistry {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"version" in value &&
+		typeof value.version === "string" &&
+		"updatedAt" in value &&
+		typeof value.updatedAt === "string" &&
+		"plugins" in value &&
+		Array.isArray(value.plugins) &&
+		value.plugins.every(isRegistryEntry)
+	);
+}
+
 /**
- * Fetch the remote plugin registry and optionally filter by query.
+ * Fetch and validate the registry within one 10-second fetch/body deadline.
+ * Cancellation settles this API even when a transport ignores abort; it cannot
+ * forcibly terminate that transport. Late completion/rejection remains handled.
  */
 export async function searchRegistry(
 	query?: string,
-): Promise<PluginRegistryEntry[]> {
-	try {
-		const response = await fetch(PLUGIN_REGISTRY_URL);
-		if (!response.ok) {
-			return [];
-		}
+	signal?: AbortSignal,
+): Promise<RegistrySearchResult> {
+	if (signal?.aborted) return { status: REGISTRY_SEARCH_STATUS.CANCELLED };
 
-		const registry = (await response.json()) as PluginRegistry;
-		let plugins = registry.plugins ?? [];
+	return new Promise((resolve) => {
+		const controller = new AbortController();
+		let settled = false;
+		const finish = (result: RegistrySearchResult) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", cancel);
+			resolve(result);
+		};
+		const cancel = () => {
+			finish({ status: REGISTRY_SEARCH_STATUS.CANCELLED });
+			controller.abort();
+		};
+		const timer = setTimeout(() => {
+			finish({ status: REGISTRY_SEARCH_STATUS.UNAVAILABLE });
+			controller.abort();
+		}, 10_000);
+		signal?.addEventListener("abort", cancel, { once: true });
 
-		if (query) {
-			const q = query.toLowerCase();
-			plugins = plugins.filter(
-				(p) =>
-					p.id.toLowerCase().includes(q) ||
-					p.description.toLowerCase().includes(q) ||
-					p.tags.some((t) => t.toLowerCase().includes(q)),
-			);
-		}
-
-		return plugins;
-	} catch {
-		return [];
-	}
+		const request = async (): Promise<RegistrySearchResult> => {
+			const response = await fetch(PLUGIN_REGISTRY_URL, {
+				signal: controller.signal,
+			});
+			if (settled || !response.ok)
+				return { status: REGISTRY_SEARCH_STATUS.UNAVAILABLE };
+			const registry: unknown = await response.json();
+			if (!isRegistry(registry))
+				return { status: REGISTRY_SEARCH_STATUS.UNAVAILABLE };
+			const q = query?.toLowerCase();
+			const entries = q
+				? registry.plugins.filter(
+						(p) =>
+							p.id.toLowerCase().includes(q) ||
+							p.description.toLowerCase().includes(q) ||
+							p.tags.some((t) => t.toLowerCase().includes(q)),
+					)
+				: registry.plugins;
+			return { status: REGISTRY_SEARCH_STATUS.SUCCESS, entries };
+		};
+		void request().then(finish, () =>
+			finish({ status: REGISTRY_SEARCH_STATUS.UNAVAILABLE }),
+		);
+	});
 }
 
 // ── Sync ───────────────────────────────────────────────────────────────

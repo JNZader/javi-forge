@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { makeFakeSecureFs } from "./__fixtures__/fake-secure-fs.js";
 import {
 	runTransaction,
@@ -255,5 +255,115 @@ describe("runTransaction — rollback STOPS on lost proof (never clobbers)", () 
 		expect(outcome.errors.join(" ")).toMatch(/changed after commit/);
 		// The concurrent change is preserved, not clobbered.
 		expect(fake.fileText(ASSET)).toBe("NEW-ASSET");
+	});
+});
+
+describe("runTransaction — rename mutation accounting", () => {
+	const upgrade = (fake: ReturnType<typeof makeFakeSecureFs>) =>
+		run(
+			fake,
+			asset({ capturePrior: true, wasAbsent: false }),
+			settings({ capturePrior: true, wasAbsent: false }),
+		);
+	it.each([
+		1, 2,
+	])("accounts for target %i applied before directory sync failure", async (failAt) => {
+		const fake = seededUpgradeFake();
+		const rename = fake.renameInDir.bind(fake);
+		let calls = 0;
+		vi.spyOn(fake, "renameInDir").mockImplementation(async (...args) => {
+			const result = await rename(...args);
+			return ++calls === failAt
+				? { ...result, ok: false, mutation: "applied", detail: "dirsync EIO" }
+				: result;
+		});
+		const outcome = await upgrade(fake);
+		expect(outcome.ok).toBe(false);
+		expect(outcome.committed).toEqual([ASSET, SETTINGS].slice(0, failAt));
+		expect(fake.fileText(ASSET)).toBe("OLD-ASSET");
+		expect(fake.fileText(SETTINGS)).toBe("OLD-SETTINGS");
+	});
+	it("reports a refused rollback unlink instead of silently succeeding", async () => {
+		const fake = makeFakeSecureFs();
+		for (const dir of ["/", PROJECT]) fake.seedDir(dir);
+		fake.faults.renameRefuse = (to) => to === "settings.json";
+		vi.spyOn(fake, "unlinkIfIdentity").mockResolvedValue({
+			ok: false,
+			refusal: "unsafe-parent-chain",
+		});
+		const cleanup = vi.spyOn(fake, "rmdirIfIdentityEmpty");
+		const outcome = await run(fake, asset(), settings());
+		expect(outcome.errors.join(" ")).toMatch(/STOP:.*unlink.*asset\.mjs/);
+		expect(fake.fileText(ASSET)).toBe("NEW-ASSET");
+		expect(cleanup).not.toHaveBeenCalled();
+	});
+	it("records an applied target before post-identity refusal and preserves it on lost proof", async () => {
+		const fake = seededUpgradeFake();
+		const rename = fake.renameInDir.bind(fake);
+		let applied = false;
+		vi.spyOn(fake, "renameInDir").mockImplementation(async (...args) => {
+			const result = await rename(...args);
+			applied = true;
+			return result;
+		});
+		fake.faults.revalidateRefuse = (target) => applied && target === HOOKS;
+		const outcome = await upgrade(fake);
+		expect(outcome.committed).toEqual([ASSET]);
+		expect(outcome.errors.join(" ")).toMatch(/STOP: lost parent-chain proof/);
+		expect(fake.fileText(ASSET)).toBe("NEW-ASSET");
+	});
+	it.each([
+		"unknown",
+		"thrown",
+		"malformed",
+	])("stops all rollback and directory cleanup on %s rename", async (kind) => {
+		const fake = makeFakeSecureFs();
+		for (const dir of ["/", PROJECT]) fake.seedDir(dir);
+		const rename = fake.renameInDir.bind(fake);
+		vi.spyOn(fake, "renameInDir").mockImplementation(async (...args) => {
+			if (args[2] !== "settings.json") return rename(...args);
+			if (kind === "thrown") throw new Error("transport lost");
+			if (kind === "malformed")
+				return undefined as unknown as Awaited<ReturnType<typeof rename>>;
+			return { ok: false, mutation: "unknown" };
+		});
+		const unlink = vi.spyOn(fake, "unlinkIfIdentity");
+		const cleanup = vi.spyOn(fake, "rmdirIfIdentityEmpty");
+		const outcome = await run(fake, asset(), settings());
+		expect(outcome.ok).toBe(false);
+		expect(outcome.committed).toEqual([ASSET]);
+		expect(outcome.errors.join(" ")).toMatch(/STOP:.*unknown.*settings\.json/);
+		expect(fake.fileText(ASSET)).toBe("NEW-ASSET");
+		expect(unlink).not.toHaveBeenCalled();
+		expect(cleanup).not.toHaveBeenCalled();
+	});
+	it.each([
+		"applied",
+		"unknown",
+	] as const)("stops after a %s failed restore without inventing surviving staging", async (mutation) => {
+		const fake = seededUpgradeFake();
+		const rename = fake.renameInDir.bind(fake);
+		let calls = 0;
+		vi.spyOn(fake, "renameInDir").mockImplementation(async (...args) => {
+			calls++;
+			if (calls === 3 && mutation === "unknown") return { ok: false, mutation };
+			const result = await rename(...args);
+			return calls >= 2
+				? { ...result, ok: false, mutation: "applied" }
+				: result;
+		});
+		const outcome = await upgrade(fake);
+		expect(outcome.committed).toEqual([ASSET, SETTINGS]);
+		expect(outcome.errors.join(" ")).toMatch(/STOP:.*settings\.json/);
+		expect(outcome.errors.join(" ")).not.toContain("prior payload staged at");
+		expect(fake.fileText(ASSET)).toBe("NEW-ASSET");
+		expect(fake.fileText(SETTINGS)).toBe(
+			mutation === "applied" ? "OLD-SETTINGS" : "NEW-SETTINGS",
+		);
+		expect(calls).toBe(3);
+		if (mutation === "applied")
+			expect([...fake.files.keys()].some((p) => p.includes(".tmp."))).toBe(
+				false,
+			);
 	});
 });

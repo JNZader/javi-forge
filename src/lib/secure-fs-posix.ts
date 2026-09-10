@@ -537,15 +537,20 @@ export function createPosixSecureFs(acl: PosixAclAdapter): PlatformSecureFs {
 		},
 
 		async renameInDir(dir, from, to) {
+			let applied = false;
 			try {
 				await rename(path.join(dir.path, from), path.join(dir.path, to));
+				applied = true;
 				await fsyncDir(dir.path);
-				return ok();
+				return { ok: true, mutation: "applied" };
 			} catch (error) {
-				return refuse(
-					"unsafe-parent-chain",
-					`rename ${from}->${to}: ${errCode(error) ?? "error"}`,
-				);
+				return {
+					...refuse<void>(
+						"unsafe-parent-chain",
+						`rename ${from}->${to}: ${errCode(error) ?? "error"}`,
+					),
+					mutation: applied ? "applied" : "unknown",
+				};
 			}
 		},
 

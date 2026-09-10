@@ -64,6 +64,18 @@ export interface SecureResult<T> {
 	notFound?: boolean;
 }
 
+/** Namespace mutation is independent of success/refusal and durability. */
+export const RENAME_MUTATION = {
+	APPLIED: "applied",
+	NOT_APPLIED: "not-applied",
+	UNKNOWN: "unknown",
+} as const;
+export type RenameMutation =
+	(typeof RENAME_MUTATION)[keyof typeof RENAME_MUTATION];
+export interface SecureRenameResult extends SecureResult<void> {
+	mutation: RenameMutation;
+}
+
 /**
  * The whole platform boundary. Every host-dependent operation is a method here;
  * the transaction core talks only to this interface. POSIX now, Windows stub in
@@ -132,12 +144,12 @@ export interface PlatformSecureFs {
 	/** Apply an exact mode to an existing staged file and re-verify mode + ACL absence. */
 	applyExactMode(target: string, mode: number): Promise<SecureResult<void>>;
 
-	/** Same-directory rename from -> to, then fsync the directory. */
+	/** Same-directory rename. Report namespace mutation separately from completion. */
 	renameInDir(
 		dir: SecureDirHandle,
 		from: string,
 		to: string,
-	): Promise<SecureResult<void>>;
+	): Promise<SecureRenameResult>;
 
 	/** Unlink an identity-matched file (rollback of a newly created target). */
 	unlinkIfIdentity(
@@ -341,6 +353,7 @@ export async function runTransaction(
 	const createdDirs: SecureDirHandle[] = [];
 	const staged: StagedEntry[] = [];
 	const committed: CommittedEntry[] = [];
+	let unknownRenameTarget: string | null = null;
 	const backups: string[] = [];
 
 	const needsWrite = (c: TransactionComponent): boolean => c.desired !== null;
@@ -574,21 +587,24 @@ export async function runTransaction(
 				await secureFs.revalidateIdentity(entry.dir.path, entry.dir.identity),
 			);
 			const wroteHash = sha256(entry.target.desired as Buffer);
-			must(
-				`rename ${base}`,
-				await secureFs.renameInDir(entry.dir, entry.tempName, base),
-			);
+			const renamed = await observeRename(entry.dir, entry.tempName, base);
+			// Record the namespace change BEFORE completion or post-identity can fail.
+			if (renamed.mutation === "applied") {
+				committed.push({
+					path: entry.target.path,
+					dir: entry.dir,
+					wroteHash,
+					wasAbsent: entry.target.wasAbsent,
+					prior: entry.prior,
+				});
+			} else if (renamed.mutation === "unknown") {
+				unknownRenameTarget = entry.target.path;
+			}
+			must(`rename ${base}`, renamed);
 			must(
 				`post-rename ${entry.dir.path}`,
 				await secureFs.revalidateIdentity(entry.dir.path, entry.dir.identity),
 			);
-			committed.push({
-				path: entry.target.path,
-				dir: entry.dir,
-				wroteHash,
-				wasAbsent: entry.target.wasAbsent,
-				prior: entry.prior,
-			});
 		}
 
 		return {
@@ -601,7 +617,13 @@ export async function runTransaction(
 		const errors: string[] = [
 			error instanceof TxAbort ? error.message : String(error),
 		];
-		await rollback(committed, createdDirs, errors);
+		if (unknownRenameTarget) {
+			errors.push(
+				`STOP: unknown rename outcome at ${unknownRenameTarget}; manual recovery; no rollback or directory cleanup`,
+			);
+		} else {
+			await rollback(committed, createdDirs, errors);
+		}
 		return {
 			ok: false,
 			committed: committed.map((c) => c.path),
@@ -611,6 +633,31 @@ export async function runTransaction(
 	} finally {
 		for (const handle of [...createdDirs, ...heldOrder]) {
 			await handle.close().catch(() => {});
+		}
+	}
+
+	/** A rejected or malformed rename reply never proves absence of mutation. */
+	async function observeRename(
+		dir: SecureDirHandle,
+		from: string,
+		to: string,
+	): Promise<SecureRenameResult> {
+		try {
+			const result = await secureFs.renameInDir(dir, from, to);
+			if (
+				result &&
+				typeof result.ok === "boolean" &&
+				Object.values(RENAME_MUTATION).includes(result.mutation) &&
+				(!result.ok || result.mutation === "applied")
+			)
+				return result;
+			return {
+				ok: false,
+				mutation: "unknown",
+				detail: "malformed rename result",
+			};
+		} catch (error) {
+			return { ok: false, mutation: "unknown", detail: String(error) };
 		}
 	}
 
@@ -669,11 +716,17 @@ export async function runTransaction(
 			}
 			const base = path.basename(entry.path);
 			if (entry.wasAbsent) {
-				await secureFs.unlinkIfIdentity(
+				const unlinked = await secureFs.unlinkIfIdentity(
 					entry.dir,
 					base,
 					current.value.identity,
 				);
+				if (!unlinked.ok) {
+					errors.push(
+						`STOP: cannot confirm rollback unlink of ${entry.path}; manual recovery`,
+					);
+					return;
+				}
 			} else if (entry.prior) {
 				const rName = tempName(base, nonce());
 				const wrote = await secureFs.writeExclusive(
@@ -696,17 +749,25 @@ export async function runTransaction(
 					path.join(entry.dir.path, rName),
 					entry.prior.mode,
 				);
+				const restored = await observeRename(entry.dir, rName, base);
+				if (restored.mutation === "unknown") {
+					errors.push(
+						`STOP: unknown restore rename outcome at ${entry.path}; manual recovery`,
+					);
+					return;
+				}
+				if (!restored.ok) {
+					errors.push(
+						restored.mutation === "applied"
+							? `STOP: restore rename applied at ${entry.path}, but completion failed; verify durability for manual recovery`
+							: `STOP: cannot restore ${entry.path}; prior payload staged at ${path.join(entry.dir.path, rName)} for manual recovery`,
+					);
+					return;
+				}
 				if (!remoded.ok) {
 					errors.push(
 						`note: restored ${entry.path}; prior-mode restore failed, verify permissions (${remoded.detail ?? remoded.refusal ?? "unknown"})`,
 					);
-				}
-				const restored = await secureFs.renameInDir(entry.dir, rName, base);
-				if (!restored.ok) {
-					errors.push(
-						`STOP: cannot restore ${entry.path}; prior payload staged at ${path.join(entry.dir.path, rName)} for manual recovery`,
-					);
-					return;
 				}
 			}
 		}

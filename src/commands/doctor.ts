@@ -7,7 +7,10 @@ import {
 	TEMPLATES_DIR,
 } from "../constants.js";
 import { detectStack } from "../lib/common.js";
-import { refreshContextDir } from "../lib/context.js";
+import {
+	detectDependenciesDetailed,
+	refreshContextDir,
+} from "../lib/context.js";
 import { execFileAsync } from "../lib/exec.js";
 import { resolvePlatformSupport } from "../lib/platform-support.js";
 import { listInstalledPlugins } from "../lib/plugin.js";
@@ -22,7 +25,12 @@ export type CheckStatus = "ok" | "fail" | "skip";
 
 type DoctorFilesystem = Pick<typeof fs, "pathExists" | "readJson" | "readdir">;
 
-export interface DoctorDeps {
+export interface DoctorOptions {
+	dryRun?: boolean;
+	refreshContext?: boolean;
+}
+
+export interface DoctorDeps extends DoctorOptions {
 	platform?: string;
 	cwd?: () => string;
 	filesystem?: DoctorFilesystem;
@@ -30,6 +38,7 @@ export interface DoctorDeps {
 	stackDetector?: typeof detectStack;
 	pluginLister?: typeof listInstalledPlugins;
 	contextRefresher?: typeof refreshContextDir;
+	dependencyDetector?: typeof detectDependenciesDetailed;
 }
 
 /** Resolve a binary name to its first full path, returns null if not found. */
@@ -232,6 +241,8 @@ export async function runDoctor(
 	const stackDetector = deps.stackDetector ?? detectStack;
 	const pluginLister = deps.pluginLister ?? listInstalledPlugins;
 	const contextRefresher = deps.contextRefresher ?? refreshContextDir;
+	const dependencyDetector =
+		deps.dependencyDetector ?? detectDependenciesDetailed;
 	const sections: DoctorSection[] = [];
 
 	// ── 1. System Tools ────────────────────────────────────────────────────────
@@ -402,19 +413,38 @@ export async function runDoctor(
 	}
 	sections.push({ title: "Plugins", checks: pluginChecks });
 
-	// ── 7. Context Directory Refresh ───────────────────────────────────────────
+	// ── 7. Context Directory (refresh is explicit) ──────────────────────────────
 	const contextChecks: DoctorCheck[] = [];
 	try {
-		const result = await contextRefresher(cwd);
-		if (result) {
+		if (deps.refreshContext && !deps.dryRun) {
+			const result = await contextRefresher(cwd);
 			contextChecks.push({
 				label: ".context/ refresh",
-				status: "ok",
-				detail: "INDEX.md + summary.md updated",
+				status: result ? "ok" : "skip",
+				detail: result
+					? "INDEX.md + summary.md updated"
+					: "no .context/ or no manifest found",
 			});
-			// A manifest that could not be read is not "no dependencies" — surface
-			// each warning so an unreadable/oversized/invalid manifest is visible.
-			for (const warning of result.warnings) {
+			for (const warning of result?.warnings ?? []) {
+				contextChecks.push({
+					label: "dependency manifest",
+					status: "fail",
+					detail: warning,
+				});
+			}
+		} else if (
+			manifest &&
+			(await filesystem.pathExists(path.join(cwd, ".context")))
+		) {
+			contextChecks.push({
+				label: ".context/",
+				status: deps.refreshContext ? "skip" : "ok",
+				detail: deps.refreshContext
+					? "dry-run: would refresh INDEX.md + summary.md and manifest timestamp"
+					: "present; not refreshed (use --refresh-context to update)",
+			});
+			const { warnings } = await dependencyDetector(cwd, manifest.stack);
+			for (const warning of warnings) {
 				contextChecks.push({
 					label: "dependency manifest",
 					status: "fail",
@@ -423,16 +453,16 @@ export async function runDoctor(
 			}
 		} else {
 			contextChecks.push({
-				label: ".context/ refresh",
+				label: ".context/",
 				status: "skip",
 				detail: "no .context/ or no manifest found",
 			});
 		}
-	} catch (e) {
+	} catch (error: unknown) {
 		contextChecks.push({
-			label: ".context/ refresh",
+			label: ".context/",
 			status: "fail",
-			detail: `refresh failed: ${String(e)}`,
+			detail: `context check failed: ${error instanceof Error ? error.message : String(error)}`,
 		});
 	}
 	sections.push({ title: "Context Directory", checks: contextChecks });

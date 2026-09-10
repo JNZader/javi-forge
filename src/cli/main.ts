@@ -18,14 +18,6 @@ import { FLAGS_SCHEMA, HELP_TEXT } from "./help.js";
 import { createInkStdin, detectCI, setupUpdateNotifier } from "./runtime.js";
 
 export async function runCli(): Promise<void> {
-	// Check for updates in background (non-blocking, cached 24h)
-	const _require = createRequire(import.meta.url);
-	const pkg = _require("../../package.json") as {
-		name: string;
-		version: string;
-	};
-	setupUpdateNotifier(pkg);
-
 	const cli = meow(HELP_TEXT, {
 		importMeta: import.meta,
 		flags: FLAGS_SCHEMA,
@@ -35,12 +27,42 @@ export async function runCli(): Promise<void> {
 	});
 
 	const subcommand = cli.input[0] ?? "init";
+	const commands = new Set([
+		"init",
+		"tdd",
+		"ci",
+		"hooks",
+		"doctor",
+		"analyze",
+		"workflow",
+		"llms-txt",
+		"plugin",
+		"skills",
+		"skill",
+		"security",
+	]);
+	if (!commands.has(subcommand)) {
+		console.error(
+			`Unknown command "${subcommand}". Run javi-forge --help for usage.`,
+		);
+		process.exit(1);
+	}
 
 	// Global --help: every command except `ci` and `hooks` shows the global banner
 	// here. Those two own their per-command help inside their handlers.
 	if (cli.flags.help && subcommand !== "ci" && subcommand !== "hooks") {
 		console.log(HELP_TEXT);
 		process.exit(0);
+	}
+
+	// The notifier caches to disk; diagnostics and dry-runs must not start it.
+	if (subcommand !== "doctor" && !cli.flags.dryRun) {
+		const _require = createRequire(import.meta.url);
+		const pkg = _require("../../package.json") as {
+			name: string;
+			version: string;
+		};
+		setupUpdateNotifier(pkg);
 	}
 
 	const isCI = detectCI(cli.flags);
@@ -102,7 +124,7 @@ export async function runCli(): Promise<void> {
 			break;
 		}
 
-		default: {
+		case "init": {
 			handleInitDefault(cli, { inkStdin, isCI });
 			break;
 		}

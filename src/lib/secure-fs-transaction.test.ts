@@ -196,6 +196,38 @@ describe("runTransaction — created directory handle cleanup", () => {
 	});
 });
 
+describe("runTransaction — opened ancestor handle cleanup", () => {
+	it("closes the root handle once when root ownership refuses", async () => {
+		const fake = freshFake();
+		const closed = trackOpenedHandleClosures(fake);
+		fake.faults.ownershipRefuse = (target) => target === "/";
+
+		const outcome = await run(fake, asset(), settings());
+
+		expect(outcome.ok).toBe(false);
+		expect(outcome.errors.join(" ")).toContain("ownership /");
+		expect(outcome.committed).toEqual([]);
+		expect(fake.files.size).toBe(0);
+		expect(fake.dirs.has(CLAUDE)).toBe(false);
+		expect(closed).toEqual(["/"]);
+	});
+
+	it("closes the root handle once when root endangering ACL refuses", async () => {
+		const fake = freshFake();
+		const closed = trackOpenedHandleClosures(fake);
+		fake.faults.endangeringAclRefuse = (target) => target === "/";
+
+		const outcome = await run(fake, asset(), settings());
+
+		expect(outcome.ok).toBe(false);
+		expect(outcome.errors.join(" ")).toContain("acl /");
+		expect(outcome.committed).toEqual([]);
+		expect(fake.files.size).toBe(0);
+		expect(fake.dirs.has(CLAUDE)).toBe(false);
+		expect(closed).toEqual(["/"]);
+	});
+});
+
 describe("runTransaction — pre-commit aborts leave every target untouched", () => {
 	it("closes an opened fake SecureDirHandle when ownership or ACL validation fails before registration", async () => {
 		const refuseGateProofs: Array<(fake: FakeSecureFs) => void> = [

@@ -22,6 +22,24 @@ const CLI_PATH = path.resolve(__dirname, "../../dist/index.js");
 
 const sandboxes: string[] = [];
 
+interface SyncInvocation {
+	tool: string;
+	args: string[];
+	cwd: string;
+}
+
+interface AISyncBoundary {
+	env: NodeJS.ProcessEnv;
+	expected: SyncInvocation;
+	readInvocations: () => Promise<SyncInvocation[]>;
+}
+
+interface InitResult {
+	stdout: string;
+	stderr: string;
+	exitCode: number;
+}
+
 async function createSandbox(): Promise<string> {
 	const dir = path.join(
 		os.tmpdir(),
@@ -30,6 +48,57 @@ async function createSandbox(): Promise<string> {
 	await fs.ensureDir(dir);
 	sandboxes.push(dir);
 	return dir;
+}
+
+async function createAISyncBoundary(
+	sandbox: string,
+	projectDir: string,
+): Promise<AISyncBoundary> {
+	const binDir = path.join(sandbox, ".javi-forge-test-bin");
+	const recordPath = path.join(
+		binDir,
+		`ai-sync-${crypto.createHash("sha256").update(projectDir).digest("hex")}.json`,
+	);
+	const expected = {
+		tool: "npx",
+		args: ["javi-ai", "sync", "--project-dir", projectDir, "--target", "all"],
+		cwd: projectDir,
+	};
+	const npxShim = `#!${process.execPath}
+import fs from "node:fs";
+const expected = ${JSON.stringify(expected)};
+const recordPath = ${JSON.stringify(recordPath)};
+const invocation = { tool: "npx", args: process.argv.slice(2), cwd: process.cwd() };
+const calls = fs.existsSync(recordPath) ? JSON.parse(fs.readFileSync(recordPath, "utf8")) : [];
+calls.push(invocation);
+fs.writeFileSync(recordPath, JSON.stringify(calls));
+if (JSON.stringify(invocation) !== JSON.stringify(expected)) {
+  process.stderr.write("refused unexpected npx invocation\\n");
+  process.exitCode = 86;
+}
+`;
+	const javiAiShim = `#!${process.execPath}
+process.stderr.write("refused direct javi-ai invocation\\n");
+process.exitCode = 87;
+`;
+
+	await fs.ensureDir(binDir);
+	await Promise.all([
+		fs.writeFile(path.join(binDir, "npx"), npxShim, { mode: 0o700 }),
+		fs.writeFile(path.join(binDir, "javi-ai"), javiAiShim, { mode: 0o700 }),
+	]);
+
+	return {
+		env: {
+			...process.env,
+			PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+		},
+		expected,
+		readInvocations: async () =>
+			(await fs.pathExists(recordPath))
+				? ((await fs.readJson(recordPath)) as SyncInvocation[])
+				: [],
+	};
 }
 
 afterEach(async () => {
@@ -42,14 +111,13 @@ afterEach(async () => {
 /**
  * Run the CLI for real (no --dry-run) in a sandbox.
  * Always sets CI=1 and --batch for non-interactive mode.
- * Defaults: --no-ai-sync by NOT including aiSync (OptionSelector auto-confirms
- * with defaults which includes aiSync, so we accept javi-ai errors gracefully).
  */
 async function runInit(
 	args: string[],
 	cwd: string,
 	timeout = 60_000,
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+	env: NodeJS.ProcessEnv = process.env,
+): Promise<InitResult> {
 	try {
 		const { stdout, stderr } = await execFileAsync(
 			"node",
@@ -57,7 +125,7 @@ async function runInit(
 			{
 				timeout,
 				cwd,
-				env: { ...process.env, FORCE_COLOR: "0", CI: "1" },
+				env: { ...env, FORCE_COLOR: "0", CI: "1" },
 			},
 		);
 		return { stdout, stderr, exitCode: 0 };
@@ -69,6 +137,35 @@ async function runInit(
 			exitCode: (err.code as number) ?? 1,
 		};
 	}
+}
+
+async function runContainedInit(
+	args: string[],
+	cwd: string,
+	timeout = 60_000,
+): Promise<InitResult> {
+	const projectNameIndex = args.indexOf("--project-name");
+	const projectName = args[projectNameIndex + 1];
+	if (projectNameIndex < 0 || !projectName) {
+		throw new Error("contained init requires a non-empty --project-name");
+	}
+
+	const boundary = await createAISyncBoundary(cwd, path.join(cwd, projectName));
+	const priorInvocations = await boundary.readInvocations();
+	const result = await runInit(args, cwd, timeout, boundary.env);
+	expect(
+		(await boundary.readInvocations()).slice(priorInvocations.length),
+	).toEqual([boundary.expected]);
+	if (result.exitCode !== 0) {
+		throw new Error(
+			`contained init failed: ${JSON.stringify({
+				exitCode: result.exitCode,
+				stdout: result.stdout.slice(0, 4_096),
+				stderr: result.stderr.slice(0, 4_096),
+			})}`,
+		);
+	}
+	return result;
 }
 
 /** Get the project directory inside a sandbox */
@@ -99,7 +196,7 @@ async function readProjectFile(
 describe("Project creation: init creates complete project", () => {
 	it("init --stack node --ci github: creates complete project structure", async () => {
 		const sandbox = await createSandbox();
-		const { exitCode } = await runInit(
+		const { exitCode } = await runContainedInit(
 			[
 				"--project-name",
 				"test-app",
@@ -673,7 +770,7 @@ describe("GHAGGA review system", () => {
 describe("Manifest metadata", () => {
 	it("manifest contains correct metadata fields", async () => {
 		const sandbox = await createSandbox();
-		await runInit(
+		await runContainedInit(
 			[
 				"--project-name",
 				"meta-app",
@@ -704,7 +801,7 @@ describe("Manifest metadata", () => {
 	it("different stacks produce different manifests", async () => {
 		const sandbox = await createSandbox();
 
-		await runInit(
+		await runContainedInit(
 			[
 				"--project-name",
 				"proj-node",
@@ -717,7 +814,7 @@ describe("Manifest metadata", () => {
 			],
 			sandbox,
 		);
-		await runInit(
+		await runContainedInit(
 			[
 				"--project-name",
 				"proj-go",
@@ -802,7 +899,7 @@ describe("Idempotency", () => {
 		const sandbox = await createSandbox();
 
 		// First run
-		const first = await runInit(
+		const first = await runContainedInit(
 			[
 				"--project-name",
 				"idem-app",
@@ -818,7 +915,7 @@ describe("Idempotency", () => {
 		expect(first.exitCode).toBe(0);
 
 		// Second run — same project name in same sandbox
-		const second = await runInit(
+		const second = await runContainedInit(
 			[
 				"--project-name",
 				"idem-app",

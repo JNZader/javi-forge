@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { makeFakeSecureFs } from "./__fixtures__/fake-secure-fs.js";
+import {
+	type FakeSecureFs,
+	makeFakeSecureFs,
+} from "./__fixtures__/fake-secure-fs.js";
 import {
 	runTransaction,
 	type TransactionComponent,
@@ -43,6 +46,27 @@ const freshFake = () => {
 	fake.seedDir("/");
 	fake.seedDir(PROJECT);
 	return fake;
+};
+
+const trackOpenedHandleClosures = (fake: FakeSecureFs): string[] => {
+	const closed: string[] = [];
+	const openDirNoFollow = fake.openDirNoFollow.bind(fake);
+	fake.openDirNoFollow = async (dirPath) => {
+		const result = await openDirNoFollow(dirPath);
+		if (!result.value) return result;
+		const handle = result.value;
+		return {
+			...result,
+			value: {
+				...handle,
+				close: async () => {
+					closed.push(handle.path);
+					await handle.close();
+				},
+			},
+		};
+	};
+	return closed;
 };
 
 const run = (
@@ -125,6 +149,28 @@ describe("runTransaction — fresh install (host-independent fake)", () => {
 });
 
 describe("runTransaction — pre-commit aborts leave every target untouched", () => {
+	it("closes an opened fake SecureDirHandle when ownership or ACL validation fails before registration", async () => {
+		const refuseGateProofs: Array<(fake: FakeSecureFs) => void> = [
+			(fake) => {
+				fake.faults.ownershipRefuse = (dirPath) => dirPath === "/";
+			},
+			(fake) => {
+				fake.faults.endangeringAclRefuse = (dirPath) => dirPath === "/";
+			},
+		];
+
+		for (const refuseGateProof of refuseGateProofs) {
+			const fake = freshFake();
+			const closed = trackOpenedHandleClosures(fake);
+			refuseGateProof(fake);
+
+			const outcome = await run(fake, asset(), settings());
+
+			expect(outcome.ok).toBe(false);
+			expect(closed).toEqual(["/"]);
+		}
+	});
+
 	it("aborts with zero mutation when a controlling directory has an extended ACL", async () => {
 		const fake = freshFake();
 		fake.faults.aclRefuse = (target) => target === PROJECT;

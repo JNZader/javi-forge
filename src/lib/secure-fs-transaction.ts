@@ -363,10 +363,12 @@ export async function runTransaction(
 	// only segments loosen. No `process.platform` here — role is expressed by which
 	// dirs get proveManagedContainer'd (the managedContainers set).
 	async function gate(dirPath: string, handle: SecureDirHandle): Promise<void> {
-		must(`ownership ${dirPath}`, await secureFs.proveOwnershipAndMode(dirPath));
-		must(`acl ${dirPath}`, await secureFs.proveNoEndangeringAcl(dirPath));
+		// Transfer ownership before refusal-capable proofs so `finally` closes a
+		// successfully opened handle even when either proof fails.
 		heldByPath.set(dirPath, handle);
 		heldOrder.push(handle);
+		must(`ownership ${dirPath}`, await secureFs.proveOwnershipAndMode(dirPath));
+		must(`acl ${dirPath}`, await secureFs.proveNoEndangeringAcl(dirPath));
 	}
 
 	/**

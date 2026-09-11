@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { test } from "vitest";
 import {
 	AGENT_CONFIGS,
 	evaluateEvent,
@@ -83,7 +83,7 @@ test("baseline allows standalone quoted cat-data heredoc", () => {
 	});
 });
 
-test("inert Python string apostrophe does not change classification", (t) => {
+test("inert Python string apostrophe does not change classification", () => {
 	const plain = "python3 - <<'PY'\nvalue = '''GETs response'''\nPY";
 	const apostrophe = "python3 - <<'PY'\nvalue = '''GET's response'''\nPY";
 	assert.equal(apostrophe.replace("GET's", "GETs"), plain);
@@ -91,7 +91,6 @@ test("inert Python string apostrophe does not change classification", (t) => {
 	const before = { command: plain, verdict: classify(plain) };
 	const after = { command: apostrophe, verdict: classify(apostrophe) };
 	const evidence = JSON.stringify({ before, after });
-	t.diagnostic(evidence);
 	// Equality deliberately chooses neither allow-Python nor deny-Python policy.
 	assert.deepEqual(after.verdict, before.verdict, evidence);
 });

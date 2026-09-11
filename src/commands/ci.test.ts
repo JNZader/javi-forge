@@ -2634,7 +2634,7 @@ describe("characterization: auto + docker", () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-char-"));
 		// Node repo with no .javi-forge/ci.yaml → resolved.source === "auto".
 		await fs.writeJson(path.join(tmpDir, "package.json"), {
-			scripts: { lint: "eslint .", build: "tsc", test: "vitest run" },
+			scripts: { lint: "true", build: "true", test: "true" },
 		});
 		await fs.writeFile(path.join(tmpDir, "pnpm-lock.yaml"), "");
 	});
@@ -2685,9 +2685,8 @@ describe("characterization: auto + docker", () => {
 
 	it("emits ZERO image steps and never builds an image with --no-docker", async () => {
 		const steps: CIStep[] = [];
-		// Native execution shells out to the detected commands, whose outcome is
-		// environment-dependent (and irrelevant here): the Docker-gate assertions
-		// below hold on the emitted stream whether the run passes or fails.
+		// The fixture commands are self-contained so native execution is independent
+		// of package-manager installs; this keeps the Docker-gate assertions focused.
 		await runCI({ projectDir: tmpDir, ...AUTO_DOCKER, noDocker: true }, (s) =>
 			steps.push({ ...s }),
 		).catch(() => undefined);

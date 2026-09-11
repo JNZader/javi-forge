@@ -1,3 +1,10 @@
+## [1.38.2](https://github.com/JNZader/javi-forge/compare/v1.38.1...v1.38.2) (2026-09-11)
+
+### Bug Fixes
+
+* **secure-fs:** clean up rejected created handles ([9729c71](https://github.com/JNZader/javi-forge/commit/9729c711d4e76c82cd32933c54ce6e89726b693a))
+* **secure-fs:** close rejected ancestor handles ([55b8930](https://github.com/JNZader/javi-forge/commit/55b89300fbff6471fc45d2e5a5feab4c6cf2a6aa))
+
 ## [1.38.1](https://github.com/JNZader/javi-forge/compare/v1.38.0...v1.38.1) (2026-09-11)
 
 ### Bug Fixes

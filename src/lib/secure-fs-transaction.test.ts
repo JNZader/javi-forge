@@ -69,6 +69,29 @@ const trackOpenedHandleClosures = (fake: FakeSecureFs): string[] => {
 	return closed;
 };
 
+const trackCreatedHandleClosures = (
+	fake: ReturnType<typeof makeFakeSecureFs>,
+): string[] => {
+	const closed: string[] = [];
+	const createDirExclusive = fake.createDirExclusive.bind(fake);
+	fake.createDirExclusive = async (parent, name, mode) => {
+		const result = await createDirExclusive(parent, name, mode);
+		if (!result.value) return result;
+		const handle = result.value;
+		return {
+			...result,
+			value: {
+				...handle,
+				close: async () => {
+					closed.push(handle.path);
+					await handle.close();
+				},
+			},
+		};
+	};
+	return closed;
+};
+
 const run = (
 	fake: ReturnType<typeof makeFakeSecureFs>,
 	a: TransactionComponent,
@@ -145,6 +168,31 @@ describe("runTransaction — fresh install (host-independent fake)", () => {
 		expect(fake.dirs.has(CLAUDE)).toBe(true);
 		// .claude/hooks is only created when the asset itself is written.
 		expect(fake.dirs.has(HOOKS)).toBe(false);
+	});
+});
+
+describe("runTransaction — created directory handle cleanup", () => {
+	it("rolls back and closes a created directory when post-create revalidation refuses", async () => {
+		const fake = freshFake();
+		const closed = trackCreatedHandleClosures(fake);
+		fake.faults.revalidateRefuse = (target) => target === CLAUDE;
+
+		const outcome = await run(fake, asset(), settings());
+
+		expect(outcome.ok).toBe(false);
+		expect(outcome.errors.join(" ")).toMatch(/revalidate-created/);
+		expect(fake.dirs.has(CLAUDE)).toBe(false);
+		expect(closed).toEqual([CLAUDE]);
+	});
+
+	it("closes each successfully created directory handle once", async () => {
+		const fake = freshFake();
+		const closed = trackCreatedHandleClosures(fake);
+
+		const outcome = await run(fake, asset(), settings());
+
+		expect(outcome.ok).toBe(true);
+		expect(closed).toEqual([CLAUDE, HOOKS]);
 	});
 });
 

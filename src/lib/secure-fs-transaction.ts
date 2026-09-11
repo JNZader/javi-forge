@@ -416,12 +416,14 @@ export async function runTransaction(
 			`create ${fullPath}`,
 			await secureFs.createDirExclusive(parent, path.basename(fullPath), 0o700),
 		);
+		// Own the created segment before post-create validation so any refusal rolls
+		// it back and closes its handle.
+		createdDirs.push(created);
 		// Post-create identity revalidation + full gate on the new segment.
 		must(
 			`revalidate-created ${fullPath}`,
 			await secureFs.revalidateIdentity(fullPath, created.identity),
 		);
-		createdDirs.push(created);
 		await gate(fullPath, created);
 		must(
 			`container ${fullPath}`,
@@ -611,7 +613,7 @@ export async function runTransaction(
 			errors,
 		};
 	} finally {
-		for (const handle of [...createdDirs, ...heldOrder]) {
+		for (const handle of new Set([...createdDirs, ...heldOrder])) {
 			await handle.close().catch(() => {});
 		}
 	}

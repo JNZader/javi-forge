@@ -1,3 +1,10 @@
+## [1.38.1](https://github.com/JNZader/javi-forge/compare/v1.38.0...v1.38.1) (2026-09-11)
+
+### Bug Fixes
+
+* **deps:** remediate high-severity audit findings ([43f25ed](https://github.com/JNZader/javi-forge/commit/43f25ed713dd0d6d3c9905775ab0cfcf85261f7f))
+* **secure-fs:** close rejected directory handles ([c6ee842](https://github.com/JNZader/javi-forge/commit/c6ee84235567dc45aa7ea407323b26e1c9a8dd90))
+
 ## [1.38.0](https://github.com/JNZader/javi-forge/compare/v1.37.1...v1.38.0) (2026-08-23)
 
 ### Features

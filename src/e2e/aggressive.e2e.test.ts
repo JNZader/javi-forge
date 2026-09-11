@@ -153,9 +153,9 @@ async function runContainedInit(
 	const boundary = await createAISyncBoundary(cwd, path.join(cwd, projectName));
 	const priorInvocations = await boundary.readInvocations();
 	const result = await runInit(args, cwd, timeout, boundary.env);
-	expect((await boundary.readInvocations()).slice(priorInvocations.length)).toEqual([
-		boundary.expected,
-	]);
+	expect(
+		(await boundary.readInvocations()).slice(priorInvocations.length),
+	).toEqual([boundary.expected]);
 	if (result.exitCode !== 0) {
 		throw new Error(
 			`contained init failed: ${JSON.stringify({

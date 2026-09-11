@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-	makeFakeSecureFs,
 	type FakeSecureFs,
+	makeFakeSecureFs,
 } from "./__fixtures__/fake-secure-fs.js";
 import {
 	runTransaction,

@@ -13,7 +13,9 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import fs from "fs-extra";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { initProject } from "../commands/init.js";
+import type { InitStep } from "../types/index.js";
 
 const execFileAsync = promisify(execFile);
 const CLI_PATH = path.resolve(__dirname, "../../dist/index.js");
@@ -21,6 +23,14 @@ const CLI_PATH = path.resolve(__dirname, "../../dist/index.js");
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const sandboxes: string[] = [];
+let sandboxRoot: string | undefined;
+
+beforeAll(async () => {
+	sandboxRoot = await fs.mkdtemp(
+		path.join(os.homedir(), ".javi-forge-aggressive-"),
+	);
+	await fs.chmod(sandboxRoot, 0o700);
+});
 
 interface SyncInvocation {
 	tool: string;
@@ -41,11 +51,8 @@ interface InitResult {
 }
 
 async function createSandbox(): Promise<string> {
-	const dir = path.join(
-		os.tmpdir(),
-		`javi-forge-aggressive-${crypto.randomUUID()}`,
-	);
-	await fs.ensureDir(dir);
+	if (!sandboxRoot) throw new Error("aggressive sandbox root is unavailable");
+	const dir = await fs.mkdtemp(path.join(sandboxRoot, "sandbox-"));
 	sandboxes.push(dir);
 	return dir;
 }
@@ -108,6 +115,11 @@ afterEach(async () => {
 	sandboxes.length = 0;
 });
 
+afterAll(async () => {
+	if (sandboxRoot) await fs.remove(sandboxRoot).catch(() => {});
+	sandboxRoot = undefined;
+});
+
 /**
  * Run the CLI for real (no --dry-run) in a sandbox.
  * Always sets CI=1 and --batch for non-interactive mode.
@@ -168,6 +180,40 @@ async function runContainedInit(
 	return result;
 }
 
+async function runSecurityInit(
+	projectName: string,
+	projectDir: string,
+): Promise<InitStep | undefined> {
+	const steps: InitStep[] = [];
+	await initProject(
+		{
+			projectName,
+			projectDir,
+			stack: "node",
+			ciProvider: "github",
+			memory: "none",
+			aiSync: false,
+			sdd: false,
+			ghagga: false,
+			mock: false,
+			contextDir: false,
+			claudeMd: false,
+			securityHooks: true,
+			hookProfile: "standard",
+			claudePreToolUseGuard: true,
+			codeGraph: false,
+			dockerDeploy: false,
+			dockerServiceName: "app",
+			localAi: false,
+			dryRun: false,
+		},
+		(step) => steps.push(step),
+	);
+	return steps.findLast(
+		(step) => step.id === "security-hooks" && step.status === "error",
+	);
+}
+
 /** Get the project directory inside a sandbox */
 function _projectDir(sandbox: string, name: string): string {
 	return path.join(sandbox, name);
@@ -192,6 +238,31 @@ async function readProjectFile(
 }
 
 // ── Project creation tests ───────────────────────────────────────────────────
+
+describe("Aggressive E2E sandbox security", () => {
+	it("uses a private 0700 home-rooted fixture without weakening /tmp refusal", async () => {
+		expect(sandboxRoot).toBeDefined();
+		expect(path.dirname(sandboxRoot!)).toBe(os.homedir());
+		expect((await fs.stat(sandboxRoot!)).mode & 0o777).toBe(0o700);
+
+		const projectName = `javi-forge-tmp-refusal-${crypto.randomUUID()}`;
+		const projectPath = path.join(os.tmpdir(), projectName);
+		try {
+			const securityStep = await runSecurityInit(projectName, projectPath);
+
+			expect(securityStep).toMatchObject({
+				id: "security-hooks",
+				status: "error",
+			});
+			expect(securityStep?.detail).toContain("Claude guard install refused");
+			expect(securityStep?.detail).toMatch(
+				/ownership (?:\/: foreign owner at \/|\/tmp: group\/other-writable \/tmp)/,
+			);
+		} finally {
+			await fs.remove(projectPath).catch(() => {});
+		}
+	});
+});
 
 describe("Project creation: init creates complete project", () => {
 	it("init --stack node --ci github: creates complete project structure", async () => {

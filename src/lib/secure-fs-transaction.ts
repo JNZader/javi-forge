@@ -376,10 +376,18 @@ export async function runTransaction(
 	// only segments loosen. No `process.platform` here — role is expressed by which
 	// dirs get proveManagedContainer'd (the managedContainers set).
 	async function gate(dirPath: string, handle: SecureDirHandle): Promise<void> {
-		must(`ownership ${dirPath}`, await secureFs.proveOwnershipAndMode(dirPath));
-		must(`acl ${dirPath}`, await secureFs.proveNoEndangeringAcl(dirPath));
-		heldByPath.set(dirPath, handle);
-		heldOrder.push(handle);
+		try {
+			must(
+				`ownership ${dirPath}`,
+				await secureFs.proveOwnershipAndMode(dirPath),
+			);
+			must(`acl ${dirPath}`, await secureFs.proveNoEndangeringAcl(dirPath));
+			heldByPath.set(dirPath, handle);
+			heldOrder.push(handle);
+		} catch (error) {
+			await handle.close().catch(() => {});
+			throw error;
+		}
 	}
 
 	/**
@@ -428,16 +436,21 @@ export async function runTransaction(
 			await secureFs.createDirExclusive(parent, path.basename(fullPath), 0o700),
 		);
 		// Post-create identity revalidation + full gate on the new segment.
-		must(
-			`revalidate-created ${fullPath}`,
-			await secureFs.revalidateIdentity(fullPath, created.identity),
-		);
-		createdDirs.push(created);
+		try {
+			must(
+				`revalidate-created ${fullPath}`,
+				await secureFs.revalidateIdentity(fullPath, created.identity),
+			);
+		} catch (error) {
+			await created.close().catch(() => {});
+			throw error;
+		}
 		await gate(fullPath, created);
 		must(
 			`container ${fullPath}`,
 			await secureFs.proveManagedContainer(fullPath),
 		);
+		createdDirs.push(created);
 		return created;
 	}
 
@@ -631,7 +644,7 @@ export async function runTransaction(
 			errors,
 		};
 	} finally {
-		for (const handle of [...createdDirs, ...heldOrder]) {
+		for (const handle of new Set([...createdDirs, ...heldOrder])) {
 			await handle.close().catch(() => {});
 		}
 	}

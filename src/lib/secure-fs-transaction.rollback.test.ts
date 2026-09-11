@@ -60,6 +60,112 @@ const seededUpgradeFake = () => {
 	return fake;
 };
 
+describe("runTransaction — closes handles rejected before registration", () => {
+	it("closes an ownership-refused ancestor once without replacing its refusal", async () => {
+		const fake = makeFakeSecureFs();
+		fake.seedDir("/");
+		fake.seedDir(PROJECT);
+		fake.faults.ownershipRefuse = (dirPath) => dirPath === "/";
+		const openDirNoFollow = fake.openDirNoFollow.bind(fake);
+		const rootClose = vi.fn().mockRejectedValue(new Error("close failed"));
+		vi.spyOn(fake, "openDirNoFollow").mockImplementation(async (dirPath) => {
+			const opened = await openDirNoFollow(dirPath);
+			if (dirPath === "/" && opened.value) opened.value.close = rootClose;
+			return opened;
+		});
+
+		const outcome = await run(fake, asset(), settings());
+
+		expect(outcome.ok).toBe(false);
+		expect(outcome.errors.join(" ")).toMatch(/ownership \/: ownership \//);
+		expect(rootClose).toHaveBeenCalledTimes(1);
+	});
+
+	it("closes the ACL-refused handle once while preserving earlier held handles", async () => {
+		const fake = makeFakeSecureFs();
+		for (const dir of ["/", PROJECT]) fake.seedDir(dir);
+		fake.faults.endangeringAclRefuse = (dirPath) => dirPath === PROJECT;
+		const openDirNoFollow = fake.openDirNoFollow.bind(fake);
+		const closes = new Map<string, ReturnType<typeof vi.fn>>();
+		vi.spyOn(fake, "openDirNoFollow").mockImplementation(async (dirPath) => {
+			const opened = await openDirNoFollow(dirPath);
+			if (opened.value) {
+				const close = vi.fn(async () => {});
+				opened.value.close = close;
+				closes.set(dirPath, close);
+			}
+			return opened;
+		});
+
+		const outcome = await run(fake, asset(), settings());
+
+		expect(outcome.ok).toBe(false);
+		expect(outcome.errors.join(" ")).toMatch(/acl \/proj: \/proj/);
+		expect(closes.get("/")).toHaveBeenCalledTimes(1);
+		expect(closes.get(PROJECT)).toHaveBeenCalledTimes(1);
+	});
+
+	it("closes an identity-refused created handle without authorizing its removal", async () => {
+		const fake = makeFakeSecureFs();
+		for (const dir of ["/", PROJECT]) fake.seedDir(dir);
+		fake.faults.revalidateRefuse = (target) => target === CLAUDE;
+		const createDirExclusive = fake.createDirExclusive.bind(fake);
+		const createdClose = vi.fn(async () => {});
+		vi.spyOn(fake, "createDirExclusive").mockImplementation(async (...args) => {
+			const created = await createDirExclusive(...args);
+			if (created.value) created.value.close = createdClose;
+			return created;
+		});
+		const removeCreatedDir = vi.spyOn(fake, "rmdirIfIdentityEmpty");
+
+		const outcome = await run(fake, asset(), settings());
+
+		expect(outcome.ok).toBe(false);
+		expect(outcome.errors.join(" ")).toMatch(
+			/revalidate-created \/proj\/\.claude: identity drift \/proj\/\.claude/,
+		);
+		expect(createdClose).toHaveBeenCalledTimes(1);
+		expect(removeCreatedDir).not.toHaveBeenCalled();
+	});
+
+	it("closes every validated handle exactly once after a successful transaction", async () => {
+		const fake = makeFakeSecureFs();
+		for (const dir of ["/", PROJECT]) fake.seedDir(dir);
+		const openDirNoFollow = fake.openDirNoFollow.bind(fake);
+		const openedCloses = new Map<string, ReturnType<typeof vi.fn>>();
+		vi.spyOn(fake, "openDirNoFollow").mockImplementation(async (dirPath) => {
+			const opened = await openDirNoFollow(dirPath);
+			if (opened.value) {
+				const close = vi.fn(async () => {});
+				opened.value.close = close;
+				openedCloses.set(dirPath, close);
+			}
+			return opened;
+		});
+		const createDirExclusive = fake.createDirExclusive.bind(fake);
+		const createdCloses = new Map<string, ReturnType<typeof vi.fn>>();
+		vi.spyOn(fake, "createDirExclusive").mockImplementation(async (...args) => {
+			const created = await createDirExclusive(...args);
+			if (created.value) {
+				const close = vi.fn(async () => {});
+				created.value.close = close;
+				createdCloses.set(created.value.path, close);
+			}
+			return created;
+		});
+
+		const outcome = await run(fake, asset(), settings());
+
+		expect(outcome.ok).toBe(true);
+		for (const dir of ["/", PROJECT]) {
+			expect(openedCloses.get(dir)).toHaveBeenCalledTimes(1);
+		}
+		for (const dir of [CLAUDE, HOOKS]) {
+			expect(createdCloses.get(dir)).toHaveBeenCalledTimes(1);
+		}
+	});
+});
+
 describe("runTransaction — capture, backup, and mode preservation", () => {
 	it("routine upgrade preserves the exact prior mode and leaves backups empty", async () => {
 		const fake = seededUpgradeFake();

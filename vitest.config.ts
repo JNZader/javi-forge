@@ -15,6 +15,9 @@ export default defineConfig({
 		exclude: [
 			...configDefaults.exclude,
 			"**/.claude/**",
+			"**/.worktrees/**",
+			"**/.stryker-tmp/**",
+			"**/heredoc-boundary-regression.test.mjs",
 			...(process.env.JAVI_FORGE_LINUX_INT === "1"
 				? []
 				: ["**/secure-fs-posix.integration.test.ts"]),

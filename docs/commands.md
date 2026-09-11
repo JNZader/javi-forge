@@ -208,6 +208,33 @@ coverage**).
 
 To bypass: `git commit --no-verify` (pre-push: `git push --no-verify`).
 
+### Agent guard commands
+
+The dispatcher also manages the optional PreToolUse guards for Claude Code and
+Codex:
+
+```bash
+javi-forge hooks install claude
+javi-forge hooks doctor claude
+javi-forge hooks repair claude --force
+javi-forge hooks install codex
+javi-forge hooks doctor codex
+javi-forge hooks repair codex --force
+```
+
+`install` and `repair` exit `0` on success and non-zero on refusal or failure.
+`doctor claude` is informational and exits `0`; `doctor codex` reports the
+effective execution verdict: `0` runnable, `1` blocked, or `2` inconclusive.
+Codex doctor checks `~/.codex/hooks.json`, `~/.codex/config.toml`, the managed
+asset, Node availability, and the provider-trust boundary. A successful
+registration does not prove provider trust or runtime execution; trust must be
+reviewed and approved in Codex. When a managed Codex registration is
+`released-outdated`, doctor recommends `javi-forge hooks install codex`.
+
+The `--force` option is only for edited managed assets. Foreign, malformed,
+symlink, and non-regular hook content remains fail-closed and is not forcibly
+overwritten.
+
 ### `hooks:` config reference
 
 Add a `hooks:` section to a **version 2** `.javi-forge/ci.yaml` to choose which

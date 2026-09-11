@@ -128,4 +128,10 @@ describe("help — hooks command", () => {
 		expect(HOOKS_HELP_TEXT).toContain("repair claude");
 		expect(HOOKS_HELP_TEXT).toContain("--force");
 	});
+
+	it("HOOKS_HELP_TEXT documents the codex guard subcommands", () => {
+		expect(HOOKS_HELP_TEXT).toContain("install codex");
+		expect(HOOKS_HELP_TEXT).toContain("doctor codex");
+		expect(HOOKS_HELP_TEXT).toContain("repair codex");
+	});
 });

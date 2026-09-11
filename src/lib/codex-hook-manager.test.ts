@@ -407,9 +407,8 @@ describe("codex doctor (execution matrix)", () => {
 		fs.mkdirSync(codexDir(), { recursive: true });
 		fs.writeFileSync(configFile(), text);
 	};
-	const writeManagedHooks = () => {
+	const writeHooks = (cmd: string) => {
 		fs.mkdirSync(codexDir(), { recursive: true });
-		const cmd = expectedCodexCommand(REAL_ASSET);
 		fs.writeFileSync(
 			hooksFile(),
 			`${JSON.stringify(
@@ -428,6 +427,7 @@ describe("codex doctor (execution matrix)", () => {
 			)}\n`,
 		);
 	};
+	const writeManagedHooks = () => writeHooks(expectedCodexCommand(REAL_ASSET));
 	const trustText = () =>
 		`[features]\nhooks = true\n[hooks.state."${hooksFile()}:pre_tool_use:0:0"]\ntrusted_hash = "x"\n`;
 
@@ -476,6 +476,21 @@ describe("codex doctor (execution matrix)", () => {
 		expect(report.execution.status).toBe("blocked");
 		expect(report.execution.blockers.join(",")).toMatch(
 			/registration|hooks\.json/,
+		);
+	});
+
+	it("released-outdated registration recommends installing the current Codex guard", async () => {
+		writeHooks(
+			"node /old/javi-forge-skillguard-pre-tool-use.mjs --agent=codex",
+		);
+		writeConfig(trustText());
+		const report = await doctor();
+		expect(report.hooksJson.state).toBe("released-outdated");
+		expect(report.execution.blockers.join(",")).toContain(
+			"registration:hooks.json=released-outdated",
+		);
+		expect(report.remediation).toContain(
+			"install the codex guard with: javi-forge hooks install codex",
 		);
 	});
 
@@ -604,6 +619,58 @@ describe("codex install edge cases", () => {
 		expect(commands.some((c: string) => c.includes("--agent=codex"))).toBe(
 			true,
 		);
+	});
+
+	it("replaces stale managed handler without dropping a foreign sibling", async () => {
+		fs.mkdirSync(codexDir(), { recursive: true });
+		const foreign = {
+			type: "command",
+			command: "echo keep",
+			timeout: 7,
+			statusMessage: "foreign handler",
+		};
+		fs.writeFileSync(
+			hooksFile(),
+			`${JSON.stringify(
+				{
+					hooks: {
+						PreToolUse: [
+							{
+								matcher: "*",
+								hooks: [
+									{
+										type: "command",
+										command:
+											"node /old/javi-forge-skillguard-pre-tool-use.mjs --agent=codex",
+										timeout: 30,
+									},
+									foreign,
+								],
+							},
+						],
+					},
+				},
+				null,
+				2,
+			)}\n`,
+		);
+
+		const fake = makeFakeSecureFs();
+		mirror(fake);
+		const result = await runInstall(fake);
+		expect(result.ok).toBe(true);
+
+		const parsed = JSON.parse(fake.fileText(hooksFile()) as string);
+		const foreignGroup = parsed.hooks.PreToolUse.find(
+			(g: { matcher?: string }) => g.matcher === "*",
+		);
+		expect(foreignGroup?.hooks).toEqual([foreign]);
+		const managedHandlers = parsed.hooks.PreToolUse.flatMap(
+			(g: { hooks: { command?: string }[] }) =>
+				g.hooks.filter((h) => h.command?.includes("--agent=codex")),
+		);
+		expect(managedHandlers).toHaveLength(1);
+		expect(managedHandlers[0].command).toBe(expectedCodexCommand(REAL_ASSET));
 	});
 
 	it("refuses with zero mutation when no secure-fs adapter exists (Windows)", async () => {

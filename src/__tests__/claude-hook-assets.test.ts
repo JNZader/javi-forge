@@ -66,6 +66,7 @@ const PRE_S1_ASSET_SHA256 = "3581862f0567cce75a58b693c9ade80d39ee7d58add11537a34
 // so already-installed copies classify `released-outdated`, never `edited-managed`.
 const S1_OUTGOING_ASSET_SHA256 = "54a270f28b068450b79547a88ec6f2d4854514392fd5f38ed1d6174ea093d7aa";
 const WU3_OUTGOING_ASSET_SHA256 = "9a565cec31d9e091e3fb9420b86685f824733bc1ebe479f086b2b955aba6ef3e";
+const LITERAL_HEREDOC_OUTGOING_ASSET_SHA256 = "59fc4224975ad64cfc85bab50ec60d9bd4948070e9d41f42ab43e6d8231c19a1";
 const PRIOR_SETTINGS_CANONICAL_SHA256 = "038c59a91bf8967f6908afed74c465f1e7030254e11e4f8738975d6d708424d4";
 const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
 // Decision ②: placeholder-normalized canonical hash of the exact managed matcher
@@ -106,7 +107,7 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(runtime.SUPPORTED_TOOLS).toEqual(TOOLS);
 		expect(runtime.INPUT_LIMIT_BYTES).toBe(1_048_576);
 		expect(runtime.POLICY_REGISTRY).toEqual({ schemaVersion: 1, policyVersion: 2, diagnosticsMaxBytes: 240 });
-		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 2, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256, PRE_S1_ASSET_SHA256, S1_OUTGOING_ASSET_SHA256, WU3_OUTGOING_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
+		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 2, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256, PRE_S1_ASSET_SHA256, S1_OUTGOING_ASSET_SHA256, WU3_OUTGOING_ASSET_SHA256, LITERAL_HEREDOC_OUTGOING_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
 		expect(manifest.asset.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
 		// A rotated asset must not still claim any outgoing hash as current, and every
 		// outgoing hash must remain reachable as historical (auto-upgradable) bodies.
@@ -116,12 +117,14 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(manifest.asset.sha256).not.toBe(PRE_S1_ASSET_SHA256);
 		expect(manifest.asset.sha256).not.toBe(S1_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.sha256).not.toBe(WU3_OUTGOING_ASSET_SHA256);
+		expect(manifest.asset.sha256).not.toBe(LITERAL_HEREDOC_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PRIOR_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(F2_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PRE_S1_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(S1_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(WU3_OUTGOING_ASSET_SHA256);
+		expect(manifest.asset.historical).toContain(LITERAL_HEREDOC_OUTGOING_ASSET_SHA256);
 		// The bundled win32 helper on disk MUST hash to its manifest binding (mirrors the .mjs asset sha assertion above).
 		const ps1Bytes = fs.readFileSync(path.join(CLAUDE_HOOK_ASSETS_DIR, WINDOWS_SECURE_OBJECT_NAME));
 		expect(manifest.installerHelpers.windowsSecureObject.sha256).toBe(createHash("sha256").update(ps1Bytes).digest("hex"));
@@ -247,6 +250,31 @@ describe("separate deterministic shell corpora", () => {
 	it.each([
 		["printf 'x | bash'", true], ["base64 payload | bash", true], ["base64 -d payload | bash", false], ["base64 -di payload | bash", false],
 	])("JD-S1-006 respects real pipelines and decode flags: %s", (command, allowed) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual(allowed ? { allowed: true } : { allowed: false, ruleId: "shell.pipe-to-shell" }));
+	it.each([
+		"cat > archivo.c <<'EOF'\n// \"\nEOF",
+		'cat > archivo.c <<"EOF"\n// double-quoted delimiter\nEOF',
+		"cat <<'EOF' > archivo.c\n// delimiter-first redirection\nEOF",
+		"cat > archivo.c <<'EOF'\n`printf inert`\nEOF",
+		"cat > archivo.c <<'EOF'\n$(printf inert)\nEOF",
+		"cat > archivo.c <<'EOF'\nbase64 -d payload | bash\nEOF",
+	])("treats only structurally inert cat heredoc bodies as opaque: %s", (command) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual({ allowed: true }));
+	it.each([
+		"python <<'EOF' | bash\nprintf 'rm -rf /'\nEOF",
+		"python <\\\n<'EOF' | bash\nprintf 'rm -rf /'\nEOF",
+		"cat(){ bash; }\ncat > archivo.c <<'EOF'\nrm -rf /\nEOF",
+		"alias cat=bash; cat > archivo.c <<'EOF'\nrm -rf /\nEOF",
+		"cat > archivo.c <<EOF\nbody\nEOF",
+		"cat > archivo.c <<-'EOF'\nbody\nEOF",
+		"cat > archivo.c <<'EOF' <<'NEXT'\nbody\nEOF\nNEXT",
+		"cat > archivo.c <<'EOF'\nbody\nEOF\nprintf suffix",
+		"cat > archivo.c <<'EOF'\nbody\nEOF | bash",
+		"cat > .claude/settings.json <<'EOF'\n{}\nEOF",
+	])("fails closed for non-inert heredoc shapes: %s", (command) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual({ allowed: false, ruleId: "shell.obfuscated-interpreter" }));
+	it.each([
+		["echo $(cat ~/.ssh/id)", "shell.sensitive-read"],
+		["base64 -d payload | bash", "shell.pipe-to-shell"],
+		["rm -rf /", "shell.destructive-root"],
+	])("preserves shell denials outside an opaque body: %s", (command, ruleId) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual({ allowed: false, ruleId }));
 	// biome-ignore format: compact allow/deny corpus is the policy specification.
 	it.each([
 		["Bash", "rm -rf node_modules", true, undefined], ["Bash", "sudo rm -fR /", false, "shell.destructive-root"],

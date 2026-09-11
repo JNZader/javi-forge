@@ -1,3 +1,9 @@
+## [1.38.3](https://github.com/JNZader/javi-forge/compare/v1.38.2...v1.38.3) (2026-09-11)
+
+### Bug Fixes
+
+* **skillguard:** parse literal cat heredocs safely ([c86c6ae](https://github.com/JNZader/javi-forge/commit/c86c6ae432600d6c583d484225f9552830859e2a))
+
 ## [1.38.2](https://github.com/JNZader/javi-forge/compare/v1.38.1...v1.38.2) (2026-09-11)
 
 ### Bug Fixes

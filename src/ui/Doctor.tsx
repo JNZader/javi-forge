@@ -1,7 +1,6 @@
 import { Box, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
-import React, { useEffect, useState } from "react";
-import { type DoctorOptions, runDoctor } from "../commands/doctor.js";
+import React, { useEffect } from "react";
 import type { DoctorResult } from "../types/index.js";
 import { useCIMode } from "./CIContext.js";
 import Header from "./Header.js";
@@ -29,34 +28,21 @@ export function unsupportedDoctorMessage(
 		: undefined;
 }
 
+export interface DoctorProps {
+	loading: boolean;
+	result: DoctorResult | null;
+	error: string | null;
+	onRerun: () => void;
+}
+
 export default function Doctor({
-	dryRun = false,
-	refreshContext = false,
-}: DoctorOptions = {}) {
+	loading,
+	result,
+	error,
+	onRerun,
+}: DoctorProps) {
 	const { exit } = useApp();
 	const isCI = useCIMode();
-	const [result, setResult] = useState<DoctorResult | null>(null);
-	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(true);
-
-	const runCheck = () => {
-		setLoading(true);
-		setResult(null);
-		setError(null);
-		runDoctor(undefined, { dryRun, refreshContext })
-			.then((r) => {
-				setResult(r);
-				setLoading(false);
-			})
-			.catch((e) => {
-				setError(String(e));
-				setLoading(false);
-			});
-	};
-
-	useEffect(() => {
-		runCheck();
-	}, [dryRun, refreshContext]);
 
 	// Auto-exit in CI mode once loading finishes
 	useEffect(() => {
@@ -69,7 +55,7 @@ export default function Doctor({
 
 	useInput(
 		(input, key) => {
-			if (input.toLowerCase() === "r") runCheck();
+			if (input.toLowerCase() === "r") onRerun();
 			if (input.toLowerCase() === "q" || key.return || key.escape) exit();
 		},
 		{ isActive: !isCI },

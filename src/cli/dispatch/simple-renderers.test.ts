@@ -6,7 +6,7 @@ import type { CLI } from "./types.js";
 
 vi.mock("ink", () => ({ render: vi.fn() }));
 vi.mock("../../ui/CIContext.js", () => ({ CIProvider: "CIProvider" }));
-vi.mock("../../ui/Doctor.js", () => ({ default: "Doctor" }));
+vi.mock("./doctor.js", () => ({ default: "DoctorController" }));
 vi.mock("../../ui/AnalyzeUI.js", () => ({ default: "AnalyzeUI" }));
 vi.mock("../../ui/App.js", () => ({ default: "App" }));
 vi.mock("../../ui/LlmsTxt.js", () => ({ default: "LlmsTxt" }));
@@ -33,7 +33,7 @@ describe("doctor flags", () => {
 		const tree = vi.mocked(render).mock.calls[0][0] as ReactElement<{
 			children: ReactElement;
 		}>;
-		expect(tree.props.children.type).toBe("Doctor");
+		expect(tree.props.children.type).toBe("DoctorController");
 		expect(tree.props.children.props).toEqual({ dryRun, refreshContext: true });
 	});
 });

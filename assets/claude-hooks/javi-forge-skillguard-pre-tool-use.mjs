@@ -177,6 +177,97 @@ function lex(command, powershell = false) {
 	if (!commands.at(-1).length) commands.pop();
 	return { commands, separators };
 }
+function hasUnquotedHereDocOperator(line) {
+	let quote = "", escaped = false;
+	for (let index = 0; index < line.length; index++) {
+		const char = line[index];
+		if (escaped) { escaped = false; continue; }
+		if (quote) {
+			if (char === "\\" && quote === '"') escaped = true;
+			else if (char === quote) quote = "";
+			continue;
+		}
+		if (char === "\\") { escaped = true; continue; }
+		if (char === "'" || char === '"') { quote = char; continue; }
+		if (char === "#" && (index === 0 || /\s/.test(line[index - 1]))) break;
+		if (char === "<" && line[index + 1] === "<" && line[index + 2] !== "<") return true;
+	}
+	return false;
+}
+const SHELL_HEADER_WHITESPACE = new Set([" ", "\t"]);
+const STATIC_FILE_TARGET_CHARS = new Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-");
+const HEREDOC_DELIMITER_START_CHARS = new Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_");
+const HEREDOC_DELIMITER_CHARS = new Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_");
+function isShellHeaderWhitespace(char) {
+	return SHELL_HEADER_WHITESPACE.has(char);
+}
+function skipShellWhitespace(line, index) {
+	while (isShellHeaderWhitespace(line[index])) index++;
+	return index;
+}
+function parseStaticFileTarget(line, index) {
+	const start = index;
+	while (index < line.length && !isShellHeaderWhitespace(line[index])) {
+		if (!STATIC_FILE_TARGET_CHARS.has(line[index])) return null;
+		index++;
+	}
+	return index === start ? null : { target: line.slice(start, index), index };
+}
+function parseQuotedHereDocDelimiter(line, index) {
+	const quote = line[index];
+	if (quote !== "'" && quote !== '"') return null;
+	const start = ++index;
+	while (index < line.length && line[index] !== quote) {
+		const char = line[index];
+		if (!(index === start ? HEREDOC_DELIMITER_START_CHARS : HEREDOC_DELIMITER_CHARS).has(char)) return null;
+		index++;
+	}
+	return index === start || line[index] !== quote ? null : { delimiter: line.slice(start, index), index: index + 1 };
+}
+function parseInertCatHereDocHeader(line) {
+	let index = skipShellWhitespace(line, 0);
+	if (line.slice(index, index + 3) !== "cat" || !(isShellHeaderWhitespace(line[index + 3]) || line[index + 3] === ">")) return null;
+	index = skipShellWhitespace(line, index + 3);
+	let target, delimiter;
+	if (line[index] === ">") {
+		const parsedTarget = parseStaticFileTarget(line, skipShellWhitespace(line, index + 1));
+		if (!parsedTarget) return null;
+		target = parsedTarget.target;
+		index = skipShellWhitespace(line, parsedTarget.index);
+		if (line[index] !== "<" || line[index + 1] !== "<" || line[index + 2] === "-") return null;
+		const parsedDelimiter = parseQuotedHereDocDelimiter(line, skipShellWhitespace(line, index + 2));
+		if (!parsedDelimiter) return null;
+		delimiter = parsedDelimiter.delimiter;
+		index = parsedDelimiter.index;
+	} else if (line[index] === "<" && line[index + 1] === "<" && line[index + 2] !== "-") {
+		const parsedDelimiter = parseQuotedHereDocDelimiter(line, skipShellWhitespace(line, index + 2));
+		if (!parsedDelimiter) return null;
+		delimiter = parsedDelimiter.delimiter;
+		index = skipShellWhitespace(line, parsedDelimiter.index);
+		if (line[index] !== ">") return null;
+		const parsedTarget = parseStaticFileTarget(line, skipShellWhitespace(line, index + 1));
+		if (!parsedTarget) return null;
+		target = parsedTarget.target;
+		index = parsedTarget.index;
+	} else return null;
+	return skipShellWhitespace(line, index) === line.length ? { target, delimiter } : null;
+}
+function opaqueInertCatHereDoc(command, cwd, config, projectRoot) {
+	// A continuation changes the lexical boundary which identifies a heredoc
+	// header. This bounded parser cannot prove it is body-only, so fail closed.
+	if (command.includes("\\" + "\n") || command.includes("\\" + "\r\n")) return null;
+	const lines = command.split(/\r?\n/);
+	if (lines.at(-1) === "") lines.pop();
+	const parsed = parseInertCatHereDocHeader(lines[0] ?? "");
+	if (parsed && lines.length >= 2) {
+		const terminator = lines.findIndex((line, index) => index > 0 && line === parsed.delimiter);
+		if (terminator === lines.length - 1) {
+			const target = lexicalizePolicyPath(parsed.target, { base: cwd, projectRoot });
+			return evaluateFile("Write", target, config, projectRoot).allowed ? lines[0] : null;
+		}
+	}
+	return lines.some(hasUnquotedHereDocOperator) ? null : command;
+}
 // The pre-redesign boolean helpers (parseEnvSplit/hasChmodRecursive/hasBase64Decode
 // and their isLongPrefix/splitEnvString internals) were replaced by the semantic
 // state machines below; only ENV_ESCAPES survives, shared with splitEnvSemantics.
@@ -703,6 +794,9 @@ function bashSubstitutions(command) {
 }
 function evaluateBash(command, cwd, config = AGENT_CONFIGS.claude, projectRoot = PROJECT_ROOT, depth = 0) {
 	if (depth > 4) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
+	const headerOnlyCommand = opaqueInertCatHereDoc(command, cwd, config, projectRoot);
+	if (headerOnlyCommand === null) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
+	command = headerOnlyCommand;
 	try { for (const body of bashSubstitutions(command)) { const nested = evaluateBash(body, cwd, config, projectRoot, depth + 1); if (!nested.allowed) return nested; } } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
 	if (/^\s*:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:\s*$/.test(command)) return { allowed: false, ruleId: "shell.destructive-root" };
 	let parsed;

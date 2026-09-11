@@ -22,6 +22,32 @@ const CLI_PATH = path.resolve(__dirname, "../../dist/index.js");
 
 const sandboxes: string[] = [];
 
+interface SyncInvocation {
+	args: string[];
+	cwd: string;
+}
+
+interface AISyncBoundary {
+	env: NodeJS.ProcessEnv;
+	expected: SyncInvocation;
+	readCalls: () => Promise<SyncInvocation[]>;
+}
+
+interface InitExecution {
+	stdout: string;
+	stderr: string;
+	exitCode: number;
+}
+
+interface InitExecutionInput {
+	args: string[];
+	cwd: string;
+	timeout: number;
+	env: NodeJS.ProcessEnv;
+}
+
+type InitExecutor = (input: InitExecutionInput) => Promise<InitExecution>;
+
 async function createSandbox(): Promise<string> {
 	const dir = path.join(
 		os.tmpdir(),
@@ -30,6 +56,52 @@ async function createSandbox(): Promise<string> {
 	await fs.ensureDir(dir);
 	sandboxes.push(dir);
 	return dir;
+}
+
+async function createAISyncBoundary(
+	sandbox: string,
+	projectDir: string,
+	baseEnv: NodeJS.ProcessEnv,
+): Promise<AISyncBoundary> {
+	const binDir = path.join(sandbox, ".javi-forge-test-bin");
+	const recordId = crypto
+		.createHash("sha256")
+		.update(projectDir)
+		.digest("hex")
+		.slice(0, 16);
+	const recordPath = path.join(binDir, `ai-sync-invocations-${recordId}.json`);
+	const expected = {
+		args: ["javi-ai", "sync", "--project-dir", projectDir, "--target", "all"],
+		cwd: projectDir,
+	};
+	const shimPath = path.join(binDir, "npx");
+	const shim = `#!${process.execPath}
+import fs from "node:fs";
+const expected = ${JSON.stringify(expected)};
+const recordPath = ${JSON.stringify(recordPath)};
+const invocation = { args: process.argv.slice(2), cwd: process.cwd() };
+const calls = fs.existsSync(recordPath) ? JSON.parse(fs.readFileSync(recordPath, "utf8")) : [];
+calls.push(invocation);
+fs.writeFileSync(recordPath, JSON.stringify(calls));
+if (JSON.stringify(invocation) !== JSON.stringify(expected)) {
+  process.stderr.write("unexpected npx invocation\\n");
+  process.exitCode = 86;
+}
+	`;
+	await fs.ensureDir(binDir);
+	await fs.remove(recordPath);
+	await fs.writeFile(shimPath, shim, { mode: 0o700 });
+	return {
+		env: {
+			...baseEnv,
+			PATH: `${binDir}${path.delimiter}${baseEnv.PATH ?? ""}`,
+		},
+		expected,
+		readCalls: async () =>
+			(await fs.pathExists(recordPath))
+				? ((await fs.readJson(recordPath)) as SyncInvocation[])
+				: [],
+	};
 }
 
 afterEach(async () => {
@@ -41,15 +113,15 @@ afterEach(async () => {
 
 /**
  * Run the CLI for real (no --dry-run) in a sandbox.
- * Always sets CI=1 and --batch for non-interactive mode.
- * Defaults: --no-ai-sync by NOT including aiSync (OptionSelector auto-confirms
- * with defaults which includes aiSync, so we accept javi-ai errors gracefully).
+ * Always sets CI=1 and --batch for non-interactive mode. The test boundary
+ * contains the product's actual AI sync default without changing its options.
  */
-async function runInit(
-	args: string[],
-	cwd: string,
-	timeout = 60_000,
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+async function executeCLIInit({
+	args,
+	cwd,
+	timeout,
+	env,
+}: InitExecutionInput): Promise<InitExecution> {
 	try {
 		const { stdout, stderr } = await execFileAsync(
 			"node",
@@ -57,7 +129,7 @@ async function runInit(
 			{
 				timeout,
 				cwd,
-				env: { ...process.env, FORCE_COLOR: "0", CI: "1" },
+				env,
 			},
 		);
 		return { stdout, stderr, exitCode: 0 };
@@ -69,6 +141,56 @@ async function runInit(
 			exitCode: (err.code as number) ?? 1,
 		};
 	}
+}
+
+function projectNameFromArgs(args: string[]): string | undefined {
+	const nameIndex = args.indexOf("--project-name");
+	return nameIndex >= 0 ? args[nameIndex + 1] : undefined;
+}
+
+async function runContainedInit(
+	args: string[],
+	cwd: string,
+	timeout = 60_000,
+	env?: NodeJS.ProcessEnv,
+	executor: InitExecutor = executeCLIInit,
+): Promise<InitExecution> {
+	const baseEnv = env ?? { ...process.env };
+	const projectName = projectNameFromArgs(args);
+	const projectDir = path.join(cwd, projectName ?? ".missing-project-name");
+	const aiSyncBoundary = await createAISyncBoundary(cwd, projectDir, baseEnv);
+	let result: InitExecution;
+	try {
+		result = await executor({
+			args,
+			cwd,
+			timeout,
+			env: { ...aiSyncBoundary.env, FORCE_COLOR: "0", CI: "1" },
+		});
+	} catch (e: unknown) {
+		const err = e as Record<string, unknown>;
+		result = {
+			stdout: (err.stdout as string) ?? "",
+			stderr: (err.stderr as string) ?? String(e),
+			exitCode: (err.code as number) ?? 1,
+		};
+	}
+
+	const syncCalls = await aiSyncBoundary.readCalls();
+	if (syncCalls.length === 0 && result.exitCode !== 0) {
+		return result;
+	}
+	expect(syncCalls).toEqual([aiSyncBoundary.expected]);
+	return result;
+}
+
+async function runInit(
+	args: string[],
+	cwd: string,
+	timeout = 60_000,
+	env?: NodeJS.ProcessEnv,
+): Promise<InitExecution> {
+	return runContainedInit(args, cwd, timeout, env);
 }
 
 /** Get the project directory inside a sandbox */
@@ -94,12 +216,157 @@ async function readProjectFile(
 	return fs.readFile(path.join(sandbox, name, ...segments), "utf-8");
 }
 
+// ── AI sync containment tests ───────────────────────────────────────────────
+
+describe("AI sync containment", () => {
+	it("places a non-forwarding fake npx first and accepts an exact sync call", async () => {
+		const sandbox = await createSandbox();
+		const projectName = "contained-app";
+		const projectDir = path.join(sandbox, projectName);
+		const callerEnv = { PATH: "/caller-controlled/bin", TEST_CALLER_ENV: "1" };
+
+		const result = await runContainedInit(
+			["--project-name", projectName],
+			sandbox,
+			60_000,
+			callerEnv,
+			async ({ cwd, env }) => {
+				const fakeBinDir = env.PATH?.split(path.delimiter)[0];
+				expect(fakeBinDir).toContain(".javi-forge-test-bin");
+				expect(fakeBinDir).not.toBe("/caller-controlled/bin");
+				const fakeNpx = path.join(fakeBinDir as string, "npx");
+				await fs.ensureDir(projectDir);
+				await execFileAsync(
+					fakeNpx as string,
+					["javi-ai", "sync", "--project-dir", projectDir, "--target", "all"],
+					{ cwd: projectDir },
+				);
+				return { stdout: "", stderr: "", exitCode: 0 };
+			},
+		);
+
+		expect(result.exitCode).toBe(0);
+	});
+
+	it("rejects unexpected sync argv or cwd even when the executor exits zero", async () => {
+		const sandbox = await createSandbox();
+		const projectName = "unexpected-sync";
+
+		await expect(
+			runContainedInit(
+				["--project-name", projectName],
+				sandbox,
+				60_000,
+				undefined,
+				async ({ cwd, env }) => {
+					const fakeNpx = path.join(
+						env.PATH?.split(path.delimiter)[0] as string,
+						"npx",
+					);
+					await execFileAsync(fakeNpx as string, ["javi-ai", "sync", "wrong"], {
+						cwd,
+					});
+					return { stdout: "", stderr: "", exitCode: 0 };
+				},
+			),
+		).rejects.toThrow("to deeply equal");
+	});
+
+	it("postchecks the record after an executor failure", async () => {
+		const sandbox = await createSandbox();
+		const projectName = "failed-executor";
+		const projectDir = path.join(sandbox, projectName);
+
+		const result = await runContainedInit(
+			["--project-name", projectName],
+			sandbox,
+			60_000,
+			undefined,
+			async ({ cwd, env }) => {
+				const fakeNpx = path.join(
+					env.PATH?.split(path.delimiter)[0] as string,
+					"npx",
+				);
+				await fs.ensureDir(projectDir);
+				await execFileAsync(
+					fakeNpx as string,
+					["javi-ai", "sync", "--project-dir", projectDir, "--target", "all"],
+					{ cwd: projectDir },
+				);
+				throw new Error("injected executor failure");
+			},
+		);
+
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("injected executor failure");
+	});
+
+	it("isolates records across projects and permits missing-name early refusal", async () => {
+		const sandbox = await createSandbox();
+		const executeExactSync = async ({ args, cwd, env }: InitExecutionInput) => {
+			const nameIndex = args.indexOf("--project-name");
+			const projectName = args[nameIndex + 1] as string;
+			const projectDir = path.join(cwd, projectName);
+			const fakeNpx = path.join(
+				env.PATH?.split(path.delimiter)[0] as string,
+				"npx",
+			);
+			await fs.ensureDir(projectDir);
+			await execFileAsync(
+				fakeNpx as string,
+				["javi-ai", "sync", "--project-dir", projectDir, "--target", "all"],
+				{ cwd: projectDir },
+			);
+			return { stdout: "", stderr: "", exitCode: 0 };
+		};
+
+		await expect(
+			runContainedInit(
+				["--project-name", "first-contained"],
+				sandbox,
+				60_000,
+				{ PATH: "/caller-first" },
+				executeExactSync,
+			),
+		).resolves.toMatchObject({ exitCode: 0 });
+		await expect(
+			runContainedInit(
+				["--project-name", "second-contained"],
+				sandbox,
+				60_000,
+				{ PATH: "/caller-second" },
+				executeExactSync,
+			),
+		).resolves.toMatchObject({ exitCode: 0 });
+		await expect(
+			runContainedInit(
+				["--stack", "node"],
+				sandbox,
+				60_000,
+				{ PATH: "/caller-missing-name" },
+				async ({ env }) => {
+					expect(env.PATH?.split(path.delimiter)[0]).toContain(
+						".javi-forge-test-bin",
+					);
+					throw new Error("CLI early refusal");
+				},
+			),
+		).resolves.toMatchObject({ exitCode: 1 });
+	});
+});
+
 // ── Project creation tests ───────────────────────────────────────────────────
 
 describe("Project creation: init creates complete project", () => {
 	it("init --stack node --ci github: creates complete project structure", async () => {
 		const sandbox = await createSandbox();
-		const { exitCode } = await runInit(
+		const projectDir = path.join(sandbox, "test-app");
+		const aiSyncBoundary = await createAISyncBoundary(
+			sandbox,
+			projectDir,
+			process.env,
+		);
+		const result = await runInit(
 			[
 				"--project-name",
 				"test-app",
@@ -111,9 +378,21 @@ describe("Project creation: init creates complete project", () => {
 				"none",
 			],
 			sandbox,
+			60_000,
+			aiSyncBoundary.env,
 		);
 
-		expect(exitCode).toBe(0);
+		const syncCalls = await aiSyncBoundary.readCalls();
+		const diagnostic = JSON.stringify({
+			exitCode: result.exitCode,
+			stderr: result.stderr.slice(0, 4_096),
+			stdout: result.stdout.slice(0, 4_096),
+			syncCalls,
+		});
+		console.info(`aggressive-init-diagnostic ${diagnostic}`);
+
+		expect(syncCalls, diagnostic).toEqual([aiSyncBoundary.expected]);
+		expect(result.exitCode, diagnostic).toBe(0);
 
 		// .git/ directory (git initialized)
 		expect(await fileExists(sandbox, "test-app", ".git")).toBe(true);

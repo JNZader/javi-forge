@@ -1,3 +1,9 @@
+## [1.38.6](https://github.com/JNZader/javi-forge/compare/v1.38.5...v1.38.6) (2026-09-12)
+
+### Bug Fixes
+
+* **plugin:** cancel registry search on terminal signals ([ecf3fd7](https://github.com/JNZader/javi-forge/commit/ecf3fd79895aeadcaf227366a08cee8af64dfac2))
+
 ## [1.38.5](https://github.com/JNZader/javi-forge/compare/v1.38.4...v1.38.5) (2026-09-12)
 
 ### Bug Fixes

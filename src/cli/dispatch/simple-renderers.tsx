@@ -15,10 +15,10 @@ import type { CIProvider, MemoryOption, Stack } from "../../types/index.js";
 import AnalyzeUI from "../../ui/AnalyzeUI.js";
 import App from "../../ui/App.js";
 import { CIProvider as CIContextProvider } from "../../ui/CIContext.js";
-import Doctor from "../../ui/Doctor.js";
 import LlmsTxt from "../../ui/LlmsTxt.js";
 import Plugin from "../../ui/Plugin.js";
 import { VALID_CI, VALID_MEMORY, VALID_STACKS } from "../validators.js";
+import DoctorController from "./doctor.js";
 import type { CLI, RendererCtx } from "./types.js";
 
 export interface RendererDeps {
@@ -29,7 +29,7 @@ export interface RendererDeps {
 }
 
 export function handleDoctor(
-	_cli: CLI,
+	cli: CLI,
 	ctx: RendererCtx,
 	deps: RendererDeps = {},
 ): void {
@@ -50,7 +50,10 @@ export function handleDoctor(
 	}
 	(deps.render ?? render)(
 		<CIContextProvider isCI={ctx.isCI}>
-			<Doctor />
+			<DoctorController
+				dryRun={cli.flags.dryRun === true}
+				refreshContext={cli.flags.refreshContext === true}
+			/>
 		</CIContextProvider>,
 		{ stdin: ctx.inkStdin },
 	);

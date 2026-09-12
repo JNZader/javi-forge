@@ -82,6 +82,23 @@ describe("help / FLAGS_SCHEMA — ci validate + --help + --json", () => {
 });
 
 // =============================================================================
+// doctor --refresh-context
+// =============================================================================
+
+describe("help / FLAGS_SCHEMA — doctor --refresh-context", () => {
+	it("declares a --refresh-context boolean flag defaulting to false", () => {
+		expect(FLAGS_SCHEMA).toHaveProperty("refreshContext");
+		expect(FLAGS_SCHEMA.refreshContext.type).toBe("boolean");
+		expect(FLAGS_SCHEMA.refreshContext.default).toBe(false);
+	});
+
+	it("documents explicit context refresh in the global help", () => {
+		expect(HELP_TEXT).toContain("--refresh-context");
+		expect(HELP_TEXT).toContain("Refresh .context/ during doctor");
+	});
+});
+
+// =============================================================================
 // CI_HELP_TEXT — per-command help for `ci`
 // =============================================================================
 

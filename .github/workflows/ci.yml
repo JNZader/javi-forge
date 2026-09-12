@@ -4,6 +4,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-26.04
@@ -87,3 +89,21 @@ jobs:
           npm install -g ./javi-forge-*.tgz
           rm -f ./javi-forge-*.tgz
           javi-forge ci --quick --no-docker --no-ci-ghagga
+
+  linux-hook:
+    uses: ./.github/workflows/claude-hook-linux.yml
+
+  windows-hook:
+    uses: ./.github/workflows/claude-hook-windows.yml
+
+  release:
+    needs: [test, linux-hook, windows-hook]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -2,10 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("ink", () => ({ render: vi.fn() }));
 vi.mock("./doctor.js", () => ({ default: "DoctorController" }));
+vi.mock("./plugin.js", () => ({ default: "PluginController" }));
 
 import { render } from "ink";
 import type { ReactElement } from "react";
-import { handleDoctor, handleInitDefault } from "./simple-renderers.js";
+import {
+	handleDoctor,
+	handleInitDefault,
+	handlePlugin,
+} from "./simple-renderers.js";
 
 beforeEach(() => {
 	vi.clearAllMocks();
@@ -88,5 +93,36 @@ describe("doctor dispatch", () => {
 		}>;
 		expect(tree.props.children.type).toBe("DoctorController");
 		expect(tree.props.children.props).toEqual({ dryRun, refreshContext: true });
+	});
+});
+
+describe("plugin dispatch", () => {
+	it("forwards raw plugin request to the controller", () => {
+		handlePlugin(
+			{
+				input: ["plugin", "add", "org/repo"],
+				flags: { dryRun: true, codex: true, force: true },
+			} as never,
+			{
+				isCI: true,
+				inkStdin: process.stdin,
+			} as never,
+		);
+		const renderCalls = vi.mocked(render).mock.calls;
+		const tree = renderCalls[renderCalls.length - 1][0] as ReactElement<{
+			children: ReactElement;
+		}>;
+		const child = tree.props.children as ReactElement<{
+			request: { projectDir: string };
+		}>;
+		expect(child.type).toBe("PluginController");
+		expect(child.props.request).toMatchObject({
+			action: "add",
+			target: "org/repo",
+			dryRun: true,
+			codex: true,
+			force: true,
+		});
+		expect(child.props.request.projectDir).toBe(process.cwd());
 	});
 });

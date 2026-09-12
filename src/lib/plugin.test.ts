@@ -9,12 +9,26 @@ vi.mock("fs-extra", () => {
 		writeJson: vi.fn(),
 		readdir: vi.fn(),
 		ensureDir: vi.fn(),
+		mkdtemp: vi.fn().mockResolvedValue("/tmp/plugins/.tmp/install-exclusive"),
 		remove: vi.fn(),
 		move: vi.fn(),
 		copy: vi.fn(),
 	};
 	return { default: mockFs, ...mockFs };
 });
+
+vi.mock("./plugin-replacement.js", () => ({
+	publishPluginReplacement: vi.fn(
+		async (
+			_root: string,
+			_name: string,
+			prepare: (stage: string) => Promise<void>,
+		) => {
+			await prepare("/fake/plugin-stage");
+			return { success: true, cleanup: "complete" };
+		},
+	),
+}));
 
 // ── Mock child_process ───────────────────────────────────────────────────────
 vi.mock("child_process", () => ({
@@ -57,6 +71,7 @@ import {
 	syncPlugins,
 	validatePlugin,
 } from "./plugin.js";
+import { publishPluginReplacement } from "./plugin-replacement.js";
 import type { SkillScanResult } from "./skill-scanner.js";
 import { scanSkillsWithCoverage } from "./skill-scanner.js";
 
@@ -424,7 +439,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.error).toContain("1 rejected");
 		expect(result.error).toContain("1 blocked");
 		expect(result.error).toContain("[BLOCK]");
-		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 		// staging cleanup still runs
 		expect(mockFs.remove).toHaveBeenCalled();
 	});
@@ -443,7 +458,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.error).toContain("skillguard: install refused");
 		expect(result.error).toContain("could not be read");
 		expect(result.error).toContain("locked");
-		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("refuses on unscannable declared skill; force lifts unscannable", async () => {
@@ -459,12 +474,12 @@ describe("installPlugin — skillguard gate", () => {
 		expect(refused.success).toBe(false);
 		expect(refused.error).toContain("skillguard: install refused");
 		expect(refused.error).toContain("1 unscannable");
-		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 
 		mockScanner.mockClear();
 		const forced = await installPlugin("org/repo", { force: true });
 		expect(forced.success).toBe(true);
-		expect(mockFs.move).toHaveBeenCalled();
+		expect(publishPluginReplacement).toHaveBeenCalled();
 	});
 
 	it("force does NOT lift a block verdict", async () => {
@@ -479,7 +494,7 @@ describe("installPlugin — skillguard gate", () => {
 		const result = await installPlugin("org/repo", { force: true });
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("skillguard: install refused");
-		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("denies when the scan throws — even with force (D7)", async () => {
@@ -489,7 +504,7 @@ describe("installPlugin — skillguard gate", () => {
 		const result = await installPlugin("org/repo", { force: true });
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("skillguard scan failed");
-		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("installs byte-identically when declared skills pass and coverage is clean", async () => {
@@ -504,7 +519,7 @@ describe("installPlugin — skillguard gate", () => {
 		const result = await installPlugin("org/repo");
 		expect(result.success).toBe(true);
 		expect(result.name).toBe("my-plugin");
-		expect(mockFs.move).toHaveBeenCalled();
+		expect(publishPluginReplacement).toHaveBeenCalled();
 	});
 
 	it("refuses an undeclared SKILL.md anywhere in the tree — force never lifts (JD-006/JD-007)", async () => {
@@ -521,7 +536,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.error).toContain("skillguard: install refused");
 		expect(result.error).toContain("undeclared");
 		expect(result.error).toContain("evil/SKILL.md");
-		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("refuses an ambiguous declared dir (case-colliding on-disk twin) — force never lifts (FU-5)", async () => {
@@ -544,7 +559,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.error).toContain("manifest-integrity");
 		expect(result.error).toContain("skills/Alpha");
 		expect(result.refused).toBe(true);
-		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("refuses ANY symlink in the tree — manifest-integrity, force never lifts (JD-007)", async () => {
@@ -561,7 +576,7 @@ describe("installPlugin — skillguard gate", () => {
 		expect(result.error).toContain("skillguard: install refused");
 		expect(result.error).toContain("symlink");
 		expect(result.error).toContain("linked/SKILL.md");
-		expect(mockFs.move).not.toHaveBeenCalled();
+		expect(publishPluginReplacement).not.toHaveBeenCalled();
 	});
 
 	it("declared pass/warn + coverage clean → installs (JD-002 rebind, testing 14/16(e))", async () => {
@@ -578,7 +593,7 @@ describe("installPlugin — skillguard gate", () => {
 
 		const result = await installPlugin("org/repo");
 		expect(result.success).toBe(true);
-		expect(mockFs.move).toHaveBeenCalled();
+		expect(publishPluginReplacement).toHaveBeenCalled();
 	});
 
 	it("does not run the gate in dry-run — scan not called (D3)", async () => {

@@ -20,6 +20,10 @@ import { generateAgentSkillsManifest } from "./agent-skills.js";
 import { autoWirePlugins } from "./auto-wire.js";
 import { execFileAsync } from "./exec.js";
 import {
+	type PluginReplacementDiagnostics,
+	publishPluginReplacement,
+} from "./plugin-replacement.js";
+import {
 	evaluateCoverageGate,
 	scanFailureMessage,
 } from "./skill-install-gate.js";
@@ -150,19 +154,21 @@ export async function validatePlugin(
 export async function installPlugin(
 	source: string,
 	options: { dryRun?: boolean; force?: boolean } = {},
-): Promise<{
-	success: boolean;
-	name?: string;
-	error?: string;
-	/**
-	 * FU-1 (R4-002): true when the failure is a skillguard gate refusal
-	 * (manifest-integrity or verdict refusal, incl. a scanner-error deny).
-	 * The CLI layer turns this into a non-zero exit code so scripted
-	 * consumers can tell a refusal apart from success. Plain usage errors
-	 * (invalid source, validation failed) leave it unset.
-	 */
-	refused?: boolean;
-}> {
+): Promise<
+	PluginReplacementDiagnostics & {
+		success: boolean;
+		name?: string;
+		error?: string;
+		/**
+		 * FU-1 (R4-002): true when the failure is a skillguard gate refusal
+		 * (manifest-integrity or verdict refusal, incl. a scanner-error deny).
+		 * The CLI layer turns this into a non-zero exit code so scripted
+		 * consumers can tell a refusal apart from success. Plain usage errors
+		 * (invalid source, validation failed) leave it unset.
+		 */
+		refused?: boolean;
+	}
+> {
 	const { dryRun = false, force = false } = options;
 
 	// Normalize source to a git URL
@@ -175,11 +181,12 @@ export async function installPlugin(
 	}
 
 	// Clone to temp
-	const tmpDir = path.join(PLUGINS_DIR, ".tmp", `install-${Date.now()}`);
+	let tmpDir = "";
 
 	try {
 		if (!dryRun) {
-			await fs.ensureDir(tmpDir);
+			await fs.ensureDir(path.join(PLUGINS_DIR, ".tmp"));
+			tmpDir = await fs.mkdtemp(path.join(PLUGINS_DIR, ".tmp", "install-"));
 			await execFileAsync("git", ["clone", "--depth", "1", gitUrl, tmpDir], {
 				timeout: 60_000,
 			});
@@ -205,8 +212,8 @@ export async function installPlugin(
 			return { success: false, error: `validation failed:\n${msgs}` };
 		}
 
-		const pluginName = validation.manifest.name;
-		const destDir = path.join(PLUGINS_DIR, pluginName);
+		const pluginManifest = validation.manifest;
+		const pluginName = pluginManifest.name;
 
 		if (!dryRun) {
 			// ── SkillGuard runtime gate (D1/D3, JD-006/JD-007) ────────────
@@ -240,28 +247,35 @@ export async function installPlugin(
 				};
 			}
 
-			// Remove existing version if present
-			if (await fs.pathExists(destDir)) {
-				await fs.remove(destDir);
-			}
-			await fs.move(tmpDir, destDir);
+			const publication = await publishPluginReplacement(
+				PLUGINS_DIR,
+				pluginName,
+				async (stage) => {
+					await fs.copy(tmpDir, stage, {
+						filter: (file) =>
+							![
+								path.join(tmpDir, ".installed.json"),
+								path.join(tmpDir, "skills.json"),
+							].includes(file),
+					});
+					const installedPlugin: InstalledPlugin = {
+						name: pluginName,
+						version: pluginManifest.version,
+						installedAt: new Date().toISOString(),
+						source,
+						manifest: pluginManifest,
+					};
+					await fs.writeJson(
+						path.join(stage, ".installed.json"),
+						installedPlugin,
+						{ spaces: 2 },
+					);
 
-			// Write install metadata
-			const installedPlugin: InstalledPlugin = {
-				name: pluginName,
-				version: validation.manifest.version,
-				installedAt: new Date().toISOString(),
-				source,
-				manifest: validation.manifest,
-			};
-			await fs.writeJson(
-				path.join(destDir, ".installed.json"),
-				installedPlugin,
-				{ spaces: 2 },
+					// Preserve the established best-effort skills manifest behavior.
+					await generateAgentSkillsManifest(stage, source).catch(() => {});
+				},
 			);
-
-			// Generate Agent Skills spec manifest for cross-agent compatibility
-			await generateAgentSkillsManifest(destDir, source).catch(() => {});
+			return { ...publication, name: pluginName };
 		}
 
 		return { success: true, name: pluginName };
@@ -270,7 +284,7 @@ export async function installPlugin(
 		return { success: false, error: msg };
 	} finally {
 		// Clean up tmp if it still exists (error path)
-		if (!dryRun && (await fs.pathExists(tmpDir))) {
+		if (tmpDir && (await fs.pathExists(tmpDir))) {
 			await fs.remove(tmpDir).catch(() => {});
 		}
 	}

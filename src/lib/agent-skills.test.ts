@@ -23,6 +23,19 @@ vi.mock("fs-extra", () => {
 	return { default: mockFs, ...mockFs };
 });
 
+vi.mock("./plugin-replacement.js", () => ({
+	publishPluginReplacement: vi.fn(
+		async (
+			_root: string,
+			_name: string,
+			prepare: (stage: string) => Promise<void>,
+		) => {
+			await prepare("/fake/plugin-stage");
+			return { success: true, cleanup: "complete" };
+		},
+	),
+}));
+
 // ── Mock skill-scanner (importOriginal: real exports kept, walk doubled) ─────
 vi.mock("./skill-scanner.js", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("./skill-scanner.js")>();
@@ -722,7 +735,8 @@ describe("importAgentSkillsPackage — skillguard gate", () => {
 		expect(result.refused).toBeUndefined();
 		expect(mockFs.copy).toHaveBeenCalledWith(
 			"/fake/source",
-			expect.any(String),
+			"/fake/plugin-stage",
+			expect.objectContaining({ filter: expect.any(Function) }),
 		);
 	});
 

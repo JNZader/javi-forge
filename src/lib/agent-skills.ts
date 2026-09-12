@@ -14,6 +14,10 @@ import type {
 	PluginManifest,
 } from "../types/index.js";
 import {
+	type PluginReplacementDiagnostics,
+	publishPluginReplacement,
+} from "./plugin-replacement.js";
+import {
 	evaluateCoverageGate,
 	scanFailureMessage,
 } from "./skill-install-gate.js";
@@ -111,19 +115,21 @@ export async function exportPluginAsAgentSkills(
 export async function importAgentSkillsPackage(
 	sourceDir: string,
 	options: { dryRun?: boolean; force?: boolean } = {},
-): Promise<{
-	success: boolean;
-	name?: string;
-	error?: string;
-	/**
-	 * FU-1 (R4-002): true when the failure is a skillguard gate refusal
-	 * (manifest-integrity — invalid name, empty/missing skills, containment
-	 * escape, walk errors/symlinks/undeclared — or verdict refusal, incl. a
-	 * scanner-error deny). The CLI layer turns this into a non-zero exit
-	 * code. Plain input errors (skills.json missing/invalid) leave it unset.
-	 */
-	refused?: boolean;
-}> {
+): Promise<
+	PluginReplacementDiagnostics & {
+		success: boolean;
+		name?: string;
+		error?: string;
+		/**
+		 * FU-1 (R4-002): true when the failure is a skillguard gate refusal
+		 * (manifest-integrity — invalid name, empty/missing skills, containment
+		 * escape, walk errors/symlinks/undeclared — or verdict refusal, incl. a
+		 * scanner-error deny). The CLI layer turns this into a non-zero exit
+		 * code. Plain input errors (skills.json missing/invalid) leave it unset.
+		 */
+		refused?: boolean;
+	}
+> {
 	const { dryRun = false, force = false } = options;
 	const skillsPath = path.join(sourceDir, AGENT_SKILLS_MANIFEST_FILE);
 
@@ -243,8 +249,6 @@ export async function importAgentSkillsPackage(
 		return { success: true, name: pluginName };
 	}
 
-	const destDir = path.join(PLUGINS_DIR, pluginName);
-
 	// ── SkillGuard runtime gate (D8, JD-001/JD-003/JD-006/JD-007) ──────────
 	// Runs BEFORE the existing-install remove and fs.copy: a refusal preserves
 	// an existing install and installs nothing. dryRun early-returns above, so
@@ -271,33 +275,56 @@ export async function importAgentSkillsPackage(
 		};
 	}
 
-	// Remove existing version if present
-	if (await fs.pathExists(destDir)) {
-		await fs.remove(destDir);
+	const pluginsRoot = await fs
+		.realpath(PLUGINS_DIR)
+		.catch((error: NodeJS.ErrnoException) => {
+			if (error.code === "ENOENT") return path.resolve(PLUGINS_DIR);
+			throw error;
+		});
+	const destination = path.join(pluginsRoot, pluginName);
+	if (
+		sourceRootReal === destination ||
+		sourceRootReal.startsWith(`${destination}${path.sep}`) ||
+		destination.startsWith(`${sourceRootReal}${path.sep}`)
+	) {
+		return {
+			success: false,
+			error: "refuse overlapping import source and destination",
+		};
 	}
 
-	// Copy the source directory
-	await fs.copy(sourceDir, destDir);
+	const publication = await publishPluginReplacement(
+		PLUGINS_DIR,
+		pluginName,
+		async (stage) => {
+			await fs.copy(sourceDir, stage, {
+				filter: (file) =>
+					![
+						path.join(sourceDir, ".installed.json"),
+						path.join(sourceDir, PLUGIN_MANIFEST_FILE),
+					].includes(file),
+			});
+			const pluginManifest = agentSkillsToPlugin(agentManifest);
+			await fs.writeJson(
+				path.join(stage, PLUGIN_MANIFEST_FILE),
+				pluginManifest,
+				{ spaces: 2 },
+			);
 
-	// Generate plugin.json from skills.json
-	const pluginManifest = agentSkillsToPlugin(agentManifest);
-	await fs.writeJson(path.join(destDir, PLUGIN_MANIFEST_FILE), pluginManifest, {
-		spaces: 2,
-	});
+			const installedPlugin: InstalledPlugin = {
+				name: pluginName,
+				version: agentManifest.version,
+				installedAt: new Date().toISOString(),
+				source: `agent-skills:${sourceDir}`,
+				manifest: pluginManifest,
+			};
+			await fs.writeJson(path.join(stage, ".installed.json"), installedPlugin, {
+				spaces: 2,
+			});
+		},
+	);
 
-	// Write install metadata
-	const installedPlugin: InstalledPlugin = {
-		name: pluginName,
-		version: agentManifest.version,
-		installedAt: new Date().toISOString(),
-		source: `agent-skills:${sourceDir}`,
-		manifest: pluginManifest,
-	};
-	await fs.writeJson(path.join(destDir, ".installed.json"), installedPlugin, {
-		spaces: 2,
-	});
-
-	return { success: true, name: pluginName };
+	return { ...publication, name: pluginName };
 }
 
 /**

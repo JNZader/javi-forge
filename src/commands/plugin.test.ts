@@ -86,6 +86,24 @@ describe("runPluginAdd", () => {
 		expect(steps[1]!.detail).toContain("dry-run");
 	});
 
+	it("reports successful publication warnings and recovery paths", async () => {
+		mockInstall.mockResolvedValue({
+			success: true,
+			name: "my-plugin",
+			warning: "backup cleanup not confirmed",
+			recoveryPaths: ["/tmp/stage", "/tmp/previous"],
+		});
+		const { steps, onStep } = collectSteps();
+
+		await runPluginAdd("org/repo", false, onStep);
+
+		expect(steps[1]!.status).toBe("done");
+		expect(steps[1]!.detail).toContain("installed my-plugin");
+		expect(steps[1]!.detail).toContain("warning: backup cleanup not confirmed");
+		expect(steps[1]!.detail).toContain("manual recovery paths:");
+		expect(steps[1]!.detail).toContain("/tmp/previous");
+	});
+
 	it("reports error when install fails", async () => {
 		mockInstall.mockResolvedValue({ success: false, error: "clone failed" });
 		const { steps, onStep } = collectSteps();
@@ -428,6 +446,24 @@ describe("runPluginImport", () => {
 		await runPluginImport("/path/to/package", true, onStep);
 
 		expect(steps[1]!.detail).toContain("dry-run");
+	});
+
+	it("reports successful import warnings and recovery paths", async () => {
+		mockImport.mockResolvedValue({
+			success: true,
+			name: "imported-skill",
+			warning: "backup cleanup not confirmed",
+			recoveryPaths: ["/tmp/import-stage", "/tmp/import-previous"],
+		});
+		const { steps, onStep } = collectSteps();
+
+		await runPluginImport("/path/to/package", false, onStep);
+
+		expect(steps[1]!.status).toBe("done");
+		expect(steps[1]!.detail).toContain("imported imported-skill");
+		expect(steps[1]!.detail).toContain("warning: backup cleanup not confirmed");
+		expect(steps[1]!.detail).toContain("manual recovery paths:");
+		expect(steps[1]!.detail).toContain("/tmp/import-previous");
 	});
 
 	it("reports error when skills.json not found", async () => {

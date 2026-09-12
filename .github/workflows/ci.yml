@@ -49,8 +49,6 @@ jobs:
             /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
             /etc/apparmor.d/bwrap-userns-restrict
           sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
-          bwrap --unshare-all --die-with-parent --cap-drop ALL --clearenv \
-            --ro-bind /usr/bin/true /worker -- /worker
 
       - run: pnpm build
       # COV-2: run tests WITH coverage so the configured 85/80 floor

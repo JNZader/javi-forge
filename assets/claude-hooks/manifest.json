@@ -30,7 +30,7 @@
 	"installerHelpers": {
 		"windowsSecureObject": {
 			"name": "javi-forge-windows-secure-object.ps1",
-			"sha256": "2289ef6ac6b039ec74dc3ea0894413e243ff9bea963f04008a356b3838f9b8dd"
+			"sha256": "4ee446d4e540adbea88c343df540efdcad1a5b26d31481ac5ae7057d8375cd11"
 		}
 	}
 }

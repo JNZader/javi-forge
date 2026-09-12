@@ -1,0 +1,271 @@
+name: Package Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full 40-character commit SHA to package and verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TARGET_COMMIT_SHA: ${{ inputs.commit_sha }}
+
+jobs:
+  producer:
+    name: Produce package evidence
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Validate dispatch target and ref
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "::error::This workflow accepts only workflow_dispatch events."
+            exit 1
+          fi
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error::Dispatch this workflow from refs/heads/main."
+            exit 1
+          fi
+          if ! [[ "$TARGET_COMMIT_SHA" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+            echo "::error::commit_sha must be a full 40-character hexadecimal SHA."
+            exit 1
+          fi
+
+      - name: Checkout requested commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove checked out commit
+        run: |
+          set -euo pipefail
+          expected_commit_sha="${TARGET_COMMIT_SHA,,}"
+          actual_commit_sha="$(git rev-parse HEAD)"
+          if [ "$actual_commit_sha" != "$expected_commit_sha" ]; then
+            echo "::error::Checked out $actual_commit_sha, not requested $TARGET_COMMIT_SHA."
+            exit 1
+          fi
+          echo "CANONICAL_COMMIT_SHA=$actual_commit_sha" >> "$GITHUB_ENV"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Verify focused package contract
+        run: |
+          set -euo pipefail
+          if [ -f src/__tests__/package-platform-support.test.ts ]; then
+            pnpm vitest run src/__tests__/package-platform-support.test.ts
+          elif [ -f src/__tests__/package-contents.test.ts ]; then
+            pnpm vitest run src/__tests__/package-contents.test.ts
+          else
+            echo "::error::No supported focused package contract test exists at this commit."
+            exit 1
+          fi
+
+      - name: Check package contents
+        run: pnpm package:check
+
+      - name: Pack package and write manifest
+        env:
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/package-evidence"
+          mkdir -p "$evidence_dir"
+          npm pack --json --pack-destination "$evidence_dir" > "$RUNNER_TEMP/package-pack-result.json"
+
+          shopt -s nullglob
+          archives=("$evidence_dir"/*.tgz)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one package tarball, found ${#archives[@]}."
+            exit 1
+          fi
+
+          tarball_path="${archives[0]}"
+          tarball_filename="$(basename "$tarball_path")"
+          package_name="$(node -p "require('./package.json').name")"
+          package_version="$(node -p "require('./package.json').version")"
+          size_bytes="$(wc -c < "$tarball_path" | tr -d '[:space:]')"
+          sha256="$(sha256sum "$tarball_path" | awk '{print $1}')"
+
+          export REPOSITORY CANONICAL_COMMIT_SHA WORKFLOW_SHA RUN_ID package_name package_version tarball_filename size_bytes sha256
+          node - <<'NODE' > "$evidence_dir/evidence.json"
+          const evidence = {
+            schemaVersion: 1,
+            repository: process.env.REPOSITORY,
+            targetCommitSha: process.env.CANONICAL_COMMIT_SHA,
+            workflowSha: process.env.WORKFLOW_SHA,
+            runId: process.env.RUN_ID,
+            packageName: process.env.package_name,
+            packageVersion: process.env.package_version,
+            filename: process.env.tarball_filename,
+            sizeBytes: Number(process.env.size_bytes),
+            sha256: process.env.sha256,
+            producerOs: process.platform,
+          };
+          process.stdout.write(`${JSON.stringify(evidence)}\n`);
+          NODE
+
+      - name: Upload package evidence
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: javi-forge-package-evidence-${{ inputs.commit_sha }}
+          path: |
+            ${{ runner.temp }}/package-evidence/*.tgz
+            ${{ runner.temp }}/package-evidence/evidence.json
+          retention-days: 7
+          if-no-files-found: error
+
+  consumer:
+    name: Verify package evidence (${{ matrix.os }})
+    needs: producer
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout requested commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove checked out commit (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          expected_commit_sha="${TARGET_COMMIT_SHA,,}"
+          actual_commit_sha="$(git rev-parse HEAD)"
+          if [ "$actual_commit_sha" != "$expected_commit_sha" ]; then
+            echo "::error::Checked out $actual_commit_sha, not requested $TARGET_COMMIT_SHA."
+            exit 1
+          fi
+          echo "CANONICAL_COMMIT_SHA=$actual_commit_sha" >> "$GITHUB_ENV"
+
+      - name: Prove checked out commit (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $expectedCommitSha = $env:TARGET_COMMIT_SHA.ToLowerInvariant()
+          $actualCommitSha = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($actualCommitSha -cne $expectedCommitSha) {
+            Write-Error "Checked out $actualCommitSha, not requested $env:TARGET_COMMIT_SHA."
+            exit 1
+          }
+          "CANONICAL_COMMIT_SHA=$actualCommitSha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Download immutable producer artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.producer.outputs.artifact-id }}
+          # v4.3.0 nests artifact-id downloads unless merge-multiple is true.
+          # Flatten this one immutable same-run producer artifact for the validators.
+          merge-multiple: true
+          path: ${{ runner.temp }}/package-evidence
+
+      - name: Validate artifact identity (Linux)
+        if: runner.os == 'Linux'
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/package-evidence
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=("$EVIDENCE_DIR"/*)
+          archives=("$EVIDENCE_DIR"/*.tgz)
+          manifests=("$EVIDENCE_DIR"/*.json)
+          if [ "${#files[@]}" -ne 2 ] || [ "${#archives[@]}" -ne 1 ] || [ "${#manifests[@]}" -ne 1 ]; then
+            echo "::error::Evidence artifact must contain exactly one .tgz and one JSON manifest."
+            exit 1
+          fi
+          tarball_path="${archives[0]}"
+          manifest_path="${manifests[0]}"
+          actual_size="$(wc -c < "$tarball_path" | tr -d '[:space:]')"
+          actual_sha256="$(sha256sum "$tarball_path" | awk '{print $1}')"
+          export tarball_path manifest_path actual_size actual_sha256
+          node - <<'NODE'
+          import { basename } from 'node:path';
+          import { readFileSync } from 'node:fs';
+
+          const evidence = JSON.parse(readFileSync(process.env.manifest_path, 'utf8'));
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          const expectedFilename = `${pkg.name.replace(/^@/, '').replace('/', '-')}-${pkg.version}.tgz`;
+          const expectedTarget = process.env.CANONICAL_COMMIT_SHA;
+          const failures = [
+            ['schemaVersion', evidence.schemaVersion === 1],
+            ['targetCommitSha', evidence.targetCommitSha === expectedTarget],
+            ['runId', String(evidence.runId) === process.env.EXPECTED_RUN_ID],
+            ['packageName', evidence.packageName === pkg.name],
+            ['packageVersion', evidence.packageVersion === pkg.version],
+            ['filename', evidence.filename === expectedFilename && basename(process.env.tarball_path) === evidence.filename],
+            ['sizeBytes', String(evidence.sizeBytes) === process.env.actual_size],
+            ['sha256', evidence.sha256 === process.env.actual_sha256],
+          ].filter(([, valid]) => !valid);
+          if (failures.length > 0) {
+            throw new Error(`Evidence validation failed: ${failures.map(([field]) => field).join(', ')}`);
+          }
+          NODE
+
+      - name: Validate artifact identity (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/package-evidence
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+        run: |
+          $entries = @(Get-ChildItem -LiteralPath $env:EVIDENCE_DIR -Force)
+          $files = @($entries | Where-Object { -not $_.PSIsContainer })
+          $archives = @($files | Where-Object { $_.Extension -eq '.tgz' })
+          $manifests = @($files | Where-Object { $_.Extension -eq '.json' })
+          if ($entries.Count -ne 2 -or $files.Count -ne 2 -or $archives.Count -ne 1 -or $manifests.Count -ne 1) {
+            Write-Error 'Evidence artifact must contain exactly one .tgz and one JSON manifest.'
+            exit 1
+          }
+
+          $evidence = Get-Content -LiteralPath $manifests[0].FullName -Raw | ConvertFrom-Json
+          $package = Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json
+          $expectedFilename = "$($package.name.TrimStart('@').Replace('/', '-'))-$($package.version).tgz"
+          $actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $archives[0].FullName).Hash.ToLowerInvariant()
+          $failures = @()
+          if ($evidence.schemaVersion -ne 1) { $failures += 'schemaVersion' }
+          if ($evidence.targetCommitSha -cne $env:CANONICAL_COMMIT_SHA) { $failures += 'targetCommitSha' }
+          if ("$($evidence.runId)" -cne $env:EXPECTED_RUN_ID) { $failures += 'runId' }
+          if ($evidence.packageName -cne $package.name) { $failures += 'packageName' }
+          if ($evidence.packageVersion -cne $package.version) { $failures += 'packageVersion' }
+          if ($evidence.filename -cne $expectedFilename -or $archives[0].Name -cne $evidence.filename) { $failures += 'filename' }
+          if ("$($evidence.sizeBytes)" -cne "$($archives[0].Length)") { $failures += 'sizeBytes' }
+          if ($evidence.sha256 -cne $actualSha256) { $failures += 'sha256' }
+          if ($failures.Count -gt 0) {
+            Write-Error "Evidence validation failed: $($failures -join ', ')"
+            exit 1
+          }

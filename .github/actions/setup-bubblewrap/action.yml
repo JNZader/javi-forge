@@ -1,0 +1,20 @@
+name: Set up bubblewrap
+description: Install bubblewrap and load its AppArmor user-namespace restriction profile.
+runs:
+  using: composite
+  steps:
+    - name: Install bubblewrap and AppArmor profile
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y apparmor apparmor-profiles apparmor-utils bubblewrap
+        if [ -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict ]; then
+          sudo install -m 0644 \
+            /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
+            /etc/apparmor.d/bwrap-userns-restrict
+        fi
+        if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+        fi
+        bwrap --version
+        python3 -c 'import re, subprocess, sys; out = subprocess.check_output(["bwrap", "--version"], text=True); version = tuple(map(int, re.search(r"\d+(?:\.\d+)+", out).group(0).split(".")[:2])); sys.exit(0 if version >= (0, 10) else 1)'

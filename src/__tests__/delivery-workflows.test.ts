@@ -27,9 +27,25 @@ function workflow(file: string): Record<string, unknown> {
 	return object(parsed);
 }
 
+function action(file: string): Record<string, unknown> {
+	const parsed: unknown = parse(
+		readFileSync(
+			new URL(`../../.github/actions/${file}/action.yml`, import.meta.url),
+			"utf8",
+		),
+	);
+	return object(parsed);
+}
+
 function steps(job: unknown): Record<string, unknown>[] {
 	const value = object(job).steps;
 	if (!Array.isArray(value)) throw new Error("Expected workflow steps");
+	return value.map(object);
+}
+
+function actionSteps(actionDefinition: unknown): Record<string, unknown>[] {
+	const value = object(object(actionDefinition).runs).steps;
+	if (!Array.isArray(value)) throw new Error("Expected composite action steps");
 	return value.map(object);
 }
 
@@ -39,9 +55,9 @@ function namedStep(job: unknown, name: string): Record<string, unknown> {
 	return step;
 }
 
-function stepIndex(job: unknown, name: string): number {
-	const index = steps(job).findIndex((candidate) => candidate.name === name);
-	if (index === -1) throw new Error(`Missing step: ${name}`);
+function usesStepIndex(job: unknown, action: string): number {
+	const index = steps(job).findIndex((candidate) => candidate.uses === action);
+	if (index === -1) throw new Error(`Missing action step: ${action}`);
 	return index;
 }
 
@@ -62,9 +78,11 @@ function secretReference(name: string): string {
 
 const ci = workflow("ci");
 const release = workflow("release");
+const bubblewrapSetup = action("setup-bubblewrap");
 const linux = workflow("claude-hook-linux");
 const windows = workflow("claude-hook-windows");
 const ciJobs = object(ci.jobs);
+const testJob = object(ciJobs.test);
 const releaseJob = object(object(release.jobs).release);
 const linuxJob = object(object(linux.jobs).runtime);
 const windowsJob = object(object(windows.jobs).runtime);
@@ -127,36 +145,30 @@ describe("dependency-gated delivery workflows", () => {
 		});
 	});
 
-	it("keeps the Ubuntu 26.04 bubblewrap and AppArmor test prerequisite", () => {
-		const testJob = object(ciJobs.test);
+	it("shares the Ubuntu 26.04 bubblewrap and AppArmor test prerequisite", () => {
 		for (const job of [testJob, releaseJob]) {
 			expect(job["runs-on"]).toBe("ubuntu-26.04");
-			const setup = runCommand(
-				namedStep(job, "Install bubblewrap (from preparation executor tests)"),
-			);
-			expect(setup).toContain(
-				"sudo apt-get install -y apparmor apparmor-profiles apparmor-utils bubblewrap",
-			);
-			expect(setup).toContain(
-				"/usr/share/apparmor/extra-profiles/bwrap-userns-restrict",
-			);
-			expect(setup).toContain(
-				"sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict",
-			);
-			expect(setup).toContain("bwrap --version");
-			expect(setup).toContain("version >= (0, 10)");
+			expect(
+				usesStepIndex(job, "./.github/actions/setup-bubblewrap"),
+			).toBeGreaterThanOrEqual(0);
 		}
+		const setup = runCommand(actionSteps(bubblewrapSetup)[0]);
+		expect(setup).toContain(
+			"sudo apt-get install -y apparmor apparmor-profiles apparmor-utils bubblewrap",
+		);
+		expect(setup).toContain(
+			"/usr/share/apparmor/extra-profiles/bwrap-userns-restrict",
+		);
+		expect(setup).toContain(
+			"sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict",
+		);
+		expect(setup).toContain("bwrap --version");
+		expect(setup).toContain("version >= (0, 10)");
 		expect(
-			stepIndex(
-				testJob,
-				"Install bubblewrap (from preparation executor tests)",
-			),
+			usesStepIndex(testJob, "./.github/actions/setup-bubblewrap"),
 		).toBeLessThan(runStepIndex(testJob, "pnpm test:coverage"));
 		expect(
-			stepIndex(
-				releaseJob,
-				"Install bubblewrap (from preparation executor tests)",
-			),
+			usesStepIndex(releaseJob, "./.github/actions/setup-bubblewrap"),
 		).toBeLessThan(runStepIndex(releaseJob, "pnpm test"));
 		expect(
 			runCommand(steps(releaseJob)[runStepIndex(releaseJob, "pnpm test")]),
@@ -188,7 +200,7 @@ describe("dependency-gated delivery workflows", () => {
 	});
 
 	it("checks out the caller SHA", () => {
-		for (const job of [releaseJob, linuxJob, windowsJob]) {
+		for (const job of [testJob, releaseJob, linuxJob, windowsJob]) {
 			for (const step of steps(job)) {
 				if (String(step.uses).startsWith("actions/checkout@")) {
 					expect(object(step.with ?? {}).ref).toBeUndefined();

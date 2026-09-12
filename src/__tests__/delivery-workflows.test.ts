@@ -175,7 +175,7 @@ describe("dependency-gated delivery workflows", () => {
 			"actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
 			"pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
 			"actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38",
-			"actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+			"actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
 		];
 		for (const job of [linuxJob, windowsJob]) {
 			for (const step of steps(job)) {

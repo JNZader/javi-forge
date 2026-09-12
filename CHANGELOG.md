@@ -1,3 +1,9 @@
+## [1.38.4](https://github.com/JNZader/javi-forge/compare/v1.38.3...v1.38.4) (2026-09-12)
+
+### Bug Fixes
+
+* **codex-hooks:** preserve mixed hook groups ([2e7a742](https://github.com/JNZader/javi-forge/commit/2e7a74288fa153ef0878be13b6567b60128e0736))
+
 ## [1.38.3](https://github.com/JNZader/javi-forge/compare/v1.38.2...v1.38.3) (2026-09-11)
 
 ### Bug Fixes

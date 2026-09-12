@@ -733,33 +733,72 @@ describe("listInstalledPlugins", () => {
 
 describe("searchRegistry", () => {
 	const originalFetch = globalThis.fetch;
+	const validRegistry = (plugins: unknown[] = []) => ({
+		version: "1",
+		updatedAt: "2026-01-01",
+		plugins,
+	});
 
 	afterEach(() => {
+		vi.useRealTimers();
 		globalThis.fetch = originalFetch;
 	});
 
-	it("returns empty array when fetch fails", async () => {
+	it("returns unavailable when fetch fails", async () => {
 		globalThis.fetch = vi.fn().mockRejectedValue(new Error("network error"));
 
 		const result = await searchRegistry("test");
-		expect(result).toEqual([]);
+		expect(result).toEqual({ status: "unavailable" });
 	});
 
-	it("returns empty array when response is not ok", async () => {
+	it("returns unavailable when the response is not ok", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({ ok: false });
 
 		const result = await searchRegistry();
-		expect(result).toEqual([]);
+		expect(result).toEqual({ status: "unavailable" });
 	});
 
-	it("returns all plugins when no query provided", async () => {
+	it("returns unavailable for malformed registry envelopes and entries", async () => {
+		globalThis.fetch = vi
+			.fn()
+			.mockResolvedValueOnce({
+				ok: true,
+				json: () => Promise.resolve({ plugins: [] }),
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve(
+						validRegistry([
+							{
+								id: "org/invalid",
+								repository: "",
+								description: "Invalid plugin",
+								tags: [1],
+							},
+						]),
+					),
+			});
+
+		expect(await searchRegistry()).toEqual({ status: "unavailable" });
+		expect(await searchRegistry()).toEqual({ status: "unavailable" });
+	});
+
+	it("returns a successful empty result for a valid empty registry", async () => {
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: () => Promise.resolve(validRegistry()),
+		});
+
+		expect(await searchRegistry()).toEqual({ status: "success", entries: [] });
+	});
+
+	it("returns all plugins when no query is provided", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: true,
 			json: () =>
-				Promise.resolve({
-					version: "1",
-					updatedAt: "2026-01-01",
-					plugins: [
+				Promise.resolve(
+					validRegistry([
 						{
 							id: "org/alpha",
 							repository: "",
@@ -772,41 +811,45 @@ describe("searchRegistry", () => {
 							description: "Beta plugin",
 							tags: ["tools"],
 						},
-					],
-				}),
+					]),
+				),
 		});
 
 		const result = await searchRegistry();
-		expect(result).toHaveLength(2);
+		expect(result).toEqual({
+			status: "success",
+			entries: expect.arrayContaining([
+				expect.objectContaining({ id: "org/alpha" }),
+				expect.objectContaining({ id: "org/beta" }),
+			]),
+		});
 	});
 
 	it("filters plugins by query matching id", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: true,
 			json: () =>
-				Promise.resolve({
-					version: "1",
-					updatedAt: "2026-01-01",
-					plugins: [
+				Promise.resolve(
+					validRegistry([
 						{ id: "org/alpha", repository: "", description: "First", tags: [] },
 						{ id: "org/beta", repository: "", description: "Second", tags: [] },
-					],
-				}),
+					]),
+				),
 		});
 
 		const result = await searchRegistry("alpha");
-		expect(result).toHaveLength(1);
-		expect(result[0]!.id).toBe("org/alpha");
+		expect(result).toEqual({
+			status: "success",
+			entries: [expect.objectContaining({ id: "org/alpha" })],
+		});
 	});
 
 	it("filters plugins by query matching description", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: true,
 			json: () =>
-				Promise.resolve({
-					version: "1",
-					updatedAt: "2026-01-01",
-					plugins: [
+				Promise.resolve(
+					validRegistry([
 						{
 							id: "org/a",
 							repository: "",
@@ -819,23 +862,23 @@ describe("searchRegistry", () => {
 							description: "Database helpers",
 							tags: [],
 						},
-					],
-				}),
+					]),
+				),
 		});
 
 		const result = await searchRegistry("ai tools");
-		expect(result).toHaveLength(1);
-		expect(result[0]!.id).toBe("org/a");
+		expect(result).toEqual({
+			status: "success",
+			entries: [expect.objectContaining({ id: "org/a" })],
+		});
 	});
 
 	it("filters plugins by query matching tags", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: true,
 			json: () =>
-				Promise.resolve({
-					version: "1",
-					updatedAt: "2026-01-01",
-					plugins: [
+				Promise.resolve(
+					validRegistry([
 						{
 							id: "org/a",
 							repository: "",
@@ -848,13 +891,96 @@ describe("searchRegistry", () => {
 							description: "Other",
 							tags: ["testing"],
 						},
-					],
-				}),
+					]),
+				),
 		});
 
 		const result = await searchRegistry("security");
-		expect(result).toHaveLength(1);
-		expect(result[0]!.id).toBe("org/a");
+		expect(result).toEqual({
+			status: "success",
+			entries: [expect.objectContaining({ id: "org/a" })],
+		});
+	});
+
+	it("uses one deadline for a non-cooperative fetch", async () => {
+		vi.useFakeTimers();
+		let transportSignal: AbortSignal | undefined;
+		globalThis.fetch = vi.fn((_input, init) => {
+			transportSignal = init?.signal ?? undefined;
+			return new Promise<Response>(() => {});
+		}) as typeof fetch;
+
+		const result = searchRegistry();
+		await vi.advanceTimersByTimeAsync(10_000);
+
+		expect(await result).toEqual({ status: "unavailable" });
+		expect(transportSignal?.aborted).toBe(true);
+	});
+
+	it("uses the same deadline while reading the response body", async () => {
+		vi.useFakeTimers();
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: () => new Promise<unknown>(() => {}),
+		});
+
+		const result = searchRegistry();
+		await Promise.resolve();
+		await vi.advanceTimersByTimeAsync(10_000);
+
+		expect(await result).toEqual({ status: "unavailable" });
+	});
+
+	it("returns cancelled before starting a pre-aborted request", async () => {
+		const caller = new AbortController();
+		caller.abort();
+		globalThis.fetch = vi.fn();
+
+		expect(await searchRegistry(undefined, { signal: caller.signal })).toEqual({
+			status: "cancelled",
+		});
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+	});
+
+	it("aborts transport and returns cancelled for an in-flight caller abort", async () => {
+		let transportSignal: AbortSignal | undefined;
+		globalThis.fetch = vi.fn((_input, init) => {
+			transportSignal = init?.signal ?? undefined;
+			return new Promise<Response>(() => {});
+		}) as typeof fetch;
+		const caller = new AbortController();
+
+		const result = searchRegistry(undefined, { signal: caller.signal });
+		await Promise.resolve();
+		caller.abort();
+
+		expect(await result).toEqual({ status: "cancelled" });
+		expect(transportSignal?.aborted).toBe(true);
+	});
+
+	it("cleans up request resources and handles a late transport rejection", async () => {
+		let rejectFetch!: (reason: Error) => void;
+		const caller = new AbortController();
+		const removeListener = vi.spyOn(caller.signal, "removeEventListener");
+		const clearTimer = vi.spyOn(globalThis, "clearTimeout");
+		globalThis.fetch = vi.fn(
+			() =>
+				new Promise<Response>((_resolve, reject) => {
+					rejectFetch = reject;
+				}),
+		) as typeof fetch;
+
+		const result = searchRegistry(undefined, { signal: caller.signal });
+		await Promise.resolve();
+		caller.abort();
+		expect(await result).toEqual({ status: "cancelled" });
+		rejectFetch(new Error("late transport failure"));
+		await Promise.resolve();
+
+		expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+		expect(clearTimer).toHaveBeenCalled();
+		removeListener.mockRestore();
+		clearTimer.mockRestore();
 	});
 });
 

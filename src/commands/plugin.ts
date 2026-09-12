@@ -133,18 +133,32 @@ export async function runPluginSearch(
 
 	const results = await searchRegistry(query);
 
-	if (results.length === 0) {
+	if (results.status === "cancelled") {
+		report(
+			onStep,
+			stepId,
+			`Search plugins${query ? `: ${query}` : ""}`,
+			"error",
+			"registry search cancelled",
+		);
+	} else if (results.status === "unavailable") {
+		report(
+			onStep,
+			stepId,
+			`Search plugins${query ? `: ${query}` : ""}`,
+			"error",
+			"registry unavailable",
+		);
+	} else if (results.entries.length === 0) {
 		report(
 			onStep,
 			stepId,
 			`Search plugins${query ? `: ${query}` : ""}`,
 			"done",
-			query
-				? `no plugins matching "${query}"`
-				: "registry empty or unreachable",
+			query ? `no plugins matching "${query}"` : "registry empty",
 		);
 	} else {
-		const summary = results
+		const summary = results.entries
 			.map((p) => `${p.id} — ${p.description}`)
 			.join("\n  ");
 		report(
@@ -152,7 +166,7 @@ export async function runPluginSearch(
 			stepId,
 			`Search plugins${query ? `: ${query}` : ""}`,
 			"done",
-			`${results.length} results:\n  ${summary}`,
+			`${results.entries.length} results:\n  ${summary}`,
 		);
 	}
 }

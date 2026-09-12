@@ -341,10 +341,12 @@ function mergeCodexHooks(
 		}
 		const foreign = group.hooks.filter(
 			(h) =>
-				!(isPlainObject(h) &&
+				!(
+					isPlainObject(h) &&
 					h.type === "command" &&
 					typeof h.command === "string" &&
-					CODEX_CMD_RE.test(h.command)),
+					CODEX_CMD_RE.test(h.command)
+				),
 		);
 		if (foreign.length === 0) continue;
 		if (foreign.length === group.hooks.length) {

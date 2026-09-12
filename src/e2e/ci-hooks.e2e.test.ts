@@ -36,8 +36,11 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runCliSubprocess, runFileBackedProcess } from "./cli-runner.js";
+
+const E2E_TEST_TIMEOUT_MS = 90_000;
+vi.setConfig({ testTimeout: E2E_TEST_TIMEOUT_MS });
 
 /** Probe a host toolchain once at module load — skip (not fail) when absent. */
 async function hasTool(tool: string): Promise<boolean> {

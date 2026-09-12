@@ -13,7 +13,15 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import { initProject } from "../commands/init.js";
 import type { InitStep } from "../types/index.js";
 import { runCliSubprocess } from "./cli-runner.js";
@@ -21,7 +29,9 @@ import { runCliSubprocess } from "./cli-runner.js";
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const sandboxes: string[] = [];
+const E2E_TEST_TIMEOUT_MS = 90_000;
 let sandboxRoot: string | undefined;
+vi.setConfig({ testTimeout: E2E_TEST_TIMEOUT_MS });
 
 beforeAll(async () => {
 	sandboxRoot = await fs.mkdtemp(

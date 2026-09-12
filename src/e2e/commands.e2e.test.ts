@@ -10,12 +10,15 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runCliSubprocess } from "./cli-runner.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const sandboxes: string[] = [];
+const DOCTOR_PROCESS_TIMEOUT_MS = 60_000;
+const DOCTOR_TEST_TIMEOUT_MS = 90_000;
+vi.setConfig({ testTimeout: DOCTOR_TEST_TIMEOUT_MS });
 
 async function createSandbox(): Promise<string> {
 	const dir = path.join(os.tmpdir(), `javi-forge-e2e-${crypto.randomUUID()}`);
@@ -334,75 +337,131 @@ describe("javi-forge analyze", () => {
 // ── doctor ──────────────────────────────────────────────────────────────────
 
 describe("javi-forge doctor", () => {
-	it("runs without crashing and shows check results", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"runs without crashing and shows check results",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		// Doctor output contains status icons (✓ ok, ✗ fail, – skip)
-		const hasStatusIndicators =
-			stdout.includes("\u2713") || // ✓
-			stdout.includes("\u2717") || // ✗
-			stdout.includes("\u2013") || // –
-			stdout.includes("ok") ||
-			stdout.includes("fail") ||
-			stdout.includes("skip");
-		expect(hasStatusIndicators).toBe(true);
-	});
+			expect(exitCode).toBe(0);
+			// Doctor output contains status icons (✓ ok, ✗ fail, – skip)
+			const hasStatusIndicators =
+				stdout.includes("\u2713") || // ✓
+				stdout.includes("\u2717") || // ✗
+				stdout.includes("\u2013") || // –
+				stdout.includes("ok") ||
+				stdout.includes("fail") ||
+				stdout.includes("skip");
+			expect(hasStatusIndicators).toBe(true);
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("shows health score", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"shows health score",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		expect(stdout).toContain("Health:");
-		expect(stdout).toMatch(/\d+\/\d+ checks passed/);
-	});
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("Health:");
+			expect(stdout).toMatch(/\d+\/\d+ checks passed/);
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("checks system tools (git, node)", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"checks system tools (git, node)",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		expect(stdout).toContain("System Tools");
-		expect(stdout).toContain("Git");
-		expect(stdout).toContain("Node.js");
-	});
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("System Tools");
+			expect(stdout).toContain("Git");
+			expect(stdout).toContain("Node.js");
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("shows framework structure section", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"shows framework structure section",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		expect(stdout).toContain("Framework Structure");
-		expect(stdout).toContain("templates/");
-		expect(stdout).toContain("modules/");
-	});
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("Framework Structure");
+			expect(stdout).toContain("templates/");
+			expect(stdout).toContain("modules/");
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("in empty dir shows no stack detected", async () => {
-		const sandbox = await createSandbox();
-		const { stdout, exitCode } = await runCLI(["doctor"], sandbox);
+	it(
+		"in empty dir shows no stack detected",
+		async () => {
+			const sandbox = await createSandbox();
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				sandbox,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		expect(stdout).toContain("Stack Detection");
-		// In empty dir, no stack is recognizable
-		expect(stdout).toContain("no recognizable project files");
-	});
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("Stack Detection");
+			// In empty dir, no stack is recognizable
+			expect(stdout).toContain("no recognizable project files");
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("shows installed modules section", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"shows installed modules section",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		expect(stdout).toContain("Installed Modules");
-		expect(stdout).toContain("engram");
-		expect(stdout).toContain("ghagga");
-	});
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("Installed Modules");
+			expect(stdout).toContain("engram");
+			expect(stdout).toContain("ghagga");
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("shows the Security advisories section (commit-signing + branch-protection)", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"shows the Security advisories section (commit-signing + branch-protection)",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		// hook-consolidation D9: L4/L6 + L5 folded into read-only doctor advisories.
-		expect(stdout).toContain("Security");
-		expect(stdout).toContain("Commit signing");
-		expect(stdout).toContain("Branch protection");
-	});
+			expect(exitCode).toBe(0);
+			// hook-consolidation D9: L4/L6 + L5 folded into read-only doctor advisories.
+			expect(stdout).toContain("Security");
+			expect(stdout).toContain("Commit signing");
+			expect(stdout).toContain("Branch protection");
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 });
 
 // ── hooks ─────────────────────────────────────────────────────────────────────

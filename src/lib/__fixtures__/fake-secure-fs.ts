@@ -247,15 +247,20 @@ export function makeFakeSecureFs(): FakeSecureFs {
 		},
 
 		async renameInDir(dir, from, to) {
-			if (fake.faults.renameRefuse?.(to)) return unsafe(`rename ${to}`);
+			if (fake.faults.renameRefuse?.(to))
+				return { ...unsafe<void>(`rename ${to}`), mutation: "not-applied" };
 			const fromP = path.join(dir.path, from);
 			const toP = path.join(dir.path, to);
 			const file = files.get(fromP);
-			if (!file) return unsafe(`rename enoent ${fromP}`);
+			if (!file)
+				return {
+					...unsafe<void>(`rename enoent ${fromP}`),
+					mutation: "not-applied",
+				};
 			files.set(toP, file);
 			files.delete(fromP);
 			inos.delete(toP); // fresh identity for the renamed-in target
-			return ok();
+			return { ok: true, mutation: "applied" };
 		},
 
 		async unlinkIfIdentity(dir, name, _held) {

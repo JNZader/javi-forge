@@ -92,6 +92,7 @@ namespace JaviForge
         private const uint WRITE_OWNER_A = 0x00080000;
         private const uint DELETE_A = 0x00010000;
         private const uint FILE_READ_ATTRIBUTES = 0x0080;
+        private const uint DIRECTORY_FLUSH_ACCESS = GENERIC_WRITE | READ_CONTROL | FILE_READ_ATTRIBUTES;
 
         private const uint FILE_SHARE_READ = 0x1;
         private const uint FILE_SHARE_WRITE = 0x2;
@@ -866,12 +867,34 @@ namespace JaviForge
                 // No opaque re-check here (unlike unlink/rmdir): both endpoints are our
                 // own just-created nodes under the held parent-chain lock, so no on-path
                 // node can be swapped while the chain handle is held.
-                if (!MoveFileExW(fromFull, toFull,
-                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-                    return OpResult.Fail(R_CHAIN, "rename failed " + Marshal.GetLastWin32Error()
-                        + " " + fromFull);
-                FlushFileBuffers(dir.Handle);
-                return OpResult.Good();
+                int flushErr;
+                IntPtr flushHandle = OpenNoFollow(dir.Path, DIRECTORY_FLUSH_ACCESS,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE, out flushErr);
+                if (flushHandle == INVALID_HANDLE)
+                    return OpResult.Fail(R_CHAIN, "rename flush-open failed " + flushErr + " " + dir.Path);
+                try
+                {
+                    uint attr; string opaque; bool zeroId;
+                    if (!ReadInfo(flushHandle, out attr, out opaque, out zeroId))
+                        return OpResult.Fail(R_CHAIN, "rename flush-open info failed " + dir.Path);
+                    if ((attr & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                        return OpResult.Fail(R_CHAIN, "rename flush-open reparse point " + dir.Path);
+                    if ((attr & FILE_ATTRIBUTE_DIRECTORY) == 0)
+                        return OpResult.Fail(R_CHAIN, "rename flush-open not a directory " + dir.Path);
+                    if (zeroId)
+                        return OpResult.Fail(R_CHAIN, "rename flush-open unresolvable identity " + dir.Path);
+                    if (!String.Equals(opaque, dir.Opaque, StringComparison.OrdinalIgnoreCase))
+                        return OpResult.Fail(R_CHAIN, "rename flush-open identity changed " + dir.Path);
+                    if (!MoveFileExW(fromFull, toFull,
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                        return OpResult.Fail(R_CHAIN, "rename failed " + Marshal.GetLastWin32Error()
+                            + " " + fromFull);
+                    if (!FlushFileBuffers(flushHandle))
+                        return OpResult.Fail(R_CHAIN, "rename flush failed " + Marshal.GetLastWin32Error()
+                            + " " + dir.Path);
+                    return OpResult.Good();
+                }
+                finally { CloseHandle(flushHandle); }
             }
             catch (Exception ex) { return OpResult.Fail(R_CHAIN, "rename exception " + ex.Message); }
         }

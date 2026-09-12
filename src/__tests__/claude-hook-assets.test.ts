@@ -35,7 +35,7 @@ const LINUX_ONLY = process.platform === "linux";
 // nothing" gate. The on-disk .ps1 MUST hash to the manifest binding below.
 const WINDOWS_SECURE_OBJECT_NAME = "javi-forge-windows-secure-object.ps1";
 const WINDOWS_SECURE_OBJECT_SHA256 =
-	"2289ef6ac6b039ec74dc3ea0894413e243ff9bea963f04008a356b3838f9b8dd";
+	"4ee446d4e540adbea88c343df540efdcad1a5b26d31481ac5ae7057d8375cd11";
 // Deliberate asset rotation (Linux sensitive-path coverage): editing the .mjs
 // moves asset.sha256, so the OUTGOING released hash MUST be appended to
 // asset.historical[] or every installed copy in the fleet classifies as
@@ -128,6 +128,10 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		// The bundled win32 helper on disk MUST hash to its manifest binding (mirrors the .mjs asset sha assertion above).
 		const ps1Bytes = fs.readFileSync(path.join(CLAUDE_HOOK_ASSETS_DIR, WINDOWS_SECURE_OBJECT_NAME));
 		expect(manifest.installerHelpers.windowsSecureObject.sha256).toBe(createHash("sha256").update(ps1Bytes).digest("hex"));
+		expect(ps1Bytes.toString("utf8")).toContain("DIRECTORY_FLUSH_ACCESS = GENERIC_WRITE | READ_CONTROL | FILE_READ_ATTRIBUTES");
+		expect(ps1Bytes.toString("utf8")).toContain("OpenNoFollow(path, READ_CONTROL | FILE_READ_ATTRIBUTES");
+		expect(ps1Bytes.toString("utf8")).toContain("IntPtr flushHandle = OpenNoFollow(dir.Path, DIRECTORY_FLUSH_ACCESS");
+		expect(ps1Bytes.toString("utf8")).toContain("if (!FlushFileBuffers(flushHandle))");
 		expect(source.match(/^import .+ from "(.+)";$/gm)?.every((line) => line.includes('"node:'))).toBe(true);
 		expect(source).not.toMatch(/\b(?:fetch|https?:\/\/|require\s*\(|import\s*\()\b/);
 	});

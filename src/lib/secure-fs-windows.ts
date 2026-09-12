@@ -426,10 +426,19 @@ export function createWindowsSecureFs(
 
 		async renameInDir(dir, from, to) {
 			const dirHandle = handleIds.get(dir);
-			return mapVoid(
-				await call({ op: "rename", args: { dirHandle, from, to } }),
-				`rename ${from}->${to}`,
-			);
+			const response = await call({
+				op: "rename",
+				args: { dirHandle, from, to },
+			});
+			const result =
+				response && typeof response === "object"
+					? mapVoid(response, `rename ${from}->${to}`)
+					: refuse<void>(
+							"windows-secure-object-unavailable",
+							"malformed rename reply",
+						);
+			// Legacy success proves namespace application, NOT durable persistence.
+			return { ...result, mutation: result.ok ? "applied" : "unknown" };
 		},
 
 		async unlinkIfIdentity(dir, name, held) {

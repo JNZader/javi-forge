@@ -371,6 +371,7 @@ describe("createWindowsSecureFs — capture and mutation ops", () => {
 		const dir = await openHandle(fs, t);
 		t.on("rename", () => okVoid());
 		const res = await fs.renameInDir(dir, "asset.tmp", "asset.mjs");
+		expect(res.mutation).toBe("applied");
 		expect(res.ok).toBe(true);
 		const req = t.requests.find((r) => r.op === "rename");
 		expect(req?.args).toEqual({
@@ -386,6 +387,7 @@ describe("createWindowsSecureFs — capture and mutation ops", () => {
 		const dir = await openHandle(fs, t);
 		t.on("rename", () => daclRefuse("rename crossed a boundary"));
 		const res = await fs.renameInDir(dir, "asset.tmp", "asset.mjs");
+		expect(res.mutation).toBe("unknown");
 		expect(res.ok).toBe(false);
 		expect(res.refusal).toBe("unsafe-windows-dacl");
 	});
@@ -910,5 +912,24 @@ describe("createPs1Session — idle watchdog gated on outstanding handles (W1)",
 		child.emitStdout(encodeFrame({ ok: true }));
 		await p2;
 		expect(armed).toBeGreaterThan(0);
+	});
+});
+
+describe("Windows rename uncertainty (fake transport only)", () => {
+	it.each([
+		"malformed",
+		"thrown",
+	])("maps %s legacy reply to unknown namespace mutation", async (fault) => {
+		const t = makeFakeHelperTransport();
+		const fs = createWindowsSecureFs(t);
+		const dir = await openHandle(fs, t);
+		t.on("rename", () => {
+			if (fault === "thrown") throw new Error("lost reply");
+			return undefined as unknown as HelperResponse;
+		});
+		const result = await fs.renameInDir(dir, "from", "to");
+		expect(result.ok).toBe(false);
+		expect(result.mutation).toBe("unknown");
+		expect(result.refusal).toBe("windows-secure-object-unavailable");
 	});
 });

@@ -60,6 +60,16 @@ export default function Plugin({
 	const [steps, setSteps] = useState<InitStep[]>([]);
 	const [done, setDone] = useState(false);
 
+	const handleTerminalSignal = (
+		signal: NodeJS.Signals,
+		signalController: AbortController,
+	) => {
+		if (signalController.signal.aborted) return;
+		signalController.abort();
+		if (signal === "SIGINT") process.exitCode = 130;
+		if (signal === "SIGTERM") process.exitCode = 143;
+	};
+
 	const onStep = (step: InitStep) => {
 		setSteps((prev) => {
 			const idx = prev.findIndex((s) => s.id === step.id);
@@ -73,6 +83,21 @@ export default function Plugin({
 	};
 
 	useEffect(() => {
+		const controller = action === "search" ? new AbortController() : undefined;
+		const sigintHandler =
+			controller === undefined
+				? undefined
+				: () => handleTerminalSignal("SIGINT", controller);
+		const sigtermHandler =
+			controller === undefined
+				? undefined
+				: () => handleTerminalSignal("SIGTERM", controller);
+
+		if (action === "search" && sigintHandler && sigtermHandler) {
+			process.on("SIGINT", sigintHandler);
+			process.on("SIGTERM", sigtermHandler);
+		}
+
 		const run = async () => {
 			try {
 				switch (action) {
@@ -104,7 +129,9 @@ export default function Plugin({
 						await runPluginList(onStep);
 						break;
 					case "search":
-						await runPluginSearch(target, onStep);
+						await runPluginSearch(target, onStep, {
+							signal: controller?.signal,
+						});
 						break;
 					case "validate":
 						if (!target) {
@@ -172,6 +199,15 @@ export default function Plugin({
 			setDone(true);
 		};
 		run();
+
+		return () => {
+			if (sigintHandler) {
+				process.removeListener("SIGINT", sigintHandler);
+			}
+			if (sigtermHandler) {
+				process.removeListener("SIGTERM", sigtermHandler);
+			}
+		};
 	}, [action, target, dryRun, force]);
 
 	return (

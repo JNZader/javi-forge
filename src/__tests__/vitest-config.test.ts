@@ -20,6 +20,8 @@ beforeEach(async () => {
 		".worktrees/branch/src/lib/duplicate.test.ts",
 		".claude/worktrees/branch/src/lib/duplicate.test.ts",
 		".stryker-tmp/sandbox/src/lib/mutant.test.ts",
+		"src/.worktrees/branch/duplicate.test.ts",
+		"src/.stryker-tmp/sandbox/mutant.test.ts",
 	]) {
 		// Discovery-only inert fixtures: this test inspects config, not payloads.
 		await fs.outputFile(path.join(fixture, file), "");

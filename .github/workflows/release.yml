@@ -11,7 +11,7 @@ permissions:
   id-token: write
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -37,6 +37,25 @@ jobs:
         run: |
           pipx install ruff==0.15.6
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # The preparation executor coverage suite pins and hashes the system
+      # bubblewrap launcher at /usr/bin/bwrap and uses --bind-fd, which requires
+      # bubblewrap >=0.10. Ubuntu 24.04's package is 0.9.x; run this job on
+      # Ubuntu 26.04 and assert the runtime contract before the build/test gate
+      # instead of silently skipping or weakening the security runtime.
+      - name: Install bubblewrap (from preparation executor tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apparmor apparmor-profiles apparmor-utils bubblewrap
+          if [ -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict ]; then
+            sudo install -m 0644 \
+              /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
+              /etc/apparmor.d/bwrap-userns-restrict
+          fi
+          if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then
+            sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          fi
+          bwrap --version
+          python3 -c 'import re, subprocess, sys; out = subprocess.check_output(["bwrap", "--version"], text=True); version = tuple(map(int, re.search(r"\d+(?:\.\d+)+", out).group(0).split(".")[:2])); sys.exit(0 if version >= (0, 10) else 1)'
       - run: pnpm build
       - run: pnpm test
       - run: pnpm package:check

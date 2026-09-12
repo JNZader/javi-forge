@@ -1,0 +1,73 @@
+# Preparation source slice — disconnected, partial
+
+No hook, CLI, configuration, production key, or real preparation destination is
+activated. The interpreter prohibition is unchanged. `inspectAuthorization`
+returns `runtime-unavailable` **before contacting or consuming an authority**;
+an absent authority returns `authorization-unavailable`.
+
+## Implemented and tested
+
+- Exact fixed cwd, destination, six names and empty ambient inputs. Immutable
+  strings and five identity claims are bound to the complete policy with SHA-256.
+  These identity claims are not yet measurements of a production runtime.
+- An explicitly configured **Ed25519 public key**, never a private key, verifies
+  domain-separated canonical operator evidence. Exact binding, nonce, purpose,
+  maxUses=1, issued time and expiry (at most ten minutes) are checked.
+- Verification is read-only. Low-level consume/revoke primitives compete for the
+  same exclusive terminal inode on a trusted Linux local filesystem. Creation,
+  file fsync and directory fsync precede success. A partial failure never deletes
+  the terminal inode or reopens the nonce. Revocation before consumption wins;
+  revocation is not a process-cancellation mechanism after consumption wins.
+- The terminal record is a bounded sanitized audit (`consumed` or `revoked` only),
+  0600 inside an existing operator-owned 0700 state directory. No evidence,
+  credentials, payload or error detail is stored. Retain terminal files permanently.
+- The data-only stager uses pinned directory descriptors via `/proc/self/fd`,
+  exclusive creation, no caller path names, six output strings, an aggregate 1 MiB
+  limit and 0700/0600. It never imports, interprets or runs helper bytes.
+- Its only exposed staging entrypoint creates its **own random temporary fixture
+  root**. There is no production destination override or production staging route.
+  Partial failure cleanup removes only identities it created, never recursively
+  following a replaced destination. Unknown replacement state is preserved.
+
+Tests include real temporary files, actual fixture Ed25519 signatures, two
+competing local processes, replay/revocation, mode/symlink checks, mid-write
+ancestor replacement, and injected disk-write failure cleanup. They issue no real
+operator grant and never access the fixed production destination.
+
+## Trust boundary and remaining work
+
+The root account, effective UID, monotonic operation of the wall clock, procfs and
+local filesystem durability are trusted. Foreign-writable ancestors are refused;
+a root-owned sticky ancestor such as `/tmp` is allowed. The final controlling
+and state directories must be owned by the effective UID and exactly 0700.
+Hostile same-UID processes, root compromise and network filesystems are outside
+this supported boundary. Descriptor tests do not prove security against them.
+
+This slice now includes a **disconnected executor fixture** and a pinned native
+worker. The executor verifies the fixed policy binding, compares observed
+code/dependency/executable/configuration/destination identities, consumes the
+approval immediately before work, runs the worker with bounded stdio and
+timeouts, checks the worker's structured preparation result, stages bounded
+outputs, and records a bounded execution audit. The worker fixture provides the
+no-network/no-credential Linux namespace boundary used by the tests.
+
+That executor is still **not a production route**. No hook, CLI, configuration,
+production key, production destination, or arbitrary helper execution is wired to
+it. Its fixture identities are test-only claims, not deployment measurements.
+The top-level availability route remains unavailable, and this slice does not
+authorize running generated preparation helpers.
+
+Remaining work is to connect this boundary through a separately reviewed
+production route with real operator configuration, production identity
+measurement, operator UX, packaging, install/rollback procedure, and runtime
+evidence collection. No broad host mount or weaker worker is shipped as a
+substitute. There is no static claim that arbitrary Python is safe.
+
+## Verification and rollback
+
+Run the focused `src/lib/preparation-*.test.ts` suites and the packaged hook
+integration harness with the existing Vitest. The child fixtures are fixed test
+code and the worker is the pinned native fixture; neither executes generated
+output helpers. Remove the preparation source/tests, fixtures, worker and this
+document to roll back this disconnected unit. No dependencies, installation or
+production activation.

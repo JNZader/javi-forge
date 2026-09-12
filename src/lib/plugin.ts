@@ -28,6 +28,12 @@ import { scanSkillsWithCoverage } from "./skill-scanner.js";
 
 const KEBAB_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
+const REGISTRY_REQUEST_TIMEOUT_MS = 10_000;
+
+export type RegistrySearchResult =
+	| { status: "success"; entries: PluginRegistryEntry[] }
+	| { status: "unavailable" }
+	| { status: "cancelled" };
 
 // ── Validation ──────────────────────────────────────────────────────────────
 
@@ -319,33 +325,109 @@ export async function listInstalledPlugins(): Promise<InstalledPlugin[]> {
 
 /**
  * Fetch the remote plugin registry and optionally filter by query.
+ *
+ * A registry that cannot be read or validated is deliberately distinct from a
+ * valid registry with no matches. Callers need that distinction to avoid
+ * presenting a network failure as a successful empty search.
  */
 export async function searchRegistry(
 	query?: string,
-): Promise<PluginRegistryEntry[]> {
+	options: { signal?: AbortSignal } = {},
+): Promise<RegistrySearchResult> {
+	const { signal: callerSignal } = options;
+	if (callerSignal?.aborted) return { status: "cancelled" };
+
+	const controller = new AbortController();
+	let timedOut = false;
+	let callerCancelled = false;
+	let resolveDeadline!: () => void;
+	const deadline = new Promise<void>((resolve) => {
+		resolveDeadline = resolve;
+	});
+
+	const timeout = setTimeout(() => {
+		timedOut = true;
+		controller.abort();
+		resolveDeadline();
+	}, REGISTRY_REQUEST_TIMEOUT_MS);
+
+	const cancelFromCaller = () => {
+		callerCancelled = true;
+		controller.abort();
+		resolveDeadline();
+	};
+	callerSignal?.addEventListener("abort", cancelFromCaller, { once: true });
+
 	try {
-		const response = await fetch(PLUGIN_REGISTRY_URL);
-		if (!response.ok) {
-			return [];
-		}
+		const response = await Promise.race([
+			Promise.resolve().then(() =>
+				fetch(PLUGIN_REGISTRY_URL, { signal: controller.signal }),
+			),
+			deadline,
+		]);
 
-		const registry = (await response.json()) as PluginRegistry;
-		let plugins = registry.plugins ?? [];
+		if (callerCancelled || callerSignal?.aborted)
+			return { status: "cancelled" };
+		if (timedOut || !response || !response.ok) return { status: "unavailable" };
 
-		if (query) {
-			const q = query.toLowerCase();
-			plugins = plugins.filter(
-				(p) =>
-					p.id.toLowerCase().includes(q) ||
-					p.description.toLowerCase().includes(q) ||
-					p.tags.some((t) => t.toLowerCase().includes(q)),
-			);
-		}
+		const body = await Promise.race([response.json(), deadline]);
+		if (callerCancelled || callerSignal?.aborted)
+			return { status: "cancelled" };
+		if (timedOut || !isPluginRegistry(body)) return { status: "unavailable" };
 
-		return plugins;
+		const entries = query
+			? filterRegistryEntries(body.plugins, query)
+			: body.plugins;
+		return { status: "success", entries };
 	} catch {
-		return [];
+		return callerCancelled || callerSignal?.aborted
+			? { status: "cancelled" }
+			: { status: "unavailable" };
+	} finally {
+		clearTimeout(timeout);
+		callerSignal?.removeEventListener("abort", cancelFromCaller);
 	}
+}
+
+function filterRegistryEntries(
+	plugins: PluginRegistryEntry[],
+	query: string,
+): PluginRegistryEntry[] {
+	const normalizedQuery = query.toLowerCase();
+	return plugins.filter(
+		(plugin) =>
+			plugin.id.toLowerCase().includes(normalizedQuery) ||
+			plugin.description.toLowerCase().includes(normalizedQuery) ||
+			plugin.tags.some((tag) => tag.toLowerCase().includes(normalizedQuery)),
+	);
+}
+
+function isPluginRegistry(value: unknown): value is PluginRegistry {
+	if (!isRecord(value)) return false;
+	return (
+		typeof value.version === "string" &&
+		typeof value.updatedAt === "string" &&
+		Array.isArray(value.plugins) &&
+		value.plugins.every(isPluginRegistryEntry)
+	);
+}
+
+function isPluginRegistryEntry(value: unknown): value is PluginRegistryEntry {
+	if (!isRecord(value)) return false;
+	return (
+		typeof value.id === "string" &&
+		typeof value.repository === "string" &&
+		typeof value.description === "string" &&
+		Array.isArray(value.tags) &&
+		value.tags.every((tag) => typeof tag === "string") &&
+		(value.stars === undefined ||
+			(typeof value.stars === "number" && Number.isFinite(value.stars))) &&
+		(value.updatedAt === undefined || typeof value.updatedAt === "string")
+	);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
 }
 
 // ── Sync ───────────────────────────────────────────────────────────────

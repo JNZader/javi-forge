@@ -196,24 +196,28 @@ describe("runPluginList", () => {
 // ── runPluginSearch ──────────────────────────────────────────────────────────
 
 describe("runPluginSearch", () => {
-	it("reports empty results", async () => {
-		mockSearch.mockResolvedValue([]);
+	it("reports valid empty results as a successful search", async () => {
+		mockSearch.mockResolvedValue({ status: "success", entries: [] });
 		const { steps, onStep } = collectSteps();
 
 		await runPluginSearch("test", onStep);
 
+		expect(steps[1]!.status).toBe("done");
 		expect(steps[1]!.detail).toContain("no plugins matching");
 	});
 
 	it("reports search results with count", async () => {
-		mockSearch.mockResolvedValue([
-			{
-				id: "org/plugin",
-				repository: "https://github.com/org/plugin",
-				description: "A plugin",
-				tags: [],
-			},
-		]);
+		mockSearch.mockResolvedValue({
+			status: "success",
+			entries: [
+				{
+					id: "org/plugin",
+					repository: "https://github.com/org/plugin",
+					description: "A plugin",
+					tags: [],
+				},
+			],
+		});
 		const { steps, onStep } = collectSteps();
 
 		await runPluginSearch("plugin", onStep);
@@ -222,13 +226,24 @@ describe("runPluginSearch", () => {
 		expect(steps[1]!.detail).toContain("org/plugin");
 	});
 
-	it("reports registry unreachable when no query and no results", async () => {
-		mockSearch.mockResolvedValue([]);
+	it("reports an unavailable registry as an error", async () => {
+		mockSearch.mockResolvedValue({ status: "unavailable" });
 		const { steps, onStep } = collectSteps();
 
 		await runPluginSearch(undefined, onStep);
 
-		expect(steps[1]!.detail).toContain("registry empty or unreachable");
+		expect(steps[1]!.status).toBe("error");
+		expect(steps[1]!.detail).toContain("registry unavailable");
+	});
+
+	it("reports a cancelled registry search as an error", async () => {
+		mockSearch.mockResolvedValue({ status: "cancelled" });
+		const { steps, onStep } = collectSteps();
+
+		await runPluginSearch(undefined, onStep);
+
+		expect(steps[1]!.status).toBe("error");
+		expect(steps[1]!.detail).toContain("registry search cancelled");
 	});
 });
 

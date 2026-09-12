@@ -1,3 +1,19 @@
+## [1.39.0](https://github.com/JNZader/javi-forge/compare/v1.38.6...v1.39.0) (2026-09-12)
+
+### Features
+
+* **preparation:** add disconnected capability slice ([0032d0a](https://github.com/JNZader/javi-forge/commit/0032d0adb5ef95600be82016a4ada582fb9eed2b))
+
+### Bug Fixes
+
+* **cli:** reject unknown commands ([1c93953](https://github.com/JNZader/javi-forge/commit/1c939537327e3cdac991790b57e3b273e0f1eeeb))
+* **plugin:** stage plugin replacement publication ([bcd4a12](https://github.com/JNZader/javi-forge/commit/bcd4a12ac611ec6b09df05881c25d8badb979684))
+* **secure-fs:** track rename mutation outcomes ([1c44668](https://github.com/JNZader/javi-forge/commit/1c4466864d4c2f88904fa80d24839bad033249fe))
+
+### Refactoring
+
+* **doctor:** separate collection from rendering ([d6c6c9b](https://github.com/JNZader/javi-forge/commit/d6c6c9b9a90ea45b317d22986eb37d9e9429470d))
+
 ## [1.38.6](https://github.com/JNZader/javi-forge/compare/v1.38.5...v1.38.6) (2026-09-12)
 
 ### Bug Fixes

@@ -1,3 +1,9 @@
+## [1.39.2](https://github.com/JNZader/javi-forge/compare/v1.39.1...v1.39.2) (2026-09-12)
+
+### Refactoring
+
+* **plugin:** move cli execution into controller ([4e18364](https://github.com/JNZader/javi-forge/commit/4e18364b311104fd4cc4ff9cf2744efd60a63c60))
+
 ## [1.39.1](https://github.com/JNZader/javi-forge/compare/v1.39.0...v1.39.1) (2026-09-12)
 
 ### Bug Fixes

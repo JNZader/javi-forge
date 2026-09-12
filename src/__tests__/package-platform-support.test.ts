@@ -37,6 +37,8 @@ const packedFiles = [
 	"assets/hooks/pre-push",
 	"assets/hooks/commit-msg",
 	"assets/hooks/manifest.json",
+	"assets/claude-hooks/javi-forge-skillguard-pre-tool-use.mjs",
+	"assets/claude-hooks/manifest.json",
 	"assets/claude-hooks/javi-forge-windows-secure-object.ps1",
 	"templates/github/ci-node.yml",
 	"modules/engram/install-engram.sh",
@@ -254,6 +256,21 @@ fs.mkdtempSync = () => {
 		expect(result.status).toBe(0);
 		expect(result.stdout).toContain("Package content verification passed");
 		expect(() => readFileSync(ownedTemp)).toThrow();
+	});
+	it.each([
+		"assets/claude-hooks/javi-forge-skillguard-pre-tool-use.mjs",
+		"assets/claude-hooks/manifest.json",
+	])("rejects omission of explicit guard package file %s", (missing) => {
+		const fixture = createArchive();
+		const packument = {
+			...fixture.packument,
+			files: fixture.packument.files.filter(({ path: filePath }) => filePath !== missing),
+		};
+		const result = runSeam(fixture, { packument });
+		expect(result.status).toBe(1);
+		expect(JSON.parse(String(result.stderr))).toContain(
+			`missing required file: ${missing}`,
+		);
 	});
 	it("ignores caller TAR_OPTIONS while verifying the real archive", () => {
 		const result = runSeam(createArchive(), {}, { ...process.env, TAR_OPTIONS: "--version" });

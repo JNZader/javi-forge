@@ -5,25 +5,33 @@
  * They verify that `init` actually creates the expected project structure,
  * files, and content — not dry-run.
  *
- * Prerequisites: `pnpm build` must be run before these tests.
+ * The subprocess uses the source CLI through tsx by default so staged source is
+ * tested without a release build. Set JAVI_FORGE_E2E_CLI=dist to explicitly
+ * exercise the built artifact.
  */
-import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	describe,
+	expect,
+	it,
+	vi,
+} from "vitest";
 import { initProject } from "../commands/init.js";
 import type { InitStep } from "../types/index.js";
-
-const execFileAsync = promisify(execFile);
-const CLI_PATH = path.resolve(__dirname, "../../dist/index.js");
+import { runCliSubprocess } from "./cli-runner.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const sandboxes: string[] = [];
+const E2E_TEST_TIMEOUT_MS = 90_000;
 let sandboxRoot: string | undefined;
+vi.setConfig({ testTimeout: E2E_TEST_TIMEOUT_MS });
 
 beforeAll(async () => {
 	sandboxRoot = await fs.mkdtemp(
@@ -130,25 +138,11 @@ async function runInit(
 	timeout = 60_000,
 	env: NodeJS.ProcessEnv = process.env,
 ): Promise<InitResult> {
-	try {
-		const { stdout, stderr } = await execFileAsync(
-			"node",
-			[CLI_PATH, "init", "--batch", ...args],
-			{
-				timeout,
-				cwd,
-				env: { ...env, FORCE_COLOR: "0", CI: "1" },
-			},
-		);
-		return { stdout, stderr, exitCode: 0 };
-	} catch (e: unknown) {
-		const err = e as Record<string, unknown>;
-		return {
-			stdout: (err.stdout as string) ?? "",
-			stderr: (err.stderr as string) ?? "",
-			exitCode: (err.code as number) ?? 1,
-		};
-	}
+	return runCliSubprocess(["init", "--batch", ...args], {
+		cwd,
+		env,
+		timeout,
+	});
 }
 
 async function runContainedInit(

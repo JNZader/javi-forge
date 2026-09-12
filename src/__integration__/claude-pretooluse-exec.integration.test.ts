@@ -31,24 +31,103 @@ function run(input: Buffer, options: { args?: string[]; keepOpen?: boolean; asse
 		// omits the selector to prove the fail-closed refusal (S0).
 		const agent = options.agent === undefined ? "claude" : options.agent;
 		const agentArgs = agent === null ? [] : [`--agent=${agent}`];
+		const env = {
+			PATH: path.dirname(process.execPath), ...(options.env ?? {}),
+			HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE,
+			TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP,
+			XDG_CACHE_HOME: process.env.XDG_CACHE_HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+			XDG_DATA_HOME: process.env.XDG_DATA_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME,
+			XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, NODE_OPTIONS: "", NODE_PATH: "",
+		};
+		if (options.keepOpen) {
+			const ioRoot = fs.mkdtempSync(path.join(os.tmpdir(), "javi-forge-hook-fifo-"));
+			const stdinPath = path.join(ioRoot, "stdin");
+			const stdoutPath = path.join(ioRoot, "stdout");
+			const stderrPath = path.join(ioRoot, "stderr");
+			const fifo = spawnSync("mkfifo", [stdinPath]);
+			if (fifo.status !== 0) {
+				fs.rmSync(ioRoot, { recursive: true, force: true });
+				reject(new Error("mkfifo unavailable for keep-open stdin test"));
+				return;
+			}
+			const stdinFd = fs.openSync(stdinPath, fs.constants.O_RDWR);
+			const stdoutFd = fs.openSync(stdoutPath, "w");
+			const stderrFd = fs.openSync(stderrPath, "w");
+			let settled = false;
+			const cleanup = () => {
+				for (const descriptor of [stdinFd, stdoutFd, stderrFd]) {
+					try { fs.closeSync(descriptor); } catch {}
+				}
+				try { writer.destroy(); } catch {}
+				try { fs.rmSync(ioRoot, { recursive: true, force: true }); } catch {}
+			};
+			const finish = (callback: () => void) => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				try { callback(); } finally { cleanup(); }
+			};
+			const child = spawn(process.execPath, [options.asset ?? ASSET, ...agentArgs, ...(options.args ?? [])], {
+				cwd: options.cwd, stdio: [stdinFd, stdoutFd, stderrFd], env,
+			});
+			const writer = fs.createWriteStream(stdinPath);
+			writer.on("error", (error: NodeJS.ErrnoException) => {
+				if (error.code !== "EPIPE") finish(() => reject(error));
+			});
+			const timer = setTimeout(() => {
+				child.kill("SIGKILL");
+				finish(() => reject(new Error("spawned evaluator required timeout kill")));
+			}, 10_000);
+			child.on("error", (error) => finish(() => reject(error)));
+			child.on("close", (code) => finish(() => {
+				resolve({ code, stdout: fs.readFileSync(stdoutPath), stderr: fs.readFileSync(stderrPath), elapsedMs: performance.now() - started });
+			}));
+			writer.write(input);
+			return;
+		}
+		// File-backed stdio keeps most cases focused on the packaged hook. In this
+		// Codex runtime, Node->Node pipe stdio can spawn a child that observes empty
+		// stdin, collapsing unrelated policy cases into invalid-json.
+		const ioRoot = fs.mkdtempSync(path.join(os.tmpdir(), "javi-forge-hook-io-"));
+		const stdinPath = path.join(ioRoot, "stdin");
+		const stdoutPath = path.join(ioRoot, "stdout");
+		const stderrPath = path.join(ioRoot, "stderr");
+		fs.writeFileSync(stdinPath, input);
+		const stdinFd = fs.openSync(stdinPath, "r");
+		const stdoutFd = fs.openSync(stdoutPath, "w");
+		const stderrFd = fs.openSync(stderrPath, "w");
+		let settled = false;
+		let timedOut = false;
+		const closeDescriptors = () => {
+			for (const descriptor of [stdinFd, stdoutFd, stderrFd]) {
+				try { fs.closeSync(descriptor); } catch {}
+			}
+		};
+		const cleanup = () => {
+			try { fs.rmSync(ioRoot, { recursive: true, force: true }); } catch {}
+		};
+		const finish = (callback: () => void) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			closeDescriptors();
+			try { callback(); } finally { cleanup(); }
+		};
 		const child = spawn(process.execPath, [options.asset ?? ASSET, ...agentArgs, ...(options.args ?? [])], {
-			cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"], env: { PATH: path.dirname(process.execPath), ...(options.env ?? {}) },
+			cwd: options.cwd, stdio: [stdinFd, stdoutFd, stderrFd], env,
 		});
-		const stdout: Buffer[] = [];
-		const stderr: Buffer[] = [];
 		const timer = setTimeout(() => {
+			timedOut = true;
 			child.kill("SIGKILL");
-			reject(new Error("spawned evaluator required timeout kill"));
-		}, 2_000);
-		child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-		child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-		child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-			if (error.code !== "EPIPE") reject(error);
-		});
-		child.on("error", reject);
-		child.on("close", (code) => { clearTimeout(timer); resolve({ code, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), elapsedMs: performance.now() - started }); });
-		child.stdin.write(input);
-		if (!options.keepOpen) child.stdin.end();
+		}, 10_000);
+		child.on("error", (error) => finish(() => reject(error)));
+		child.on("close", (code) => finish(() => {
+			if (timedOut) {
+				reject(new Error("spawned evaluator required timeout kill"));
+				return;
+			}
+			resolve({ code, stdout: fs.readFileSync(stdoutPath), stderr: fs.readFileSync(stderrPath), elapsedMs: performance.now() - started });
+		}));
 	});
 }
 describe("exact packaged Claude PreToolUse process", () => {
@@ -56,7 +135,7 @@ describe("exact packaged Claude PreToolUse process", () => {
 		["JD-S1-001", "Bash", "printf x | cat ~/.ssh/id"],
 		["JD-S1-002", "Bash", "env --unset OLD FOO=x sudo -u root command -- cat ~/.ssh/id"],
 		["JD-S1-FR1-001 sudo -D", "Bash", "sudo -D /tmp cat ~/.ssh/id"], ["JD-S1-FR1-001 sudo -R", "Bash", "sudo -R /tmp cat ~/.ssh/id"], ["JD-S1-FR1-001 env -S", "Bash", 'env -S "cat ~/.ssh/id"'],
-		...["env -Scat ~/.ssh/id", "env -S'cat ~/.ssh/id'", 'env -S"cat ~/.ssh/id"', "env --split-string='cat ~/.ssh/id'", 'env --split-string "cat ~/.ssh/id"', String.raw`env -S'cat\_~/.ssh/id'`, String.raw`env -S'cat\c' ~/.ssh/id`, String.raw`env -S'printf\q'`, "env --split-str='cat ~/.ssh/id'", String.raw`env -iS 'cat\_~/.ssh/id'`, String.raw`env -vS 'cat\_~/.ssh/id'`, String.raw`env -iS'cat\_~/.ssh/id'`, "READER=cat env -S '${READER}\\_~/.ssh/id'", String.raw`/usr/bin/env -iS 'cat\_~/.ssh/id'`].map((command): [string, string, string] => [`JD-S1-FR3-001 ${command}`, "Bash", command]),
+		...["env -Scat ~/.ssh/id", "env -S'cat ~/.ssh/id'", 'env -S"cat ~/.ssh/id"', "env --split-string='cat ~/.ssh/id'", 'env --split-string "cat ~/.ssh/id"', String.raw`env -S'cat\_~/.ssh/id'`, String.raw`env -S'cat\c' ~/.ssh/id`, String.raw`env -S'printf\q'`, "env --split-str='cat ~/.ssh/id'", String.raw`env -iS 'cat\_~/.ssh/id'`, String.raw`env -vS 'cat\_~/.ssh/id'`, String.raw`env -iS'cat\_~/.ssh/id'`, `READER=cat env -S '\${READER}\\_~/.ssh/id'`, String.raw`/usr/bin/env -iS 'cat\_~/.ssh/id'`].map((command): [string, string, string] => [`JD-S1-FR3-001 ${command}`, "Bash", command]),
 		["JD-S1-003", "Bash", "bash -c \"cat ~/.ssh/id\""],
 		...(["bash", "sh", "zsh", "dash", "ksh"] as const).map((shell): [string, string, string] => [`JD-S1-FR1-002 ${shell}`, "Bash", `${shell} -lc "cat ~/.ssh/id"`]), ["JD-S1-FR1-002 bounded", "Bash", "echo $(echo $(echo $(echo $(echo $(echo ok)))))"],
 		["JD-S1-005", "Bash", "chmod 777 /"],
@@ -126,7 +205,7 @@ describe("exact packaged Claude PreToolUse process", () => {
 		expect(exact).toHaveLength(LIMIT);
 		expect(await run(exact)).toMatchObject({ code: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
 	});
-	it("exits promptly on oversized input while the writer remains open", async () => {
+	it.runIf(LINUX_ONLY)("exits promptly on oversized input while the writer remains open", async () => {
 		const result = await run(Buffer.alloc(LIMIT + 1, 0x78), { keepOpen: true });
 		expect(result.code).toBe(2);
 		expect(result.elapsedMs).toBeLessThan(500);
@@ -183,7 +262,7 @@ describe.skipIf(!LINUX_ONLY)("P2-LINUX host-absolute sensitive reads (Linux-only
 describe("protected ambiguity diagnostics and corrected orderings", () => {
 	it.each([
 		["S08/S21 unsupported env escape", String.raw`env -S 'printf\q'`, ["utility-ambiguity", "env", "wrapper-extraction"], [String.raw`printf\q`]],
-		["S16/S45 active expansion", "SECRET_ASSIGN=topsecret123 READER=cat env -S '${READER}\\_~/.ssh/id'", ["utility-ambiguity", "env", "wrapper-extraction"], ["topsecret123", "READER", "~/.ssh/id"]],
+		["S16/S45 active expansion", `SECRET_ASSIGN=topsecret123 READER=cat env -S '\${READER}\\_~/.ssh/id'`, ["utility-ambiguity", "env", "wrapper-extraction"], ["topsecret123", "READER", "~/.ssh/id"]],
 		["S09/S46 chmod critical sink", "chmod --reference=/tmp/ref 777 /", ["utility-ambiguity", "chmod", "critical-chmod"], ["/tmp/ref", "777"]],
 		["S12 base64 shell sink", "base64 --bogus payload | bash", ["utility-ambiguity", "base64", "base64-to-shell"], ["payload", "--bogus"]],
 	])("%s denies with fixed categories only", async (_name, command, categories, forbidden) => {

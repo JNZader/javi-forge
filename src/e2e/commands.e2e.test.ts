@@ -1,25 +1,24 @@
 /**
  * E2E tests for javi-forge CLI commands.
  *
- * These tests execute the REAL compiled CLI as a subprocess but ONLY test
- * dry-run behavior — no real filesystem modifications are made.
- *
- * Prerequisites: `pnpm build` must be run before these tests.
+ * These tests execute the real CLI as a subprocess but ONLY test dry-run
+ * behavior — no real filesystem modifications are made. They use the source CLI
+ * through tsx by default so staged source is tested without a release build.
+ * Set JAVI_FORGE_E2E_CLI=dist to explicitly exercise the built artifact.
  */
-import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
-import { afterEach, describe, expect, it } from "vitest";
-
-const execFileAsync = promisify(execFile);
-const CLI_PATH = path.resolve(__dirname, "../../dist/index.js");
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { runCliSubprocess } from "./cli-runner.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const sandboxes: string[] = [];
+const DOCTOR_PROCESS_TIMEOUT_MS = 60_000;
+const DOCTOR_TEST_TIMEOUT_MS = 90_000;
+vi.setConfig({ testTimeout: DOCTOR_TEST_TIMEOUT_MS });
 
 async function createSandbox(): Promise<string> {
 	const dir = path.join(os.tmpdir(), `javi-forge-e2e-${crypto.randomUUID()}`);
@@ -40,25 +39,7 @@ async function runCLI(
 	cwd?: string,
 	timeout = 30_000,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-	try {
-		const { stdout, stderr } = await execFileAsync(
-			"node",
-			[CLI_PATH, ...args],
-			{
-				timeout,
-				cwd: cwd ?? process.cwd(),
-				env: { ...process.env, FORCE_COLOR: "0", CI: "1" },
-			},
-		);
-		return { stdout, stderr, exitCode: 0 };
-	} catch (e: unknown) {
-		const err = e as Record<string, unknown>;
-		return {
-			stdout: (err.stdout as string) ?? "",
-			stderr: (err.stderr as string) ?? "",
-			exitCode: (err.code as number) ?? 1,
-		};
-	}
+	return runCliSubprocess(args, { cwd: cwd ?? process.cwd(), timeout });
 }
 
 // ── --help ──────────────────────────────────────────────────────────────────
@@ -356,75 +337,131 @@ describe("javi-forge analyze", () => {
 // ── doctor ──────────────────────────────────────────────────────────────────
 
 describe("javi-forge doctor", () => {
-	it("runs without crashing and shows check results", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"runs without crashing and shows check results",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		// Doctor output contains status icons (✓ ok, ✗ fail, – skip)
-		const hasStatusIndicators =
-			stdout.includes("\u2713") || // ✓
-			stdout.includes("\u2717") || // ✗
-			stdout.includes("\u2013") || // –
-			stdout.includes("ok") ||
-			stdout.includes("fail") ||
-			stdout.includes("skip");
-		expect(hasStatusIndicators).toBe(true);
-	});
+			expect(exitCode).toBe(0);
+			// Doctor output contains status icons (✓ ok, ✗ fail, – skip)
+			const hasStatusIndicators =
+				stdout.includes("\u2713") || // ✓
+				stdout.includes("\u2717") || // ✗
+				stdout.includes("\u2013") || // –
+				stdout.includes("ok") ||
+				stdout.includes("fail") ||
+				stdout.includes("skip");
+			expect(hasStatusIndicators).toBe(true);
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("shows health score", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"shows health score",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		expect(stdout).toContain("Health:");
-		expect(stdout).toMatch(/\d+\/\d+ checks passed/);
-	});
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("Health:");
+			expect(stdout).toMatch(/\d+\/\d+ checks passed/);
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("checks system tools (git, node)", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"checks system tools (git, node)",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		expect(stdout).toContain("System Tools");
-		expect(stdout).toContain("Git");
-		expect(stdout).toContain("Node.js");
-	});
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("System Tools");
+			expect(stdout).toContain("Git");
+			expect(stdout).toContain("Node.js");
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("shows framework structure section", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"shows framework structure section",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		expect(stdout).toContain("Framework Structure");
-		expect(stdout).toContain("templates/");
-		expect(stdout).toContain("modules/");
-	});
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("Framework Structure");
+			expect(stdout).toContain("templates/");
+			expect(stdout).toContain("modules/");
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("in empty dir shows no stack detected", async () => {
-		const sandbox = await createSandbox();
-		const { stdout, exitCode } = await runCLI(["doctor"], sandbox);
+	it(
+		"in empty dir shows no stack detected",
+		async () => {
+			const sandbox = await createSandbox();
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				sandbox,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		expect(stdout).toContain("Stack Detection");
-		// In empty dir, no stack is recognizable
-		expect(stdout).toContain("no recognizable project files");
-	});
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("Stack Detection");
+			// In empty dir, no stack is recognizable
+			expect(stdout).toContain("no recognizable project files");
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("shows installed modules section", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"shows installed modules section",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		expect(stdout).toContain("Installed Modules");
-		expect(stdout).toContain("engram");
-		expect(stdout).toContain("ghagga");
-	});
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("Installed Modules");
+			expect(stdout).toContain("engram");
+			expect(stdout).toContain("ghagga");
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 
-	it("shows the Security advisories section (commit-signing + branch-protection)", async () => {
-		const { stdout, exitCode } = await runCLI(["doctor"]);
+	it(
+		"shows the Security advisories section (commit-signing + branch-protection)",
+		async () => {
+			const { stdout, exitCode } = await runCLI(
+				["doctor"],
+				undefined,
+				DOCTOR_PROCESS_TIMEOUT_MS,
+			);
 
-		expect(exitCode).toBe(0);
-		// hook-consolidation D9: L4/L6 + L5 folded into read-only doctor advisories.
-		expect(stdout).toContain("Security");
-		expect(stdout).toContain("Commit signing");
-		expect(stdout).toContain("Branch protection");
-	});
+			expect(exitCode).toBe(0);
+			// hook-consolidation D9: L4/L6 + L5 folded into read-only doctor advisories.
+			expect(stdout).toContain("Security");
+			expect(stdout).toContain("Commit signing");
+			expect(stdout).toContain("Branch protection");
+		},
+		DOCTOR_TEST_TIMEOUT_MS,
+	);
 });
 
 // ── hooks ─────────────────────────────────────────────────────────────────────

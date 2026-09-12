@@ -32,6 +32,8 @@ const REQUIRED_FILES = [
 	// manifest binds its sha256 and the win32 installer refuses without it, so a
 	// tarball that silently dropped it would fail closed on every Windows run.
 	// Asserted BY NAME so an omission (or a rename) fails `pnpm package:check`.
+	"assets/claude-hooks/javi-forge-skillguard-pre-tool-use.mjs",
+	"assets/claude-hooks/manifest.json",
 	"assets/claude-hooks/javi-forge-windows-secure-object.ps1",
 	"templates/github/ci-node.yml",
 	"modules/engram/install-engram.sh",

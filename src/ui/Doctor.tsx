@@ -146,7 +146,7 @@ export default function Doctor({
 			{!loading && (
 				<Box marginTop={1}>
 					<Text color={theme.muted} dimColor>
-						Press r to refresh, q to quit
+						Press r to rerun checks, q to quit
 					</Text>
 				</Box>
 			)}

@@ -38,10 +38,19 @@ jobs:
 
       # The preparation executor coverage suite pins and hashes the system
       # bubblewrap launcher at /usr/bin/bwrap. GitHub's ubuntu image does not
-      # guarantee that package is preinstalled, so install it explicitly before
-      # the build/test gate instead of silently skipping the security runtime.
+      # guarantee that package/profile is preinstalled, so install and load the
+      # AppArmor userns profile explicitly before the build/test gate instead
+      # of silently skipping the security runtime.
       - name: Install bubblewrap (from preparation executor tests)
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apparmor apparmor-profiles apparmor-utils bubblewrap
+          sudo install -m 0644 \
+            /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
+            /etc/apparmor.d/bwrap-userns-restrict
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+          bwrap --unshare-all --die-with-parent --cap-drop ALL --clearenv \
+            --ro-bind /usr/bin/true /worker -- /worker
 
       - run: pnpm build
       # COV-2: run tests WITH coverage so the configured 85/80 floor

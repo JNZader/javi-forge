@@ -259,12 +259,7 @@ describe("runDoctor", () => {
 	// count returned for the bundled dir; a unit test for countDir itself
 	// belongs in lib/common.test.ts if we want explicit coverage.
 
-	it("shows context refresh ok when .context/ + manifest are present", async () => {
-		// Round-7 review flagged that the original loose assertion
-		// (`["ok", "skip"]`) made this test pass even if refresh silently
-		// failed. Tighten back to a strict "ok" — when both .context/ and
-		// the manifest exist, the doctor MUST report success or there's a
-		// real regression.
+	async function scaffoldRefreshableContext() {
 		await fs.ensureDir(path.join(tmpDir, ".context"));
 		await fs.writeFile(
 			path.join(tmpDir, ".context", "INDEX.md"),
@@ -286,14 +281,103 @@ describe("runDoctor", () => {
 		// cannot pick a template and falls through to skip.
 		await fs.writeJson(path.join(tmpDir, "package.json"), {
 			name: "test-project",
+			dependencies: { ink: "^5.0.0" },
 		});
+	}
+
+	it("reports an existing context without refreshing by default", async () => {
+		await scaffoldRefreshableContext();
+		const indexPath = path.join(tmpDir, ".context", "INDEX.md");
+		const summaryPath = path.join(tmpDir, ".context", "summary.md");
+		const manifestPath = path.join(tmpDir, ".javi-forge", "manifest.json");
+		const beforeIndex = await fs.readFile(indexPath, "utf8");
+		const beforeSummary = await fs.readFile(summaryPath, "utf8");
+		const beforeManifest = await fs.readJson(manifestPath);
 
 		const result = await runDoctor(tmpDir);
 		const ctxSection = result.sections.find(
 			(s) => s.title === "Context Directory",
 		)!;
-		expect(ctxSection).toBeDefined();
-		expect(ctxSection.checks[0].status).toBe("ok");
+		expect(ctxSection.checks[0]).toMatchObject({
+			label: ".context/",
+			status: "ok",
+			detail: "present; not refreshed (use --refresh-context to update)",
+		});
+		expect(await fs.readFile(indexPath, "utf8")).toBe(beforeIndex);
+		expect(await fs.readFile(summaryPath, "utf8")).toBe(beforeSummary);
+		expect(await fs.readJson(manifestPath)).toEqual(beforeManifest);
+	});
+
+	it("refreshes context only when explicitly requested", async () => {
+		await scaffoldRefreshableContext();
+		const indexPath = path.join(tmpDir, ".context", "INDEX.md");
+		const summaryPath = path.join(tmpDir, ".context", "summary.md");
+		const manifestPath = path.join(tmpDir, ".javi-forge", "manifest.json");
+		const beforeManifest = await fs.readJson(manifestPath);
+
+		const result = await runDoctor(tmpDir, { refreshContext: true });
+		const ctxSection = result.sections.find(
+			(s) => s.title === "Context Directory",
+		)!;
+		expect(ctxSection.checks[0]).toMatchObject({
+			label: ".context/ refresh",
+			status: "ok",
+			detail: "INDEX.md + summary.md updated",
+		});
+		expect(await fs.readFile(indexPath, "utf8")).toContain(
+			"# test-project — Project Index",
+		);
+		expect(await fs.readFile(summaryPath, "utf8")).toContain(
+			"**Dependencies**: ink",
+		);
+		const afterManifest = await fs.readJson(manifestPath);
+		expect(afterManifest.updatedAt).not.toBe(beforeManifest.updatedAt);
+	});
+
+	it("does not refresh context during dry-run", async () => {
+		await scaffoldRefreshableContext();
+		const indexPath = path.join(tmpDir, ".context", "INDEX.md");
+		const summaryPath = path.join(tmpDir, ".context", "summary.md");
+		const manifestPath = path.join(tmpDir, ".javi-forge", "manifest.json");
+		const beforeIndex = await fs.readFile(indexPath, "utf8");
+		const beforeSummary = await fs.readFile(summaryPath, "utf8");
+		const beforeManifest = await fs.readJson(manifestPath);
+
+		const result = await runDoctor(tmpDir, {
+			dryRun: true,
+			refreshContext: true,
+		});
+		const ctxSection = result.sections.find(
+			(s) => s.title === "Context Directory",
+		)!;
+		expect(ctxSection.checks[0]).toMatchObject({
+			label: ".context/",
+			status: "skip",
+			detail:
+				"dry-run: would refresh INDEX.md + summary.md and manifest timestamp",
+		});
+		expect(await fs.readFile(indexPath, "utf8")).toBe(beforeIndex);
+		expect(await fs.readFile(summaryPath, "utf8")).toBe(beforeSummary);
+		expect(await fs.readJson(manifestPath)).toEqual(beforeManifest);
+	});
+
+	it("surfaces dependency manifest warnings without refreshing", async () => {
+		await scaffoldRefreshableContext();
+		await fs.writeFile(path.join(tmpDir, "package.json"), "{ invalid json");
+
+		const result = await runDoctor(tmpDir);
+		const ctxSection = result.sections.find(
+			(s) => s.title === "Context Directory",
+		)!;
+		expect(ctxSection.checks).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					label: "dependency manifest",
+					status: "fail",
+					detail: expect.stringContaining("package.json: invalid JSON"),
+				}),
+			]),
+		);
 	});
 
 	it("shows context refresh skip when no .context/ exists", async () => {

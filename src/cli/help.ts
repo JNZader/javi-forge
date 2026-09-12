@@ -60,6 +60,7 @@ export const HELP_TEXT = `
     --mock          Enable mock-first mode (no real API keys needed)
     --local-ai      Include local AI dev stack (Ollama + Docker Compose)
     --batch         Non-interactive mode (auto-proceed, no keyboard input)
+    --refresh-context  Refresh .context/ during doctor (writes INDEX.md, summary.md, manifest timestamp)
     --deep          Enable deep analysis (conflict + duplicate detection)
     --budget, -b    Token budget limit for skills (default: 8000)
     --skills-dir    Custom skills directory path
@@ -218,6 +219,7 @@ export const FLAGS_SCHEMA = {
 	// `ci --help` can show ci-specific usage instead of the global banner).
 	help: { type: "boolean", shortFlag: "h", default: false },
 	dryRun: { type: "boolean", default: false },
+	refreshContext: { type: "boolean", default: false },
 	stack: { type: "string", default: "" },
 	ci: { type: "string", default: "" },
 	memory: { type: "string", default: "" },

@@ -27,6 +27,32 @@ function report(
 	onStep({ id, label, status, detail });
 }
 
+interface PluginSuccessDiagnostics {
+	name?: string;
+	warning?: string;
+	recoveryPaths?: string[];
+}
+
+function successDetail(
+	action: "install" | "import",
+	dryRun: boolean,
+	result: PluginSuccessDiagnostics,
+): string {
+	const verb = action === "install" ? "install" : "import";
+	const past = action === "install" ? "installed" : "imported";
+	const lines = [
+		dryRun ? `dry-run: would ${verb} ${result.name}` : `${past} ${result.name}`,
+	];
+	if (result.warning) lines.push(`warning: ${result.warning}`);
+	if (result.recoveryPaths?.length) {
+		lines.push("manual recovery paths:");
+		for (const recoveryPath of result.recoveryPaths) {
+			lines.push(`  - ${recoveryPath}`);
+		}
+	}
+	return lines.join("\n");
+}
+
 /**
  * Add (install) a plugin from a GitHub source.
  */
@@ -47,9 +73,7 @@ export async function runPluginAdd(
 			stepId,
 			`Install plugin: ${source}`,
 			"done",
-			dryRun
-				? `dry-run: would install ${result.name}`
-				: `installed ${result.name}`,
+			successDetail("install", dryRun, result),
 		);
 	} else {
 		report(onStep, stepId, `Install plugin: ${source}`, "error", result.error);
@@ -331,9 +355,7 @@ export async function runPluginImport(
 			stepId,
 			`Import agent-skills package: ${sourceDir}`,
 			"done",
-			dryRun
-				? `dry-run: would import ${result.name}`
-				: `imported ${result.name}`,
+			successDetail("import", dryRun, result),
 		);
 	} else {
 		report(

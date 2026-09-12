@@ -1,21 +1,17 @@
 /**
  * E2E tests for javi-forge CLI commands.
  *
- * These tests execute the REAL compiled CLI as a subprocess but ONLY test
- * dry-run behavior — no real filesystem modifications are made.
- *
- * Prerequisites: `pnpm build` must be run before these tests.
+ * These tests execute the real CLI as a subprocess but ONLY test dry-run
+ * behavior — no real filesystem modifications are made. They use the source CLI
+ * through tsx by default so staged source is tested without a release build.
+ * Set JAVI_FORGE_E2E_CLI=dist to explicitly exercise the built artifact.
  */
-import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
 import { afterEach, describe, expect, it } from "vitest";
-
-const execFileAsync = promisify(execFile);
-const CLI_PATH = path.resolve(__dirname, "../../dist/index.js");
+import { runCliSubprocess } from "./cli-runner.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -40,25 +36,7 @@ async function runCLI(
 	cwd?: string,
 	timeout = 30_000,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-	try {
-		const { stdout, stderr } = await execFileAsync(
-			"node",
-			[CLI_PATH, ...args],
-			{
-				timeout,
-				cwd: cwd ?? process.cwd(),
-				env: { ...process.env, FORCE_COLOR: "0", CI: "1" },
-			},
-		);
-		return { stdout, stderr, exitCode: 0 };
-	} catch (e: unknown) {
-		const err = e as Record<string, unknown>;
-		return {
-			stdout: (err.stdout as string) ?? "",
-			stderr: (err.stderr as string) ?? "",
-			exitCode: (err.code as number) ?? 1,
-		};
-	}
+	return runCliSubprocess(args, { cwd: cwd ?? process.cwd(), timeout });
 }
 
 // ── --help ──────────────────────────────────────────────────────────────────

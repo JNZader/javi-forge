@@ -12,7 +12,7 @@
  * dispatcher exits non-zero.
  *
  * These tests prove the shim → dispatcher → exit-code round trip end to end by
- * spawning the COMPILED CLI:
+ * spawning the real CLI:
  *   1. `hooks run pre-commit` against a real `hooks:` config composes the ci
  *      section and propagates its exit code (0 on pass, non-zero on a blocking
  *      failure).
@@ -28,26 +28,28 @@
  * Notes:
  *   - args-level coverage lives in src/lib/docker.test.ts.
  *
- * Prerequisites: `pnpm build` must be run before these tests.
+ * The subprocess uses the source CLI through tsx by default so staged source is
+ * tested without a release build. Set JAVI_FORGE_E2E_CLI=dist to explicitly
+ * exercise the built artifact.
  */
-import { execFile, execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
 import { afterEach, describe, expect, it } from "vitest";
-
-const execFileAsync = promisify(execFile);
-const CLI_PATH = path.resolve(__dirname, "../../dist/index.js");
+import { runCliSubprocess, runFileBackedProcess } from "./cli-runner.js";
 
 /** Probe a host toolchain once at module load — skip (not fail) when absent. */
 async function hasTool(tool: string): Promise<boolean> {
 	try {
-		await execFileAsync("bash", ["-c", `command -v ${tool}`], {
-			timeout: 5_000,
-		});
-		return true;
+		const result = await runFileBackedProcess(
+			"bash",
+			["-c", `command -v ${tool}`],
+			{
+				timeout: 5_000,
+			},
+		);
+		return result.exitCode === 0;
 	} catch {
 		return false;
 	}
@@ -72,30 +74,11 @@ async function runCLI(
 	args: string[],
 	options: { cwd: string; env?: NodeJS.ProcessEnv; timeout?: number },
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-	try {
-		const { stdout, stderr } = await execFileAsync(
-			"node",
-			[CLI_PATH, ...args],
-			{
-				timeout: options.timeout ?? 60_000,
-				cwd: options.cwd,
-				env: {
-					...process.env,
-					FORCE_COLOR: "0",
-					CI: "1",
-					...options.env,
-				},
-			},
-		);
-		return { stdout, stderr, exitCode: 0 };
-	} catch (e: unknown) {
-		const err = e as Record<string, unknown>;
-		return {
-			stdout: (err.stdout as string) ?? "",
-			stderr: (err.stderr as string) ?? "",
-			exitCode: (err.code as number) ?? 1,
-		};
-	}
+	return runCliSubprocess(args, {
+		cwd: options.cwd,
+		env: options.env,
+		timeout: options.timeout ?? 60_000,
+	});
 }
 
 /** Hybrid repo: root package.json + nested backend/ Python project. */
@@ -222,8 +205,9 @@ describe("hook contract — ci section quick gate (quick, no-docker)", () => {
 			await fs.ensureDir(binDir);
 			for (const tool of ["node", "bash", "python3"]) {
 				const real = (
-					await execFileAsync("bash", ["-c", `command -v ${tool}`])
+					await runFileBackedProcess("bash", ["-c", `command -v ${tool}`])
 				).stdout.trim();
+				expect(real).not.toBe("");
 				await fs.symlink(real, path.join(binDir, tool));
 			}
 
@@ -320,7 +304,8 @@ describe("hook dispatcher — hooks run round trip", () => {
 	it("ci init installs a shim whose body invokes the dispatcher", async () => {
 		const repo = await createHybridRepo(DISPATCH_PASSING_CONFIG);
 		// A real git repo is required for installCIHooks to write .git/hooks.
-		execFileSync("git", ["init"], { cwd: repo });
+		const gitInit = await runFileBackedProcess("git", ["init"], { cwd: repo });
+		expect(gitInit.exitCode).toBe(0);
 
 		const { exitCode } = await runCLI(["ci", "init"], { cwd: repo });
 		expect(exitCode).toBe(0);

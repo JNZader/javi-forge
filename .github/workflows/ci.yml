@@ -36,6 +36,13 @@ jobs:
           pipx install ruff==0.15.6
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # The preparation executor coverage suite pins and hashes the system
+      # bubblewrap launcher at /usr/bin/bwrap. GitHub's ubuntu image does not
+      # guarantee that package is preinstalled, so install it explicitly before
+      # the build/test gate instead of silently skipping the security runtime.
+      - name: Install bubblewrap (from preparation executor tests)
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
       - run: pnpm build
       # COV-2: run tests WITH coverage so the configured 85/80 floor
       # (vitest.config.ts) actually gates on CI. Local `pnpm validate` keeps

@@ -792,12 +792,63 @@ function bashSubstitutions(command) {
 	}
 	return bodies;
 }
+// This deliberately recognizes only a direct, quoted Python stdin heredoc on
+// the first command line. It removes the opaque body before shell inspection;
+// it does not parse Python or permit its execution.
+function pythonQuotedHeredoc(command) {
+	const newline = command.indexOf("\n");
+	const header = newline < 0 ? command : command.slice(0, newline);
+	const starts = [0];
+	let quote = "", escaped = false, heredocs = 0;
+	for (let index = 0; index < header.length; index++) {
+		const char = header[index];
+		if (escaped) { escaped = false; continue; }
+		if (char === "\\" && quote !== "'") { escaped = true; continue; }
+		if (quote) { if (char === quote) quote = ""; continue; }
+		if (char === "'" || char === '"' || char === "`") { quote = char; continue; }
+		if (char === "<" && header[index + 1] === "<") { heredocs++; index++; }
+		if (char === ";" || char === "|" || char === "&") starts.push(index + 1);
+	}
+	const literalPath = String.raw`(?:[A-Za-z0-9_./~-]+|'[A-Za-z0-9_./~ -]+'|"[A-Za-z0-9_./~ -]+")`;
+	const redirection = String.raw`(?:[0-9]*>>?|[0-9]*<)[ \t]*${literalPath}[ \t]*`;
+	const python = String.raw`[ \t]*(?:python3?|/(?:[A-Za-z0-9_.-]+/)*python3?)(?:[ \t]+-)?[ \t]*`;
+	const pattern = new RegExp(String.raw`^(${python}(?:${redirection})*)<<(-?)[ \t]*(['"])([A-Za-z_][A-Za-z0-9_]*)\3([ \t]*(?:${redirection})*)([;|&].*)?$`);
+	for (const start of starts) {
+		const match = pattern.exec(header.slice(start));
+		if (!match) continue;
+		// Multiple documents and tab-stripping need a shell grammar this guard
+		// intentionally does not implement, so retain fail-closed behavior.
+		if (newline < 0 || heredocs !== 1 || match[2]) fail("unlexable-command");
+		if (match[6]?.trimStart().startsWith("|")) fail("unlexable-command");
+		let offset = newline + 1;
+		while (offset <= command.length) {
+			const end = command.indexOf("\n", offset);
+			const lineEnd = end < 0 ? command.length : end;
+			if (command.slice(offset, lineEnd) === match[4]) {
+				const outerHeader = header.slice(0, start) + match[1] + match[5] + (match[6] ?? "");
+				return { command: `${outerHeader}\n${command.slice(lineEnd + 1)}`, unsupported: true };
+			}
+			if (end < 0) break;
+			offset = end + 1;
+		}
+		fail("unlexable-command");
+	}
+	return { command, unsupported: false };
+}
 function evaluateBash(command, cwd, config = AGENT_CONFIGS.claude, projectRoot = PROJECT_ROOT, depth = 0) {
 	if (depth > 4) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
+	let unsupported = false;
+	try { ({ command, unsupported } = pythonQuotedHeredoc(command)); } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
 	const headerOnlyCommand = opaqueInertCatHereDoc(command, cwd, config, projectRoot);
 	if (headerOnlyCommand === null) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
 	command = headerOnlyCommand;
-	try { for (const body of bashSubstitutions(command)) { const nested = evaluateBash(body, cwd, config, projectRoot, depth + 1); if (!nested.allowed) return nested; } } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
+	try {
+		for (const body of bashSubstitutions(command)) {
+			const nested = evaluateBash(body, cwd, config, projectRoot, depth + 1);
+			if (nested.ruleId === "shell.unsupported-interpreter") unsupported = true;
+			else if (!nested.allowed) return nested;
+		}
+	} catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
 	if (/^\s*:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:\s*$/.test(command)) return { allowed: false, ruleId: "shell.destructive-root" };
 	let parsed;
 	try { parsed = lex(command); } catch { return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; }
@@ -834,10 +885,16 @@ function evaluateBash(command, cwd, config = AGENT_CONFIGS.claude, projectRoot =
 		if (/^(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) && tokens.some((token) => /^-(?:enc|encodedcommand)$/i.test(token))) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
 		if (/^(?:bash|sh|zsh|dash|ksh)$/.test(executable)) {
 			const flag = tokens.findIndex((token) => /^-[^-]*c[^-]*$/.test(token));
-			if (flag >= 0) { const body = tokens[flag + 1]; if (!body || /\$(?!\()/.test(body)) return { allowed: false, ruleId: "shell.obfuscated-interpreter" }; const nested = evaluateBash(body, cwd, config, projectRoot, depth + 1); if (!nested.allowed) return nested; }
+			if (flag >= 0) {
+				const body = tokens[flag + 1];
+				if (!body || /\$(?!\()/.test(body)) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
+				const nested = evaluateBash(body, cwd, config, projectRoot, depth + 1);
+				if (nested.ruleId === "shell.unsupported-interpreter") unsupported = true;
+				else if (!nested.allowed) return nested;
+			}
 		}
 	}
-	return { allowed: true };
+	return unsupported ? { allowed: false, ruleId: "shell.unsupported-interpreter" } : { allowed: true };
 }
 function evaluatePowerShell(command, cwd, config = AGENT_CONFIGS.claude, projectRoot = PROJECT_ROOT) {
 	const parsed = lex(command, true);
@@ -939,6 +996,7 @@ function diagnostic(error) {
 }
 function denialDiagnostic(toolName, decision) {
 	const tool = SUPPORTED_TOOLS.includes(toolName) ? toolName : "supported tool";
+	if (decision.ruleId === "shell.unsupported-interpreter") return "javi-forge PreToolUse denied Bash [shell.unsupported-interpreter]: quoted Python heredoc execution is unsupported";
 	if (decision.ambiguity) return `javi-forge PreToolUse denied ${tool} [${decision.ruleId}]: ${decision.ambiguity.utility} ${decision.ambiguity.profile} ${decision.ambiguity.sink} semantics denied as ambiguous`;
 	return `javi-forge PreToolUse denied ${tool} [${decision.ruleId}]: global guard policy denied the invocation`;
 }

@@ -319,9 +319,10 @@ function buildCodexHooksContainer(assetPath: string): Record<string, unknown> {
 }
 
 /**
- * Merge our managed group into an existing container: drop any prior managed
- * groups (ours, by command regex) and append a fresh one, preserving every
- * foreign group. A fresh install (no container) yields the clean container.
+ * Merge our managed group into an existing container: remove only prior managed
+ * handlers (ours, by command regex), preserve foreign handlers in their groups,
+ * and append one fresh canonical managed group. A fresh install (no container)
+ * yields the clean container.
  */
 function mergeCodexHooks(
 	existing: unknown,
@@ -332,18 +333,28 @@ function mergeCodexHooks(
 	if (!isPlainObject(container.hooks)) container.hooks = {};
 	const hooks = container.hooks as Record<string, unknown>;
 	const groups = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
-	const kept = groups.filter((group) => {
-		const list =
-			isPlainObject(group) && Array.isArray(group.hooks) ? group.hooks : [];
-		const isOurs = list.some(
+	const kept: unknown[] = [];
+	for (const group of groups) {
+		if (!isPlainObject(group) || !Array.isArray(group.hooks)) {
+			kept.push(group);
+			continue;
+		}
+		const foreign = group.hooks.filter(
 			(h) =>
-				isPlainObject(h) &&
-				h.type === "command" &&
-				typeof h.command === "string" &&
-				CODEX_CMD_RE.test(h.command),
+				!(
+					isPlainObject(h) &&
+					h.type === "command" &&
+					typeof h.command === "string" &&
+					CODEX_CMD_RE.test(h.command)
+				),
 		);
-		return !isOurs;
-	});
+		if (foreign.length === 0) continue;
+		if (foreign.length === group.hooks.length) {
+			kept.push(group);
+			continue;
+		}
+		kept.push({ ...group, hooks: foreign });
+	}
 	const fresh = buildCodexHooksContainer(assetPath).hooks as {
 		PreToolUse: unknown[];
 	};
@@ -507,7 +518,11 @@ export async function doctorCodexPreToolUse(
 				: "runnable";
 
 	const remediation: string[] = [];
-	if (hooksJson.state === "absent" || asset.state !== "managed-current") {
+	if (
+		hooksJson.state === "absent" ||
+		hooksJson.state === "released-outdated" ||
+		asset.state !== "managed-current"
+	) {
 		remediation.push(
 			"install the codex guard with: javi-forge hooks install codex",
 		);

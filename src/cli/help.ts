@@ -169,7 +169,7 @@ export const CI_HELP_TEXT = `
 export const HOOKS_HELP_TEXT = `
   Usage
     $ javi-forge hooks run <pre-commit|pre-push>
-    $ javi-forge hooks <install|doctor|repair> claude [--force]
+    $ javi-forge hooks <install|doctor|repair> <claude|codex> [--force]
 
     Run the sections enabled under hooks: in .javi-forge/ci.yaml, in a fixed
     cheap→expensive order, fail-fast. With no hooks: config the default is the
@@ -181,6 +181,9 @@ export const HOOKS_HELP_TEXT = `
     install claude    Install the managed Claude PreToolUse guard (.claude/)
     doctor claude     Report Claude PreToolUse guard health (informational)
     repair claude     Repair the managed guard; --force overwrites edited assets
+    install codex     Install the managed Codex PreToolUse guard (~/.codex/)
+    doctor codex      Report Codex hook execution readiness and trust boundary
+    repair codex      Repair the managed Codex guard; --force overwrites edits
 
   Notes
     A blocking section failure exits non-zero and blocks the commit/push.
@@ -189,6 +192,9 @@ export const HOOKS_HELP_TEXT = `
     doctor claude is informational (always exits 0); install/repair exit 0 on
     success, non-zero on refusal/failure. Use repair claude --force to overwrite
     a locally edited managed asset.
+    doctor codex exits 0 when runnable, 1 when blocked, and 2 when inconclusive;
+    it does not prove provider trust or runtime execution. Use repair codex
+    --force only to overwrite an edited managed asset.
     Linux: install/repair claude need the acl package (getfacl) to prove the
     parent chain — apt install acl / apk add acl / dnf install acl. Without it
     they refuse fail-closed; an already-installed guard keeps firing, and
@@ -202,6 +208,9 @@ export const HOOKS_HELP_TEXT = `
     $ javi-forge hooks install claude
     $ javi-forge hooks doctor claude
     $ javi-forge hooks repair claude --force
+    $ javi-forge hooks install codex
+    $ javi-forge hooks doctor codex
+    $ javi-forge hooks repair codex --force
 `;
 
 export const FLAGS_SCHEMA = {

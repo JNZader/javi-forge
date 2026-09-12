@@ -1,12 +1,10 @@
-import { createElement, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { type DoctorOptions, runDoctor } from "../../commands/doctor.js";
 import type { DoctorResult } from "../../types/index.js";
 import Doctor from "../../ui/Doctor.js";
 
-export default function DoctorController({
-	dryRun = false,
-	refreshContext = false,
-}: DoctorOptions) {
+export default function DoctorController(options: DoctorOptions = {}) {
+	const { dryRun = false, refreshContext = false } = options;
 	const [result, setResult] = useState<DoctorResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -20,7 +18,7 @@ export default function DoctorController({
 				setResult(nextResult);
 				setLoading(false);
 			})
-			.catch((nextError) => {
+			.catch((nextError: unknown) => {
 				setError(String(nextError));
 				setLoading(false);
 			});
@@ -30,5 +28,12 @@ export default function DoctorController({
 		runCheck();
 	}, [dryRun, refreshContext]);
 
-	return createElement(Doctor, { loading, result, error, onRerun: runCheck });
+	return (
+		<Doctor
+			loading={loading}
+			result={result}
+			error={error}
+			onRerun={runCheck}
+		/>
+	);
 }

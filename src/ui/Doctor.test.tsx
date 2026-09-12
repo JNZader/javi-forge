@@ -5,6 +5,24 @@ import { CIProvider } from "./CIContext.js";
 import Doctor, { unsupportedDoctorMessage } from "./Doctor.js";
 
 describe("Doctor unsupported-platform UI state", () => {
+	it("labels rerun as rerunning checks", () => {
+		const view = render(
+			<CIProvider isCI={false}>
+				{createElement(Doctor, {
+					loading: false,
+					result: { state: "supported", sections: [] },
+					error: null,
+					onRerun: vi.fn(),
+				})}
+			</CIProvider>,
+		);
+		try {
+			expect(view.lastFrame()).toContain("Press r to rerun checks, q to quit");
+		} finally {
+			view.unmount();
+		}
+	});
+
 	it("renders generic supported-host guidance without collecting", () => {
 		const onRerun = vi.fn();
 		const view = render(

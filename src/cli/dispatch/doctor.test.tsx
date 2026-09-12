@@ -1,5 +1,5 @@
 import { render } from "ink-testing-library";
-import { createElement, default as React } from "react";
+import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runDoctor } from "../../commands/doctor.js";
 import { CIProvider } from "../../ui/CIContext.js";
@@ -14,13 +14,31 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("DoctorController", () => {
+	it("uses safe default options when rendered without props", async () => {
+		const view = render(
+			<CIProvider isCI={false}>
+				<DoctorController />
+			</CIProvider>,
+		);
+		try {
+			await vi.waitFor(() =>
+				expect(runDoctor).toHaveBeenCalledWith(undefined, {
+					dryRun: false,
+					refreshContext: false,
+				}),
+			);
+		} finally {
+			view.unmount();
+		}
+	});
+
 	it.each([
 		false,
 		true,
 	])("forwards refresh and dry-run=%s on initial collection and rerun", async (dryRun) => {
 		const view = render(
 			<CIProvider isCI={false}>
-				{createElement(DoctorController, { dryRun, refreshContext: true })}
+				<DoctorController dryRun={dryRun} refreshContext={true} />
 			</CIProvider>,
 		);
 		try {

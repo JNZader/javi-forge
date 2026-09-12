@@ -245,6 +245,16 @@ describe("runPluginSearch", () => {
 		expect(steps[1]!.status).toBe("error");
 		expect(steps[1]!.detail).toContain("registry search cancelled");
 	});
+
+	it("threads cancellation signal to the registry search", async () => {
+		const signal = new AbortController().signal;
+		mockSearch.mockResolvedValue({ status: "success", entries: [] });
+		const { onStep } = collectSteps();
+
+		await runPluginSearch("plugin", onStep, { signal });
+
+		expect(mockSearch).toHaveBeenLastCalledWith("plugin", { signal });
+	});
 });
 
 // ── runPluginValidate ────────────────────────────────────────────────────────

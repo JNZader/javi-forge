@@ -122,6 +122,7 @@ export async function runPluginList(onStep: StepCallback): Promise<void> {
 export async function runPluginSearch(
 	query: string | undefined,
 	onStep: StepCallback,
+	options: { signal?: AbortSignal } = {},
 ): Promise<void> {
 	const stepId = "plugin-search";
 	report(
@@ -131,7 +132,7 @@ export async function runPluginSearch(
 		"running",
 	);
 
-	const results = await searchRegistry(query);
+	const results = await searchRegistry(query, options);
 
 	if (results.status === "cancelled") {
 		report(

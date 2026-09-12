@@ -1,0 +1,174 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
+
+const PUBLISHING_PERMISSIONS = {
+	contents: "write",
+	issues: "write",
+	"pull-requests": "write",
+	"id-token": "write",
+};
+
+function object(value: unknown): Record<string, unknown> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new Error("Expected a YAML mapping");
+	}
+
+	return value as Record<string, unknown>;
+}
+
+function workflow(file: string): Record<string, unknown> {
+	const parsed: unknown = parse(
+		readFileSync(
+			new URL(`../../.github/workflows/${file}.yml`, import.meta.url),
+			"utf8",
+		),
+	);
+	return object(parsed);
+}
+
+function steps(job: unknown): Record<string, unknown>[] {
+	const value = object(job).steps;
+	if (!Array.isArray(value)) throw new Error("Expected workflow steps");
+	return value.map(object);
+}
+
+function namedStep(job: unknown, name: string): Record<string, unknown> {
+	const step = steps(job).find((candidate) => candidate.name === name);
+	if (!step) throw new Error(`Missing step: ${name}`);
+	return step;
+}
+
+function runCommand(step: Record<string, unknown>): string {
+	if (typeof step.run !== "string") throw new Error("Expected run command");
+	return step.run;
+}
+
+function secretReference(name: string): string {
+	return `$${`{{ secrets.${name} }}`}`;
+}
+
+const ci = workflow("ci");
+const release = workflow("release");
+const linux = workflow("claude-hook-linux");
+const windows = workflow("claude-hook-windows");
+const ciJobs = object(ci.jobs);
+const releaseJob = object(object(release.jobs).release);
+const linuxJob = object(object(linux.jobs).runtime);
+const windowsJob = object(object(windows.jobs).runtime);
+
+describe("dependency-gated delivery workflows", () => {
+	it("uses CI as the sole push and pull-request entrypoint", () => {
+		expect(ci.on).toEqual({
+			push: { branches: ["main"] },
+			pull_request: { branches: ["main"] },
+		});
+		expect(linux.on).toEqual({ workflow_call: null });
+		expect(windows.on).toEqual({ workflow_call: null });
+		expect(release.on).toEqual({
+			workflow_call: { secrets: { NPM_TOKEN: { required: true } } },
+		});
+	});
+
+	it("runs the release only after every same-commit delivery gate passes", () => {
+		expect(Object.keys(ciJobs).sort()).toEqual([
+			"linux-hook",
+			"release",
+			"test",
+			"windows-hook",
+		]);
+		for (const [id, file] of [
+			["linux-hook", "claude-hook-linux"],
+			["windows-hook", "claude-hook-windows"],
+			["release", "release"],
+		]) {
+			const job = object(ciJobs[id]);
+			expect(job.uses).toBe(`./.github/workflows/${file}.yml`);
+			expect(job.with).toBeUndefined();
+			expect(job["continue-on-error"]).toBeUndefined();
+		}
+
+		const releaseCall = object(ciJobs.release);
+		expect(releaseCall.needs).toEqual(["test", "linux-hook", "windows-hook"]);
+		expect(releaseCall.if).toBe(
+			"github.event_name == 'push' && github.ref == 'refs/heads/main'",
+		);
+	});
+
+	it("keeps publishing permissions and NPM_TOKEN at the release boundary", () => {
+		expect(ci.permissions).toEqual({ contents: "read" });
+		expect(linux.permissions).toEqual({ contents: "read" });
+		expect(windows.permissions).toEqual({ contents: "read" });
+		expect(release.permissions).toEqual(PUBLISHING_PERMISSIONS);
+		expect(object(ciJobs.release).permissions).toEqual(PUBLISHING_PERMISSIONS);
+		expect(object(ciJobs.release).secrets).toEqual({
+			NPM_TOKEN: secretReference("NPM_TOKEN"),
+		});
+		for (const id of ["test", "linux-hook", "windows-hook"]) {
+			expect(object(ciJobs[id]).secrets).toBeUndefined();
+			expect(object(ciJobs[id]).permissions).toBeUndefined();
+		}
+		expect(namedStep(releaseJob, "Release").env).toEqual({
+			GITHUB_TOKEN: secretReference("GITHUB_TOKEN"),
+			NPM_TOKEN: secretReference("NPM_TOKEN"),
+			NODE_AUTH_TOKEN: secretReference("NPM_TOKEN"),
+		});
+	});
+
+	it("keeps the Ubuntu 26.04 bubblewrap and AppArmor test prerequisite", () => {
+		const testJob = object(ciJobs.test);
+		expect(testJob["runs-on"]).toBe("ubuntu-26.04");
+		const setup = runCommand(
+			namedStep(
+				testJob,
+				"Install bubblewrap (from preparation executor tests)",
+			),
+		);
+		expect(setup).toContain(
+			"sudo apt-get install -y apparmor apparmor-profiles apparmor-utils bubblewrap",
+		);
+		expect(setup).toContain(
+			"/usr/share/apparmor/extra-profiles/bwrap-userns-restrict",
+		);
+		expect(setup).toContain(
+			"sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict",
+		);
+		expect(setup).toContain("bwrap --version");
+		expect(setup).toContain("version >= (0, 10)");
+	});
+
+	it("preserves reusable hook job platforms and their SHA-pinned actions", () => {
+		expect(linuxJob["runs-on"]).toBe("ubuntu-latest");
+		expect(linuxJob.strategy).toEqual({
+			"fail-fast": false,
+			matrix: { leg: ["with-acl", "without-acl"] },
+		});
+		expect(windowsJob["runs-on"]).toBe("windows-latest");
+
+		const hookPins = [
+			"actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
+			"pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
+			"actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38",
+			"actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+		];
+		for (const job of [linuxJob, windowsJob]) {
+			for (const step of steps(job)) {
+				if (step.uses !== undefined) expect(hookPins).toContain(step.uses);
+				if (String(step.uses).startsWith("actions/checkout@")) {
+					expect(object(step.with ?? {}).ref).toBeUndefined();
+				}
+			}
+		}
+	});
+
+	it("keeps release on its existing runner and checks out the caller SHA", () => {
+		expect(releaseJob["runs-on"]).toBe("ubuntu-latest");
+		for (const job of [releaseJob, linuxJob, windowsJob]) {
+			for (const step of steps(job)) {
+				if (String(step.uses).startsWith("actions/checkout@")) {
+					expect(object(step.with ?? {}).ref).toBeUndefined();
+				}
+			}
+		}
+	});
+});

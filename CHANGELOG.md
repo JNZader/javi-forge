@@ -1,3 +1,9 @@
+## [1.38.5](https://github.com/JNZader/javi-forge/compare/v1.38.4...v1.38.5) (2026-09-12)
+
+### Bug Fixes
+
+* **plugin:** bound registry search outcomes ([6a4991a](https://github.com/JNZader/javi-forge/commit/6a4991adb4fbe4114cb3342c706aab02f2c6e994))
+
 ## [1.38.4](https://github.com/JNZader/javi-forge/compare/v1.38.3...v1.38.4) (2026-09-12)
 
 ### Bug Fixes

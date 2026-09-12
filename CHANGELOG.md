@@ -1,3 +1,9 @@
+## [1.39.1](https://github.com/JNZader/javi-forge/compare/v1.39.0...v1.39.1) (2026-09-12)
+
+### Bug Fixes
+
+* **skillguard:** reject quoted python heredocs ([6dc8484](https://github.com/JNZader/javi-forge/commit/6dc8484d34b83adb5220e18899dab94e49665770))
+
 ## [1.39.0](https://github.com/JNZader/javi-forge/compare/v1.38.6...v1.39.0) (2026-09-12)
 
 ### Features

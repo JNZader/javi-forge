@@ -39,6 +39,18 @@ function namedStep(job: unknown, name: string): Record<string, unknown> {
 	return step;
 }
 
+function stepIndex(job: unknown, name: string): number {
+	const index = steps(job).findIndex((candidate) => candidate.name === name);
+	if (index === -1) throw new Error(`Missing step: ${name}`);
+	return index;
+}
+
+function runStepIndex(job: unknown, command: string): number {
+	const index = steps(job).findIndex((candidate) => candidate.run === command);
+	if (index === -1) throw new Error(`Missing run step: ${command}`);
+	return index;
+}
+
 function runCommand(step: Record<string, unknown>): string {
 	if (typeof step.run !== "string") throw new Error("Expected run command");
 	return step.run;
@@ -117,24 +129,38 @@ describe("dependency-gated delivery workflows", () => {
 
 	it("keeps the Ubuntu 26.04 bubblewrap and AppArmor test prerequisite", () => {
 		const testJob = object(ciJobs.test);
-		expect(testJob["runs-on"]).toBe("ubuntu-26.04");
-		const setup = runCommand(
-			namedStep(
+		for (const job of [testJob, releaseJob]) {
+			expect(job["runs-on"]).toBe("ubuntu-26.04");
+			const setup = runCommand(
+				namedStep(job, "Install bubblewrap (from preparation executor tests)"),
+			);
+			expect(setup).toContain(
+				"sudo apt-get install -y apparmor apparmor-profiles apparmor-utils bubblewrap",
+			);
+			expect(setup).toContain(
+				"/usr/share/apparmor/extra-profiles/bwrap-userns-restrict",
+			);
+			expect(setup).toContain(
+				"sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict",
+			);
+			expect(setup).toContain("bwrap --version");
+			expect(setup).toContain("version >= (0, 10)");
+		}
+		expect(
+			stepIndex(
 				testJob,
 				"Install bubblewrap (from preparation executor tests)",
 			),
-		);
-		expect(setup).toContain(
-			"sudo apt-get install -y apparmor apparmor-profiles apparmor-utils bubblewrap",
-		);
-		expect(setup).toContain(
-			"/usr/share/apparmor/extra-profiles/bwrap-userns-restrict",
-		);
-		expect(setup).toContain(
-			"sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict",
-		);
-		expect(setup).toContain("bwrap --version");
-		expect(setup).toContain("version >= (0, 10)");
+		).toBeLessThan(runStepIndex(testJob, "pnpm test:coverage"));
+		expect(
+			stepIndex(
+				releaseJob,
+				"Install bubblewrap (from preparation executor tests)",
+			),
+		).toBeLessThan(runStepIndex(releaseJob, "pnpm test"));
+		expect(
+			runCommand(steps(releaseJob)[runStepIndex(releaseJob, "pnpm test")]),
+		).toBe("pnpm test");
 	});
 
 	it("preserves reusable hook job platforms and their SHA-pinned actions", () => {
@@ -161,8 +187,7 @@ describe("dependency-gated delivery workflows", () => {
 		}
 	});
 
-	it("keeps release on its existing runner and checks out the caller SHA", () => {
-		expect(releaseJob["runs-on"]).toBe("ubuntu-latest");
+	it("checks out the caller SHA", () => {
 		for (const job of [releaseJob, linuxJob, windowsJob]) {
 			for (const step of steps(job)) {
 				if (String(step.uses).startsWith("actions/checkout@")) {

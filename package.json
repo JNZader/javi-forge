@@ -1,6 +1,6 @@
 {
 	"name": "javi-forge",
-	"version": "1.39.2",
+	"version": "1.39.3",
 	"description": "Project scaffolding and AI-ready CI bootstrap",
 	"type": "module",
 	"bin": {

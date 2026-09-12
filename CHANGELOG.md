@@ -1,3 +1,9 @@
+## [1.39.3](https://github.com/JNZader/javi-forge/compare/v1.39.2...v1.39.3) (2026-09-12)
+
+### Bug Fixes
+
+* **doctor:** refine controller rerun defaults ([096cea4](https://github.com/JNZader/javi-forge/commit/096cea44c9006c52e79b081f70864eb4f34dd6e7))
+
 ## [1.39.2](https://github.com/JNZader/javi-forge/compare/v1.39.1...v1.39.2) (2026-09-12)
 
 ### Refactoring

@@ -35,6 +35,7 @@ import {
 } from "../lib/plugin.js";
 import {
 	runPluginAdd,
+	runPluginCommand,
 	runPluginExport,
 	runPluginExportCodex,
 	runPluginImport,
@@ -272,6 +273,65 @@ describe("runPluginSearch", () => {
 		await runPluginSearch("plugin", onStep, { signal });
 
 		expect(mockSearch).toHaveBeenLastCalledWith("plugin", { signal });
+	});
+});
+
+// ── runPluginCommand ───────────────────────────────────────────────────────
+
+describe("runPluginCommand", () => {
+	it("routes list through the command dispatcher", async () => {
+		mockList.mockResolvedValue([]);
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPluginCommand(
+			{ projectDir: "/project", dryRun: false },
+			onStep,
+		);
+
+		expect(result).toEqual({ status: "success" });
+		expect(steps[1]!.detail).toContain("no plugins installed");
+	});
+
+	it("reports missing required targets without touching plugin libs", async () => {
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPluginCommand(
+			{ action: "add", projectDir: "/project", dryRun: false },
+			onStep,
+		);
+
+		expect(result).toEqual({ status: "failure" });
+		expect(steps[0]).toMatchObject({
+			status: "error",
+			detail: "source required: javi-forge plugin add <source>",
+		});
+		expect(mockInstall).not.toHaveBeenCalled();
+	});
+
+	it("threads search cancellation signals", async () => {
+		const signal = new AbortController().signal;
+		mockSearch.mockResolvedValue({ status: "cancelled" });
+		const { onStep } = collectSteps();
+
+		const result = await runPluginCommand(
+			{ action: "search", projectDir: "/project", dryRun: false, signal },
+			onStep,
+		);
+
+		expect(result).toEqual({ status: "failure" });
+		expect(mockSearch).toHaveBeenLastCalledWith(undefined, { signal });
+	});
+
+	it("reports unknown plugin actions as failures", async () => {
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPluginCommand(
+			{ action: "wat", projectDir: "/project", dryRun: false },
+			onStep,
+		);
+
+		expect(result).toEqual({ status: "failure" });
+		expect(steps[0]!.detail).toContain("unknown plugin action: wat");
 	});
 });
 
@@ -544,9 +604,9 @@ describe("runPluginExportCodex", () => {
 	});
 });
 
-// ── skillguard refusal exit code (FU-1 / R4-002) ────────────────────────────
+// ── skillguard refusal status (FU-1 / R4-002) ───────────────────────────────
 
-describe("skillguard refusal exit code (FU-1/R4-002)", () => {
+describe("skillguard refusal status (FU-1/R4-002)", () => {
 	beforeEach(() => {
 		process.exitCode = undefined;
 	});
@@ -555,7 +615,7 @@ describe("skillguard refusal exit code (FU-1/R4-002)", () => {
 		process.exitCode = undefined;
 	});
 
-	it("runPluginAdd: a refused install exits non-zero", async () => {
+	it("runPluginAdd: a refused install returns refused", async () => {
 		mockInstall.mockResolvedValue({
 			success: false,
 			refused: true,
@@ -564,17 +624,20 @@ describe("skillguard refusal exit code (FU-1/R4-002)", () => {
 		});
 		const { steps, onStep } = collectSteps();
 
-		await runPluginAdd("org/repo", false, onStep);
+		const result = await runPluginAdd("org/repo", false, onStep);
 
 		expect(steps[1]!.status).toBe("error");
-		expect(process.exitCode).toBe(1);
+		expect(result).toEqual({ status: "refused" });
+		expect(process.exitCode).toBeUndefined();
 	});
 
-	it("runPluginAdd: success and non-gate failures keep exit 0", async () => {
+	it("runPluginAdd: success and non-gate failures return distinct statuses", async () => {
 		const { onStep } = collectSteps();
 
 		mockInstall.mockResolvedValue({ success: true, name: "my-plugin" });
-		await runPluginAdd("org/repo", false, onStep);
+		await expect(runPluginAdd("org/repo", false, onStep)).resolves.toEqual({
+			status: "success",
+		});
 		expect(process.exitCode).toBeUndefined();
 
 		// A plain (non-skillguard) failure — e.g. validation — is NOT a
@@ -583,11 +646,13 @@ describe("skillguard refusal exit code (FU-1/R4-002)", () => {
 			success: false,
 			error: "validation failed:\n  name: name is required",
 		});
-		await runPluginAdd("org/repo", false, onStep);
+		await expect(runPluginAdd("org/repo", false, onStep)).resolves.toEqual({
+			status: "failure",
+		});
 		expect(process.exitCode).toBeUndefined();
 	});
 
-	it("runPluginImport: a refused import exits non-zero", async () => {
+	it("runPluginImport: a refused import returns refused", async () => {
 		mockImport.mockResolvedValue({
 			success: false,
 			refused: true,
@@ -596,24 +661,29 @@ describe("skillguard refusal exit code (FU-1/R4-002)", () => {
 		});
 		const { steps, onStep } = collectSteps();
 
-		await runPluginImport("/path/to/package", false, onStep);
+		const result = await runPluginImport("/path/to/package", false, onStep);
 
 		expect(steps[1]!.status).toBe("error");
-		expect(process.exitCode).toBe(1);
+		expect(result).toEqual({ status: "refused" });
+		expect(process.exitCode).toBeUndefined();
 	});
 
-	it("runPluginImport: success and non-gate failures keep exit 0", async () => {
+	it("runPluginImport: success and non-gate failures return distinct statuses", async () => {
 		const { onStep } = collectSteps();
 
 		mockImport.mockResolvedValue({ success: true, name: "imported-skill" });
-		await runPluginImport("/path/to/package", false, onStep);
+		await expect(
+			runPluginImport("/path/to/package", false, onStep),
+		).resolves.toEqual({ status: "success" });
 		expect(process.exitCode).toBeUndefined();
 
 		mockImport.mockResolvedValue({
 			success: false,
 			error: "skills.json not found",
 		});
-		await runPluginImport("/bad/path", false, onStep);
+		await expect(runPluginImport("/bad/path", false, onStep)).resolves.toEqual({
+			status: "failure",
+		});
 		expect(process.exitCode).toBeUndefined();
 	});
 });

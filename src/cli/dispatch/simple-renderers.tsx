@@ -16,9 +16,9 @@ import AnalyzeUI from "../../ui/AnalyzeUI.js";
 import App from "../../ui/App.js";
 import { CIProvider as CIContextProvider } from "../../ui/CIContext.js";
 import LlmsTxt from "../../ui/LlmsTxt.js";
-import Plugin from "../../ui/Plugin.js";
 import { VALID_CI, VALID_MEMORY, VALID_STACKS } from "../validators.js";
 import DoctorController from "./doctor.js";
+import PluginController from "./plugin.js";
 import type { CLI, RendererCtx } from "./types.js";
 
 export interface RendererDeps {
@@ -78,42 +78,17 @@ export function handleLlmsTxt(cli: CLI, ctx: RendererCtx): void {
 }
 
 export function handlePlugin(cli: CLI, ctx: RendererCtx): void {
-	const pluginAction = cli.input[1] as
-		| "add"
-		| "remove"
-		| "list"
-		| "search"
-		| "validate"
-		| "sync"
-		| "export"
-		| "import"
-		| "export-skills"
-		| undefined;
-	const VALID_PLUGIN_ACTIONS = [
-		"add",
-		"remove",
-		"list",
-		"search",
-		"validate",
-		"sync",
-		"export",
-		"import",
-		"export-skills",
-	];
-	const action =
-		pluginAction && VALID_PLUGIN_ACTIONS.includes(pluginAction)
-			? pluginAction
-			: "list";
-	const target = cli.input[2];
-
 	render(
 		<CIContextProvider isCI={ctx.isCI}>
-			<Plugin
-				action={action}
-				target={target}
-				dryRun={cli.flags.dryRun}
-				codex={cli.flags.codex}
-				force={cli.flags.force}
+			<PluginController
+				request={{
+					action: cli.input[1],
+					target: cli.input[2],
+					projectDir: process.cwd(),
+					dryRun: cli.flags.dryRun,
+					codex: cli.flags.codex,
+					force: cli.flags.force,
+				}}
 			/>
 		</CIContextProvider>,
 		{ stdin: ctx.inkStdin },

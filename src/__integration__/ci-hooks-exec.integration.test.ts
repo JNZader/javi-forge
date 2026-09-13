@@ -12,15 +12,12 @@
  * exit-code propagation are observed rather than assumed.
  */
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
 import fs from "fs-extra";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { installCIHooks } from "../commands/ci.js";
 import { cleanupTempDir, createTempDir } from "./helpers.js";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Frozen hook contract (S1b): each shim execs the dispatcher `hooks run <name>`,
@@ -30,6 +27,10 @@ const execFileAsync = promisify(execFile);
  */
 const FROZEN_PRE_COMMIT_ARGS = "hooks run pre-commit";
 const FROZEN_PRE_PUSH_ARGS = "hooks run pre-push";
+const ZERO_SHA1_OID = "0".repeat(40);
+const ZERO_SHA256_OID = "0".repeat(64);
+const SAMPLE_SHA1_OID = "1".repeat(40);
+const SAMPLE_SHA256_OID = "1".repeat(64);
 
 interface HookRunResult {
 	exitCode: number;
@@ -169,10 +170,11 @@ async function runHook(
 	args: string[] = [],
 	env: Record<string, string> = {},
 	runCwd: string = tmpDir,
+	stdin = "",
 ): Promise<HookRunResult> {
 	const hookPath = path.join(tmpDir, ".git", "hooks", name);
-	try {
-		const { stdout, stderr } = await execFileAsync(hookPath, args, {
+	return await new Promise((resolve) => {
+		const child = spawn(hookPath, args, {
 			cwd: runCwd,
 			env: {
 				...process.env,
@@ -181,15 +183,24 @@ async function runHook(
 				...env,
 			},
 		});
-		return { exitCode: 0, stdout, stderr };
-	} catch (e) {
-		const err = e as { code?: number; stdout?: string; stderr?: string };
-		return {
-			exitCode: typeof err.code === "number" ? err.code : 1,
-			stdout: err.stdout ?? "",
-			stderr: err.stderr ?? "",
-		};
-	}
+		let stdout = "";
+		let stderr = "";
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk;
+		});
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
+		child.on("error", (error) => {
+			resolve({ exitCode: 1, stdout, stderr: stderr + error.message });
+		});
+		child.on("close", (code) => {
+			resolve({ exitCode: code ?? 1, stdout, stderr });
+		});
+		child.stdin.end(stdin);
+	});
 }
 
 async function readArgsLog(): Promise<string[]> {
@@ -316,6 +327,74 @@ describe("installed hooks — executed", () => {
 
 	it("pre-push invokes the dispatcher with the frozen `hooks run` args", async () => {
 		const result = await runHook("pre-push");
+
+		expect(result.exitCode).toBe(0);
+		expect(await readArgsLog()).toEqual([FROZEN_PRE_PUSH_ARGS]);
+	});
+
+	it("pre-push skips the dispatcher for deletion-only ref updates", async () => {
+		const result = await runHook(
+			"pre-push",
+			[],
+			{},
+			tmpDir,
+			`(delete) ${ZERO_SHA1_OID} refs/heads/stale ${SAMPLE_SHA1_OID}\n`,
+		);
+
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain("deletion-only ref update");
+		expect(await readArgsLog()).toEqual([]);
+	});
+
+	it("pre-push skips the dispatcher for SHA-256 deletion-only ref updates", async () => {
+		const result = await runHook(
+			"pre-push",
+			[],
+			{},
+			tmpDir,
+			`(delete) ${ZERO_SHA256_OID} refs/heads/stale ${SAMPLE_SHA256_OID}\n`,
+		);
+
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain("deletion-only ref update");
+		expect(await readArgsLog()).toEqual([]);
+	});
+
+	it("pre-push runs the dispatcher for malformed deletion-shaped ref updates", async () => {
+		const result = await runHook(
+			"pre-push",
+			[],
+			{},
+			tmpDir,
+			`(delete) ${ZERO_SHA1_OID} refs/heads/../stale ${SAMPLE_SHA1_OID}\n`,
+		);
+
+		expect(result.exitCode).toBe(0);
+		expect(await readArgsLog()).toEqual([FROZEN_PRE_PUSH_ARGS]);
+	});
+
+	it("pre-push runs the dispatcher for mismatched deletion oid widths", async () => {
+		const result = await runHook(
+			"pre-push",
+			[],
+			{},
+			tmpDir,
+			`(delete) ${ZERO_SHA1_OID} refs/heads/stale ${SAMPLE_SHA256_OID}\n`,
+		);
+
+		expect(result.exitCode).toBe(0);
+		expect(await readArgsLog()).toEqual([FROZEN_PRE_PUSH_ARGS]);
+	});
+
+	it("pre-push still runs the dispatcher for mixed delete and update ref updates", async () => {
+		const head = gitOutput(tmpDir, ["rev-parse", "HEAD"]);
+		const result = await runHook(
+			"pre-push",
+			[],
+			{},
+			tmpDir,
+			`(delete) ${ZERO_SHA1_OID} refs/heads/stale ${SAMPLE_SHA1_OID}\nrefs/heads/master ${head} refs/heads/master ${head}\n`,
+		);
 
 		expect(result.exitCode).toBe(0);
 		expect(await readArgsLog()).toEqual([FROZEN_PRE_PUSH_ARGS]);

@@ -82,15 +82,3 @@ jobs:
 
   windows-hook:
     uses: ./.github/workflows/claude-hook-windows.yml
-
-  release:
-    needs: [test, linux-hook, windows-hook]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: ./.github/workflows/release.yml
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      id-token: write
-    secrets:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -9,10 +9,12 @@ import type { CLI } from "./types.js";
 const runHook = vi.fn();
 const runClaudeHookCommand = vi.fn();
 const runCodexHookCommand = vi.fn();
+const runOpenCodeHookCommand = vi.fn();
 
 vi.mock("../../commands/hooks.js", () => ({ runHook }));
 vi.mock("../../commands/claude-hooks.js", () => ({ runClaudeHookCommand }));
 vi.mock("../../commands/codex-hooks.js", () => ({ runCodexHookCommand }));
+vi.mock("../../commands/opencode-hooks.js", () => ({ runOpenCodeHookCommand }));
 
 const cliStub = (input: string[], flags: Record<string, unknown> = {}): CLI =>
 	({ input, flags }) as unknown as CLI;
@@ -50,6 +52,7 @@ describe("hooks dispatch", () => {
 		runHook.mockReset();
 		runClaudeHookCommand.mockReset();
 		runCodexHookCommand.mockReset();
+		runOpenCodeHookCommand.mockReset();
 	});
 
 	it("dispatches `hooks run pre-commit` to runHook and exits with its code", async () => {
@@ -152,12 +155,25 @@ describe("hooks dispatch", () => {
 		expect(exitCode).toBe(1);
 	});
 
+	it("routes `hooks install opencode` and exits with its code", async () => {
+		runOpenCodeHookCommand.mockResolvedValue(0);
+		const { exitCode } = await run(["hooks", "install", "opencode"]);
+		expect(runOpenCodeHookCommand).toHaveBeenCalledWith(
+			"install",
+			process.cwd(),
+			{ force: false },
+		);
+		expect(exitCode).toBe(0);
+	});
+
 	it("rejects an unknown agent with usage + exit 1, never calling any command", async () => {
 		const { err, exitCode } = await run(["hooks", "install", "foo"]);
 
 		expect(runClaudeHookCommand).not.toHaveBeenCalled();
 		expect(runCodexHookCommand).not.toHaveBeenCalled();
-		expect(err.join("\n")).toContain("javi-forge hooks install <claude|codex>");
+		expect(err.join("\n")).toContain(
+			"javi-forge hooks install <claude|codex|opencode>",
+		);
 		expect(exitCode).toBe(1);
 	});
 
@@ -166,7 +182,9 @@ describe("hooks dispatch", () => {
 
 		expect(runClaudeHookCommand).not.toHaveBeenCalled();
 		expect(runCodexHookCommand).not.toHaveBeenCalled();
-		expect(err.join("\n")).toContain("javi-forge hooks doctor <claude|codex>");
+		expect(err.join("\n")).toContain(
+			"javi-forge hooks doctor <claude|codex|opencode>",
+		);
 		expect(exitCode).toBe(1);
 	});
 });

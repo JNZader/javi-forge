@@ -1,9 +1,9 @@
 /**
  * Agent adapter registry (agent-agnostic slice 2). One descriptor per host
- * (`claude`, `codex`) capturing the per-agent facts the SkillGuard installer and
+ * (`claude`, `codex`, `opencode`) capturing the per-agent facts the SkillGuard installer and
  * doctor need: config paths, the protected managed set, the project-root source,
- * the settings-schema validator (SHARED — both hosts use the identical hooks
- * schema), the managed marker, the deny protocol, and the trust model.
+ * the host registration schema, the managed marker, the deny protocol, and the
+ * trust model.
  *
  * This descriptor is additive: Codex is routed through it, while Claude keeps its
  * existing, byte-identical runtime path (the descriptor only DESCRIBES Claude; it
@@ -23,7 +23,7 @@ import {
 	hasCodexTrustEntry,
 } from "./codex-hook-manager.js";
 
-export type AgentId = "claude" | "codex";
+export type AgentId = "claude" | "codex" | "opencode";
 
 export type TrustState = "trusted" | "untrusted" | "unknown";
 
@@ -42,12 +42,12 @@ export interface AgentAdapter {
 	managedSet: readonly string[];
 	/** Project-root source: an env var, or null → the envelope `cwd` (Codex). */
 	projectDir: { envVar: string | null };
-	/** SHARED settings-schema validator — the hooks container shape is identical. */
-	settingsSchema: typeof validateSettingsShape;
+	/** Host settings-schema validator, or null when the host does not use one. */
+	settingsSchema: typeof validateSettingsShape | null;
 	/** The managed asset marker for this host. */
 	marker: string;
-	/** Deny protocol emitted by the shared `.mjs` — the same on both hosts. */
-	emitDeny: "exit2+stderr";
+	/** Deny protocol emitted by the host integration. */
+	emitDeny: "exit2+stderr" | "throw-error";
 	/** Hook-trust model, or null when the host has none (Claude). */
 	trust: TrustDescriptor | null;
 }
@@ -65,6 +65,21 @@ const CLAUDE_MANAGED_SET = [
 
 const CODEX_MANAGED_SET = [
 	".codex/hooks.json",
+	".claude/settings.json",
+	".claude/settings.local.json",
+	".claude/CLAUDE.md",
+	"CLAUDE.md",
+	".javi-forge/ci.yaml",
+	".claude/hooks/",
+	".claude/agents/",
+	".claude/skills/",
+] as const;
+
+const OPENCODE_MANAGED_SET = [
+	".config/opencode/plugins/javi-forge-skillguard-plugin.mjs",
+	".config/opencode/plugins/javi-forge-skillguard-pre-tool-use.mjs",
+	".opencode/opencode.json",
+	"opencode.json",
 	".claude/settings.json",
 	".claude/settings.local.json",
 	".claude/CLAUDE.md",
@@ -112,9 +127,30 @@ export const codexAdapter: AgentAdapter = {
 	},
 };
 
+export const opencodeAdapter: AgentAdapter = {
+	id: "opencode",
+	configPaths(homeDir) {
+		const pluginsDir = path.join(homeDir, ".config", "opencode", "plugins");
+		return {
+			hooksFile: path.join(pluginsDir, "javi-forge-skillguard-plugin.mjs"),
+			settingsFile: path.join(
+				pluginsDir,
+				"javi-forge-skillguard-pre-tool-use.mjs",
+			),
+		};
+	},
+	managedSet: OPENCODE_MANAGED_SET,
+	projectDir: { envVar: null },
+	settingsSchema: null,
+	marker: "// javi-forge-managed: opencode-skillguard v1",
+	emitDeny: "throw-error",
+	trust: null,
+};
+
 export const AGENT_ADAPTERS: Record<AgentId, AgentAdapter> = {
 	claude: claudeAdapter,
 	codex: codexAdapter,
+	opencode: opencodeAdapter,
 };
 
 /**

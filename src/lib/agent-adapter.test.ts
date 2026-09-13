@@ -3,11 +3,33 @@ import { AGENT_ADAPTERS, isAgentId } from "./agent-adapter.js";
 import { validateSettingsShape } from "./claude-hook-settings.js";
 
 describe("agent adapter registry", () => {
-	it("exposes claude + codex and rejects unknown ids", () => {
-		expect(Object.keys(AGENT_ADAPTERS).sort()).toEqual(["claude", "codex"]);
+	it("exposes claude, codex, and opencode and rejects unknown ids", () => {
+		expect(Object.keys(AGENT_ADAPTERS).sort()).toEqual([
+			"claude",
+			"codex",
+			"opencode",
+		]);
 		expect(isAgentId("claude")).toBe(true);
 		expect(isAgentId("codex")).toBe(true);
+		expect(isAgentId("opencode")).toBe(true);
 		expect(isAgentId("gemini")).toBe(false);
+	});
+
+	it("opencode resolves its global plugin pair under the supplied home root", () => {
+		const opencode = AGENT_ADAPTERS.opencode;
+		const paths = opencode.configPaths("/home/u");
+		expect(paths.hooksFile).toBe(
+			"/home/u/.config/opencode/plugins/javi-forge-skillguard-plugin.mjs",
+		);
+		expect(paths.settingsFile).toBe(
+			"/home/u/.config/opencode/plugins/javi-forge-skillguard-pre-tool-use.mjs",
+		);
+		expect(opencode.managedSet).toContain(
+			".config/opencode/plugins/javi-forge-skillguard-plugin.mjs",
+		);
+		expect(opencode.settingsSchema).toBeNull();
+		expect(opencode.emitDeny).toBe("throw-error");
+		expect(opencode.trust).toBeNull();
 	});
 
 	it("both adapters reuse the SHARED settings-schema validator", () => {

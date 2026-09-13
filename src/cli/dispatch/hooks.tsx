@@ -6,7 +6,7 @@
  *
  * Subcommands:
  *   - `hooks run <pre-commit|pre-push>` → runHook, exits with its code.
- *   - `hooks <install|doctor|repair> <claude|codex> [--force]` → the matching
+ *   - `hooks <install|doctor|repair> <claude|codex|opencode> [--force]` → the matching
  *     agent command, exits with its code (unknown/missing agent → usage + exit 1).
  * Any other subcommand or a missing name → usage + exit 1.
  *
@@ -35,6 +35,8 @@ const AGENT_COMMAND_LOADERS: Record<AgentId, () => Promise<HookCommandRunner>> =
 			(await import("../../commands/claude-hooks.js")).runClaudeHookCommand,
 		codex: async () =>
 			(await import("../../commands/codex-hooks.js")).runCodexHookCommand,
+		opencode: async () =>
+			(await import("../../commands/opencode-hooks.js")).runOpenCodeHookCommand,
 	};
 
 export async function handleHooks(cli: CLI): Promise<void> {
@@ -60,7 +62,7 @@ export async function handleHooks(cli: CLI): Promise<void> {
 		// Validity is decided by the agent registry (isAgentId), the single source
 		// of truth; the loader map is exhaustive over AgentId by type.
 		if (!isAgentId(agent)) {
-			console.error(`Usage: javi-forge hooks ${sub} <claude|codex>`);
+			console.error(`Usage: javi-forge hooks ${sub} <claude|codex|opencode>`);
 			process.exit(1);
 		}
 		const run = await AGENT_COMMAND_LOADERS[agent]();

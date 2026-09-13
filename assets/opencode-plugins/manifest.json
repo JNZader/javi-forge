@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "plugin": {
+    "name": "javi-forge-skillguard-plugin.mjs",
+    "version": 1,
+    "sha256": "901feed0cb3b50a7b9b0e3e99290d49b8bd25fc85a305513f947d34726b428d5",
+    "historical": []
+  }
+}

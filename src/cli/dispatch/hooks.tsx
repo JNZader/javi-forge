@@ -6,7 +6,7 @@
  *
  * Subcommands:
  *   - `hooks run <pre-commit|pre-push>` → runHook, exits with its code.
- *   - `hooks <install|doctor|repair> <claude|codex|opencode> [--force]` → the matching
+ *   - `hooks <install|doctor|repair> <claude|codex|opencode|grok|cursor> [--force]` → the matching
  *     agent command, exits with its code (unknown/missing agent → usage + exit 1).
  * Any other subcommand or a missing name → usage + exit 1.
  *
@@ -39,6 +39,8 @@ const AGENT_COMMAND_LOADERS: Record<AgentId, () => Promise<HookCommandRunner>> =
 			(await import("../../commands/opencode-hooks.js")).runOpenCodeHookCommand,
 		grok: async () =>
 			(await import("../../commands/grok-hooks.js")).runGrokHookCommand,
+		cursor: async () =>
+			(await import("../../commands/cursor-hooks.js")).runCursorHookCommand,
 	};
 
 export async function handleHooks(cli: CLI): Promise<void> {
@@ -65,7 +67,7 @@ export async function handleHooks(cli: CLI): Promise<void> {
 		// of truth; the loader map is exhaustive over AgentId by type.
 		if (!isAgentId(agent)) {
 			console.error(
-				`Usage: javi-forge hooks ${sub} <claude|codex|opencode|grok>`,
+				`Usage: javi-forge hooks ${sub} <claude|codex|opencode|grok|cursor>`,
 			);
 			process.exit(1);
 		}

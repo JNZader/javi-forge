@@ -170,7 +170,7 @@ export const CI_HELP_TEXT = `
 export const HOOKS_HELP_TEXT = `
   Usage
     $ javi-forge hooks run <pre-commit|pre-push>
-    $ javi-forge hooks <install|doctor|repair> <claude|codex|opencode|grok> [--force]
+    $ javi-forge hooks <install|doctor|repair> <claude|codex|opencode|grok|cursor> [--force]
 
     Run the sections enabled under hooks: in .javi-forge/ci.yaml, in a fixed
     cheap→expensive order, fail-fast. With no hooks: config the default is the
@@ -191,6 +191,9 @@ export const HOOKS_HELP_TEXT = `
     install grok      Install the Grok Build global PreToolUse hook (~/.grok/hooks/)
     doctor grok       Report Grok hook registration and policy file currency (informational)
     repair grok       Repair the Grok hook pair; --force overwrites edits
+    install cursor    Install the Cursor global preToolUse hook (~/.cursor/)
+    doctor cursor     Report Cursor hook registration and policy file currency (informational)
+    repair cursor     Repair the Cursor hook pair; --force overwrites edits
 
   Notes
     A blocking section failure exits non-zero and blocks the commit/push.
@@ -206,7 +209,9 @@ export const HOOKS_HELP_TEXT = `
     not prove OpenCode discovered, loaded, or executed the plugin.
     doctor grok is informational and inspects the global hook registration and
     adjacent policy runtime only; it does not prove Grok loaded or executed them.
-    Linux: install/repair claude and grok need the acl package (getfacl) to
+    doctor cursor is informational and inspects the global hook registration and
+    adjacent policy runtime only; it does not prove Cursor loaded or executed them.
+    Linux: install/repair claude, grok, and cursor need the acl package (getfacl) to
     prove the parent chain — apt install acl / apk add acl / dnf install acl.
     Without it
     they refuse fail-closed; an already-installed guard keeps firing, and
@@ -229,6 +234,9 @@ export const HOOKS_HELP_TEXT = `
     $ javi-forge hooks install grok
     $ javi-forge hooks doctor grok
     $ javi-forge hooks repair grok --force
+    $ javi-forge hooks install cursor
+    $ javi-forge hooks doctor cursor
+    $ javi-forge hooks repair cursor --force
 `;
 
 export const FLAGS_SCHEMA = {

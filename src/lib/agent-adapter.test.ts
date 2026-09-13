@@ -3,10 +3,11 @@ import { AGENT_ADAPTERS, isAgentId } from "./agent-adapter.js";
 import { validateSettingsShape } from "./claude-hook-settings.js";
 
 describe("agent adapter registry", () => {
-	it("exposes claude, codex, opencode, and grok and rejects unknown ids", () => {
+	it("exposes claude, codex, opencode, grok, and cursor and rejects unknown ids", () => {
 		expect(Object.keys(AGENT_ADAPTERS).sort()).toEqual([
 			"claude",
 			"codex",
+			"cursor",
 			"grok",
 			"opencode",
 		]);
@@ -14,7 +15,23 @@ describe("agent adapter registry", () => {
 		expect(isAgentId("codex")).toBe(true);
 		expect(isAgentId("opencode")).toBe(true);
 		expect(isAgentId("grok")).toBe(true);
+		expect(isAgentId("cursor")).toBe(true);
 		expect(isAgentId("gemini")).toBe(false);
+	});
+
+	it("cursor resolves its global hooks.json and adjacent policy under the supplied home root", () => {
+		const cursor = AGENT_ADAPTERS.cursor;
+		const paths = cursor.configPaths("/home/u");
+		expect(paths.hooksFile).toBe("/home/u/.cursor/hooks.json");
+		expect(paths.settingsFile).toBe(
+			"/home/u/.cursor/hooks/javi-forge-skillguard-pre-tool-use.mjs",
+		);
+		expect(cursor.projectDir.envVar).toBe("CURSOR_PROJECT_DIR");
+		expect(cursor.managedSet).toContain(".cursor/hooks.json");
+		expect(cursor.managedSet).toContain(".cursor/rules/");
+		expect(cursor.settingsSchema).toBeNull();
+		expect(cursor.emitDeny).toBe("json-stdout");
+		expect(cursor.trust).toBeNull();
 	});
 
 	it("grok resolves the managed global hook pair beneath the supplied home root", () => {

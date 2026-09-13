@@ -9,6 +9,7 @@ export const MANAGED_MARKER = "// javi-forge-managed: claude-pretooluse v1";
 export const INPUT_LIMIT_BYTES = 1_048_576;
 export const SUPPORTED_TOOLS = Object.freeze(["Bash", "PowerShell", "Read", "Write", "Edit"]);
 export function mapGrokToolName(toolName, platform = process.platform) { return toolName === "run_terminal_command" ? (platform === "win32" ? "PowerShell" : "Bash") : toolName === "read_file" ? "Read" : toolName === "search_replace" ? "Edit" : toolName; }
+export function mapCursorToolName(toolName, platform = process.platform) { return toolName === "Shell" ? (platform === "win32" ? "PowerShell" : "Bash") : toolName === "Delete" ? "Edit" : toolName; }
 export const POLICY_REGISTRY = Object.freeze({ schemaVersion: 1, policyVersion: 2, diagnosticsMaxBytes: 240 });
 export function resolvePlatformSupport(platform = process.platform) { return platform === "linux" || platform === "win32" ? { supported: true } : { supported: false, reason: "unsupported-platform" }; }
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -26,9 +27,11 @@ const CLAUDE_MANAGED_SET = Object.freeze({ exact: Object.freeze([".claude/settin
 const CODEX_MANAGED_SET = Object.freeze({ exact: Object.freeze([".codex/hooks.json", ".claude/settings.json", ".claude/settings.local.json", ".claude/CLAUDE.md", "CLAUDE.md", ".javi-forge/ci.yaml"]), prefixes: Object.freeze([".claude/hooks/", ".claude/agents/", ".claude/skills/"]), caseFoldExact: Object.freeze(["claude.md", ".claude/claude.md"]) });
 const OPENCODE_MANAGED_SET = Object.freeze({ exact: Object.freeze(["opencode.json", "opencode.jsonc", ".opencode/opencode.json", ".opencode/opencode.jsonc", ".opencode/AGENTS.md", "AGENTS.md", ".javi-forge/ci.yaml"]), prefixes: Object.freeze([".opencode/plugins/", ".opencode/agents/", ".opencode/skills/", ".agents/skills/", ".claude/hooks/", ".claude/agents/", ".claude/skills/"]), caseFoldExact: Object.freeze(["agents.md", ".opencode/agents.md", "claude.md", ".claude/claude.md"]) });
 const GROK_MANAGED_SET = Object.freeze({ exact: Object.freeze([".grok/config.toml", "AGENTS.md", ".claude/settings.json", ".claude/settings.local.json", ".claude/CLAUDE.md", "CLAUDE.md", ".javi-forge/ci.yaml"]), prefixes: Object.freeze([".grok/hooks/", ".claude/hooks/", ".claude/agents/", ".claude/skills/"]), caseFoldExact: Object.freeze(["agents.md", "claude.md", ".claude/claude.md"]) });
+const CURSOR_MANAGED_SET = Object.freeze({ exact: Object.freeze([".cursor/hooks.json", ".cursor/rules/", "AGENTS.md", ".claude/settings.json", ".claude/settings.local.json", ".claude/CLAUDE.md", "CLAUDE.md", ".javi-forge/ci.yaml"]), prefixes: Object.freeze([".cursor/hooks/", ".cursor/rules/", ".claude/hooks/", ".claude/agents/", ".claude/skills/"]), caseFoldExact: Object.freeze(["agents.md", "claude.md", ".claude/claude.md"]) });
 const CODEX_GLOBAL_MANAGED_PATHS = Object.freeze([".codex/hooks.json", ".codex/config.toml"]);
 const GROK_GLOBAL_MANAGED_PATHS = Object.freeze([path.join(GROK_HOME_ROOT, "hooks", "javi-forge-skillguard-pre-tool-use.json"), path.join(GROK_HOME_ROOT, "hooks", "javi-forge-skillguard-pre-tool-use.mjs")]);
-export const AGENT_CONFIGS = Object.freeze({ claude: Object.freeze({ id: "claude", managedSet: CLAUDE_MANAGED_SET, globalManagedPaths: Object.freeze([]), projectDir: Object.freeze({ envVar: "CLAUDE_PROJECT_DIR", fallback: "asset-root" }), marker: MANAGED_MARKER }), codex: Object.freeze({ id: "codex", managedSet: CODEX_MANAGED_SET, globalManagedPaths: CODEX_GLOBAL_MANAGED_PATHS, projectDir: Object.freeze({ envVar: null, fallback: "cwd" }), marker: "// javi-forge-managed: codex-pretooluse v1" }), opencode: Object.freeze({ id: "opencode", managedSet: OPENCODE_MANAGED_SET, globalManagedPaths: Object.freeze([]), projectDir: Object.freeze({ envVar: null, fallback: "cwd" }), marker: "// javi-forge-managed: opencode-skillguard v1" }), grok: Object.freeze({ id: "grok", managedSet: GROK_MANAGED_SET, globalManagedPaths: GROK_GLOBAL_MANAGED_PATHS, projectDir: Object.freeze({ envVar: null, fallback: "cwd" }), marker: "javi-forge-managed: grok-pretooluse v1" }) });
+const CURSOR_GLOBAL_MANAGED_PATHS = Object.freeze([path.join(HOST_HOME, ".cursor", "hooks.json"), path.join(HOST_HOME, ".cursor", "hooks", "javi-forge-skillguard-pre-tool-use.mjs")]);
+export const AGENT_CONFIGS = Object.freeze({ claude: Object.freeze({ id: "claude", managedSet: CLAUDE_MANAGED_SET, globalManagedPaths: Object.freeze([]), projectDir: Object.freeze({ envVar: "CLAUDE_PROJECT_DIR", fallback: "asset-root" }), marker: MANAGED_MARKER }), codex: Object.freeze({ id: "codex", managedSet: CODEX_MANAGED_SET, globalManagedPaths: CODEX_GLOBAL_MANAGED_PATHS, projectDir: Object.freeze({ envVar: null, fallback: "cwd" }), marker: "// javi-forge-managed: codex-pretooluse v1" }), opencode: Object.freeze({ id: "opencode", managedSet: OPENCODE_MANAGED_SET, globalManagedPaths: Object.freeze([]), projectDir: Object.freeze({ envVar: null, fallback: "cwd" }), marker: "// javi-forge-managed: opencode-skillguard v1" }), grok: Object.freeze({ id: "grok", managedSet: GROK_MANAGED_SET, globalManagedPaths: GROK_GLOBAL_MANAGED_PATHS, projectDir: Object.freeze({ envVar: null, fallback: "cwd" }), marker: "javi-forge-managed: grok-pretooluse v1" }), cursor: Object.freeze({ id: "cursor", managedSet: CURSOR_MANAGED_SET, globalManagedPaths: CURSOR_GLOBAL_MANAGED_PATHS, projectDir: Object.freeze({ envVar: "CURSOR_PROJECT_DIR", fallback: "cwd" }), marker: "// javi-forge-managed: cursor-pretooluse v1" }) });
 // Fail-closed agent selector: a missing/unknown --agent means we cannot know what to protect, so refuse.
 function resolveAgentConfig(argv) { const arg = argv.find((value) => typeof value === "string" && value.startsWith("--agent=")); const id = arg === undefined ? undefined : arg.slice("--agent=".length); const config = id === undefined ? undefined : AGENT_CONFIGS[id]; if (!config) fail("invalid-config"); return config; }
 // Project root per agent: the env var when set (Claude = CLAUDE_PROJECT_DIR); otherwise the per-agent
@@ -956,15 +959,18 @@ export function parseApplyPatchPaths(command) {
 	return paths;
 }
 export function evaluateEvent(input, config = AGENT_CONFIGS.claude) {
-	if (!isObject(input) || input.hook_event_name !== "PreToolUse") fail("invalid-event");
+	if (!isObject(input)) fail("invalid-event");
+	const eventName = input.hook_event_name;
+	if (eventName !== "PreToolUse" && !(config.id === "cursor" && eventName === "preToolUse")) fail("invalid-event");
 	const rawToolName = typeof input.tool_name === "string" ? input.tool_name : input.toolName;
-	const toolName = config.id === "grok" && typeof rawToolName === "string" ? mapGrokToolName(rawToolName) : rawToolName;
+	const toolName = config.id === "grok" && typeof rawToolName === "string" ? mapGrokToolName(rawToolName) : config.id === "cursor" && typeof rawToolName === "string" ? mapCursorToolName(rawToolName) : rawToolName;
 	const toolInput = isObject(input.tool_input) ? input.tool_input : input.toolInput;
 	if (typeof toolName !== "string" || !isObject(toolInput)) fail("invalid-event");
 	if (input.toolInputTruncated === true || input.tool_input_truncated === true) return { allowed: false, ruleId: "tool-input-truncated" };
 	const applyPatch = toolName === "apply_patch";
 	if (!applyPatch && !SUPPORTED_TOOLS.includes(toolName)) fail("invalid-event");
-	const cwd = typeof input.cwd === "string" && isAbsolutePolicyPath(input.cwd) ? input.cwd : PROJECT_ROOT;
+	const toolWorkingDirectory = isObject(toolInput) && typeof toolInput.working_directory === "string" ? toolInput.working_directory : undefined;
+	const cwd = typeof input.cwd === "string" && isAbsolutePolicyPath(input.cwd) ? input.cwd : typeof toolWorkingDirectory === "string" && isAbsolutePolicyPath(toolWorkingDirectory) ? toolWorkingDirectory : PROJECT_ROOT;
 	const projectRoot = resolveProjectRoot(config, cwd);
 	if (applyPatch) {
 		if (typeof toolInput.command !== "string") fail("invalid-event");
@@ -983,7 +989,7 @@ export function evaluateEvent(input, config = AGENT_CONFIGS.claude) {
 		if (typeof toolInput.command !== "string") fail("invalid-event");
 		return toolName === "Bash" ? evaluateBash(toolInput.command, cwd, config, projectRoot) : evaluatePowerShell(toolInput.command, cwd, config, projectRoot);
 	}
-	const filePath = typeof toolInput.file_path === "string" ? toolInput.file_path : typeof toolInput.filePath === "string" ? toolInput.filePath : config.id === "grok" && typeof toolInput.path === "string" ? lexicalizePolicyPath(toolInput.path, { base: cwd, projectRoot }) : undefined;
+	const filePath = typeof toolInput.file_path === "string" ? toolInput.file_path : typeof toolInput.filePath === "string" ? toolInput.filePath : (config.id === "grok" || config.id === "cursor") && typeof toolInput.path === "string" ? lexicalizePolicyPath(toolInput.path, { base: cwd, projectRoot }) : undefined;
 	if (typeof filePath !== "string" || !isAbsolutePolicyPath(filePath)) fail("invalid-event");
 	return evaluateFile(toolName, filePath, config, projectRoot);
 }
@@ -1031,6 +1037,20 @@ function denyAndExit(message) {
 		process.stdin.unref?.();
 		process.exit(2);
 	}
+}
+function cursorDecisionAndExit(permission, message) {
+	try {
+		const body = permission === "allow" ? { permission: "allow" } : { permission: "deny", user_message: message, agent_message: message };
+		fs.writeSync(1, `${JSON.stringify(body)}\n`);
+	} finally {
+		process.stdin.destroy();
+		process.stdin.unref?.();
+		process.exit(permission === "allow" ? 0 : 2);
+	}
+}
+function failClosed(message, config) {
+	if (config?.id === "cursor") cursorDecisionAndExit("deny", message);
+	denyAndExit(message);
 }
 export function readBoundedStdin(stream = process.stdin) {
 	return new Promise((resolve, reject) => {
@@ -1083,11 +1103,14 @@ export async function main() {
 		if (fault === "evaluator-throw") throw new Error("internal-error");
 		const decision = evaluateEvent(parsed, config);
 		const rawToolName = typeof parsed.tool_name === "string" ? parsed.tool_name : parsed.toolName;
-		const toolName = config.id === "grok" && typeof rawToolName === "string" ? mapGrokToolName(rawToolName) : rawToolName;
-		if (!decision.allowed) denyAndExit(denialDiagnostic(toolName, decision));
+		const toolName = config.id === "grok" && typeof rawToolName === "string" ? mapGrokToolName(rawToolName) : config.id === "cursor" && typeof rawToolName === "string" ? mapCursorToolName(rawToolName) : rawToolName;
+		if (!decision.allowed) failClosed(denialDiagnostic(toolName, decision), config);
+		if (config.id === "cursor") cursorDecisionAndExit("allow", "");
 		process.exitCode = 0;
 	} catch (error) {
-		denyAndExit(diagnostic(error));
+		let config;
+		try { config = resolveAgentConfig(process.argv); } catch {}
+		failClosed(diagnostic(error), config);
 	}
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

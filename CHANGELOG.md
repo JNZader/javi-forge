@@ -1,3 +1,9 @@
+## [1.40.0](https://github.com/JNZader/javi-forge/compare/v1.39.5...v1.40.0) (2026-09-13)
+
+### Features
+
+* **opencode:** add SkillGuard plugin manager ([#118](https://github.com/JNZader/javi-forge/issues/118)) ([718c6d1](https://github.com/JNZader/javi-forge/commit/718c6d14e3081b4732d1db3e67545b1a8feacdb1))
+
 ## [1.39.5](https://github.com/JNZader/javi-forge/compare/v1.39.4...v1.39.5) (2026-09-13)
 
 ### Bug Fixes

@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CLAUDE_HOOK_ASSETS_DIR } from "../constants.js";
 
 interface Decision { allowed: boolean; ruleId?: string }
+interface RuntimeAgentConfig { id: string }
 interface Runtime {
 	INPUT_LIMIT_BYTES: number;
 	MANAGED_MARKER: string;
@@ -18,7 +19,8 @@ interface Runtime {
 	resolvePlatformSupport(platform?: string): { supported: boolean; reason?: string };
 	canonicalizePolicyPath(input: string, options?: { base?: string; platform?: string; projectRoot?: string }): string;
 	isSensitivePolicyKey(input: string, platform?: string): boolean;
-	evaluateEvent(input: unknown): Decision;
+	AGENT_CONFIGS: { claude: RuntimeAgentConfig; codex: RuntimeAgentConfig };
+	evaluateEvent(input: unknown, config?: RuntimeAgentConfig): Decision;
 	parseAndEvaluateInput(input: Buffer): Decision;
 }
 const ASSET_NAME = "javi-forge-skillguard-pre-tool-use.mjs";
@@ -68,6 +70,8 @@ const S1_OUTGOING_ASSET_SHA256 = "54a270f28b068450b79547a88ec6f2d4854514392fd5f3
 const WU3_OUTGOING_ASSET_SHA256 = "9a565cec31d9e091e3fb9420b86685f824733bc1ebe479f086b2b955aba6ef3e";
 const LITERAL_HEREDOC_OUTGOING_ASSET_SHA256 = "59fc4224975ad64cfc85bab50ec60d9bd4948070e9d41f42ab43e6d8231c19a1";
 const PRE_PYTHON_HEREDOC_ASSET_SHA256 = "6edfbb31ce0551b27e38ae1ffd1daf9cc4bea54f2c86687c5124132af5b8c0af";
+const PYTHON_HEREDOC_ASSET_SHA256 = "507a57a15f1b967103bb1eefe701a74813d5a9603fa7bcc15579a215b03621e3";
+const GLOBAL_CODEX_CONFIG_ASSET_SHA256 = "f55ece1aea76251ec005f2b731fa44a58b6245fef8150b58486ae062167a2377";
 const PRIOR_SETTINGS_CANONICAL_SHA256 = "038c59a91bf8967f6908afed74c465f1e7030254e11e4f8738975d6d708424d4";
 const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
 // Decision ②: placeholder-normalized canonical hash of the exact managed matcher
@@ -108,7 +112,7 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(runtime.SUPPORTED_TOOLS).toEqual(TOOLS);
 		expect(runtime.INPUT_LIMIT_BYTES).toBe(1_048_576);
 		expect(runtime.POLICY_REGISTRY).toEqual({ schemaVersion: 1, policyVersion: 2, diagnosticsMaxBytes: 240 });
-		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 2, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256, PRE_S1_ASSET_SHA256, S1_OUTGOING_ASSET_SHA256, WU3_OUTGOING_ASSET_SHA256, LITERAL_HEREDOC_OUTGOING_ASSET_SHA256, PRE_PYTHON_HEREDOC_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
+		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 2, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256, PRE_S1_ASSET_SHA256, S1_OUTGOING_ASSET_SHA256, WU3_OUTGOING_ASSET_SHA256, LITERAL_HEREDOC_OUTGOING_ASSET_SHA256, PRE_PYTHON_HEREDOC_ASSET_SHA256, PYTHON_HEREDOC_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
 		expect(manifest.asset.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
 		// A rotated asset must not still claim any outgoing hash as current, and every
 		// outgoing hash must remain reachable as historical (auto-upgradable) bodies.
@@ -120,6 +124,7 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(manifest.asset.sha256).not.toBe(WU3_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.sha256).not.toBe(LITERAL_HEREDOC_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.sha256).not.toBe(PRE_PYTHON_HEREDOC_ASSET_SHA256);
+		expect(manifest.asset.sha256).not.toBe(PYTHON_HEREDOC_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PRIOR_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(F2_OUTGOING_ASSET_SHA256);
@@ -128,6 +133,8 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(manifest.asset.historical).toContain(WU3_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(LITERAL_HEREDOC_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PRE_PYTHON_HEREDOC_ASSET_SHA256);
+		expect(manifest.asset.historical).toContain(PYTHON_HEREDOC_ASSET_SHA256);
+		expect(manifest.asset.sha256).toBe(GLOBAL_CODEX_CONFIG_ASSET_SHA256);
 		// The bundled win32 helper on disk MUST hash to its manifest binding (mirrors the .mjs asset sha assertion above).
 		const ps1Bytes = fs.readFileSync(path.join(CLAUDE_HOOK_ASSETS_DIR, WINDOWS_SECURE_OBJECT_NAME));
 		expect(manifest.installerHelpers.windowsSecureObject.sha256).toBe(createHash("sha256").update(ps1Bytes).digest("hex"));
@@ -155,11 +162,21 @@ describe("packaged Claude PreToolUse asset contract", () => {
 	});
 	it("enforces the host boundary in the real standalone runtime", () => {
 		const input = JSON.stringify(event("Read", { file_path: "/tmp/allowed" }));
+		const runWithPlatform = (platform: string) => {
+			const stdinPath = path.join(temp, `host-boundary-${platform}.json`);
+			fs.writeFileSync(stdinPath, input);
+			const stdinFd = fs.openSync(stdinPath, "r");
+			try {
+				return spawnSync(process.execPath, ["--input-type=module", "--eval", `process.argv.push("--agent=claude"); Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} }); const runtime = await import(${JSON.stringify(pathToFileURL(ASSET).href)}); await runtime.main();`], { stdio: [stdinFd, "pipe", "pipe"], encoding: "utf8" });
+			} finally {
+				fs.closeSync(stdinFd);
+			}
+		};
 		for (const platform of ["linux", "win32"]) {
-			const result = spawnSync(process.execPath, ["--input-type=module", "--eval", `process.argv.push("--agent=claude"); Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} }); const runtime = await import(${JSON.stringify(pathToFileURL(ASSET).href)}); await runtime.main();`], { input, encoding: "utf8" });
+			const result = runWithPlatform(platform);
 			expect(result.status).toBe(0);
 		}
-		const unsupported = spawnSync(process.execPath, ["--input-type=module", "--eval", `process.argv.push("--agent=claude"); Object.defineProperty(process, "platform", { value: "darwin" }); const runtime = await import(${JSON.stringify(pathToFileURL(ASSET).href)}); await runtime.main();`], { input, encoding: "utf8" });
+		const unsupported = runWithPlatform("darwin");
 		expect(unsupported.status).toBe(2);
 		expect(unsupported.stderr).toContain("unsupported-platform");
 	});
@@ -236,6 +253,77 @@ describe("cross-platform file-tool policy", () => {
 		for (const tool of ["Read", "Write", "Edit"]) {
 			expect(runtime.evaluateEvent(event(tool, { file_path }))).toEqual(allowed ? { allowed: true } : { allowed: false, ruleId: "path.sensitive" });
 		}
+	});
+});
+describe("Codex current-user global configuration policy", () => {
+	// These are inert policy inputs. The suite never invokes the embedded command or patch text.
+	const hostHome = os.homedir();
+	const unrelatedCwd = "/tmp/javi-forge-unrelated-cwd";
+	const globalFiles = [
+		path.join(hostHome, ".codex", "hooks.json"),
+		path.join(hostHome, ".codex", "config.toml"),
+	];
+	const codexEvent = (toolName: string, toolInput: Record<string, unknown>): unknown => ({
+		...(event(toolName, toolInput) as Record<string, unknown>),
+		cwd: unrelatedCwd,
+	});
+
+	it.each(globalFiles)("denies only Write/Edit to current-user global %s and preserves reads", (filePath) => {
+		for (const tool of ["Write", "Edit"]) {
+			expect(runtime.evaluateEvent(codexEvent(tool, { file_path: filePath }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "path.managed-config" });
+		}
+		expect(runtime.evaluateEvent(codexEvent("Read", { file_path: filePath }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: true });
+	});
+
+	it("preserves lexical normalization without widening to lookalikes or another user", () => {
+		const lexicalHooks = `${hostHome}/.codex/./hooks.json`;
+		const anotherUser = path.join(path.dirname(hostHome), "another-user", ".codex", "config.toml");
+		expect(runtime.evaluateEvent(codexEvent("Write", { file_path: lexicalHooks }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "path.managed-config" });
+		for (const filePath of [
+			anotherUser,
+			path.join(hostHome, ".codex", "config.toml.bak"),
+			path.join(hostHome, ".codex", "hooks.json.d", "entry.json"),
+		]) {
+			expect(runtime.evaluateEvent(codexEvent("Write", { file_path: filePath }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: true });
+		}
+	});
+
+	it.each(["~/.codex/hooks.json", "~/.codex/config.toml"])("denies Codex Bash and apply_patch writes through tilde path %s", (tildePath) => {
+		expect(runtime.evaluateEvent(codexEvent("Bash", { command: `printf x > ${tildePath}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
+		const patch = `*** Begin Patch\n*** Update File: ${tildePath}\n@@\n-x\n+y\n*** End Patch`;
+		expect(runtime.evaluateEvent(codexEvent("apply_patch", { command: patch }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "path.managed-config" });
+	});
+
+	it.each(globalFiles)("denies Codex Bash writes through absolute current-user path %s", (filePath) => {
+		expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/tee ${filePath}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
+		expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/sed -i s/a/b/ ${filePath}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
+		expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/perl -i -pe s/a/b/ ${filePath}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
+	});
+
+	it("denies symlink aliases to the current user home through every Codex write channel", () => {
+		const homeAlias = path.join(temp, "current-user-home-alias");
+		fs.symlinkSync(hostHome, homeAlias, "dir");
+		for (const name of ["hooks.json", "config.toml"]) {
+			const aliasPath = path.join(homeAlias, ".codex", name);
+			expect(runtime.evaluateEvent(codexEvent("Write", { file_path: aliasPath }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "path.managed-config" });
+			expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/tee ${aliasPath}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
+			const patch = `*** Begin Patch\n*** Update File: ${aliasPath}\n@@\n-x\n+y\n*** End Patch`;
+			expect(runtime.evaluateEvent(codexEvent("apply_patch", { command: patch }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "path.managed-config" });
+		}
+	});
+
+	it("keeps Claude global targets and spoofed event homes outside the Codex-only boundary", () => {
+		const spoofedHome = path.join(temp, "spoofed-home");
+		const spoofedTarget = path.join(spoofedHome, ".codex", "hooks.json");
+		const withSpoofedHome = (filePath: string): unknown => ({
+			...(codexEvent("Write", { file_path: filePath, home: spoofedHome }) as Record<string, unknown>),
+			home: spoofedHome,
+		});
+		for (const filePath of globalFiles) {
+			expect(runtime.evaluateEvent(event("Write", { file_path: filePath }))).toEqual({ allowed: true });
+			expect(runtime.evaluateEvent(withSpoofedHome(filePath), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "path.managed-config" });
+		}
+		expect(runtime.evaluateEvent(withSpoofedHome(spoofedTarget), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: true });
 	});
 });
 describe("separate deterministic shell corpora", () => {

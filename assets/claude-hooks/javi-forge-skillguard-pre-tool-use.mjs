@@ -11,6 +11,10 @@ export const SUPPORTED_TOOLS = Object.freeze(["Bash", "PowerShell", "Read", "Wri
 export const POLICY_REGISTRY = Object.freeze({ schemaVersion: 1, policyVersion: 2, diagnosticsMaxBytes: 240 });
 export function resolvePlatformSupport(platform = process.platform) { return platform === "linux" || platform === "win32" ? { supported: true } : { supported: false, reason: "unsupported-platform" }; }
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+// The global Codex targets are anchored to the hook process's current-user home,
+// never to an event field or a command token. This is intentionally an exact,
+// two-file allowlist rather than a whole-home or whole-.codex policy.
+const HOST_HOME = os.homedir();
 // Per-agent adapter config (S0 core-extraction): every agent-specific input the guard needs
 // (the isManaged protected-path set, the project-dir source, the managed marker) is resolved by
 // the --agent selector instead of a baked-in literal. The pure evaluate*/utility engine stays
@@ -18,7 +22,8 @@ const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 // byte-identical; codex is defined so the map is agent-generic but wired end-to-end only in a later slice.
 const CLAUDE_MANAGED_SET = Object.freeze({ exact: Object.freeze([".claude/settings.json", ".claude/settings.local.json", ".claude/CLAUDE.md", "CLAUDE.md", ".javi-forge/ci.yaml"]), prefixes: Object.freeze([".claude/hooks/", ".claude/agents/", ".claude/skills/"]), caseFoldExact: Object.freeze(["claude.md", ".claude/claude.md"]) });
 const CODEX_MANAGED_SET = Object.freeze({ exact: Object.freeze([".codex/hooks.json", ".claude/settings.json", ".claude/settings.local.json", ".claude/CLAUDE.md", "CLAUDE.md", ".javi-forge/ci.yaml"]), prefixes: Object.freeze([".claude/hooks/", ".claude/agents/", ".claude/skills/"]), caseFoldExact: Object.freeze(["claude.md", ".claude/claude.md"]) });
-export const AGENT_CONFIGS = Object.freeze({ claude: Object.freeze({ id: "claude", managedSet: CLAUDE_MANAGED_SET, projectDir: Object.freeze({ envVar: "CLAUDE_PROJECT_DIR", fallback: "asset-root" }), marker: MANAGED_MARKER }), codex: Object.freeze({ id: "codex", managedSet: CODEX_MANAGED_SET, projectDir: Object.freeze({ envVar: null, fallback: "cwd" }), marker: "// javi-forge-managed: codex-pretooluse v1" }) });
+const CODEX_GLOBAL_MANAGED_PATHS = Object.freeze([".codex/hooks.json", ".codex/config.toml"]);
+export const AGENT_CONFIGS = Object.freeze({ claude: Object.freeze({ id: "claude", managedSet: CLAUDE_MANAGED_SET, globalManagedPaths: Object.freeze([]), projectDir: Object.freeze({ envVar: "CLAUDE_PROJECT_DIR", fallback: "asset-root" }), marker: MANAGED_MARKER }), codex: Object.freeze({ id: "codex", managedSet: CODEX_MANAGED_SET, globalManagedPaths: CODEX_GLOBAL_MANAGED_PATHS, projectDir: Object.freeze({ envVar: null, fallback: "cwd" }), marker: "// javi-forge-managed: codex-pretooluse v1" }) });
 // Fail-closed agent selector: a missing/unknown --agent means we cannot know what to protect, so refuse.
 function resolveAgentConfig(argv) { const arg = argv.find((value) => typeof value === "string" && value.startsWith("--agent=")); const id = arg === undefined ? undefined : arg.slice("--agent=".length); const config = id === undefined ? undefined : AGENT_CONFIGS[id]; if (!config) fail("invalid-config"); return config; }
 // Project root per agent: the env var when set (Claude = CLAUDE_PROJECT_DIR); otherwise the per-agent
@@ -135,7 +140,8 @@ export function isSensitivePolicyKey(key, platform = process.platform) {
 	if (SENSITIVE_DIRECTORY_SUFFIXES.some((directory) => key.endsWith(directory) || key.includes(`${directory}/`))) return true;
 	return platform === "win32" ? basename.toLowerCase() === "serviceaccountkey.json" : basename === "serviceAccountKey.json";
 }
-function isManaged(key, managedSet = CLAUDE_MANAGED_SET, projectRoot = PROJECT_ROOT) {
+function isManaged(key, managedSet = CLAUDE_MANAGED_SET, projectRoot = PROJECT_ROOT, globalManagedPaths = []) {
+	if (globalManagedPaths.some((relative) => key === canonicalizePolicyPath(path.join(HOST_HOME, relative)))) return true;
 	const project = canonicalizePolicyPath(projectRoot);
 	if (!key.startsWith(`${project}/`) && key !== project) return false;
 	const relative = key.slice(project.length + 1);
@@ -148,7 +154,7 @@ function isManaged(key, managedSet = CLAUDE_MANAGED_SET, projectRoot = PROJECT_R
 function evaluateFile(toolName, filePath, config = AGENT_CONFIGS.claude, projectRoot = PROJECT_ROOT) {
 	const keys = policyPathKeys(filePath);
 	if (keys.some((key) => isSensitivePolicyKey(key))) return { allowed: false, ruleId: "path.sensitive" };
-	if (toolName !== "Read" && keys.some((key) => isManaged(key, config.managedSet, projectRoot))) return { allowed: false, ruleId: "path.managed-config" };
+	if (toolName !== "Read" && keys.some((key) => isManaged(key, config.managedSet, projectRoot, config.globalManagedPaths))) return { allowed: false, ruleId: "path.managed-config" };
 	return { allowed: true };
 }
 function lex(command, powershell = false) {
@@ -753,7 +759,7 @@ function hasManagedLiteral(tokens, cwd, config = AGENT_CONFIGS.claude, projectRo
 	return tokens.some((token) => {
 		if ((token.startsWith("-") && !/^-(?:LiteralPath|Path):/i.test(token)) || !/[\\/.]/.test(token)) return false;
 		try {
-			return isManaged(canonicalizePolicyPath(token.replace(/^(?:-LiteralPath:|-Path:)/i, "").replace(/[;,]$/, ""), { base: cwd, projectRoot }), config.managedSet, projectRoot);
+			return isManaged(canonicalizePolicyPath(token.replace(/^(?:-LiteralPath:|-Path:)/i, "").replace(/[;,]$/, ""), { base: cwd, projectRoot }), config.managedSet, projectRoot, config.globalManagedPaths);
 		} catch {
 			return false;
 		}
@@ -857,6 +863,7 @@ function evaluateBash(command, cwd, config = AGENT_CONFIGS.claude, projectRoot =
 		if (reduced.ambiguity) return ambiguityDecision(reduced.ambiguity);
 		const tokens = reduced.tokens;
 		const executable = (tokens[0] ?? "").toLowerCase();
+		const executableName = path.basename(executable.replaceAll("\\", "/"));
 		const identity = normalizeLiteralUtilityIdentity(tokens[0] ?? "");
 		const rmOptions = tokens.filter((token) => token.startsWith("-")).join("");
 		if ((executable === "rm" && /r/i.test(rmOptions) && /f/i.test(rmOptions) && tokens.some(isCriticalTarget)) || /^mkfs/.test(executable) || (executable === "dd" && tokens.some((token) => /^of=\/dev\/(?:sd|nvme|vd|disk)/.test(token)))) return { allowed: false, ruleId: "shell.destructive-root" };
@@ -880,8 +887,8 @@ function evaluateBash(command, cwd, config = AGENT_CONFIGS.claude, projectRoot =
 		if (["cat", "less", "more", "head", "tail", "bat", "grep", "rg", "sed", "awk", "source", ".", "cp", "install"].includes(executable) && hasSensitiveLiteral(tokens.slice(1), cwd, projectRoot)) return { allowed: false, ruleId: "shell.sensitive-read" };
 		if (tokens.some((token) => token === "<") && hasSensitiveLiteral(tokens, cwd, projectRoot)) return { allowed: false, ruleId: "shell.sensitive-read" };
 		if (executable === "git" && tokens[1]?.toLowerCase() === "push" && tokens.some((token) => ["-f", "--force", "--force-with-lease"].includes(token.toLowerCase()))) return { allowed: false, ruleId: "shell.force-push" };
-		if (["rm", "mv", "cp", "install", "truncate", "touch", "chmod", "chown", "tee"].includes(executable) && hasManagedLiteral(tokens.slice(1), cwd, config, projectRoot)) return { allowed: false, ruleId: "shell.managed-config-tamper" };
-		if ((/^(?:sed|perl)$/.test(executable) && tokens.some((token) => token.startsWith("-i")) && hasManagedLiteral(tokens, cwd, config, projectRoot)) || (tokens.includes(">") && hasManagedLiteral(tokens, cwd, config, projectRoot))) return { allowed: false, ruleId: "shell.managed-config-tamper" };
+		if (["rm", "mv", "cp", "install", "truncate", "touch", "chmod", "chown", "tee"].includes(executableName) && hasManagedLiteral(tokens.slice(1), cwd, config, projectRoot)) return { allowed: false, ruleId: "shell.managed-config-tamper" };
+		if ((/^(?:sed|perl)$/.test(executableName) && tokens.some((token) => token.startsWith("-i")) && hasManagedLiteral(tokens, cwd, config, projectRoot)) || (tokens.includes(">") && hasManagedLiteral(tokens, cwd, config, projectRoot))) return { allowed: false, ruleId: "shell.managed-config-tamper" };
 		if (/^(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) && tokens.some((token) => /^-(?:enc|encodedcommand)$/i.test(token))) return { allowed: false, ruleId: "shell.obfuscated-interpreter" };
 		if (/^(?:bash|sh|zsh|dash|ksh)$/.test(executable)) {
 			const flag = tokens.findIndex((token) => /^-[^-]*c[^-]*$/.test(token));

@@ -289,6 +289,21 @@ Notes:
 - A previously javi-forge-managed but outdated shim is silently upgraded — no
   `--force` needed.
 
+### Codex global configuration boundary
+
+The Codex PreToolUse policy treats only the current host user's
+`~/.codex/hooks.json` and `~/.codex/config.toml` as managed global write targets.
+It does not protect the whole home directory or every `.codex` file, and existing
+project-scoped protection remains unchanged. Reads remain permitted unless an
+existing sensitive-path rule applies.
+Legitimate agents are subject to the same boundary: writes to either selected
+global file are blocked regardless of their intent.
+
+This boundary neither installs nor activates a hook, changes trust, nor modifies
+live configuration. Updating the bundled policy asset requires updating its
+manifest SHA-256 and retaining the outgoing digest in manifest history so released
+installations can be recognized for upgrade.
+
 ---
 
 ## plugin

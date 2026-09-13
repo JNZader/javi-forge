@@ -263,6 +263,7 @@ describe("Codex current-user global configuration policy", () => {
 		path.join(hostHome, ".codex", "hooks.json"),
 		path.join(hostHome, ".codex", "config.toml"),
 	];
+	const bashPathLiteral = (filePath: string): string => `'${filePath.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`;
 	const codexEvent = (toolName: string, toolInput: Record<string, unknown>): unknown => ({
 		...(event(toolName, toolInput) as Record<string, unknown>),
 		cwd: unrelatedCwd,
@@ -295,9 +296,10 @@ describe("Codex current-user global configuration policy", () => {
 	});
 
 	it.each(globalFiles)("denies Codex Bash writes through absolute current-user path %s", (filePath) => {
-		expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/tee ${filePath}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
-		expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/sed -i s/a/b/ ${filePath}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
-		expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/perl -i -pe s/a/b/ ${filePath}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
+		const target = bashPathLiteral(filePath);
+		expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/tee ${target}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
+		expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/sed -i s/a/b/ ${target}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
+		expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/perl -i -pe s/a/b/ ${target}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
 	});
 
 	it("denies symlink aliases to the current user home through every Codex write channel", () => {
@@ -306,7 +308,7 @@ describe("Codex current-user global configuration policy", () => {
 		for (const name of ["hooks.json", "config.toml"]) {
 			const aliasPath = path.join(homeAlias, ".codex", name);
 			expect(runtime.evaluateEvent(codexEvent("Write", { file_path: aliasPath }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "path.managed-config" });
-			expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/tee ${aliasPath}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
+			expect(runtime.evaluateEvent(codexEvent("Bash", { command: `/usr/bin/tee ${bashPathLiteral(aliasPath)}` }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "shell.managed-config-tamper" });
 			const patch = `*** Begin Patch\n*** Update File: ${aliasPath}\n@@\n-x\n+y\n*** End Patch`;
 			expect(runtime.evaluateEvent(codexEvent("apply_patch", { command: patch }), runtime.AGENT_CONFIGS.codex)).toEqual({ allowed: false, ruleId: "path.managed-config" });
 		}

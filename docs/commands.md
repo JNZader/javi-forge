@@ -211,7 +211,8 @@ To bypass: `git commit --no-verify` (pre-push: `git push --no-verify`).
 ### Agent guard commands
 
 The dispatcher also manages the optional PreToolUse guards for Claude Code and
-Codex, plus the OpenCode global plugin and Grok Build global hook:
+Codex, plus the OpenCode global plugin, Grok Build global hook, and Cursor
+global hook:
 
 ```bash
 javi-forge hooks install claude
@@ -226,6 +227,9 @@ javi-forge hooks repair opencode --force
 javi-forge hooks install grok
 javi-forge hooks doctor grok
 javi-forge hooks repair grok --force
+javi-forge hooks install cursor
+javi-forge hooks doctor cursor
+javi-forge hooks repair cursor --force
 ```
 
 `install` and `repair` exit `0` on success and non-zero on refusal or failure.
@@ -249,6 +253,15 @@ shared Bash/Read/Edit policy surfaces. `doctor grok` is informational and
 classifies the registration and policy bytes; it does not claim that Grok loaded
 or executed them. On Linux, install/repair uses the same secure filesystem proof
 chain as Claude and needs `getfacl` from the `acl` package.
+
+Cursor installation merges a `preToolUse` registration into
+`~/.cursor/hooks.json` and writes an adjacent policy runtime under
+`~/.cursor/hooks/`. The registration uses `failClosed: true` and matches
+`Shell`, `Read`, `Write`, and `Delete`, which map to the shared
+Bash/Read/Write/Edit policy surfaces. `doctor cursor` is informational and
+classifies the registration and policy bytes; it does not claim that Cursor
+loaded or executed them. On Linux, install/repair uses the same secure
+filesystem proof chain as Claude and needs `getfacl` from the `acl` package.
 
 The `--force` option is only for edited managed assets. Foreign, malformed,
 symlink, and non-regular hook content remains fail-closed and is not forcibly
@@ -338,6 +351,16 @@ two current-user global targets, while project-scoped protection covers
 `.grok/config.toml`, `.grok/hooks/`, `AGENTS.md`, and the existing Claude
 configuration boundary. Foreign, malformed, symlink, and non-regular targets
 remain fail-closed even with `--force`.
+
+### Cursor global hook boundary
+
+The Cursor installer owns only `~/.cursor/hooks.json` and
+`~/.cursor/hooks/javi-forge-skillguard-pre-tool-use.mjs`. The policy also refuses
+writes to those two current-user global targets, while project-scoped protection
+covers `.cursor/hooks/`, `.cursor/hooks.json`, `.cursor/rules/`, `AGENTS.md`,
+and the existing Claude configuration boundary. Foreign hook registrations are
+preserved when the managed hook is added; malformed, symlink, and non-regular
+targets remain fail-closed even with `--force`.
 
 ---
 

@@ -157,4 +157,10 @@ describe("help — hooks command", () => {
 		expect(HOOKS_HELP_TEXT).toContain("doctor grok");
 		expect(HOOKS_HELP_TEXT).toContain("repair grok");
 	});
+
+	it("HOOKS_HELP_TEXT documents the Cursor hook subcommands", () => {
+		expect(HOOKS_HELP_TEXT).toContain("install cursor");
+		expect(HOOKS_HELP_TEXT).toContain("doctor cursor");
+		expect(HOOKS_HELP_TEXT).toContain("repair cursor");
+	});
 });

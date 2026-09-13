@@ -1,6 +1,6 @@
 /**
  * Agent adapter registry (agent-agnostic slice 2). One descriptor per host
- * (`claude`, `codex`, `opencode`) capturing the per-agent facts the SkillGuard installer and
+ * (`claude`, `codex`, `opencode`, `grok`, `cursor`) capturing the per-agent facts the SkillGuard installer and
  * doctor need: config paths, the protected managed set, the project-root source,
  * the host registration schema, the managed marker, the deny protocol, and the
  * trust model.
@@ -23,7 +23,7 @@ import {
 	hasCodexTrustEntry,
 } from "./codex-hook-manager.js";
 
-export type AgentId = "claude" | "codex" | "opencode" | "grok";
+export type AgentId = "claude" | "codex" | "opencode" | "grok" | "cursor";
 
 export type TrustState = "trusted" | "untrusted" | "unknown";
 
@@ -47,7 +47,7 @@ export interface AgentAdapter {
 	/** The managed asset marker for this host. */
 	marker: string;
 	/** Deny protocol emitted by the host integration. */
-	emitDeny: "exit2+stderr" | "throw-error";
+	emitDeny: "exit2+stderr" | "throw-error" | "json-stdout";
 	/** Hook-trust model, or null when the host has none (Claude). */
 	trust: TrustDescriptor | null;
 }
@@ -101,6 +101,22 @@ const GROK_MANAGED_SET = [
 	"CLAUDE.md",
 	".javi-forge/ci.yaml",
 	".grok/hooks/",
+	".claude/hooks/",
+	".claude/agents/",
+	".claude/skills/",
+] as const;
+
+const CURSOR_MANAGED_SET = [
+	".cursor/hooks.json",
+	".cursor/hooks/javi-forge-skillguard-pre-tool-use.mjs",
+	"AGENTS.md",
+	".claude/settings.json",
+	".claude/settings.local.json",
+	".claude/CLAUDE.md",
+	"CLAUDE.md",
+	".javi-forge/ci.yaml",
+	".cursor/hooks/",
+	".cursor/rules/",
 	".claude/hooks/",
 	".claude/agents/",
 	".claude/skills/",
@@ -183,11 +199,33 @@ export const grokAdapter: AgentAdapter = {
 	trust: null,
 };
 
+export const cursorAdapter: AgentAdapter = {
+	id: "cursor",
+	configPaths(homeDir) {
+		const cursorDir = path.join(homeDir, ".cursor");
+		return {
+			hooksFile: path.join(cursorDir, "hooks.json"),
+			settingsFile: path.join(
+				cursorDir,
+				"hooks",
+				"javi-forge-skillguard-pre-tool-use.mjs",
+			),
+		};
+	},
+	managedSet: CURSOR_MANAGED_SET,
+	projectDir: { envVar: "CURSOR_PROJECT_DIR" },
+	settingsSchema: null,
+	marker: "// javi-forge-managed: cursor-pretooluse v1",
+	emitDeny: "json-stdout",
+	trust: null,
+};
+
 export const AGENT_ADAPTERS: Record<AgentId, AgentAdapter> = {
 	claude: claudeAdapter,
 	codex: codexAdapter,
 	opencode: opencodeAdapter,
 	grok: grokAdapter,
+	cursor: cursorAdapter,
 };
 
 /**

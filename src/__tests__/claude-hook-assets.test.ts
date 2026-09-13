@@ -19,7 +19,11 @@ interface Runtime {
 	resolvePlatformSupport(platform?: string): { supported: boolean; reason?: string };
 	canonicalizePolicyPath(input: string, options?: { base?: string; platform?: string; projectRoot?: string }): string;
 	isSensitivePolicyKey(input: string, platform?: string): boolean;
-	AGENT_CONFIGS: { claude: RuntimeAgentConfig; codex: RuntimeAgentConfig };
+	AGENT_CONFIGS: {
+		claude: RuntimeAgentConfig;
+		codex: RuntimeAgentConfig;
+		cursor: RuntimeAgentConfig;
+	};
 	evaluateEvent(input: unknown, config?: RuntimeAgentConfig): Decision;
 	parseAndEvaluateInput(input: Buffer): Decision;
 }
@@ -76,6 +80,7 @@ const GROK_BUILD_OUTGOING_ASSET_SHA256 = "6fe1ef55363e6e3f38253ca94b17ec50c94235
 const GROK_BUILD_PATH_ASSET_SHA256 = "b79ee8dc3df525810b07215927590366ed2669255666fdc817e9637cf0e10cf2";
 const GROK_BUILD_PRE_REVIEW_ASSET_SHA256 = "a352b5b6c29fcdeecf2a014ab0e271cab9373119460134d65134f16a19222e47";
 const GROK_BUILD_ASSET_SHA256 = "044f6816d18a2894532fde52a145f10347f617cbb361fc10075d04f885327d22";
+const CURSOR_HOOK_ASSET_SHA256 = "9c175bb1daed3055420cc6b1d7b4f90a7779da3525b23315e2a66767b8de96dc";
 const PRIOR_SETTINGS_CANONICAL_SHA256 = "038c59a91bf8967f6908afed74c465f1e7030254e11e4f8738975d6d708424d4";
 const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
 // Decision ②: placeholder-normalized canonical hash of the exact managed matcher
@@ -116,7 +121,7 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(runtime.SUPPORTED_TOOLS).toEqual(TOOLS);
 		expect(runtime.INPUT_LIMIT_BYTES).toBe(1_048_576);
 		expect(runtime.POLICY_REGISTRY).toEqual({ schemaVersion: 1, policyVersion: 2, diagnosticsMaxBytes: 240 });
-		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 2, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256, PRE_S1_ASSET_SHA256, S1_OUTGOING_ASSET_SHA256, WU3_OUTGOING_ASSET_SHA256, LITERAL_HEREDOC_OUTGOING_ASSET_SHA256, PRE_PYTHON_HEREDOC_ASSET_SHA256, PYTHON_HEREDOC_ASSET_SHA256, GLOBAL_CODEX_CONFIG_ASSET_SHA256, GROK_BUILD_OUTGOING_ASSET_SHA256, GROK_BUILD_PATH_ASSET_SHA256, GROK_BUILD_PRE_REVIEW_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
+		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 2, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256, PRE_S1_ASSET_SHA256, S1_OUTGOING_ASSET_SHA256, WU3_OUTGOING_ASSET_SHA256, LITERAL_HEREDOC_OUTGOING_ASSET_SHA256, PRE_PYTHON_HEREDOC_ASSET_SHA256, PYTHON_HEREDOC_ASSET_SHA256, GLOBAL_CODEX_CONFIG_ASSET_SHA256, GROK_BUILD_OUTGOING_ASSET_SHA256, GROK_BUILD_PATH_ASSET_SHA256, GROK_BUILD_PRE_REVIEW_ASSET_SHA256, GROK_BUILD_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
 		expect(manifest.asset.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
 		// A rotated asset must not still claim any outgoing hash as current, and every
 		// outgoing hash must remain reachable as historical (auto-upgradable) bodies.
@@ -133,6 +138,7 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(manifest.asset.sha256).not.toBe(GROK_BUILD_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.sha256).not.toBe(GROK_BUILD_PATH_ASSET_SHA256);
 		expect(manifest.asset.sha256).not.toBe(GROK_BUILD_PRE_REVIEW_ASSET_SHA256);
+		expect(manifest.asset.sha256).not.toBe(GROK_BUILD_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PRIOR_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(F2_OUTGOING_ASSET_SHA256);
@@ -146,7 +152,8 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(manifest.asset.historical).toContain(GROK_BUILD_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(GROK_BUILD_PATH_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(GROK_BUILD_PRE_REVIEW_ASSET_SHA256);
-		expect(manifest.asset.sha256).toBe(GROK_BUILD_ASSET_SHA256);
+		expect(manifest.asset.historical).toContain(GROK_BUILD_ASSET_SHA256);
+		expect(manifest.asset.sha256).toBe(CURSOR_HOOK_ASSET_SHA256);
 		// The bundled win32 helper on disk MUST hash to its manifest binding (mirrors the .mjs asset sha assertion above).
 		const ps1Bytes = fs.readFileSync(path.join(CLAUDE_HOOK_ASSETS_DIR, WINDOWS_SECURE_OBJECT_NAME));
 		expect(manifest.installerHelpers.windowsSecureObject.sha256).toBe(createHash("sha256").update(ps1Bytes).digest("hex"));

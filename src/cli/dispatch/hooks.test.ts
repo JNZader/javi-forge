@@ -11,12 +11,14 @@ const runClaudeHookCommand = vi.fn();
 const runCodexHookCommand = vi.fn();
 const runOpenCodeHookCommand = vi.fn();
 const runGrokHookCommand = vi.fn();
+const runCursorHookCommand = vi.fn();
 
 vi.mock("../../commands/hooks.js", () => ({ runHook }));
 vi.mock("../../commands/claude-hooks.js", () => ({ runClaudeHookCommand }));
 vi.mock("../../commands/codex-hooks.js", () => ({ runCodexHookCommand }));
 vi.mock("../../commands/opencode-hooks.js", () => ({ runOpenCodeHookCommand }));
 vi.mock("../../commands/grok-hooks.js", () => ({ runGrokHookCommand }));
+vi.mock("../../commands/cursor-hooks.js", () => ({ runCursorHookCommand }));
 
 const cliStub = (input: string[], flags: Record<string, unknown> = {}): CLI =>
 	({ input, flags }) as unknown as CLI;
@@ -56,6 +58,7 @@ describe("hooks dispatch", () => {
 		runCodexHookCommand.mockReset();
 		runOpenCodeHookCommand.mockReset();
 		runGrokHookCommand.mockReset();
+		runCursorHookCommand.mockReset();
 	});
 
 	it("dispatches `hooks run pre-commit` to runHook and exits with its code", async () => {
@@ -178,13 +181,25 @@ describe("hooks dispatch", () => {
 		expect(exitCode).toBe(0);
 	});
 
+	it("routes `hooks install cursor` and exits with its code", async () => {
+		runCursorHookCommand.mockResolvedValue(0);
+		const { exitCode } = await run(["hooks", "install", "cursor"]);
+		expect(runCursorHookCommand).toHaveBeenCalledWith(
+			"install",
+			process.cwd(),
+			{ force: false },
+		);
+		expect(exitCode).toBe(0);
+	});
+
 	it("rejects an unknown agent with usage + exit 1, never calling any command", async () => {
 		const { err, exitCode } = await run(["hooks", "install", "foo"]);
 
 		expect(runClaudeHookCommand).not.toHaveBeenCalled();
 		expect(runCodexHookCommand).not.toHaveBeenCalled();
+		expect(runCursorHookCommand).not.toHaveBeenCalled();
 		expect(err.join("\n")).toContain(
-			"javi-forge hooks install <claude|codex|opencode|grok>",
+			"javi-forge hooks install <claude|codex|opencode|grok|cursor>",
 		);
 		expect(exitCode).toBe(1);
 	});
@@ -194,8 +209,9 @@ describe("hooks dispatch", () => {
 
 		expect(runClaudeHookCommand).not.toHaveBeenCalled();
 		expect(runCodexHookCommand).not.toHaveBeenCalled();
+		expect(runCursorHookCommand).not.toHaveBeenCalled();
 		expect(err.join("\n")).toContain(
-			"javi-forge hooks doctor <claude|codex|opencode|grok>",
+			"javi-forge hooks doctor <claude|codex|opencode|grok|cursor>",
 		);
 		expect(exitCode).toBe(1);
 	});

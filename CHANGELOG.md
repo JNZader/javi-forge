@@ -1,3 +1,9 @@
+## [1.41.0](https://github.com/JNZader/javi-forge/compare/v1.40.0...v1.41.0) (2026-09-13)
+
+### Features
+
+* **grok:** add SkillGuard hook manager ([#119](https://github.com/JNZader/javi-forge/issues/119)) ([b707284](https://github.com/JNZader/javi-forge/commit/b70728406fcb8020340262d3944cd0ac6770c2e1))
+
 ## [1.40.0](https://github.com/JNZader/javi-forge/compare/v1.39.5...v1.40.0) (2026-09-13)
 
 ### Features

@@ -204,6 +204,22 @@ describe("installCIHooks classification and write policy", () => {
 		expect(result.errors).toEqual([]);
 	});
 
+	it("warns when installing hooks from a stale CLI against a newer javi-forge checkout", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			name: "javi-forge",
+			version: "999.0.0",
+		});
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.errors).toEqual([]);
+		expect(result.notes.join("\n")).toContain(
+			"javi-forge CLI/source version mismatch",
+		);
+		expect(result.notes.join("\n")).toContain("999.0.0");
+		expect(result.notes.join("\n")).toContain("node dist/index.js ci init");
+	});
+
 	it("injects the marker block after the shebang, hashing the body below it", async () => {
 		await installCIHooks(tmpDir);
 
@@ -1022,6 +1038,24 @@ describe("installCIHooks core.hooksPath guard (D6 detect-before-mutate)", () => 
 		expect(result.installed).toEqual([]);
 		expect(readScope("--local")).toBe(".husky/_");
 		expect(result.errors.length).toBeGreaterThan(0);
+	});
+
+	it("keeps the source/CLI mismatch warning when hooksPath guard refuses", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			name: "javi-forge",
+			version: "999.0.0",
+		});
+		setLocalHooksPath(".husky/_");
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(result.installed).toEqual([]);
+		expect(result.errors.join("\n")).toMatch(/another hook manager|\.husky/);
+		expect(result.notes.join("\n")).toContain(
+			"javi-forge CLI/source version mismatch",
+		);
+		expect(result.notes.join("\n")).toContain("999.0.0");
+		expect(readScope("--local")).toBe(".husky/_");
 	});
 
 	// ── Matrix row f — DORMANT foreign slot under a legacy hooksPath →

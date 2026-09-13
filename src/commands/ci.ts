@@ -5,7 +5,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
-import { HOOK_ASSETS_DIR } from "../constants.js";
+import { FORGE_ROOT, HOOK_ASSETS_DIR } from "../constants.js";
 import {
 	CI_STACKS,
 	type CIGateConfig,
@@ -1824,6 +1824,11 @@ export interface InstallHooksResult {
 
 const HOOK_NAMES = ["pre-commit", "pre-push", "commit-msg"] as const;
 
+interface PackageIdentity {
+	name: string;
+	version: string;
+}
+
 /** Bound on the `.bak.{epochMs}-{n}` ladder before a forced install gives up. */
 const BACKUP_RETRY_BUDGET = 8;
 
@@ -2070,6 +2075,56 @@ async function loadHookManifest(): Promise<Record<string, HookManifestEntry>> {
 		string,
 		HookManifestEntry
 	>;
+}
+
+function parsePackageIdentity(value: unknown): PackageIdentity | null {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"name" in value &&
+		"version" in value &&
+		typeof value.name === "string" &&
+		typeof value.version === "string"
+	) {
+		return { name: value.name, version: value.version };
+	}
+	return null;
+}
+
+async function readPackageIdentity(
+	packageJsonPath: string,
+): Promise<PackageIdentity | null> {
+	try {
+		return parsePackageIdentity(await fs.readJson(packageJsonPath));
+	} catch {
+		return null;
+	}
+}
+
+async function detectSourceCliMismatchNote(
+	projectDir: string,
+): Promise<string | undefined> {
+	const projectPackage = await readPackageIdentity(
+		path.join(projectDir, "package.json"),
+	);
+	if (projectPackage?.name !== "javi-forge") {
+		return undefined;
+	}
+	const runtimePackage = await readPackageIdentity(
+		path.join(FORGE_ROOT, "package.json"),
+	);
+	if (
+		runtimePackage === null ||
+		runtimePackage.name !== "javi-forge" ||
+		runtimePackage.version === projectPackage.version
+	) {
+		return undefined;
+	}
+	return [
+		`javi-forge CLI/source version mismatch: running ${runtimePackage.version} from ${FORGE_ROOT},`,
+		`but this checkout declares ${projectPackage.version}.`,
+		"Update the global CLI or run the local CLI (node dist/index.js ci init) before installing hooks.",
+	].join(" ");
 }
 
 /**
@@ -2468,6 +2523,10 @@ export async function installCIHooks(
 	const errors: string[] = [];
 	const states: HookStateReport[] = [];
 	const notes: string[] = [];
+	const mismatchNote = await detectSourceCliMismatchNote(projectDir);
+	if (mismatchNote !== undefined) {
+		notes.push(mismatchNote);
+	}
 
 	// The ATOMIC core.hooksPath guard (D6) is the SINGLE choke point shared by
 	// `ci init` and `init`. It runs DETECT-BEFORE-MUTATE: on refuse it has
@@ -2476,7 +2535,7 @@ export async function installCIHooks(
 	// proceed to install the shims.
 	const guard = await guardHooksPath(projectDir, hooksDir, manifest, force);
 	if ("refuse" in guard) {
-		return { ...empty, errors: [guard.refuse] };
+		return { ...empty, notes, errors: [guard.refuse] };
 	}
 	if (guard.note !== undefined) {
 		notes.push(guard.note);

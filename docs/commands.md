@@ -320,6 +320,12 @@ Notes:
   `core.hooksPath`.
 - A previously javi-forge-managed but outdated shim is silently upgraded — no
   `--force` needed.
+- When `ci init` runs inside the `javi-forge` source checkout, it compares the
+  running CLI package version with the checkout's `package.json`. If they differ,
+  it prints a warning before/alongside install output: update the global CLI or
+  run the local CLI (`node dist/index.js ci init`) before trusting hook activation.
+  This catches the stale-global case where an old `javi-forge` on `PATH` installs
+  older hook assets than the source tree you are looking at.
 
 ### Codex global configuration boundary
 

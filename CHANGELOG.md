@@ -1,3 +1,9 @@
+## [1.39.5](https://github.com/JNZader/javi-forge/compare/v1.39.4...v1.39.5) (2026-09-13)
+
+### Bug Fixes
+
+* **security:** close transaction FileHandles exactly once ([36d52be](https://github.com/JNZader/javi-forge/commit/36d52be3eaebcf296996c570123d90b09506286d))
+
 ## [1.39.4](https://github.com/JNZader/javi-forge/compare/v1.39.3...v1.39.4) (2026-09-13)
 
 ### Bug Fixes

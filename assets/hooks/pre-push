@@ -43,6 +43,47 @@ fi
 if ! cd "$repository_root"; then
   fail_pre_push "Could not return to the repository root."
 fi
+
+if [ ! -t 0 ]; then
+  is_zero_oid() {
+    [[ "$1" =~ ^(0{40}|0{64})$ ]]
+  }
+
+  is_git_oid() {
+    [[ "$1" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]]
+  }
+
+  is_delete_oid_pair() {
+    case "${#1}:${#2}" in
+      40:40 | 64:64) ;;
+      *) return 1 ;;
+    esac
+    is_zero_oid "$1" && is_git_oid "$2"
+  }
+
+  is_git_ref_name() {
+    git check-ref-format "$1" >/dev/null 2>&1
+  }
+
+  seen_ref_update=0
+  seen_non_delete_ref_update=0
+  while IFS=' ' read -r local_ref local_oid remote_ref remote_oid extra; do
+    seen_ref_update=1
+    if [ "$local_ref" = "(delete)" ] &&
+      is_delete_oid_pair "$local_oid" "$remote_oid" &&
+      is_git_ref_name "$remote_ref" &&
+      [ -z "$extra" ]; then
+      continue
+    fi
+    seen_non_delete_ref_update=1
+  done
+
+  if [ "$seen_ref_update" -eq 1 ] && [ "$seen_non_delete_ref_update" -eq 0 ]; then
+    echo "pre-push: deletion-only ref update; skipping local gates."
+    exit 0
+  fi
+fi
+
 if ! git_dir=$(git rev-parse --absolute-git-dir) || [ -z "$git_dir" ]; then
   fail_pre_push "Could not resolve the worktree Git directory."
 fi

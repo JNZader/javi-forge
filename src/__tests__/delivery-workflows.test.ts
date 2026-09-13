@@ -2,13 +2,6 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
-const PUBLISHING_PERMISSIONS = {
-	contents: "write",
-	issues: "write",
-	"pull-requests": "write",
-	"id-token": "write",
-};
-
 function object(value: unknown): Record<string, unknown> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		throw new Error("Expected a YAML mapping");
@@ -49,12 +42,6 @@ function actionSteps(actionDefinition: unknown): Record<string, unknown>[] {
 	return value.map(object);
 }
 
-function namedStep(job: unknown, name: string): Record<string, unknown> {
-	const step = steps(job).find((candidate) => candidate.name === name);
-	if (!step) throw new Error(`Missing step: ${name}`);
-	return step;
-}
-
 function usesStepIndex(job: unknown, action: string): number {
 	const index = steps(job).findIndex((candidate) => candidate.uses === action);
 	if (index === -1) throw new Error(`Missing action step: ${action}`);
@@ -72,18 +59,12 @@ function runCommand(step: Record<string, unknown>): string {
 	return step.run;
 }
 
-function secretReference(name: string): string {
-	return `$${`{{ secrets.${name} }}`}`;
-}
-
 const ci = workflow("ci");
-const release = workflow("release");
 const bubblewrapSetup = action("setup-bubblewrap");
 const linux = workflow("claude-hook-linux");
 const windows = workflow("claude-hook-windows");
 const ciJobs = object(ci.jobs);
 const testJob = object(ciJobs.test);
-const releaseJob = object(object(release.jobs).release);
 const linuxJob = object(object(linux.jobs).runtime);
 const windowsJob = object(object(windows.jobs).runtime);
 
@@ -95,63 +76,41 @@ describe("dependency-gated delivery workflows", () => {
 		});
 		expect(linux.on).toEqual({ workflow_call: null });
 		expect(windows.on).toEqual({ workflow_call: null });
-		expect(release.on).toEqual({
-			workflow_call: { secrets: { NPM_TOKEN: { required: true } } },
-		});
 	});
 
-	it("runs the release only after every same-commit delivery gate passes", () => {
+	it("runs same-commit delivery gates without automatic release authority", () => {
 		expect(Object.keys(ciJobs).sort()).toEqual([
 			"linux-hook",
-			"release",
 			"test",
 			"windows-hook",
 		]);
 		for (const [id, file] of [
 			["linux-hook", "claude-hook-linux"],
 			["windows-hook", "claude-hook-windows"],
-			["release", "release"],
 		]) {
 			const job = object(ciJobs[id]);
 			expect(job.uses).toBe(`./.github/workflows/${file}.yml`);
 			expect(job.with).toBeUndefined();
 			expect(job["continue-on-error"]).toBeUndefined();
 		}
-
-		const releaseCall = object(ciJobs.release);
-		expect(releaseCall.needs).toEqual(["test", "linux-hook", "windows-hook"]);
-		expect(releaseCall.if).toBe(
-			"github.event_name == 'push' && github.ref == 'refs/heads/main'",
-		);
+		expect(ciJobs.release).toBeUndefined();
 	});
 
-	it("keeps publishing permissions and NPM_TOKEN at the release boundary", () => {
+	it("keeps publishing permissions and tokens out of active CI jobs", () => {
 		expect(ci.permissions).toEqual({ contents: "read" });
 		expect(linux.permissions).toEqual({ contents: "read" });
 		expect(windows.permissions).toEqual({ contents: "read" });
-		expect(release.permissions).toEqual(PUBLISHING_PERMISSIONS);
-		expect(object(ciJobs.release).permissions).toEqual(PUBLISHING_PERMISSIONS);
-		expect(object(ciJobs.release).secrets).toEqual({
-			NPM_TOKEN: secretReference("NPM_TOKEN"),
-		});
 		for (const id of ["test", "linux-hook", "windows-hook"]) {
 			expect(object(ciJobs[id]).secrets).toBeUndefined();
 			expect(object(ciJobs[id]).permissions).toBeUndefined();
 		}
-		expect(namedStep(releaseJob, "Release").env).toEqual({
-			GITHUB_TOKEN: secretReference("GITHUB_TOKEN"),
-			NPM_TOKEN: secretReference("NPM_TOKEN"),
-			NODE_AUTH_TOKEN: secretReference("NPM_TOKEN"),
-		});
 	});
 
 	it("shares the Ubuntu 26.04 bubblewrap and AppArmor test prerequisite", () => {
-		for (const job of [testJob, releaseJob]) {
-			expect(job["runs-on"]).toBe("ubuntu-26.04");
-			expect(
-				usesStepIndex(job, "./.github/actions/setup-bubblewrap"),
-			).toBeGreaterThanOrEqual(0);
-		}
+		expect(testJob["runs-on"]).toBe("ubuntu-26.04");
+		expect(
+			usesStepIndex(testJob, "./.github/actions/setup-bubblewrap"),
+		).toBeGreaterThanOrEqual(0);
 		const setup = runCommand(actionSteps(bubblewrapSetup)[0]);
 		expect(setup).toContain(
 			"sudo apt-get install -y apparmor apparmor-profiles apparmor-utils bubblewrap",
@@ -167,12 +126,6 @@ describe("dependency-gated delivery workflows", () => {
 		expect(
 			usesStepIndex(testJob, "./.github/actions/setup-bubblewrap"),
 		).toBeLessThan(runStepIndex(testJob, "pnpm test:coverage"));
-		expect(
-			usesStepIndex(releaseJob, "./.github/actions/setup-bubblewrap"),
-		).toBeLessThan(runStepIndex(releaseJob, "pnpm test"));
-		expect(
-			runCommand(steps(releaseJob)[runStepIndex(releaseJob, "pnpm test")]),
-		).toBe("pnpm test");
 	});
 
 	it("preserves reusable hook job platforms and their SHA-pinned actions", () => {
@@ -200,7 +153,7 @@ describe("dependency-gated delivery workflows", () => {
 	});
 
 	it("checks out the caller SHA", () => {
-		for (const job of [testJob, releaseJob, linuxJob, windowsJob]) {
+		for (const job of [testJob, linuxJob, windowsJob]) {
 			for (const step of steps(job)) {
 				if (String(step.uses).startsWith("actions/checkout@")) {
 					expect(object(step.with ?? {}).ref).toBeUndefined();

@@ -1,3 +1,9 @@
+## [1.39.4](https://github.com/JNZader/javi-forge/compare/v1.39.3...v1.39.4) (2026-09-13)
+
+### Bug Fixes
+
+* **codex:** protect global config files ([#116](https://github.com/JNZader/javi-forge/issues/116)) ([d90e144](https://github.com/JNZader/javi-forge/commit/d90e1443f7f547b643c9af06d13a2c05eec0b40d))
+
 ## [1.39.3](https://github.com/JNZader/javi-forge/compare/v1.39.2...v1.39.3) (2026-09-12)
 
 ### Bug Fixes

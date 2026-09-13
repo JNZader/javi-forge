@@ -23,7 +23,7 @@ import {
 	hasCodexTrustEntry,
 } from "./codex-hook-manager.js";
 
-export type AgentId = "claude" | "codex" | "opencode";
+export type AgentId = "claude" | "codex" | "opencode" | "grok";
 
 export type TrustState = "trusted" | "untrusted" | "unknown";
 
@@ -90,6 +90,22 @@ const OPENCODE_MANAGED_SET = [
 	".claude/skills/",
 ] as const;
 
+const GROK_MANAGED_SET = [
+	".grok/hooks/javi-forge-skillguard-pre-tool-use.json",
+	".grok/hooks/javi-forge-skillguard-pre-tool-use.mjs",
+	".grok/config.toml",
+	"AGENTS.md",
+	".claude/settings.json",
+	".claude/settings.local.json",
+	".claude/CLAUDE.md",
+	"CLAUDE.md",
+	".javi-forge/ci.yaml",
+	".grok/hooks/",
+	".claude/hooks/",
+	".claude/agents/",
+	".claude/skills/",
+] as const;
+
 export const claudeAdapter: AgentAdapter = {
 	id: "claude",
 	configPaths(projectDir) {
@@ -147,10 +163,31 @@ export const opencodeAdapter: AgentAdapter = {
 	trust: null,
 };
 
+export const grokAdapter: AgentAdapter = {
+	id: "grok",
+	configPaths(homeDir) {
+		const hooksDir = path.join(homeDir, ".grok", "hooks");
+		return {
+			hooksFile: path.join(hooksDir, "javi-forge-skillguard-pre-tool-use.json"),
+			settingsFile: path.join(
+				hooksDir,
+				"javi-forge-skillguard-pre-tool-use.mjs",
+			),
+		};
+	},
+	managedSet: GROK_MANAGED_SET,
+	projectDir: { envVar: null },
+	settingsSchema: null,
+	marker: "javi-forge-managed: grok-pretooluse v1",
+	emitDeny: "exit2+stderr",
+	trust: null,
+};
+
 export const AGENT_ADAPTERS: Record<AgentId, AgentAdapter> = {
 	claude: claudeAdapter,
 	codex: codexAdapter,
 	opencode: opencodeAdapter,
+	grok: grokAdapter,
 };
 
 /**

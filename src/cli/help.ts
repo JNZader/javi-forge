@@ -170,7 +170,7 @@ export const CI_HELP_TEXT = `
 export const HOOKS_HELP_TEXT = `
   Usage
     $ javi-forge hooks run <pre-commit|pre-push>
-    $ javi-forge hooks <install|doctor|repair> <claude|codex|opencode> [--force]
+    $ javi-forge hooks <install|doctor|repair> <claude|codex|opencode|grok> [--force]
 
     Run the sections enabled under hooks: in .javi-forge/ci.yaml, in a fixed
     cheap→expensive order, fail-fast. With no hooks: config the default is the
@@ -188,6 +188,9 @@ export const HOOKS_HELP_TEXT = `
     install opencode  Install the managed OpenCode global plugin (~/.config/opencode/plugins/)
     doctor opencode   Report OpenCode plugin and policy file currency (informational)
     repair opencode   Repair the OpenCode plugin pair; --force overwrites edits
+    install grok      Install the Grok Build global PreToolUse hook (~/.grok/hooks/)
+    doctor grok       Report Grok hook registration and policy file currency (informational)
+    repair grok       Repair the Grok hook pair; --force overwrites edits
 
   Notes
     A blocking section failure exits non-zero and blocks the commit/push.
@@ -201,8 +204,11 @@ export const HOOKS_HELP_TEXT = `
     --force only to overwrite an edited managed asset.
     doctor opencode is informational and inspects installed files only; it does
     not prove OpenCode discovered, loaded, or executed the plugin.
-    Linux: install/repair claude need the acl package (getfacl) to prove the
-    parent chain — apt install acl / apk add acl / dnf install acl. Without it
+    doctor grok is informational and inspects the global hook registration and
+    adjacent policy runtime only; it does not prove Grok loaded or executed them.
+    Linux: install/repair claude and grok need the acl package (getfacl) to
+    prove the parent chain — apt install acl / apk add acl / dnf install acl.
+    Without it
     they refuse fail-closed; an already-installed guard keeps firing, and
     doctor claude reports the acl capability as its own row.
     Claude Code spawns the guard with node from ITS path, so node must resolve
@@ -220,6 +226,9 @@ export const HOOKS_HELP_TEXT = `
     $ javi-forge hooks install opencode
     $ javi-forge hooks doctor opencode
     $ javi-forge hooks repair opencode --force
+    $ javi-forge hooks install grok
+    $ javi-forge hooks doctor grok
+    $ javi-forge hooks repair grok --force
 `;
 
 export const FLAGS_SCHEMA = {

@@ -3,16 +3,31 @@ import { AGENT_ADAPTERS, isAgentId } from "./agent-adapter.js";
 import { validateSettingsShape } from "./claude-hook-settings.js";
 
 describe("agent adapter registry", () => {
-	it("exposes claude, codex, and opencode and rejects unknown ids", () => {
+	it("exposes claude, codex, opencode, and grok and rejects unknown ids", () => {
 		expect(Object.keys(AGENT_ADAPTERS).sort()).toEqual([
 			"claude",
 			"codex",
+			"grok",
 			"opencode",
 		]);
 		expect(isAgentId("claude")).toBe(true);
 		expect(isAgentId("codex")).toBe(true);
 		expect(isAgentId("opencode")).toBe(true);
+		expect(isAgentId("grok")).toBe(true);
 		expect(isAgentId("gemini")).toBe(false);
+	});
+
+	it("grok resolves the managed global hook pair beneath the supplied home root", () => {
+		const grok = AGENT_ADAPTERS.grok;
+		const paths = grok.configPaths("/home/u");
+		expect(paths.hooksFile).toBe(
+			"/home/u/.grok/hooks/javi-forge-skillguard-pre-tool-use.json",
+		);
+		expect(paths.settingsFile).toBe(
+			"/home/u/.grok/hooks/javi-forge-skillguard-pre-tool-use.mjs",
+		);
+		expect(grok.managedSet).toContain(".grok/config.toml");
+		expect(grok.emitDeny).toBe("exit2+stderr");
 	});
 
 	it("opencode resolves its global plugin pair under the supplied home root", () => {

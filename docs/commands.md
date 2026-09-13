@@ -211,7 +211,7 @@ To bypass: `git commit --no-verify` (pre-push: `git push --no-verify`).
 ### Agent guard commands
 
 The dispatcher also manages the optional PreToolUse guards for Claude Code and
-Codex, plus the OpenCode global plugin:
+Codex, plus the OpenCode global plugin and Grok Build global hook:
 
 ```bash
 javi-forge hooks install claude
@@ -223,6 +223,9 @@ javi-forge hooks repair codex --force
 javi-forge hooks install opencode
 javi-forge hooks doctor opencode
 javi-forge hooks repair opencode --force
+javi-forge hooks install grok
+javi-forge hooks doctor grok
+javi-forge hooks repair grok --force
 ```
 
 `install` and `repair` exit `0` on success and non-zero on refusal or failure.
@@ -238,6 +241,14 @@ OpenCode installation writes both the plugin and its policy runtime side by side
 under `~/.config/opencode/plugins/`; the plugin imports the latter relatively.
 `doctor opencode` is informational and classifies those two installed files. It
 does not claim that an OpenCode runtime discovered, loaded, or executed them.
+
+Grok Build installation writes a `PreToolUse` registration and adjacent policy
+runtime under `~/.grok/hooks/`. The registration intentionally matches only
+`run_terminal_command`, `read_file`, and `search_replace`, which map to the
+shared Bash/Read/Edit policy surfaces. `doctor grok` is informational and
+classifies the registration and policy bytes; it does not claim that Grok loaded
+or executed them. On Linux, install/repair uses the same secure filesystem proof
+chain as Claude and needs `getfacl` from the `acl` package.
 
 The `--force` option is only for edited managed assets. Foreign, malformed,
 symlink, and non-regular hook content remains fail-closed and is not forcibly
@@ -318,6 +329,15 @@ The OpenCode installer owns only the two managed files under the current user's
 `~/.config/opencode/plugins/`. It does not edit `opencode.json`, project-local
 configuration, or any other OpenCode file. Foreign, malformed, symlink, and
 non-regular plugin targets remain fail-closed even with `--force`.
+
+### Grok Build global hook boundary
+
+The Grok installer owns only `~/.grok/hooks/javi-forge-skillguard-pre-tool-use.json`
+and its adjacent `.mjs` policy runtime. The policy also refuses writes to those
+two current-user global targets, while project-scoped protection covers
+`.grok/config.toml`, `.grok/hooks/`, `AGENTS.md`, and the existing Claude
+configuration boundary. Foreign, malformed, symlink, and non-regular targets
+remain fail-closed even with `--force`.
 
 ---
 

@@ -211,7 +211,7 @@ To bypass: `git commit --no-verify` (pre-push: `git push --no-verify`).
 ### Agent guard commands
 
 The dispatcher also manages the optional PreToolUse guards for Claude Code and
-Codex:
+Codex, plus the OpenCode global plugin:
 
 ```bash
 javi-forge hooks install claude
@@ -220,6 +220,9 @@ javi-forge hooks repair claude --force
 javi-forge hooks install codex
 javi-forge hooks doctor codex
 javi-forge hooks repair codex --force
+javi-forge hooks install opencode
+javi-forge hooks doctor opencode
+javi-forge hooks repair opencode --force
 ```
 
 `install` and `repair` exit `0` on success and non-zero on refusal or failure.
@@ -230,6 +233,11 @@ asset, Node availability, and the provider-trust boundary. A successful
 registration does not prove provider trust or runtime execution; trust must be
 reviewed and approved in Codex. When a managed Codex registration is
 `released-outdated`, doctor recommends `javi-forge hooks install codex`.
+
+OpenCode installation writes both the plugin and its policy runtime side by side
+under `~/.config/opencode/plugins/`; the plugin imports the latter relatively.
+`doctor opencode` is informational and classifies those two installed files. It
+does not claim that an OpenCode runtime discovered, loaded, or executed them.
 
 The `--force` option is only for edited managed assets. Foreign, malformed,
 symlink, and non-regular hook content remains fail-closed and is not forcibly
@@ -303,6 +311,13 @@ This boundary neither installs nor activates a hook, changes trust, nor modifies
 live configuration. Updating the bundled policy asset requires updating its
 manifest SHA-256 and retaining the outgoing digest in manifest history so released
 installations can be recognized for upgrade.
+
+### OpenCode global plugin boundary
+
+The OpenCode installer owns only the two managed files under the current user's
+`~/.config/opencode/plugins/`. It does not edit `opencode.json`, project-local
+configuration, or any other OpenCode file. Foreign, malformed, symlink, and
+non-regular plugin targets remain fail-closed even with `--force`.
 
 ---
 

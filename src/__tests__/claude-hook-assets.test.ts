@@ -72,6 +72,7 @@ const LITERAL_HEREDOC_OUTGOING_ASSET_SHA256 = "59fc4224975ad64cfc85bab50ec60d9bd
 const PRE_PYTHON_HEREDOC_ASSET_SHA256 = "6edfbb31ce0551b27e38ae1ffd1daf9cc4bea54f2c86687c5124132af5b8c0af";
 const PYTHON_HEREDOC_ASSET_SHA256 = "507a57a15f1b967103bb1eefe701a74813d5a9603fa7bcc15579a215b03621e3";
 const GLOBAL_CODEX_CONFIG_ASSET_SHA256 = "f55ece1aea76251ec005f2b731fa44a58b6245fef8150b58486ae062167a2377";
+const OPENCODE_PLUGIN_ASSET_SHA256 = "6fe1ef55363e6e3f38253ca94b17ec50c942352c00d8431cd2ff2f6858c094b6";
 const PRIOR_SETTINGS_CANONICAL_SHA256 = "038c59a91bf8967f6908afed74c465f1e7030254e11e4f8738975d6d708424d4";
 const ROOT = path.resolve(CLAUDE_HOOK_ASSETS_DIR, "../..");
 // Decision ②: placeholder-normalized canonical hash of the exact managed matcher
@@ -112,7 +113,7 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(runtime.SUPPORTED_TOOLS).toEqual(TOOLS);
 		expect(runtime.INPUT_LIMIT_BYTES).toBe(1_048_576);
 		expect(runtime.POLICY_REGISTRY).toEqual({ schemaVersion: 1, policyVersion: 2, diagnosticsMaxBytes: 240 });
-		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 2, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256, PRE_S1_ASSET_SHA256, S1_OUTGOING_ASSET_SHA256, WU3_OUTGOING_ASSET_SHA256, LITERAL_HEREDOC_OUTGOING_ASSET_SHA256, PRE_PYTHON_HEREDOC_ASSET_SHA256, PYTHON_HEREDOC_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
+		expect(manifest).toMatchObject({ schemaVersion: 1, asset: { name: ASSET_NAME, version: 1, policyVersion: 2, historical: [PRIOR_ASSET_SHA256, OUTGOING_ASSET_SHA256, F2_OUTGOING_ASSET_SHA256, PRE_S1_ASSET_SHA256, S1_OUTGOING_ASSET_SHA256, WU3_OUTGOING_ASSET_SHA256, LITERAL_HEREDOC_OUTGOING_ASSET_SHA256, PRE_PYTHON_HEREDOC_ASSET_SHA256, PYTHON_HEREDOC_ASSET_SHA256, GLOBAL_CODEX_CONFIG_ASSET_SHA256] }, settingsEntries: { current: { version: 1, canonicalSha256: SETTINGS_CANONICAL_SHA256 }, historical: [{ version: 1, canonicalSha256: PRIOR_SETTINGS_CANONICAL_SHA256 }] }, installerHelpers: { windowsSecureObject: { name: WINDOWS_SECURE_OBJECT_NAME, sha256: WINDOWS_SECURE_OBJECT_SHA256 } } });
 		expect(manifest.asset.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
 		// A rotated asset must not still claim any outgoing hash as current, and every
 		// outgoing hash must remain reachable as historical (auto-upgradable) bodies.
@@ -125,6 +126,7 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(manifest.asset.sha256).not.toBe(LITERAL_HEREDOC_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.sha256).not.toBe(PRE_PYTHON_HEREDOC_ASSET_SHA256);
 		expect(manifest.asset.sha256).not.toBe(PYTHON_HEREDOC_ASSET_SHA256);
+		expect(manifest.asset.sha256).not.toBe(GLOBAL_CODEX_CONFIG_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PRIOR_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(F2_OUTGOING_ASSET_SHA256);
@@ -134,7 +136,8 @@ describe("packaged Claude PreToolUse asset contract", () => {
 		expect(manifest.asset.historical).toContain(LITERAL_HEREDOC_OUTGOING_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PRE_PYTHON_HEREDOC_ASSET_SHA256);
 		expect(manifest.asset.historical).toContain(PYTHON_HEREDOC_ASSET_SHA256);
-		expect(manifest.asset.sha256).toBe(GLOBAL_CODEX_CONFIG_ASSET_SHA256);
+		expect(manifest.asset.historical).toContain(GLOBAL_CODEX_CONFIG_ASSET_SHA256);
+		expect(manifest.asset.sha256).toBe(OPENCODE_PLUGIN_ASSET_SHA256);
 		// The bundled win32 helper on disk MUST hash to its manifest binding (mirrors the .mjs asset sha assertion above).
 		const ps1Bytes = fs.readFileSync(path.join(CLAUDE_HOOK_ASSETS_DIR, WINDOWS_SECURE_OBJECT_NAME));
 		expect(manifest.installerHelpers.windowsSecureObject.sha256).toBe(createHash("sha256").update(ps1Bytes).digest("hex"));

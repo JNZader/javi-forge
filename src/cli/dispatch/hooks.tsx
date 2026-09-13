@@ -37,6 +37,8 @@ const AGENT_COMMAND_LOADERS: Record<AgentId, () => Promise<HookCommandRunner>> =
 			(await import("../../commands/codex-hooks.js")).runCodexHookCommand,
 		opencode: async () =>
 			(await import("../../commands/opencode-hooks.js")).runOpenCodeHookCommand,
+		grok: async () =>
+			(await import("../../commands/grok-hooks.js")).runGrokHookCommand,
 	};
 
 export async function handleHooks(cli: CLI): Promise<void> {
@@ -62,7 +64,9 @@ export async function handleHooks(cli: CLI): Promise<void> {
 		// Validity is decided by the agent registry (isAgentId), the single source
 		// of truth; the loader map is exhaustive over AgentId by type.
 		if (!isAgentId(agent)) {
-			console.error(`Usage: javi-forge hooks ${sub} <claude|codex|opencode>`);
+			console.error(
+				`Usage: javi-forge hooks ${sub} <claude|codex|opencode|grok>`,
+			);
 			process.exit(1);
 		}
 		const run = await AGENT_COMMAND_LOADERS[agent]();

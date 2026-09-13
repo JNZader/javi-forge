@@ -10,11 +10,13 @@ const runHook = vi.fn();
 const runClaudeHookCommand = vi.fn();
 const runCodexHookCommand = vi.fn();
 const runOpenCodeHookCommand = vi.fn();
+const runGrokHookCommand = vi.fn();
 
 vi.mock("../../commands/hooks.js", () => ({ runHook }));
 vi.mock("../../commands/claude-hooks.js", () => ({ runClaudeHookCommand }));
 vi.mock("../../commands/codex-hooks.js", () => ({ runCodexHookCommand }));
 vi.mock("../../commands/opencode-hooks.js", () => ({ runOpenCodeHookCommand }));
+vi.mock("../../commands/grok-hooks.js", () => ({ runGrokHookCommand }));
 
 const cliStub = (input: string[], flags: Record<string, unknown> = {}): CLI =>
 	({ input, flags }) as unknown as CLI;
@@ -53,6 +55,7 @@ describe("hooks dispatch", () => {
 		runClaudeHookCommand.mockReset();
 		runCodexHookCommand.mockReset();
 		runOpenCodeHookCommand.mockReset();
+		runGrokHookCommand.mockReset();
 	});
 
 	it("dispatches `hooks run pre-commit` to runHook and exits with its code", async () => {
@@ -166,13 +169,22 @@ describe("hooks dispatch", () => {
 		expect(exitCode).toBe(0);
 	});
 
+	it("routes `hooks doctor grok` and exits with its code", async () => {
+		runGrokHookCommand.mockResolvedValue(0);
+		const { exitCode } = await run(["hooks", "doctor", "grok"]);
+		expect(runGrokHookCommand).toHaveBeenCalledWith("doctor", process.cwd(), {
+			force: false,
+		});
+		expect(exitCode).toBe(0);
+	});
+
 	it("rejects an unknown agent with usage + exit 1, never calling any command", async () => {
 		const { err, exitCode } = await run(["hooks", "install", "foo"]);
 
 		expect(runClaudeHookCommand).not.toHaveBeenCalled();
 		expect(runCodexHookCommand).not.toHaveBeenCalled();
 		expect(err.join("\n")).toContain(
-			"javi-forge hooks install <claude|codex|opencode>",
+			"javi-forge hooks install <claude|codex|opencode|grok>",
 		);
 		expect(exitCode).toBe(1);
 	});
@@ -183,7 +195,7 @@ describe("hooks dispatch", () => {
 		expect(runClaudeHookCommand).not.toHaveBeenCalled();
 		expect(runCodexHookCommand).not.toHaveBeenCalled();
 		expect(err.join("\n")).toContain(
-			"javi-forge hooks doctor <claude|codex|opencode>",
+			"javi-forge hooks doctor <claude|codex|opencode|grok>",
 		);
 		expect(exitCode).toBe(1);
 	});

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "hook": {
+    "name": "javi-forge-skillguard-pre-tool-use.json",
+    "version": 1,
+    "matcher": "run_terminal_command|read_file|search_replace",
+    "historicalVersions": []
+  }
+}

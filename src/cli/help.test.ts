@@ -151,4 +151,10 @@ describe("help — hooks command", () => {
 		expect(HOOKS_HELP_TEXT).toContain("doctor codex");
 		expect(HOOKS_HELP_TEXT).toContain("repair codex");
 	});
+
+	it("HOOKS_HELP_TEXT documents the Grok Build hook subcommands", () => {
+		expect(HOOKS_HELP_TEXT).toContain("install grok");
+		expect(HOOKS_HELP_TEXT).toContain("doctor grok");
+		expect(HOOKS_HELP_TEXT).toContain("repair grok");
+	});
 });

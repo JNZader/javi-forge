@@ -289,6 +289,7 @@ function ancestorChain(leaf: string): string[] {
 interface StagedEntry {
 	dir: SecureDirHandle;
 	tempName: string;
+	identity?: SecureIdentity;
 	target: TransactionComponent;
 	prior: CapturedFile | null;
 }
@@ -375,11 +376,15 @@ export async function runTransaction(
 	// refuse ANY extended entry (lenient-gated THEN strict-managed); only ancestor-
 	// only segments loosen. No `process.platform` here — role is expressed by which
 	// dirs get proveManagedContainer'd (the managedContainers set).
+	function hold(dirPath: string, handle: SecureDirHandle): void {
+		heldByPath.set(dirPath, handle);
+		if (!heldOrder.includes(handle)) heldOrder.push(handle);
+	}
+
 	async function gate(dirPath: string, handle: SecureDirHandle): Promise<void> {
 		// Transfer ownership before refusal-capable proofs so `finally` closes a
 		// successfully opened handle even when either proof fails.
-		heldByPath.set(dirPath, handle);
-		heldOrder.push(handle);
+		hold(dirPath, handle);
 		must(`ownership ${dirPath}`, await secureFs.proveOwnershipAndMode(dirPath));
 		must(`acl ${dirPath}`, await secureFs.proveNoEndangeringAcl(dirPath));
 	}
@@ -432,6 +437,7 @@ export async function runTransaction(
 		// Own the created segment before post-create validation so any refusal rolls
 		// it back and closes its handle.
 		createdDirs.push(created);
+		hold(fullPath, created);
 		// Post-create identity revalidation + full gate on the new segment.
 		must(
 			`revalidate-created ${fullPath}`,
@@ -467,6 +473,8 @@ export async function runTransaction(
 		return true;
 	}
 
+	let workSucceeded = false;
+	const errors: string[] = [];
 	try {
 		// --- PREFLIGHT: gate the existing chain root..projectDir ---
 		for (const dirPath of ancestorChain(projectDir)) {
@@ -551,7 +559,17 @@ export async function runTransaction(
 				`revalidate-staged ${parentPath}`,
 				await secureFs.revalidateIdentity(dir.path, dir.identity),
 			);
-			staged.push({ dir, tempName: tName, target: component, prior });
+			const stagedEntry: StagedEntry = {
+				dir,
+				tempName: tName,
+				target: component,
+				prior,
+			};
+			staged.push(stagedEntry);
+			stagedEntry.identity = must(
+				`capture-staged ${tName}`,
+				await secureFs.captureFile(path.join(dir.path, tName)),
+			).identity;
 		}
 
 		// --- PRE-FIRST-RENAME FULL-GATE RE-PROVE (JD-007) ---
@@ -584,7 +602,8 @@ export async function runTransaction(
 		}
 
 		// --- COMMIT: asset first, settings second ---
-		for (const entry of staged) {
+		while (staged.length > 0) {
+			const entry = staged[0] as StagedEntry;
 			const base = path.basename(entry.target.path);
 			must(
 				`pre-rename ${entry.dir.path}`,
@@ -601,6 +620,7 @@ export async function runTransaction(
 					wasAbsent: entry.target.wasAbsent,
 					prior: entry.prior,
 				});
+				staged.shift();
 			} else if (renamed.mutation === "unknown") {
 				unknownRenameTarget = entry.target.path;
 			}
@@ -611,34 +631,35 @@ export async function runTransaction(
 			);
 		}
 
-		return {
-			ok: true,
-			committed: committed.map((c) => c.path),
-			backups,
-			errors: [],
-		};
+		workSucceeded = true;
 	} catch (error) {
-		const errors: string[] = [
-			error instanceof TxAbort ? error.message : String(error),
-		];
+		errors.push(error instanceof TxAbort ? error.message : String(error));
 		if (unknownRenameTarget) {
 			errors.push(
 				`STOP: unknown rename outcome at ${unknownRenameTarget}; manual recovery; no rollback or directory cleanup`,
 			);
 		} else {
-			await rollback(committed, createdDirs, errors);
+			try {
+				await rollback(committed, staged, createdDirs, errors);
+			} catch (rollbackError) {
+				errors.push(`rollback: ${String(rollbackError)}`);
+			}
 		}
-		return {
-			ok: false,
-			committed: committed.map((c) => c.path),
-			backups,
-			errors,
-		};
 	} finally {
-		for (const handle of new Set([...createdDirs, ...heldOrder])) {
-			await handle.close().catch(() => {});
+		for (const handle of heldOrder) {
+			try {
+				await handle.close();
+			} catch (error) {
+				errors.push(`close ${handle.path}: ${String(error)}`);
+			}
 		}
 	}
+	return {
+		ok: workSucceeded && errors.length === 0,
+		committed: committed.map((c) => c.path),
+		backups,
+		errors,
+	};
 
 	/** A rejected or malformed rename reply never proves absence of mutation. */
 	async function observeRename(
@@ -697,6 +718,7 @@ export async function runTransaction(
 
 	async function rollback(
 		done: CommittedEntry[],
+		pending: StagedEntry[],
 		created: SecureDirHandle[],
 		errors: string[],
 	): Promise<void> {
@@ -774,6 +796,21 @@ export async function runTransaction(
 					);
 				}
 			}
+		}
+		for (const entry of pending) {
+			const identity =
+				entry.identity ??
+				must(
+					`recapture-staged ${entry.tempName}`,
+					await secureFs.captureFile(path.join(entry.dir.path, entry.tempName)),
+				).identity;
+			const removed = await secureFs.unlinkIfIdentity(
+				entry.dir,
+				entry.tempName,
+				identity,
+			);
+			const detail = removed.detail ?? removed.refusal;
+			if (!removed.ok) errors.push(`cleanup ${entry.tempName}: ${detail}`);
 		}
 		// Remove only tx-created, identity-matched, still-empty segments, child-first.
 		for (const handle of [...created].reverse()) {

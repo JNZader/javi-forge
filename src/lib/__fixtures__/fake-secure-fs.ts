@@ -23,6 +23,8 @@ interface FakeFile {
 
 /** Per-call fault predicates; every one defaults to "no fault". */
 export interface FakeFaults {
+	closeRefuse?: (dirPath: string) => boolean;
+	reuseFirstHandle?: (dirPath: string) => boolean;
 	/** Refuse revalidateIdentity for a path on its Nth (1-based) call. */
 	revalidateRefuse?: (target: string, callIndex: number) => boolean;
 	/** Refuse proveOwnershipAndMode for a path on its Nth call. */
@@ -68,8 +70,11 @@ export interface FakeSecureFs extends PlatformSecureFs {
 	readonly dirs: Set<string>;
 	readonly files: Map<string, FakeFile>;
 	readonly dirModes: Map<string, number>;
+	readonly events: string[];
+	readonly closeAttempts: string[];
 	faults: FakeFaults;
 	seedDir(dirPath: string): void;
+	shareDirIdentity(target: string, source: string): void;
 	seedFile(filePath: string, bytes: Buffer, mode?: number): void;
 	fileText(filePath: string): string | undefined;
 	hasBackup(dirPath: string): boolean;
@@ -102,6 +107,10 @@ export function makeFakeSecureFs(): FakeSecureFs {
 	const endangeringCounts = new Map<string, number>();
 	const writeCounts = new Map<string, number>();
 	const managedCounts = new Map<string, number>();
+	const events: string[] = [];
+	const closeAttempts: string[] = [];
+	let handleSeq = 0,
+		firstHandle: SecureDirHandle | undefined;
 
 	const inoFor = (p: string): number => {
 		let ino = inos.get(p);
@@ -116,11 +125,21 @@ export function makeFakeSecureFs(): FakeSecureFs {
 		m.set(key, next);
 		return next;
 	};
-	const handleFor = (p: string): SecureDirHandle => ({
-		path: p,
-		identity: { dev: 1, ino: inoFor(p) },
-		close: async () => {},
-	});
+	const handleFor = (p: string): SecureDirHandle => {
+		if (firstHandle && fake.faults.reuseFirstHandle?.(p)) return firstHandle;
+		const token = `${p}#${++handleSeq}`;
+		const handle = {
+			path: p,
+			identity: { dev: 1, ino: inoFor(p) },
+			close: async () => {
+				events.push(`close ${token}`);
+				closeAttempts.push(token);
+				if (fake.faults.closeRefuse?.(p)) throw new Error(`close failed ${p}`);
+			},
+		};
+		firstHandle ??= handle;
+		return handle;
+	};
 	const isEmptyDir = (p: string): boolean => {
 		const prefix = `${p}/`;
 		for (const f of files.keys()) if (f.startsWith(prefix)) return false;
@@ -132,10 +151,15 @@ export function makeFakeSecureFs(): FakeSecureFs {
 		dirs,
 		files,
 		dirModes,
+		events,
+		closeAttempts,
 		faults: {},
 
 		seedDir(dirPath) {
 			dirs.add(dirPath);
+		},
+		shareDirIdentity(target, source) {
+			inos.set(target, inoFor(source));
 		},
 		seedFile(filePath, bytes, mode = 0o644) {
 			files.set(filePath, { bytes, mode });
@@ -161,6 +185,7 @@ export function makeFakeSecureFs(): FakeSecureFs {
 		},
 
 		async revalidateIdentity(target, held) {
+			events.push(`revalidate ${target}`);
 			const idx = bump(revalidateCounts, target);
 			if (fake.faults.revalidateRefuse?.(target, idx)) {
 				return unsafe(`identity drift ${target}`);
@@ -207,6 +232,7 @@ export function makeFakeSecureFs(): FakeSecureFs {
 
 		async createDirExclusive(parent, name, mode) {
 			const full = path.join(parent.path, name);
+			events.push(`create ${full}`);
 			if (dirs.has(full) || files.has(full)) return unsafe(`EEXIST ${full}`);
 			dirs.add(full);
 			dirModes.set(full, mode);
@@ -271,6 +297,7 @@ export function makeFakeSecureFs(): FakeSecureFs {
 		},
 
 		async rmdirIfIdentityEmpty(handle) {
+			events.push(`rmdir ${handle.path}`);
 			if (!dirs.has(handle.path)) return unsafe(`rmdir enoent ${handle.path}`);
 			if (inoFor(handle.path) !== handle.identity.ino) {
 				return unsafe(`rmdir identity ${handle.path}`);

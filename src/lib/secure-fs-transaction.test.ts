@@ -427,3 +427,33 @@ describe("runTransaction — managed-container proof (Round-4/5/6 seam)", () => 
 		expect(fake.files.has(SETTINGS)).toBe(false);
 	});
 });
+
+it("closes a repeated object once and distinct same-inode objects independently", async () => {
+	const repeated = freshFake();
+	repeated.faults.reuseFirstHandle = (dirPath) => dirPath === PROJECT;
+	await run(repeated, asset({ desired: null }), settings({ desired: null }));
+	expect(repeated.closeAttempts).toHaveLength(1);
+	const distinct = freshFake();
+	distinct.shareDirIdentity(PROJECT, "/");
+	distinct.faults.ownershipRefuse = (dirPath) => dirPath === PROJECT;
+	await run(distinct, asset(), settings());
+	expect(distinct.closeAttempts).toHaveLength(2);
+});
+it("keeps refusal primary, attempts every close, and reports close-only failure with commits", async () => {
+	const refused = freshFake();
+	refused.faults.ownershipRefuse = (dirPath) => dirPath === PROJECT;
+	refused.faults.closeRefuse = () => true;
+	const refusal = await run(refused, asset(), settings());
+	expect(refusal.errors[0]).toMatch(/ownership/);
+	expect(refusal.errors.slice(1)).toEqual([
+		"close /: Error: close failed /",
+		"close /proj: Error: close failed /proj",
+	]);
+	const succeeded = freshFake();
+	succeeded.faults.closeRefuse = (dirPath) => dirPath === PROJECT;
+	const closeOnly = await run(succeeded, asset(), settings());
+	expect(closeOnly.ok).toBe(false);
+	expect(closeOnly.committed).toEqual([ASSET, SETTINGS]);
+	expect(closeOnly.errors[0]).toBe("close /proj: Error: close failed /proj");
+	expect(succeeded.events.some((event) => event[1] === "m")).toBe(false);
+});

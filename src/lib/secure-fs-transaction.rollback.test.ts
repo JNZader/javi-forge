@@ -104,9 +104,38 @@ describe("runTransaction — rename fault refuses the whole operation", () => {
 		const outcome = await run(fake, asset(), settings());
 		expect(outcome.ok).toBe(false);
 		expect(outcome.committed).toEqual([]);
-		expect(fake.files.has(ASSET)).toBe(false);
-		expect(fake.files.has(SETTINGS)).toBe(false);
+		expect(fake.files.size).toBe(0);
+		expect(fake.dirs).toEqual(new Set(["/", PROJECT]));
 		expect(outcome.errors.join(" ")).toMatch(/rename asset\.mjs/);
+	});
+
+	it("rolls back a renamed target when post-rename revalidation refuses", async () => {
+		const fake = makeFakeSecureFs();
+		for (const dir of ["/", PROJECT]) fake.seedDir(dir);
+		fake.faults.revalidateRefuse = (target, index) =>
+			target === HOOKS && index === 6;
+		const outcome = await run(fake, asset(), settings());
+		expect(outcome.errors[0]).toMatch(/post-rename/);
+		expect(fake.files.size).toBe(0);
+		expect(fake.dirs).toEqual(new Set(["/", PROJECT]));
+		expect(fake.closeAttempts).toHaveLength(4);
+	});
+
+	it("owns a staged temp before its identity capture can refuse", async () => {
+		const fake = makeFakeSecureFs();
+		for (const dir of ["/", PROJECT]) fake.seedDir(dir);
+		let firstTempCapture = true;
+		fake.faults.captureRefuse = (target) => {
+			if (!firstTempCapture || !target.includes(".javi-forge.tmp."))
+				return false;
+			firstTempCapture = false;
+			return true;
+		};
+		const outcome = await run(fake, asset(), settings());
+		expect(outcome.errors[0]).toMatch(/capture-staged/);
+		expect(fake.files.size).toBe(0);
+		expect(fake.dirs).toEqual(new Set(["/", PROJECT]));
+		expect(fake.closeAttempts).toHaveLength(4);
 	});
 });
 
@@ -190,6 +219,29 @@ describe("runTransaction — guarded reverse-order rollback", () => {
 		// Both created segments were empty → removed by rollback.
 		expect(fake.dirs.has(HOOKS)).toBe(false);
 		expect(fake.dirs.has(CLAUDE)).toBe(false);
+		expect(fake.events.filter((event) => event.startsWith("rmdir"))).toEqual([
+			`rmdir ${HOOKS}`,
+			`rmdir ${CLAUDE}`,
+		]);
+		const firstClose = fake.events.findIndex((event) => event[1] === "l");
+		const lastRmdir = fake.events.findLastIndex((event) => event[0] === "r");
+		expect(firstClose).toBeGreaterThan(lastRmdir);
+	});
+
+	it("registers a created directory before post-create refusal, then removes and closes it", async () => {
+		const fake = makeFakeSecureFs();
+		fake.seedDir("/");
+		fake.seedDir(PROJECT);
+		fake.faults.revalidateRefuse = (target) => target === CLAUDE;
+		const outcome = await run(fake, asset(), settings());
+		expect(outcome.ok).toBe(false);
+		expect(fake.events.filter((event) => event.endsWith(CLAUDE))).toEqual([
+			`create ${CLAUDE}`,
+			`revalidate ${CLAUDE}`,
+			`rmdir ${CLAUDE}`,
+		]);
+		// biome-ignore format: keep the close assertion adjacent to lifecycle order.
+		expect(fake.closeAttempts.some((entry) => entry.startsWith(CLAUDE))).toBe(true);
 	});
 });
 

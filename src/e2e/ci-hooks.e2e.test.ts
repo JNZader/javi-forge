@@ -307,7 +307,11 @@ describe("hook dispatcher — hooks run round trip", () => {
 	it("ci init installs a shim whose body invokes the dispatcher", async () => {
 		const repo = await createHybridRepo(DISPATCH_PASSING_CONFIG);
 		// A real git repo is required for installCIHooks to write .git/hooks.
-		const gitInit = await runFileBackedProcess("git", ["init"], { cwd: repo });
+		const gitInit = await runFileBackedProcess(
+			"git",
+			["init", "--initial-branch=main"],
+			{ cwd: repo },
+		);
 		expect(gitInit.exitCode).toBe(0);
 
 		const { exitCode } = await runCLI(["ci", "init"], { cwd: repo });

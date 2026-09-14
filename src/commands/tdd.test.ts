@@ -120,7 +120,9 @@ describe("legacy generated TDD hook migrates via the foreign path (matrix e)", (
 		tmpDir = await fs.mkdtemp(
 			path.join(os.tmpdir(), "javi-forge-tdd-migrate-"),
 		);
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		await fs.ensureDir(path.join(tmpDir, ".git", "hooks"));
 		await fs.writeFile(preCommit(tmpDir), LEGACY_TDD_HOOK, { mode: 0o755 });
 	});

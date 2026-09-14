@@ -17,7 +17,7 @@ describe("installCIHooks() — integration", () => {
 	beforeEach(async () => {
 		tmpDir = await createTempDir("ci-init-test-");
 		// Init a real git repo
-		execFileSync("git", ["init"], { cwd: tmpDir });
+		execFileSync("git", ["init", "--initial-branch=main"], { cwd: tmpDir });
 	});
 
 	afterEach(async () => {
@@ -162,7 +162,9 @@ describe("installCIHooks() — core.hooksPath guard (matrix a/c/d/f/g)", () => {
 
 	beforeEach(async () => {
 		repo = await createTempDir("ci-guard-");
-		execFileSync("git", ["init", "-q"], { cwd: repo });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: repo,
+		});
 		globalCfg = path.join(repo, "gitconfig-global");
 		systemCfg = path.join(repo, "gitconfig-system");
 		await fs.writeFile(globalCfg, "");

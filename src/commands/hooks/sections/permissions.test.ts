@@ -127,7 +127,9 @@ describe("permissionsSection (integration, real git + stat)", () => {
 	let repo: string;
 	beforeEach(async () => {
 		repo = await fs.mkdtemp(path.join(os.tmpdir(), "jf-perms-"));
-		await execFileAsync("git", ["init", "-q"], { cwd: repo });
+		await execFileAsync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: repo,
+		});
 		await execFileAsync("git", ["config", "user.email", "t@t.dev"], {
 			cwd: repo,
 		});

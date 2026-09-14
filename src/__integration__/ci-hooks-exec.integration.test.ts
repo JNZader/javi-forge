@@ -122,7 +122,7 @@ async function writeGitPayloadStub(exitCode: number): Promise<string> {
 set -e
 mkdir -p "$PAYLOAD_CHILD"
 cd "$PAYLOAD_CHILD"
-git init -q
+git init -q --initial-branch=main
 git config user.name "Sacrificial Child"
 git config user.email "child@example.invalid"
 printf 'child\n' > child.txt
@@ -220,7 +220,7 @@ async function runCommitMsg(message: string): Promise<HookRunResult> {
 describe("installed hooks — executed", () => {
 	beforeEach(async () => {
 		tmpDir = await createTempDir("javi-forge-hooks-exec-");
-		execFileSync("git", ["init"], { cwd: tmpDir });
+		execFileSync("git", ["init", "--initial-branch=main"], { cwd: tmpDir });
 		execFileSync("git", ["config", "user.name", "Hook Fixture"], {
 			cwd: tmpDir,
 		});

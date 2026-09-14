@@ -562,7 +562,9 @@ describe("installCIHooks", () => {
 	});
 
 	it("installs the three hooks when .git exists", async () => {
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		const result = await installCIHooks(tmpDir);
 		expect(result.installed).toEqual(
 			expect.arrayContaining(["pre-commit", "pre-push", "commit-msg"]),
@@ -579,7 +581,9 @@ describe("installCIHooks", () => {
 	});
 
 	it("creates the hooks directory if it does not exist", async () => {
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		// Do NOT pre-create .git/hooks/
 		const result = await installCIHooks(tmpDir);
 		expect(result.installed.length).toBe(3);
@@ -587,7 +591,9 @@ describe("installCIHooks", () => {
 	});
 
 	it("pre-commit hook execs the `hooks run pre-commit` dispatcher (S1b shim)", async () => {
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		await installCIHooks(tmpDir);
 		const content = await fs.readFile(
 			path.join(tmpDir, ".git", "hooks", "pre-commit"),
@@ -600,7 +606,9 @@ describe("installCIHooks", () => {
 	});
 
 	it("pre-push hook execs the `hooks run pre-push` dispatcher (S1b shim)", async () => {
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		await installCIHooks(tmpDir);
 		const content = await fs.readFile(
 			path.join(tmpDir, ".git", "hooks", "pre-push"),
@@ -612,7 +620,9 @@ describe("installCIHooks", () => {
 	});
 
 	it("commit-msg hook lists AI attribution patterns", async () => {
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		await installCIHooks(tmpDir);
 		const content = await fs.readFile(
 			path.join(tmpDir, ".git", "hooks", "commit-msg"),
@@ -626,7 +636,9 @@ describe("installCIHooks", () => {
 	});
 
 	it("refuses to overwrite a hook that is a symlink", async () => {
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		await fs.ensureDir(path.join(tmpDir, ".git", "hooks"));
 		// Create a symlink at .git/hooks/pre-commit → /tmp/evil-target
 		// In the real attack, the target could be ~/.ssh/authorized_keys.
@@ -650,7 +662,9 @@ describe("installCIHooks", () => {
 	});
 
 	it("records write errors and continues with remaining hooks", async () => {
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		await fs.ensureDir(path.join(tmpDir, ".git", "hooks"));
 		// Create a DIRECTORY where the pre-commit file should be → writeFile fails
 		await fs.ensureDir(path.join(tmpDir, ".git", "hooks", "pre-commit"));
@@ -700,7 +714,9 @@ describe("installCIHooks byte-equivalence with assets/hooks", () => {
 
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookeq-"));
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 	});
 
 	afterEach(async () => {

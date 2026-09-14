@@ -186,7 +186,9 @@ describe("installCIHooks classification and write policy", () => {
 		// Real repo: the guard now reads --local core.hooksPath fail-CLOSED
 		// (JDA-001), so a faked .git dir would (correctly) refuse. Exercise the
 		// real git-config path.
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		hooksDir = path.join(tmpDir, ".git", "hooks");
 		await fs.ensureDir(hooksDir);
 	});
@@ -565,7 +567,9 @@ describe("installCIHooks --force and the backup protocol", () => {
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookbak-"));
 		// Real repo: the guard reads --local core.hooksPath fail-CLOSED (JDA-001).
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		hooksDir = path.join(tmpDir, ".git", "hooks");
 		await fs.ensureDir(hooksDir);
 		preCommit = path.join(hooksDir, "pre-commit");
@@ -801,7 +805,9 @@ describe("installCIHooks manifest failures", () => {
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookman-"));
 		// Real repo: the guard reads --local core.hooksPath fail-CLOSED (JDA-001).
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		await fs.ensureDir(path.join(tmpDir, ".git", "hooks"));
 	});
 
@@ -957,7 +963,9 @@ describe("installCIHooks core.hooksPath guard (D6 detect-before-mutate)", () => 
 
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "javi-forge-hookguard-"));
-		execFileSync("git", ["init", "-q"], { cwd: tmpDir });
+		execFileSync("git", ["init", "-q", "--initial-branch=main"], {
+			cwd: tmpDir,
+		});
 		hooksDir = path.join(tmpDir, ".git", "hooks");
 		await fs.ensureDir(hooksDir);
 		// Redirect global/system git config to empty temp files so the guard is

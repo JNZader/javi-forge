@@ -1189,11 +1189,11 @@ describe("installCIHooks core.hooksPath guard (D6 detect-before-mutate)", () => 
 		// Simulate a TRANSIENT git fault on the SINGLE `--local --get` read only;
 		// every other git invocation runs for real, so the scoped reads still pass.
 		const realExec = execMod.execFileAsync;
-		vi.spyOn(execMod, "execFileAsync").mockImplementation((async (
+		const mockExec = ((
 			file: string,
-			args: readonly string[],
-			opts: unknown,
-		) => {
+			args?: readonly string[] | null,
+			opts?: unknown,
+		): ReturnType<typeof realExec> => {
 			if (
 				file === "git" &&
 				Array.isArray(args) &&
@@ -1205,13 +1205,13 @@ describe("installCIHooks core.hooksPath guard (D6 detect-before-mutate)", () => 
 				err.code = 128; // non-1/5 → "cannot determine", must fail closed
 				throw err;
 			}
-			return realExec(
-				file as string,
-				args as string[],
-				opts as Record<string, unknown>,
-			);
-			// biome-ignore lint/suspicious/noExplicitAny: test double signature
-		}) as any);
+			return Reflect.apply(realExec, undefined, [
+				file,
+				args,
+				opts,
+			]) as ReturnType<typeof realExec>;
+		}) as unknown as typeof realExec;
+		vi.spyOn(execMod, "execFileAsync").mockImplementation(mockExec);
 
 		const result = await installCIHooks(tmpDir);
 

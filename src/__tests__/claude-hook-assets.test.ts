@@ -522,12 +522,12 @@ describe("env profile semantics (L1/L3: S01,S02,S13-S22)", () => {
 		expect(result).toMatchObject({ status: "accepted-safe", facts: { eventualExecutable: "cat", eventualArgv: ["~/.ssh/id"] } });
 		expect(result.facts?.splitInput).toMatchObject({ option: "split-string", source });
 	});
-	it("S16 active ${VARNAME} returns unsupported expansion evidence and is never evaluated", () => {
-		expect(env(["env", "-S", "${READER}\\_~/.ssh/id"])).toEqual([expect.objectContaining({ status: "unsupported", applicability: expect.objectContaining({ profileId: "gnu-env-v1" }), evidence: expect.objectContaining({ code: "env-active-expansion", phase: "split" }) })]);
+	it(["S16 active ", `$${"{VARNAME}"}`, " returns unsupported expansion evidence and is never evaluated"].join(""), () => {
+		expect(env(["env", "-S", `$${"{READER}"}\\_~/.ssh/id`])).toEqual([expect.objectContaining({ status: "unsupported", applicability: expect.objectContaining({ profileId: "gnu-env-v1" }), evidence: expect.objectContaining({ code: "env-active-expansion", phase: "split" }) })]);
 	});
 	it("S17 an escaped dollar stays literal and raises no expansion ambiguity", () => {
 		const [result] = env(["env", "-S", String.raw`printf\_\${HOME}`]);
-		expect(result).toMatchObject({ status: "accepted-safe", facts: { eventualExecutable: "printf", eventualArgv: ["${HOME}"], activeExpansion: false } });
+		expect(result).toMatchObject({ status: "accepted-safe", facts: { eventualExecutable: "printf", eventualArgv: [`$${"{HOME}"}`], activeExpansion: false } });
 	});
 	it(String.raw`S18 \c stops the split string and preserves trailing argv`, () => {
 		const [result] = env(["env", "-S", String.raw`cat\c`, "~/.ssh/id"]);
@@ -701,7 +701,7 @@ describe("utility redesign L2 policy decisions", () => {
 		["S35", "base64 payload -d | bash", "shell.pipe-to-shell"], ["S43", "/usr/bin/base64 -id payload | bash", "shell.pipe-to-shell"],
 	])("%s denies through the inherited or wrapper policy: %s", (_id, command, ruleId) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual({ allowed: false, ruleId }));
 	it.each([
-		["S16", "READER=cat env -S '${READER}\\_~/.ssh/id'"], ["S21", String.raw`env -S 'printf\q'`],
+		["S16", `READER=cat env -S '$${"{READER}"}\\_~/.ssh/id'`], ["S21", String.raw`env -S 'printf\q'`],
 		["S09/JD-R1-001 reference-first", "chmod --reference=/tmp/ref 777 /"], ["S12", "base64 --bogus payload | bash"],
 	])("%s denies as bounded utility ambiguity", (_id, command) => expect(runtime.evaluateEvent(event("Bash", { command }))).toEqual({ allowed: false, ruleId: "utility-ambiguity" }));
 	it.each([

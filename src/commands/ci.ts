@@ -1046,7 +1046,7 @@ async function runNativeProjectCommand(
 		projectDir,
 		{ ...filterDefinedEnv(process.env), CI: "true" },
 		timeout,
-		suppressStdout ? ["ignore", "ignore", "inherit"] : "inherit",
+		suppressStdout ? ["ignore", "ignore", "ignore"] : "inherit",
 	);
 	if (result.code !== 0) {
 		throw new Error(

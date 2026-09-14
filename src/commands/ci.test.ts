@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
@@ -296,6 +296,57 @@ void (async () => {
 
 		expect(output).not.toContain("NOISE");
 		expect(JSON.parse(output)).toMatchObject({
+			mode: "github-parity",
+			ok: true,
+			exitCode: 0,
+		});
+	});
+
+	it("keeps GitHub parity JSON stderr clean when local commands print warnings", async () => {
+		const binDir = path.join(tmpDir, "bin");
+		await fs.ensureDir(binDir);
+		const executable = `#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+printf 'npm warn Unknown env config "verify-deps-before-run"\\n' >&2
+exit 0
+`;
+		for (const tool of ["pnpm", "ruff", "bwrap"]) {
+			const executablePath = path.join(binDir, tool);
+			await fs.writeFile(executablePath, executable);
+			await fs.chmod(executablePath, 0o755);
+		}
+
+		const result = spawnSync(
+			path.join(process.cwd(), "node_modules", ".bin", "tsx"),
+			[
+				"--eval",
+				`
+import { collectGitHubParityOutcomes } from "./src/commands/ci.ts";
+void (async () => {
+  const result = await collectGitHubParityOutcomes({
+    projectDir: ${JSON.stringify(tmpDir)},
+    timeout: 1,
+  });
+  process.stdout.write(JSON.stringify(result));
+})();
+`,
+			],
+			{
+				cwd: process.cwd(),
+				encoding: "utf8",
+				env: {
+					...process.env,
+					PATH: `${binDir}:${originalPath ?? ""}`,
+				},
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
+
+		expect(result.status).toBe(0);
+		expect(result.stderr).not.toContain("Unknown env config");
+		expect(JSON.parse(result.stdout)).toMatchObject({
 			mode: "github-parity",
 			ok: true,
 			exitCode: 0,

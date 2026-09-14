@@ -167,13 +167,50 @@ describe("OpenCode SkillGuard manager", () => {
 		expect(edited.errors.join(" ")).toContain("--force");
 	});
 
-	it("doctor reports file currency and explicitly has no runtime execution evidence", async () => {
+	it("doctor reports file currency and an inconclusive runtime execution verdict", async () => {
 		const report = await doctorOpenCodeSkillGuard(baseDir, {
 			manifest: manifest(),
 		});
 		expect(report.healthy).toBe(false);
 		expect(report.plugin.state).toBe("absent");
 		expect(report.policy.state).toBe("absent");
-		expect(report.runtimeEvidence).toBe("not-implemented");
+		expect(report.execution).toEqual({
+			status: "inconclusive",
+			blockers: [],
+			unknownSources: [
+				"OpenCode plugin discovery is not locally verified",
+				"OpenCode plugin loading is not locally verified",
+				"OpenCode plugin execution is not locally verified",
+			],
+			residual: [
+				"Installed file bytes do not prove OpenCode discovered, loaded, or invoked the plugin",
+			],
+		});
+	});
+
+	it("doctor keeps managed-current files inconclusive because runtime is unverified", async () => {
+		fs.mkdirSync(paths().pluginsDir, { recursive: true });
+		fs.writeFileSync(
+			paths().pluginFile,
+			fs.readFileSync(SHIPPED_OPENCODE_PLUGIN),
+		);
+		fs.writeFileSync(
+			paths().policyFile,
+			fs.readFileSync(SHIPPED_OPENCODE_POLICY),
+		);
+
+		const report = await doctorOpenCodeSkillGuard(baseDir, {
+			manifest: manifest(),
+		});
+
+		expect(report.healthy).toBe(true);
+		expect(report.plugin.state).toBe("managed-current");
+		expect(report.policy.state).toBe("managed-current");
+		expect(report.execution.status).toBe("inconclusive");
+		expect(report.execution.unknownSources).toEqual([
+			"OpenCode plugin discovery is not locally verified",
+			"OpenCode plugin loading is not locally verified",
+			"OpenCode plugin execution is not locally verified",
+		]);
 	});
 });

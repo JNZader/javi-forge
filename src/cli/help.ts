@@ -192,7 +192,7 @@ export const HOOKS_HELP_TEXT = `
     doctor codex      Report Codex hook execution readiness and trust boundary
     repair codex      Repair the managed Codex guard; --force overwrites edits
     install opencode  Install the managed OpenCode global plugin (~/.config/opencode/plugins/)
-    doctor opencode   Report OpenCode plugin and policy file currency (informational)
+    doctor opencode   Report OpenCode plugin file currency and inconclusive runtime evidence
     repair opencode   Repair the OpenCode plugin pair; --force overwrites edits
     install grok      Install the Grok Build global PreToolUse hook (~/.grok/hooks/)
     doctor grok       Report Grok hook registration and policy file currency (informational)
@@ -211,8 +211,8 @@ export const HOOKS_HELP_TEXT = `
     doctor codex exits 0 when runnable, 1 when blocked, and 2 when inconclusive;
     it does not prove provider trust or runtime execution. Use repair codex
     --force only to overwrite an edited managed asset.
-    doctor opencode is informational and inspects installed files only; it does
-    not prove OpenCode discovered, loaded, or executed the plugin.
+    doctor opencode inspects installed files only and exits 2/inconclusive
+    because it cannot prove OpenCode discovered, loaded, or executed the plugin.
     doctor grok is informational and inspects the global hook registration and
     adjacent policy runtime only; it does not prove Grok loaded or executed them.
     doctor cursor is informational and inspects the global hook registration and

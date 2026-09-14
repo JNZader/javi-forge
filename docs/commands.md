@@ -253,8 +253,9 @@ reviewed and approved in Codex. When a managed Codex registration is
 
 OpenCode installation writes both the plugin and its policy runtime side by side
 under `~/.config/opencode/plugins/`; the plugin imports the latter relatively.
-`doctor opencode` is informational and classifies those two installed files. It
-does not claim that an OpenCode runtime discovered, loaded, or executed them.
+`doctor opencode` classifies those two installed files and reports effective
+execution as `inconclusive` / exit `2`, because installed bytes do not prove
+that an OpenCode runtime discovered, loaded, or executed the plugin.
 
 Grok Build installation writes a `PreToolUse` registration and adjacent policy
 runtime under `~/.grok/hooks/`. The registration intentionally matches only
@@ -358,6 +359,9 @@ The OpenCode installer owns only the two managed files under the current user's
 `~/.config/opencode/plugins/`. It does not edit `opencode.json`, project-local
 configuration, or any other OpenCode file. Foreign, malformed, symlink, and
 non-regular plugin targets remain fail-closed even with `--force`.
+`doctor opencode` remains read-only and reports runtime discovery/loading/
+execution as inconclusive until a reliable OpenCode runtime evidence mechanism
+exists.
 
 ### Grok Build global hook boundary
 

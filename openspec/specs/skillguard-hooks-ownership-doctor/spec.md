@@ -310,6 +310,31 @@ Codex config paths and trust state.
 - WHEN `hooks doctor codex` evaluates execution
 - THEN `status` is `runnable` only when every fail-closed check passes
 
+### Requirement: OpenCode doctor reports inconclusive effective execution until runtime evidence exists
+
+`hooks doctor opencode` MUST remain read-only and classify the managed global
+plugin and adjacent policy runtime under `~/.config/opencode/plugins/`. Because
+installed bytes do not prove that OpenCode discovered, loaded, or invoked the
+plugin, doctor MUST report an explicit `execution.status` of `inconclusive` and
+MUST exit `2` until a reliable bounded OpenCode runtime evidence mechanism is
+specified and implemented. It MUST NOT report `runnable` from installed-file
+currency alone.
+
+#### Scenario: Installed OpenCode files are not runtime proof
+
+- GIVEN the OpenCode plugin and adjacent policy runtime are managed-current
+- WHEN `hooks doctor opencode` evaluates execution
+- THEN `status` is `inconclusive`
+- AND the report names discovery/loading/execution as locally unverified
+- AND doctor exits `2`
+
+#### Scenario: Missing or drifted OpenCode files still report file health separately
+
+- GIVEN the OpenCode plugin or adjacent policy runtime is absent, foreign, edited, symlinked, or non-regular
+- WHEN `hooks doctor opencode` runs
+- THEN it reports the component state and remediation
+- AND it still does not claim runtime execution was verified
+
 ### Requirement: Codex ownership classification is agent-parameterized
 
 The nine-state ownership classifier MUST recognize the Codex-managed asset and

@@ -11,7 +11,10 @@ import { lstat, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { CLAUDE_HOOK_ASSETS_DIR, FORGE_ROOT } from "../constants.js";
-import type { AssetManifestEntry } from "./claude-hook-manager.js";
+import type {
+	AssetManifestEntry,
+	ExecutionReport,
+} from "./claude-hook-manager.js";
 import type { ClaudeHookComponentState } from "./claude-hook-settings.js";
 import { safeReadFile } from "./safe-read.js";
 import { selectSecureFs } from "./secure-fs-posix.js";
@@ -164,7 +167,7 @@ export interface OpenCodeHookDoctorReport {
 	policy: OpenCodeAssetClassification;
 	remediation: string[];
 	/** Installed-file inspection only; OpenCode runtime loading is not observed. */
-	runtimeEvidence: "not-implemented";
+	execution: ExecutionReport;
 }
 
 export interface OpenCodeDoctorOptions {
@@ -216,7 +219,18 @@ export async function doctorOpenCodeSkillGuard(
 		plugin,
 		policy,
 		remediation: [...new Set(remediation)],
-		runtimeEvidence: "not-implemented",
+		execution: {
+			status: "inconclusive",
+			blockers: [],
+			unknownSources: [
+				"OpenCode plugin discovery is not locally verified",
+				"OpenCode plugin loading is not locally verified",
+				"OpenCode plugin execution is not locally verified",
+			],
+			residual: [
+				"Installed file bytes do not prove OpenCode discovered, loaded, or invoked the plugin",
+			],
+		},
 	};
 }
 

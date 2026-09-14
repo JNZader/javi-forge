@@ -42,11 +42,17 @@ function renderDoctor(
 	log(`doctor opencode: ${report.healthy ? "healthy" : "unhealthy"}`);
 	log(`  plugin: ${report.plugin.state}`);
 	log(`  policy: ${report.policy.state}`);
-	log("  runtime: not verified (installed files only)");
+	log(`  execution: ${report.execution.status}`);
+	for (const unknown of report.execution.unknownSources) {
+		log(`  unknown: ${unknown}`);
+	}
+	for (const residual of report.execution.residual) {
+		log(`  residual: ${residual}`);
+	}
 	for (const remediation of report.remediation)
 		log(`  remediation: ${remediation}`);
-	// This is intentionally informational: local files cannot prove that OpenCode
-	// discovered, loaded, or invoked a plugin in a real session.
+	if (report.execution.status === "blocked") return 1;
+	if (report.execution.status === "inconclusive") return 2;
 	return 0;
 }
 

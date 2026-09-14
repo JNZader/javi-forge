@@ -10,7 +10,14 @@ const report = (healthy = true): OpenCodeHookDoctorReport => ({
 	plugin: { state: healthy ? "managed-current" : "absent" },
 	policy: { state: healthy ? "managed-current" : "absent" },
 	remediation: healthy ? [] : ["install the OpenCode plugin"],
-	runtimeEvidence: "not-implemented",
+	execution: {
+		status: "inconclusive",
+		blockers: [],
+		unknownSources: ["OpenCode plugin execution is not locally verified"],
+		residual: [
+			"Installed file bytes do not prove OpenCode discovered, loaded, or invoked the plugin",
+		],
+	},
 });
 
 const mutation = (): OpenCodeHookMutationResult => ({
@@ -51,7 +58,7 @@ describe("runOpenCodeHookCommand", () => {
 		expect(repair).toHaveBeenCalledWith(undefined, { force: true });
 	});
 
-	it("doctor is informational and says runtime execution is unverified", async () => {
+	it("doctor reports inconclusive execution and exits 2", async () => {
 		const out: string[] = [];
 		expect(
 			await runOpenCodeHookCommand(
@@ -64,7 +71,31 @@ describe("runOpenCodeHookCommand", () => {
 					logError: () => {},
 				},
 			),
-		).toBe(0);
-		expect(out.join("\n")).toContain("runtime: not verified");
+		).toBe(2);
+		expect(out.join("\n")).toContain("execution: inconclusive");
+		expect(out.join("\n")).toContain(
+			"unknown: OpenCode plugin execution is not locally verified",
+		);
+		expect(out.join("\n")).toContain(
+			"residual: Installed file bytes do not prove OpenCode discovered, loaded, or invoked the plugin",
+		);
+	});
+
+	it("doctor still exits 2 when installed files are healthy but runtime is unverified", async () => {
+		const out: string[] = [];
+		expect(
+			await runOpenCodeHookCommand(
+				"doctor",
+				"/cwd",
+				{},
+				{
+					doctor: vi.fn(async () => report(true)),
+					log: (line) => out.push(line),
+					logError: () => {},
+				},
+			),
+		).toBe(2);
+		expect(out.join("\n")).toContain("doctor opencode: healthy");
+		expect(out.join("\n")).toContain("execution: inconclusive");
 	});
 });

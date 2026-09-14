@@ -147,6 +147,27 @@ gates:
 Docker build, push, deploy, publish and release remain separate operations; the
 `user:` field only changes the local `docker run --user` value for CI execution.
 
+## Gate working directories
+
+Version 2 gates run at the repository root by default. Use `workdir:` when a
+monorepo gate belongs to a package subdirectory:
+
+```yaml
+version: 2
+gates:
+  - id: api-lint
+    workdir: packages/api
+    run: pnpm lint
+```
+
+`workdir` must stay inside the repository (no absolute paths, no `..` escape,
+no Windows-style backslashes, and no symlink escape at execution time). Native
+gates spawn with that directory as their process cwd. Image-backed gates `cd` to
+the same relative path under `/home/runner/work`, the container mount root.
+`JAVI_FORGE_CHANGED_FILES` remains repo-root-relative for backwards
+compatibility; `JAVI_FORGE_CHANGED_FILES_ABS` remains the cwd-independent form
+for gates that need changed-file paths from any `workdir`.
+
 ## Required tools (fail-closed)
 
 Before any phase of a runner executes, every entry in `requires` is checked

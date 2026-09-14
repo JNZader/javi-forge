@@ -28,6 +28,8 @@ export interface CIValidateGateSummary {
 	id: string;
 	mode: string;
 	scope: string;
+	/** Working directory relative to the project root. Present when not ".". */
+	workdir?: string;
 	/** Container image ref, present ONLY when the gate declares one. */
 	image?: string;
 	/** Docker --user override, present ONLY when the gate declares one. */
@@ -114,6 +116,7 @@ export async function validateCIConfig(
 				id: g.id,
 				mode: g.mode,
 				scope: g.scope,
+				...(g.workdir !== "." ? { workdir: g.workdir } : {}),
 				// Surface `image` ONLY when declared, so an image-less gate summary
 				// stays byte-identical to today (no `image` key).
 				...(g.image !== undefined ? { image: g.image } : {}),

@@ -1889,6 +1889,42 @@ gates:
 		);
 	});
 
+	it("runs a native gate from its configured workdir", async () => {
+		await fs.ensureDir(path.join(tmpDir, "packages", "api"));
+		await writeConfig(`
+version: 2
+gates:
+  - id: cwd
+    workdir: packages/api
+    run: pwd > ../../cwd.txt
+`);
+		await runCI({ projectDir: tmpDir, ...QUICK }, () => {});
+
+		expect(
+			(await fs.readFile(path.join(tmpDir, "cwd.txt"), "utf-8")).trim(),
+		).toBe(path.join(tmpDir, "packages", "api"));
+	});
+
+	it("refuses a gate workdir symlink that escapes the project root", async () => {
+		if (process.platform === "win32") return;
+		await fs.ensureSymlink(os.tmpdir(), path.join(tmpDir, "escape"), "dir");
+		await writeConfig(`
+version: 2
+gates:
+  - id: cwd
+    workdir: escape
+    run: pwd
+`);
+		const steps: CIStep[] = [];
+
+		await expect(
+			runCI({ projectDir: tmpDir, ...QUICK }, (step) =>
+				steps.push({ ...step }),
+			),
+		).rejects.toThrow(/blocking gate\(s\) failed: cwd/);
+		expect(steps.at(-1)?.detail).toContain("gate workdir escapes project root");
+	});
+
 	it("does NOT inject changed-files variants for a non-scope:changed gate", async () => {
 		await writeConfig(`
 version: 2
@@ -2349,7 +2385,7 @@ gates:
 
 		const call = lastContainerCall();
 		expect(call?.image).toBe("alpine:3.21");
-		expect(call?.command).toContain("cd /home/runner/work");
+		expect(call?.command).toContain(`cd '${CONTAINER_WORKDIR}'`);
 		expect(call?.env?.CI).toBe("true");
 		expect(call?.env?.FOO).toBe("bar");
 	});
@@ -2366,6 +2402,40 @@ gates:
 		await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
 
 		expect(lastContainerCall()?.user).toBe("runner");
+	});
+
+	it("runs an image gate from its configured container workdir", async () => {
+		await fs.ensureDir(path.join(tmpDir, "packages", "api"));
+		await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    workdir: packages/api
+    run: "pwd"
+`);
+		await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		expect(lastContainerCall()?.command).toBe(
+			`cd '${CONTAINER_WORKDIR}/packages/api' && pwd`,
+		);
+	});
+
+	it("quotes an image gate workdir before shell cd", async () => {
+		await fs.ensureDir(path.join(tmpDir, "packages", "api tools"));
+		await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    workdir: "packages/api tools"
+    run: "pwd"
+`);
+		await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		expect(lastContainerCall()?.command).toBe(
+			`cd '${CONTAINER_WORKDIR}/packages/api tools' && pwd`,
+		);
 	});
 
 	it("forwards JAVI_FORGE_CHANGED_FILES into the container allowlist for scope:changed", async () => {

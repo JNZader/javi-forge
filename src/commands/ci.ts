@@ -1460,7 +1460,7 @@ interface GateRunOptions {
 }
 
 /**
- * Execute a single gate command HOST-NATIVE via `bash -c`, at the repo root,
+ * Execute a single gate command HOST-NATIVE via `bash -c`, at the caller's cwd,
  * with the provided env MAP. Modeled on `runSemgrep`/`runGhagga` (a spawned
  * process, NOT `runStep`'s Docker branch — gates have no runner or image).
  *
@@ -1659,6 +1659,29 @@ const CHANGED_FILES_ABS_ENV = "JAVI_FORGE_CHANGED_FILES_ABS";
 /** Env var carrying a gate's optional baseline artifact path. */
 const BASELINE_ENV = "JAVI_FORGE_BASELINE";
 
+function shellSingleQuote(value: string): string {
+	return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+async function resolveContainedGateWorkdir(
+	projectDir: string,
+	workdir: string,
+): Promise<string> {
+	const nativeWorkdir = path.join(projectDir, workdir);
+	const [projectReal, workdirReal] = await Promise.all([
+		fs.realpath(projectDir),
+		fs.realpath(nativeWorkdir),
+	]);
+	const relative = path.relative(projectReal, workdirReal);
+	if (
+		relative === "" ||
+		(!relative.startsWith("..") && !path.isAbsolute(relative))
+	) {
+		return nativeWorkdir;
+	}
+	throw new Error(`gate workdir escapes project root: ${workdir}`);
+}
+
 /**
  * A single gate's structured result, collected for the headless JSON run path.
  * Mirrors the `{ id, mode, scope, status, blocking, changedFiles?, exitCode? }`
@@ -1699,8 +1722,8 @@ type ChangedScope =
 	| { kind: "skip"; reason: string };
 
 /**
- * Repo-level gate phase. Each gate runs host-native via `runGateNative` at the
- * repo root. Outcome semantics:
+ * Repo-level gate phase. Each gate runs in its configured `workdir` (repo root
+ * by default). Outcome semantics:
  *   - exit 0                         → `done`
  *   - non-zero/spawn error, blocking → `error`, gate id recorded (NOT re-thrown)
  *   - non-zero/spawn error, informative → `warning`, build never fails
@@ -1754,14 +1777,18 @@ async function runGateCommand(
 	nativeEnv: Record<string, string>,
 	containerEnv: Record<string, string>,
 ): Promise<GateRunResult> {
+	const nativeWorkdir = await resolveContainedGateWorkdir(
+		projectDir,
+		gate.workdir,
+	);
 	if (gate.image === undefined) {
-		return await runGateNative(cmd, projectDir, nativeEnv, gate.timeout);
+		return await runGateNative(cmd, nativeWorkdir, nativeEnv, gate.timeout);
 	}
+	const containerWorkdir = path.posix.join(CONTAINER_WORKDIR, gate.workdir);
 	const result = await runInContainer({
 		projectDir,
 		image: gate.image,
-		// Gates run at the mount root (native gates run at the repo root).
-		command: `cd ${CONTAINER_WORKDIR} && ${cmd}`,
+		command: `cd ${shellSingleQuote(containerWorkdir)} && ${cmd}`,
 		timeout: gate.timeout, // undefined ⇒ unbounded (docker.ts gate 7)
 		env: containerEnv,
 		stream: true,
@@ -1921,7 +1948,9 @@ async function runGates(
 			// target + WORKDIR), so `<projectDir>/<relpath>` would point at a
 			// non-existent HOST path inside the container. Instead it is computed twice
 			// below — once per execution context — and added to nativeEnv / containerEnv
-			// separately. See the nativeEnv / containerEnv construction.
+			// separately. See the nativeEnv / containerEnv construction. This remains
+			// independent from the gate's configured workdir: absolute paths resolve
+			// from any cwd.
 			// NUL-joined variant (GATE-5) is DELIBERATELY NOT INJECTED. A `git -z`
 			// style NUL separator is unambiguous for paths containing a literal
 			// newline, BUT a NUL byte cannot live in an environment variable: execve's
@@ -1944,7 +1973,7 @@ async function runGates(
 		const gateOverrides = gate.env ?? {};
 		// Context-dependent ABSOLUTE-path variant (JDA-001): the SAME env var NAME,
 		// but a DIFFERENT base per execution mode. Native gates resolve against the
-		// HOST projectDir (cwd = repo root); container gates resolve against
+		// HOST projectDir (independent from gate workdir); container gates resolve against
 		// CONTAINER_WORKDIR — the exact mount target from docker.ts (single source of
 		// truth), so the "absolute" path is valid INSIDE the container. Both use the
 		// SAME relpaths in the SAME order, newline-joined, only for scope:changed

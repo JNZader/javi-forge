@@ -388,13 +388,14 @@ describe("parseCIConfig — gates schema", () => {
 		const gate = config.gates?.[0];
 		expect(gate?.id).toBe("coverage");
 		expect(gate?.run).toEqual(["echo cover"]);
+		expect(gate?.workdir).toBe(".");
 		expect(gate?.mode).toBe("blocking");
 		expect(gate?.scope).toBe("all");
 		expect(gate?.baseline).toBeUndefined();
 		expect(gate?.env).toBeUndefined();
 	});
 
-	it("normalizes a list `run` and reads mode/scope/baseline/env", () => {
+	it("normalizes a list `run` and reads workdir/mode/scope/baseline/env", () => {
 		const config = parseCIConfig(
 			V2(
 				[
@@ -403,6 +404,7 @@ describe("parseCIConfig — gates schema", () => {
 					"    run:",
 					"      - echo one",
 					"      - echo two",
+					"    workdir: packages/api",
 					"    mode: informative",
 					"    scope: changed",
 					"    baseline: .baseline/audit.json",
@@ -413,6 +415,7 @@ describe("parseCIConfig — gates schema", () => {
 		);
 		const gate = config.gates?.[0];
 		expect(gate?.run).toEqual(["echo one", "echo two"]);
+		expect(gate?.workdir).toBe("packages/api");
 		expect(gate?.mode).toBe("informative");
 		expect(gate?.scope).toBe("changed");
 		expect(gate?.baseline).toBe(".baseline/audit.json");
@@ -459,6 +462,22 @@ describe("parseCIConfig — gates schema", () => {
 			expect(scopeErr?.message).toMatch(/all, changed/);
 			expect(scopeErr?.message).toContain("staged");
 		}
+	});
+
+	it("rejects a gate workdir that escapes the project root", () => {
+		expectError(
+			V2("gates:\n  - id: g\n    run: echo a\n    workdir: ../../etc"),
+			/gates\[0\]\.workdir|project root/,
+		);
+	});
+
+	it("rejects a gate workdir with Windows-style separators", () => {
+		expectError(
+			V2(
+				'gates:\n  - id: g\n    run: echo a\n    workdir: "..\\\\..\\\\Windows"',
+			),
+			/gates\[0\]\.workdir|project root/,
+		);
 	});
 
 	it("rejects a tag-unsafe gate id", () => {

@@ -71,11 +71,13 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 				if (gates.length > 0) {
 					console.log(`  ${gates.length} gate(s):`);
 					for (const gate of gates) {
+						const workdir =
+							gate.workdir !== undefined ? `, workdir: ${gate.workdir}` : "";
 						const image =
 							gate.image !== undefined ? `, image: ${gate.image}` : "";
 						const user = gate.user !== undefined ? `, user: ${gate.user}` : "";
 						console.log(
-							`    - ${gate.id} (${gate.mode}, scope: ${gate.scope}${image}${user})`,
+							`    - ${gate.id} (${gate.mode}, scope: ${gate.scope}${workdir}${image}${user})`,
 						);
 					}
 				}

@@ -107,6 +107,30 @@ describe("ci validate dispatch", () => {
 		expect(exitCode).toBe(0);
 	});
 
+	it("prints a gate workdir when declared", async () => {
+		validateCIConfig.mockResolvedValue({
+			ok: true,
+			mode: "config",
+			configPath: "/repo/.javi-forge/ci.yaml",
+			runners: [],
+			gates: [
+				{
+					id: "audit",
+					mode: "blocking",
+					scope: "all",
+					workdir: "packages/api",
+				},
+			],
+		});
+
+		const { out, exitCode } = await runValidate();
+
+		expect(out.join("\n")).toContain(
+			"audit (blocking, scope: all, workdir: packages/api)",
+		);
+		expect(exitCode).toBe(0);
+	});
+
 	it("reports a zero-config repo as valid auto-detect (exit 0), not a failure", async () => {
 		validateCIConfig.mockResolvedValue({
 			ok: true,

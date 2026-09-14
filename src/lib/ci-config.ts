@@ -75,6 +75,8 @@ export interface CIGateConfig {
 	id: string;
 	/** Command(s) to run — string or list, normalized to a list. */
 	run: string[];
+	/** Working directory relative to the project root (default: "."). */
+	workdir: string;
 	/** blocking (default) fails the build; informative degrades to a warning. */
 	mode: GateMode;
 	/** all (default) or changed — the file scope the gate cares about. */
@@ -308,6 +310,37 @@ function normalizeStringList(
 	return [];
 }
 
+function validateProjectRelativeDirectory(
+	value: unknown,
+	fieldPath: string,
+	errors: CIConfigValidationError[],
+): string {
+	if (value === undefined) return ".";
+	if (typeof value !== "string" || !value.trim()) {
+		errors.push({
+			path: fieldPath,
+			message: "directory must be a non-empty string",
+		});
+		return ".";
+	}
+
+	const normalized = path.posix.normalize(value);
+	if (
+		path.isAbsolute(value) ||
+		path.win32.isAbsolute(value) ||
+		value.includes("\\") ||
+		normalized === ".." ||
+		normalized.startsWith("../")
+	) {
+		errors.push({
+			path: fieldPath,
+			message: "directory must stay inside the project root",
+		});
+		return ".";
+	}
+	return normalized;
+}
+
 function validateRunner(
 	raw: unknown,
 	index: number,
@@ -350,29 +383,11 @@ function validateRunner(
 		});
 	}
 
-	let directory = ".";
-	if (raw.directory !== undefined) {
-		if (typeof raw.directory !== "string" || !raw.directory.trim()) {
-			errors.push({
-				path: `${base}.directory`,
-				message: "directory must be a non-empty string",
-			});
-		} else {
-			const normalized = path.posix.normalize(raw.directory);
-			if (
-				path.isAbsolute(raw.directory) ||
-				normalized === ".." ||
-				normalized.startsWith("../")
-			) {
-				errors.push({
-					path: `${base}.directory`,
-					message: "directory must stay inside the project root",
-				});
-			} else {
-				directory = normalized;
-			}
-		}
-	}
+	const directory = validateProjectRelativeDirectory(
+		raw.directory,
+		`${base}.directory`,
+		errors,
+	);
 
 	const image = validateImageRef(raw.image, `${base}.image`, errors);
 	const user = validateDockerUser(raw.user, `${base}.user`, errors);
@@ -433,6 +448,7 @@ function validateRunner(
 const GATE_FIELDS = new Set([
 	"id",
 	"run",
+	"workdir",
 	"mode",
 	"scope",
 	"baseline",
@@ -492,6 +508,12 @@ function validateGate(
 			message: "run must be a non-empty string or a list of non-empty strings",
 		});
 	}
+
+	const workdir = validateProjectRelativeDirectory(
+		raw.workdir,
+		`${base}.workdir`,
+		errors,
+	);
 
 	let mode: GateMode = GATE_MODE.BLOCKING;
 	if (raw.mode !== undefined) {
@@ -568,6 +590,7 @@ function validateGate(
 	return {
 		id: typeof id === "string" ? id.trim() : "",
 		run,
+		workdir,
 		mode,
 		scope,
 		baseline,

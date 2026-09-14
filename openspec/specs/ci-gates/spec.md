@@ -50,17 +50,21 @@ unknown-key error: the allowed-key set MUST be computed AFTER reading `version`,
 
 Each gate MUST declare a tag-safe, unique `id` and a `run` (`string` or `string[]`). `mode` MUST
 be one of `blocking | informative` (default `blocking`). `scope` MUST be one of `all | changed`
-(default `all`). `baseline` (path), `env` (record of string→string) and `timeout` (a positive number
-of seconds) are OPTIONAL. A duplicate `id` MUST fail with a named error. An invalid `mode` or `scope`
-value MUST fail with a named error naming the offending field. A `timeout` that is not a positive
-finite number (e.g. `0`, a negative, or a non-number) MUST fail with a named error naming the
-`timeout` field. A gate WITHOUT `timeout` behaves exactly as before (no timeout, runs to completion).
+(default `all`). `workdir` (directory relative to the project root, default `"."`), `baseline`
+(path), `env` (record of string→string) and `timeout` (a positive number of seconds) are OPTIONAL.
+A duplicate `id` MUST fail with a named error. An invalid `mode` or `scope` value MUST fail with a
+named error naming the offending field. A `workdir` that is empty, absolute, contains Windows-style
+backslashes, or escapes the project root with `..` MUST fail closed with a named `workdir` error. At
+execution time, the selected `workdir` realpath MUST still stay under the project root, so a symlink
+escape MUST be refused before running the gate command. A `timeout` that is not a positive finite
+number (e.g. `0`, a negative, or a non-number) MUST fail with a named error naming the `timeout`
+field. A gate WITHOUT `timeout` behaves exactly as before (no timeout, runs to completion).
 
 #### Scenario: valid gate with defaults
 
 - GIVEN a gate with `id` and `run` only
 - WHEN it is parsed
-- THEN `mode` defaults to `blocking` and `scope` defaults to `all`
+- THEN `mode` defaults to `blocking`, `scope` defaults to `all`, and `workdir` defaults to `.`
 
 #### Scenario: duplicate id rejected
 
@@ -73,6 +77,12 @@ finite number (e.g. `0`, a negative, or a non-number) MUST fail with a named err
 - GIVEN a gate with `mode: warn` or `scope: staged`
 - WHEN it is validated
 - THEN validation fails with a named error identifying the invalid field and value
+
+#### Scenario: invalid workdir rejected
+
+- GIVEN a gate with an absolute `workdir` or a `workdir` that escapes the project root
+- WHEN it is validated
+- THEN validation fails with a named error identifying the `workdir` field
 
 #### Scenario: id must be tag-safe
 
@@ -88,15 +98,16 @@ finite number (e.g. `0`, a negative, or a non-number) MUST fail with a named err
 
 ### Requirement: Gate execution phase and outcome semantics
 
-Gates MUST run as a repo-level phase AFTER all runners, each executed HOST-NATIVE (a spawned
-process at the repo root, modeled on the native security/ghagga phase), NOT through `runStep`'s
-Docker branch (which requires a runner and a resolved image that gates do not have). The native gate
-executor MUST return the child exit code (it MUST NOT merely throw), so the outcome collector and
-the JSON `exitCode` field are populatable. Running gates inside Docker is a deferred follow-up (it
-needs gate-image resolution) and is OUT OF SCOPE for version 2. A BLOCKING gate whose command exits
-non-zero MUST fail the build (process exits non-zero). An INFORMATIVE gate whose command exits
-non-zero MUST report status `warning`, MUST leave the process exit code at 0, and MUST NOT abort the
-remaining gates or runners. Informative gates MUST NEVER fail the build. For a multi-command gate,
+Gates MUST run as a repo-level phase AFTER all runners. A gate without `image` executes HOST-NATIVE
+(a spawned process modeled on the native security/ghagga phase). A gate with `image` executes inside
+that container image and MUST NOT fall through to native execution when Docker is unavailable. Both
+paths honor `workdir`: native gates spawn with `<projectDir>/<workdir>` as process cwd; image gates
+run from `/home/runner/work/<workdir>` inside the container. The native gate executor MUST return
+the child exit code (it MUST NOT merely throw), so the outcome collector and the JSON `exitCode`
+field are populatable. A BLOCKING gate whose command exits non-zero MUST fail the build (process
+exits non-zero). An INFORMATIVE gate whose command exits non-zero MUST report status `warning`, MUST
+leave the process exit code at 0, and MUST NOT abort the remaining gates or runners. Informative
+gates MUST NEVER fail the build. For a multi-command gate,
 commands MUST run in order and STOP at the first non-zero exit (fail-fast, matching the runner
 precedent); that first non-zero code is the gate's reported `exitCode`.
 
@@ -193,7 +204,7 @@ variables, in the SAME order:
   repo-root-relative variant, while a gate's own runtime cwd is unknowable to the engine.
   The absolute BASE is CONTEXT-DEPENDENT — the same var NAME resolves in the gate's own execution
   context: on the NATIVE path the base is the host project dir (`<projectDir>/<relpath>`, native
-  cwd = repo root); on the CONTAINER path the base is the mount target `/home/runner/work`
+  independent of the gate `workdir`); on the CONTAINER path the base is the mount target `/home/runner/work`
   (`/home/runner/work/<relpath>`), because a containerized gate runs with the repo bind-mounted
   there — the host project dir does not exist inside the container. A single host-absolute value
   does NOT resolve on both paths; the value differs by execution mode so it is valid wherever the
@@ -260,8 +271,9 @@ newline corrupts line-based parsing — therefore stands; a gate needing absolut
 ### Requirement: ci validate extended to gates
 
 `ci validate` MUST validate the entire `gates` block and surface every schema error above
-(version gating, duplicate id, invalid mode/scope, tag-unsafe id, unknown key) WITHOUT executing
-any gate command.
+(version gating, duplicate id, invalid mode/scope/workdir, tag-unsafe id, unknown key) WITHOUT
+executing any gate command. A non-default gate `workdir` MAY be surfaced in summaries; the default
+`.` MAY be omitted for output compatibility.
 
 #### Scenario: validate surfaces gate schema errors without executing
 

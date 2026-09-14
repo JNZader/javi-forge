@@ -200,6 +200,32 @@ describe("validateCIConfig", () => {
 		}
 	});
 
+	it("surfaces a gate workdir in the summary when declared", async () => {
+		await writeConfig(
+			[
+				"version: 2",
+				"gates:",
+				"  - id: audit",
+				"    workdir: packages/api",
+				"    run: echo a",
+			].join("\n"),
+		);
+
+		const result = await validateCIConfig(tmpDir);
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.gates).toEqual([
+				{
+					id: "audit",
+					mode: "blocking",
+					scope: "all",
+					workdir: "packages/api",
+				},
+			]);
+		}
+	});
+
 	it("omits image from the summary for a v2 gate without image (byte-identical)", async () => {
 		await writeConfig(
 			"version: 2\ngates:\n  - id: coverage\n    run: echo cover\n    mode: informative",

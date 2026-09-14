@@ -276,6 +276,13 @@ subdirectory in a monorepo must relativize the paths itself; the engine does NOT
   get `/home/runner/work/<relpath>` (the bind-mount target, sourced from a shared `CONTAINER_WORKDIR`
   constant so it can't drift). Judgment-day caught + fixed the container-base bug. Follow-up still open:
   a per-gate `workdir` field (deferred design).
+- **FOLLOW-UP CLOSED 2026-09-14**: added `workdir:` for version 2 gates. Native gates spawn with
+  `<projectDir>/<workdir>` as process cwd; image-backed gates `cd` to
+  `/home/runner/work/<workdir>` before running the gate command. `workdir` is validated like runner
+  directories, plus Windows-style backslashes are refused; execution also realpath-checks the selected
+  directory so a symlink cannot escape the project root. Changed-file vars stay unchanged:
+  root-relative `$JAVI_FORGE_CHANGED_FILES` for compatibility and cwd-independent
+  `$JAVI_FORGE_CHANGED_FILES_ABS` for package-local gates.
 
 ### GATE-5 — Newline-in-path corruption in changed-file injection (JDB-103)
 

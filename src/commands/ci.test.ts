@@ -363,26 +363,35 @@ void (async () => {
 if [ "$1" = "--version" ]; then
   exit 0
 fi
+sleep 2 &
+printf 'audit failed with useful details\\n' >&2
 exit 7
 `,
 		);
 		await fs.chmod(pnpmPath, 0o755);
 		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
 
-		const result = await collectGitHubParityOutcomes({ projectDir: tmpDir });
+		const result = await collectGitHubParityOutcomes({
+			projectDir: tmpDir,
+			timeout: 0.2,
+		});
 
 		expect(result.ok).toBe(false);
 		expect(result.exitCode).toBe(1);
 		expect(result.summary.localFailed).toBe(1);
-		expect(result.error).toContain("Command failed");
-		expect(result.steps).toContainEqual(
-			expect.objectContaining({
-				id: "github-parity:install",
-				status: "error",
-				evidenceClass: "local",
-				label: "FAIL: pnpm install --frozen-lockfile",
-			}),
+		expect(result.error).toContain("Command failed with code 7");
+		expect(result.error).not.toContain("timed out");
+		expect(result.error).toContain("stderr:");
+		expect(result.error).toContain("audit failed with useful details");
+		const failedStep = result.steps.find(
+			(step) => step.id === "github-parity:install" && step.status === "error",
 		);
+		expect(failedStep).toMatchObject({
+			status: "error",
+			evidenceClass: "local",
+			label: "FAIL: pnpm install --frozen-lockfile",
+		});
+		expect(failedStep?.detail).toContain("audit failed with useful details");
 	});
 });
 

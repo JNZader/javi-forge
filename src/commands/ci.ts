@@ -1041,20 +1041,51 @@ async function runNativeProjectCommand(
 	timeout: number,
 	suppressStdout: boolean,
 ): Promise<void> {
-	const result = await runGateNative(
-		command,
-		projectDir,
-		{ ...filterDefinedEnv(process.env), CI: "true" },
-		timeout,
-		suppressStdout ? ["ignore", "ignore", "ignore"] : "inherit",
-	);
+	const env = { ...filterDefinedEnv(process.env), CI: "true" };
+	const result = suppressStdout
+		? await runGateNative(
+				command,
+				projectDir,
+				env,
+				timeout,
+				["ignore", "pipe", "pipe"],
+				{
+					captureOutput: true,
+					detached: true,
+					killProcessGroupOnExit: true,
+				},
+			)
+		: await runGateNative(command, projectDir, env, timeout, "inherit");
 	if (result.code !== 0) {
-		throw new Error(
-			result.timedOut
-				? `Command timed out after ${timeout} second(s)`
-				: `Command failed with code ${result.code}`,
+		throw new Error(formatNativeCommandFailure(result, timeout));
+	}
+}
+
+function formatNativeCommandFailure(
+	result: GateRunResult,
+	timeout: number,
+): string {
+	const summary = result.timedOut
+		? `Command timed out after ${timeout} second(s)`
+		: `Command failed with code ${result.code}`;
+	const output = formatCapturedCommandOutput(result);
+	return output === undefined ? summary : `${summary}\n${output}`;
+}
+
+function formatCapturedCommandOutput(
+	result: GateRunResult,
+): string | undefined {
+	const sections: string[] = [];
+	const stderr = result.stderr?.trim();
+	const stdout = result.stdout?.trim();
+	if (stderr) sections.push(`stderr:\n${stderr}`);
+	if (stdout) sections.push(`stdout:\n${stdout}`);
+	if (result.outputTruncated) {
+		sections.push(
+			`output truncated to the last ${GATE_OUTPUT_CAPTURE_LIMIT_BYTES} byte(s) per stream`,
 		);
 	}
+	return sections.length > 0 ? sections.join("\n") : undefined;
 }
 
 // =============================================================================
@@ -1412,6 +1443,15 @@ function filterDefinedEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 export interface GateRunResult {
 	code: number;
 	timedOut: boolean;
+	stdout?: string;
+	stderr?: string;
+	outputTruncated?: boolean;
+}
+
+interface GateRunOptions {
+	captureOutput?: boolean;
+	detached?: boolean;
+	killProcessGroupOnExit?: boolean;
 }
 
 /**
@@ -1452,12 +1492,64 @@ export async function runGateNative(
 	env: Record<string, string>,
 	timeoutSec?: number,
 	stdio: StdioOptions = "inherit",
+	options: GateRunOptions = {},
 ): Promise<GateRunResult> {
 	return await new Promise<GateRunResult>((resolve, reject) => {
-		const proc = spawn("bash", ["-c", cmd], { cwd, env, stdio });
+		const proc = spawn("bash", ["-c", cmd], {
+			cwd,
+			env,
+			stdio,
+			detached: options.detached === true,
+		});
 		let killTimer: NodeJS.Timeout | undefined;
 		let graceTimer: NodeJS.Timeout | undefined;
 		let timedOut = false;
+		let stdout = "";
+		let stderr = "";
+		let outputTruncated = false;
+		const appendCapturedOutput = (current: string, chunk: Buffer): string => {
+			const next = `${current}${chunk.toString("utf8")}`;
+			if (Buffer.byteLength(next, "utf8") <= GATE_OUTPUT_CAPTURE_LIMIT_BYTES) {
+				return next;
+			}
+			outputTruncated = true;
+			return Buffer.from(next, "utf8")
+				.subarray(-GATE_OUTPUT_CAPTURE_LIMIT_BYTES)
+				.toString("utf8");
+		};
+		if (options.captureOutput === true) {
+			proc.stdout?.on("data", (chunk: Buffer) => {
+				stdout = appendCapturedOutput(stdout, chunk);
+			});
+			proc.stderr?.on("data", (chunk: Buffer) => {
+				stderr = appendCapturedOutput(stderr, chunk);
+			});
+		}
+		const buildResult = (
+			code: number,
+			timedOutResult: boolean,
+		): GateRunResult => ({
+			code,
+			timedOut: timedOutResult,
+			...(stdout ? { stdout } : {}),
+			...(stderr ? { stderr } : {}),
+			...(outputTruncated ? { outputTruncated: true } : {}),
+		});
+		const killChild = (signal: NodeJS.Signals): void => {
+			if (
+				options.detached === true &&
+				options.killProcessGroupOnExit === true &&
+				proc.pid !== undefined
+			) {
+				try {
+					process.kill(-proc.pid, signal);
+				} catch {
+					// The process group may already be gone; cleanup is best-effort.
+				}
+				return;
+			}
+			proc.kill(signal);
+		};
 		const clearTimers = () => {
 			if (killTimer !== undefined) clearTimeout(killTimer);
 			if (graceTimer !== undefined) clearTimeout(graceTimer);
@@ -1471,12 +1563,17 @@ export async function runGateNative(
 				timedOut = true;
 				// Ask politely, then force: SIGKILL if the child is still alive after
 				// the grace window.
-				proc.kill("SIGTERM");
+				killChild("SIGTERM");
 				graceTimer = setTimeout(() => {
-					proc.kill("SIGKILL");
+					killChild("SIGKILL");
 				}, GATE_TIMEOUT_GRACE_MS);
 			}, timeoutSec * 1000);
 		}
+		proc.on("exit", () => {
+			if (options.killProcessGroupOnExit === true) {
+				killChild("SIGTERM");
+			}
+		});
 		proc.on("close", (code, signal) => {
 			clearTimers();
 			if (timedOut) {
@@ -1487,21 +1584,18 @@ export async function runGateNative(
 				// travels with the code so the caller can tell a wall-clock timeout apart
 				// from a child that itself exits 124 (both are 124, but only one is a
 				// timeout — R3-004 observability).
-				resolve({ code: GATE_TIMEOUT_EXIT_CODE, timedOut: true });
+				resolve(buildResult(GATE_TIMEOUT_EXIT_CODE, true));
 				return;
 			}
 			if (code !== null) {
-				resolve({ code, timedOut: false });
+				resolve(buildResult(code, false));
 				return;
 			}
 			// Signal death: map to a non-zero code so the collector records a
 			// blocking failure. `128 + signum` mirrors the shell; fall back to 1
 			// when the signal name is not resolvable.
 			const signum = signal ? os.constants.signals[signal] : undefined;
-			resolve({
-				code: signum !== undefined ? 128 + signum : 1,
-				timedOut: false,
-			});
+			resolve(buildResult(signum !== undefined ? 128 + signum : 1, false));
 		});
 		proc.on("error", (e) => {
 			clearTimers();
@@ -1512,6 +1606,8 @@ export async function runGateNative(
 
 /** Grace between the timeout SIGTERM and the escalated SIGKILL. */
 const GATE_TIMEOUT_GRACE_MS = 2000;
+/** Max retained stdout/stderr bytes per captured native command stream. */
+const GATE_OUTPUT_CAPTURE_LIMIT_BYTES = 8192;
 
 /**
  * Exit code resolved for a timed-out gate, regardless of how the child died.

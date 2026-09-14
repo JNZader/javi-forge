@@ -132,7 +132,7 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 	}
 	if (cli.flags.githubParity && cli.flags.json) {
 		console.error(
-			"--json is not supported with --github-parity; rerun without --json for PASS/SKIP/UNAVAILABLE local evidence.",
+			"--json is not supported with --github-parity; rerun without --json for LOCAL/FOLLOW-UP evidence.",
 		);
 		process.exit(1);
 	}

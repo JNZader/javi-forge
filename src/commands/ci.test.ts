@@ -153,13 +153,18 @@ printf '%s\\n' "$*" >> "$JAVI_FORGE_PARITY_LOG"
 		]);
 		expect(
 			steps.some(
-				(step) => step.id === "github-parity:ruff" && step.status === "done",
+				(step) =>
+					step.id === "github-parity:ruff" &&
+					step.status === "done" &&
+					step.label.startsWith("LOCAL PASS:"),
 			),
 		).toBe(true);
 		expect(
 			steps.some(
 				(step) =>
-					step.id === "github-parity:bubblewrap" && step.status === "done",
+					step.id === "github-parity:bubblewrap" &&
+					step.status === "done" &&
+					step.label.startsWith("LOCAL PASS:"),
 			),
 		).toBe(true);
 		expect(
@@ -167,7 +172,7 @@ printf '%s\\n' "$*" >> "$JAVI_FORGE_PARITY_LOG"
 				(step) =>
 					step.id === "github-parity:runtime-matrix" &&
 					step.status === "skipped" &&
-					step.label.startsWith("SKIP (UNAVAILABLE):"),
+					step.label.startsWith("FOLLOW-UP (GITHUB-HOSTED):"),
 			),
 		).toBe(true);
 		expect(
@@ -175,7 +180,7 @@ printf '%s\\n' "$*" >> "$JAVI_FORGE_PARITY_LOG"
 				(step) =>
 					step.id === "github-parity:self-ci" &&
 					step.status === "skipped" &&
-					step.label.startsWith("SKIP (UNAVAILABLE):"),
+					step.label.startsWith("FOLLOW-UP (GLOBAL SIDE EFFECT):"),
 			),
 		).toBe(true);
 	});

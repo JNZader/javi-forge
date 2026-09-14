@@ -881,6 +881,14 @@ interface GitHubParityEnvironmentCheck {
 	ciPurpose: string;
 }
 
+const GITHUB_PARITY_OUTCOME = {
+	LOCAL_RUN: "LOCAL RUN",
+	LOCAL_PASS: "LOCAL PASS",
+	LOCAL_TOOL_MISSING: "FOLLOW-UP (LOCAL TOOL MISSING)",
+	GITHUB_HOSTED: "FOLLOW-UP (GITHUB-HOSTED)",
+	GLOBAL_SIDE_EFFECT: "FOLLOW-UP (GLOBAL SIDE EFFECT)",
+} as const;
+
 const GITHUB_PARITY_ENVIRONMENT_CHECKS: readonly GitHubParityEnvironmentCheck[] =
 	[
 		{
@@ -918,14 +926,14 @@ async function runGitHubParity(
 			report(
 				onStep,
 				check.id,
-				`PASS: ${check.tool} available (${check.ciPurpose})`,
+				`${GITHUB_PARITY_OUTCOME.LOCAL_PASS}: ${check.tool} available (${check.ciPurpose})`,
 				"done",
 			);
 		} else {
 			report(
 				onStep,
 				check.id,
-				`SKIP (UNAVAILABLE): ${check.tool} required by GitHub CI for ${check.ciPurpose}`,
+				`${GITHUB_PARITY_OUTCOME.LOCAL_TOOL_MISSING}: ${check.tool} required by GitHub CI for ${check.ciPurpose}`,
 				"skipped",
 				"Not installed automatically; install it locally to reproduce this CI-only setup.",
 			);
@@ -941,14 +949,14 @@ async function runGitHubParity(
 	report(
 		onStep,
 		"github-parity:runtime-matrix",
-		"SKIP (UNAVAILABLE): GitHub-hosted Linux/Windows hook runtime matrix",
+		`${GITHUB_PARITY_OUTCOME.GITHUB_HOSTED}: Linux/Windows hook runtime matrix`,
 		"skipped",
 		"Run the reusable hook workflows on GitHub; local parity does not emulate their platform matrix.",
 	);
 	report(
 		onStep,
 		"github-parity:self-ci",
-		"SKIP (UNAVAILABLE): packed-tarball global-install self-CI",
+		`${GITHUB_PARITY_OUTCOME.GLOBAL_SIDE_EFFECT}: packed-tarball global-install self-CI`,
 		"skipped",
 		"Skipped because npm install -g mutates the global prefix; no safe non-mutating local equivalent is configured.",
 	);
@@ -960,10 +968,20 @@ async function runGitHubParityCommand(
 	onStep: CIStepCallback,
 	timeout: number,
 ): Promise<void> {
-	report(onStep, step.id, `RUN: ${step.command}`, "running");
+	report(
+		onStep,
+		step.id,
+		`${GITHUB_PARITY_OUTCOME.LOCAL_RUN}: ${step.command}`,
+		"running",
+	);
 	try {
 		await runNativeProjectCommand(step.command, projectDir, timeout);
-		report(onStep, step.id, `PASS: ${step.command}`, "done");
+		report(
+			onStep,
+			step.id,
+			`${GITHUB_PARITY_OUTCOME.LOCAL_PASS}: ${step.command}`,
+			"done",
+		);
 	} catch (error) {
 		report(onStep, step.id, `FAIL: ${step.command}`, "error", String(error));
 		throw error;

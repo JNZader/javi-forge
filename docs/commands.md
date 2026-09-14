@@ -70,7 +70,7 @@ javi-forge ci --no-docker                      # run natively
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--quick` | boolean | `false` | Lint + compile only (used by the pre-commit hook) |
-| `--github-parity` | boolean | `false` | Run the locally reproducible native subset of `.github/workflows/ci.yml`'s `test` job, including dependency restore. Reports CI-only tooling plus hosted matrix/global-install self-CI as unavailable follow-ups; does not alter quick hooks or certify the complete workflow. |
+| `--github-parity` | boolean | `false` | Run the locally reproducible native subset of `.github/workflows/ci.yml`'s `test` job, including dependency restore. Labels reproducible checks as `LOCAL` evidence and CI-only/global side-effect gaps as `FOLLOW-UP` evidence; does not alter quick hooks or certify the complete workflow. |
 | `--shell` | boolean | `false` | Open an interactive shell in the CI container |
 | `--detect` | boolean | `false` | Show resolved stack/runners and exit |
 | `--config` | string | `.javi-forge/ci.yaml` if present | Versioned mixed-runner config |

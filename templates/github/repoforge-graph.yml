@@ -29,7 +29,7 @@ jobs:
   graph:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install repoforge
         run: npm install -g repoforge
@@ -38,7 +38,7 @@ jobs:
         run: repoforge graph --type calls --output .repoforge/call-graph.json
 
       - name: Upload graph artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: call-graph
           path: .repoforge/call-graph.json

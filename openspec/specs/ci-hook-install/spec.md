@@ -389,12 +389,12 @@ _Added by change `hook-consolidation`, archived `2026-08-11`._
 The migration MUST be ATOMIC with a DETECT-BEFORE-MUTATE ordering: EVERY refuse path MUST leave the repo in its EXACT prior state (zero mutation), and the ONLY writes may happen on the fully-validated success/force path. The guard MUST perform its checks in this strict order before any mutation:
 
 1. Classify the `.git/hooks/{pre-commit,pre-push,commit-msg}` slots (pure read).
-2. Detect a shadowing higher-scope value via SCOPED reads — `git config --global --get core.hooksPath` and `git config --system --get core.hooksPath` return each scope's own value regardless of the local value. If either is non-empty, that value WOULD shadow `.git/hooks` once a local value is unset, so the guard MUST refuse loudly with ZERO mutation (it MUST NOT unset the local config and MUST install nothing). This detection MUST happen BEFORE any local mutation, so a global/system shadow can never leave the repo in a `local-unset + global-present` half-migrated state.
+2. Detect a shadowing higher-scope value via SCOPED include-aware reads — `git config --includes --global --get core.hooksPath` and `git config --includes --system --get core.hooksPath` return each scope's own value, including matching `[includeIf]` entries, regardless of the local value. If either is non-empty, that value WOULD shadow `.git/hooks` once a local value is unset, so the guard MUST refuse loudly with ZERO mutation (it MUST NOT unset the local config and MUST install nothing). This detection MUST happen BEFORE any local mutation, so a global/system shadow can never leave the repo in a `local-unset + global-present` half-migrated state.
 3. Read the LOCAL value (`git config --local --get core.hooksPath`). If it holds ANY value OTHER than the exact legacy `ci-local/hooks` (a foreign local husky/lefthook/custom manager), the guard MUST refuse loudly with zero mutation — never hijack another manager. If empty, this is the normal fresh-install case.
 4. If any classified slot would be `foreign` and `--force` is NOT set, the guard MUST REFUSE THE WHOLE OPERATION, leave `core.hooksPath` UNCHANGED (prior consistent state), and install nothing.
 5. Only when every check passes (or `--force` is set) may the guard unset the local `ci-local/hooks` value with an informative message and install into `.git/hooks`. The install MUST NOT run before the global/system shadow check (step 2) or the slot classification check (step 4).
 
-A scoped `--global`/`--system` read covers the common non-conditional global/system shadow; a value injected only via an `[includeIf]` conditional include is a documented residual edge not covered by the scoped read.
+The scoped reads MUST pass `--includes`; a value injected via a matching `[includeIf]` conditional include is a higher-scope shadow and MUST be detected before local migration.
 
 #### Scenario: Legacy value migrates
 
@@ -424,7 +424,13 @@ A scoped `--global`/`--system` read covers the common non-conditional global/sys
 
 - GIVEN local `core.hooksPath` is exactly `ci-local/hooks` AND a global (or system) `core.hooksPath` is also set
 - WHEN install runs
-- THEN it detects the global/system value via scoped reads (`git config --global --get` / `--system --get`) BEFORE any mutation, refuses loudly naming the global value, does NOT report a successful install, and leaves the LOCAL `core.hooksPath` value UNCHANGED (still exactly `ci-local/hooks` — never unset) — the repo is never left in a `local-unset + global-present` half-migrated state
+- THEN it detects the global/system value via include-aware scoped reads (`git config --includes --global --get` / `--includes --system --get`) BEFORE any mutation, refuses loudly naming the global value, does NOT report a successful install, and leaves the LOCAL `core.hooksPath` value UNCHANGED (still exactly `ci-local/hooks` — never unset) — the repo is never left in a `local-unset + global-present` half-migrated state
+
+#### Scenario: Global includeIf hooksPath shadowing is a loud refusal with zero mutation
+
+- GIVEN local `core.hooksPath` is exactly `ci-local/hooks` AND the global config contains a matching `[includeIf]` file that sets `core.hooksPath`
+- WHEN install runs
+- THEN it detects the included global value before any mutation, refuses loudly naming that value, installs nothing, and leaves the LOCAL `core.hooksPath` value unchanged
 
 ### Requirement: Shim release preserves silent auto-upgrade
 

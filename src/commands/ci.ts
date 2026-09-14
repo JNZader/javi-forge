@@ -2745,10 +2745,12 @@ const LEGACY_HOOKSPATH = "ci-local/hooks";
  *
  * `--global`/`--system` reads return each scope's OWN value regardless of the
  * local value, so a shadowing higher-scope hooksPath is visible with ZERO
- * mutation. git exits 1 (no section / no config file) or 5 (key unset) for "no
- * value" → `{ value: "" }`. ANY other failure is surfaced as `failed` so the
- * guard can fail CLOSED: a blind spot on a possible shadow must never let the
- * migration unset the local value and half-migrate the repo.
+ * mutation. `--includes` is load-bearing: a conditional `[includeIf]` entry in
+ * the global/system config is still a higher-scope shadow once the local legacy
+ * value is removed. git exits 1 (no section / no config file) or 5 (key unset)
+ * for "no value" → `{ value: "" }`. ANY other failure is surfaced as `failed`
+ * so the guard can fail CLOSED: a blind spot on a possible shadow must never
+ * let the migration unset the local value and half-migrate the repo.
  */
 async function readScopedHooksPath(
 	projectDir: string,
@@ -2757,7 +2759,7 @@ async function readScopedHooksPath(
 	try {
 		const { stdout } = await execFileAsync(
 			"git",
-			["config", scope, "--get", "core.hooksPath"],
+			["config", "--includes", scope, "--get", "core.hooksPath"],
 			{ cwd: projectDir },
 		);
 		return { value: stdout.trim() };
@@ -2934,12 +2936,6 @@ async function guardHooksPath(
 			refuse: `a worktree core.hooksPath='${worktree.value}' would redirect git away from .git/hooks — the installed hooks would NOT run. Resolve it first (git config --worktree --unset core.hooksPath) and re-run.`,
 		};
 	}
-
-	// Shadow reads now cover --global, --system and --worktree. The includeIf
-	// residual edge remains: a hooksPath injected only through a
-	// [includeIf "gitdir:…"] conditional include is NOT returned by
-	// --global/--system/--worktree --get and would surface only in an effective
-	// read — a documented residual edge, not covered by these scoped reads.
 
 	// ── Step 3: the LOCAL value. A foreign local manager (husky/lefthook/custom)
 	//   owns this repo's hooks; never hijack it. --force does NOT override (force

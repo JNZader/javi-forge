@@ -1252,6 +1252,36 @@ describe("installCIHooks core.hooksPath guard (D6 detect-before-mutate)", () => 
 		expect(result.errors.join("\n")).toContain("/etc/git-hooks");
 	});
 
+	it("row g: a global includeIf hooksPath shadow refuses before unsetting local legacy", async () => {
+		setLocalHooksPath("ci-local/hooks");
+		const included = path.join(tmpDir, "included-gitconfig");
+		const includePattern = `${tmpDir}/.git`;
+		await fs.writeFile(
+			globalCfg,
+			`[includeIf "gitdir:${includePattern}"]\n\tpath = ${included}\n`,
+		);
+		await fs.writeFile(
+			included,
+			"[core]\n\thooksPath = /home/user/.included-hooks\n",
+		);
+		expect(readScope("--global")).toBe("");
+		expect(
+			execFileSync(
+				"git",
+				["config", "--includes", "--global", "--get", "core.hooksPath"],
+				{ cwd: tmpDir, env: gitEnv(), encoding: "utf8" },
+			).trim(),
+		).toBe("/home/user/.included-hooks");
+
+		const result = await installCIHooks(tmpDir);
+
+		expect(readScope("--local")).toBe("ci-local/hooks");
+		expect(result.installed).toEqual([]);
+		expect(result.upgraded).toEqual([]);
+		expect(await fs.pathExists(hookPathFor("pre-commit"))).toBe(false);
+		expect(result.errors.join("\n")).toContain("/home/user/.included-hooks");
+	});
+
 	it("row g: a global shadow refuses even on a FRESH repo (no local value) — install would be inert", async () => {
 		// Even with nothing to unset, installing into .git/hooks while a global
 		// hooksPath shadows it is a FAIL-OPEN (hooks would never run). Refuse.

@@ -6,7 +6,7 @@
 # Usage:
 #   jobs:
 #     review:
-#       uses: JNZader/javi-forge/.github/workflows/reusable-ghagga-review.yml@main
+#       uses: JNZader/javi-forge/.github/workflows/reusable-ghagga-review.yml@<pinned-commit-sha-or-release-tag>
 #       with:
 #         ghagga-url: ${{ vars.GHAGGA_URL }}
 #       secrets:

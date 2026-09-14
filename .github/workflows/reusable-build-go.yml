@@ -6,7 +6,7 @@
 # Usage:
 #   jobs:
 #     build:
-#       uses: JNZader/javi-forge/.github/workflows/reusable-build-go.yml@main
+#       uses: JNZader/javi-forge/.github/workflows/reusable-build-go.yml@<pinned-commit-sha-or-release-tag>
 #       with:
 #         go-version: '1.23'
 # ===========================================

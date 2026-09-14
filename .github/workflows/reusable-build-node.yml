@@ -6,7 +6,7 @@
 # Usage:
 #   jobs:
 #     build:
-#       uses: JNZader/javi-forge/.github/workflows/reusable-build-node.yml@main
+#       uses: JNZader/javi-forge/.github/workflows/reusable-build-node.yml@<pinned-commit-sha-or-release-tag>
 #       with:
 #         node-version: '20'
 # ===========================================

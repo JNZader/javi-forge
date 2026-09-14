@@ -6,7 +6,7 @@
 # Usage:
 #   jobs:
 #     docker:
-#       uses: JNZader/javi-forge/.github/workflows/reusable-docker.yml@main
+#       uses: JNZader/javi-forge/.github/workflows/reusable-docker.yml@<pinned-commit-sha-or-release-tag>
 #       with:
 #         dockerfile: './Dockerfile'
 # ===========================================

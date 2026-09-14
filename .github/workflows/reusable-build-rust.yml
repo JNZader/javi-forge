@@ -6,7 +6,7 @@
 # Usage:
 #   jobs:
 #     build:
-#       uses: JNZader/javi-forge/.github/workflows/reusable-build-rust.yml@main
+#       uses: JNZader/javi-forge/.github/workflows/reusable-build-rust.yml@<pinned-commit-sha-or-release-tag>
 # ===========================================
 
 name: Rust Build (Reusable)

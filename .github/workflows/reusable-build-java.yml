@@ -6,7 +6,7 @@
 # Usage in your project:
 #   jobs:
 #     build:
-#       uses: JNZader/javi-forge/.github/workflows/reusable-build-java.yml@main
+#       uses: JNZader/javi-forge/.github/workflows/reusable-build-java.yml@<pinned-commit-sha-or-release-tag>
 #       with:
 #         java-version: '21'
 # ===========================================

@@ -540,6 +540,7 @@ describe("createPosixSecureFs ownership + secure I/O (host-independent, own tmp 
 		const { unlink } = await import("node:fs/promises");
 		await unlink(path.join(dir, "empty", "child"));
 		expect((await fsx.rmdirIfIdentityEmpty(seg.value)).ok).toBe(true);
+		await seg.value.close();
 		await parent.close();
 	});
 });

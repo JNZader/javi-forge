@@ -600,3 +600,14 @@ path and one that cannot.
   (write/delete-class ACL entries granted to foreign users), mirroring the ratified
   Windows **Predicate A**, while KEEPING the strict any-extended-entry predicate for the
   managed containers the installer itself creates.
+- **CLOSED 2026-08-19** — shipped by the POSIX ancestor-predicate work and recorded as
+  complete in `openspec/changes/archive/2026-08-19-agent-agnostic-codex/archive-report.md`.
+  `src/lib/secure-fs-posix.ts` now exposes the split predicate the ticket requested:
+  `proveNoEndangeringAcl` for ancestor controlling directories and the existing strict
+  `proveNoExtendedAcl`/managed-container path for installer-owned nodes. The real-Linux
+  suite no longer uses the old `JF_INT_BASE=/jf-int` escape hatch: `.github/workflows/
+  claude-hook-linux.yml` roots fixtures under `$HOME`/`RUNNER_TEMP`, captures the runner's
+  `/home` ACL as a diagnostic, and runs both with-ACL and without-`getfacl` legs. The
+  integration test documents the validation-by-revert proof in
+  `src/__integration__/secure-fs-posix.integration.test.ts`: a benign `/home` ACL is allowed,
+  but a path-endangering ACL in the fixture chain still refuses fail-closed.

@@ -2693,16 +2693,21 @@ async function writeHookFile(hookPath: string, content: string): Promise<void> {
 /**
  * Bring an already-current hook back to mode 0755 WITHOUT writing bytes.
  *
- * The chmod is skipped when the mode already matches, so the common path does
- * no syscall beyond the `lstat`; when it does run, `chmod` changes `ctime` only
- * — `mtime` and the contents are untouched, so the zero-write idempotence
- * contract survives. The path was classified as a regular file moments earlier;
- * the residual TOCTOU window is the one documented for the write path itself.
+ * The chmod is skipped when the mode already matches. When it does run, chmod
+ * changes `ctime` only — `mtime` and the contents are untouched, so the
+ * zero-write idempotence contract survives. The file is reopened with
+ * `O_NOFOLLOW` and repaired through the FD, so a symlink planted after
+ * classification cannot receive the chmod.
  */
 async function repairHookMode(hookPath: string): Promise<void> {
-	const stat = await lstatOrNull(hookPath);
-	if (stat !== null && (stat.mode & 0o777) !== HOOK_MODE) {
-		await fs.chmod(hookPath, HOOK_MODE);
+	const handle = await fsp.open(hookPath, constants.O_RDONLY | O_NOFOLLOW);
+	try {
+		const stat = await handle.stat();
+		if ((stat.mode & 0o777) !== HOOK_MODE) {
+			await handle.chmod(HOOK_MODE);
+		}
+	} finally {
+		await handle.close();
 	}
 }
 

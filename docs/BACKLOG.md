@@ -69,6 +69,13 @@ and auto-detection yields exactly one runner. The `??` fallbacks are unreachable
   can legitimately be empty. Zero behavior change, full suite green unchanged.
 
 > **Scope precision (R1 review, 2026-08-09)**: SEC-1's closure covers the WRITE path (`writeHookFile`, O_NOFOLLOW + fchmod) and the backup DESTINATION (COPYFILE_EXCL + fchmod-on-fd). Still parked, same local-attacker threat model, defense-in-depth only: (a) `repairHookMode`'s path-based chmod on the managed-current branch (R1-001), (b) `backupHook`'s source-side `stat`/`copyFile` follow symlinks — a post-classification swap can copy the link target into the backup before the write correctly aborts with ELOOP (R1-002), (c) the `nlink > 1` check. All three are strictly weaker than the code execution this attacker already holds.
+>
+> **R1-001 CLOSED 2026-09-14**: `repairHookMode` now reopens the hook with
+> `O_RDONLY|O_NOFOLLOW`, checks mode through the fd, and applies `handle.chmod`
+> on that same fd. A symlink planted after managed-current classification now
+> fails closed instead of receiving a path-following chmod. Covered by
+> `ci-hooks.test.ts` ("refuses a symlink planted before managed-current mode
+> repair").
 
 ### ENV-1 — Containerized CI runs leave `node_modules/.vite-temp` root-owned — CLOSED
 

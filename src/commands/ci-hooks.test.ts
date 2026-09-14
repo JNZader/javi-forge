@@ -292,6 +292,43 @@ describe("installCIHooks classification and write policy", () => {
 		expect(statAfter.mtimeMs).toBe(statBefore.mtimeMs);
 	});
 
+	it("refuses a symlink planted before managed-current mode repair", async () => {
+		await installCIHooks(tmpDir);
+		const hookPath = hookPathFor("pre-commit");
+		await fs.chmod(hookPath, 0o644);
+		const target = path.join(tmpDir, "repair-target");
+		await fs.writeFile(target, "TARGET");
+		await fs.chmod(target, 0o644);
+		const realReadFile = fs.readFile.bind(fs) as typeof fs.readFile;
+		let hookReads = 0;
+		const spy = vi.spyOn(fs, "readFile").mockImplementation((async (
+			file: string,
+			encoding: unknown,
+		) => {
+			const content = await realReadFile(file, encoding as never);
+			if (file === hookPath) {
+				hookReads += 1;
+			}
+			if (file === hookPath && hookReads === 2) {
+				await fs.remove(hookPath);
+				await fs.symlink(target, hookPath);
+			}
+			return content;
+		}) as never);
+
+		try {
+			const result = await installCIHooks(tmpDir);
+
+			const error = result.errors.find((e) => e.startsWith("pre-commit:"));
+			expect(error).toContain("ELOOP");
+			expect(result.installed).not.toContain("pre-commit");
+			expect(result.upgraded).not.toContain("pre-commit");
+			expect((await fs.stat(target)).mode & 0o777).toBe(0o644);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
 	it("gives a legacy-v0 upgrade the exec bit even when the historical file was 0644", async () => {
 		await fs.writeFile(hookPathFor("pre-commit"), readAsset("pre-commit"));
 		await fs.chmod(hookPathFor("pre-commit"), 0o644);

@@ -2660,22 +2660,29 @@ const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
  * open then addresses the FD — `fchmod`, not a second path lookup — so the
  * bytes and the mode provably land on the same inode.
  *
+ * The open intentionally omits `O_TRUNC`: truncating happens only AFTER the
+ * FD-backed hardlink check. With `O_TRUNC` in the open flags, a hardlinked
+ * victim would already be truncated before we could inspect `nlink`.
+ *
  * The mode argument applies ONLY when the file is CREATED: overwriting an
  * existing 0644 hook would leave it non-executable and git would silently skip
  * it. The `fchmod` is therefore unconditional, on every write path, which also
  * makes the final mode independent of the umask.
- *
- * NOT covered (deferred by decision in SEC-1): a hardlink to a victim file
- * survives `O_NOFOLLOW`. On modern Linux `fs.protected_hardlinks=1` blocks the
- * cross-owner case; an `nlink > 1` refusal is parked in the backlog.
  */
 async function writeHookFile(hookPath: string, content: string): Promise<void> {
 	const handle = await fsp.open(
 		hookPath,
-		constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | O_NOFOLLOW,
+		constants.O_WRONLY | constants.O_CREAT | O_NOFOLLOW,
 		HOOK_MODE,
 	);
 	try {
+		const stat = await handle.stat();
+		if (stat.nlink > 1) {
+			throw new Error(
+				`${hookPath} has multiple hard links; refusing to truncate shared inode`,
+			);
+		}
+		await handle.truncate(0);
 		await handle.writeFile(content, "utf8");
 		await handle.chmod(HOOK_MODE);
 	} finally {

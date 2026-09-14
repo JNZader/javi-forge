@@ -541,6 +541,24 @@ describe("installCIHooks classification and write policy", () => {
 		}
 	});
 
+	it("refuses a hardlinked hook path and leaves the sibling link intact", async () => {
+		const sibling = path.join(tmpDir, "hardlink-sibling");
+		const legacyBody = readAsset("pre-commit");
+		await fs.writeFile(sibling, legacyBody);
+		await fs.link(sibling, hookPathFor("pre-commit"));
+
+		const result = await installCIHooks(tmpDir);
+
+		const error = result.errors.find((e) => e.startsWith("pre-commit:"));
+		expect(error).toContain("multiple hard links");
+		expect(result.installed).not.toContain("pre-commit");
+		expect(result.upgraded).not.toContain("pre-commit");
+		expect(await fs.readFile(sibling, "utf8")).toBe(legacyBody);
+		expect(await fs.readFile(hookPathFor("pre-commit"), "utf8")).toBe(
+			legacyBody,
+		);
+	});
+
 	it("refuses a non-regular hook path with a named reason", async () => {
 		await fs.ensureDir(hookPathFor("pre-commit"));
 

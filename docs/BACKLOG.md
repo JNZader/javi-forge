@@ -388,9 +388,12 @@ therefore invisible until someone runs the command by hand.
   in `src/commands/ci-hooks.test.ts`, which plants the symlink during the asset
   read and asserts `ELOOP` plus an untouched victim file; verified RED against
   the old `fs.writeFile` path. All pre-existing hook tests pass unchanged.
-- **Residual, still parked**: the `nlink > 1` (hardlink truncation) refusal was
-  deliberately NOT added. `O_NOFOLLOW` does not stop a hardlink; on modern
-  Linux `fs.protected_hardlinks=1` mitigates the cross-owner case.
+- **Residual closed 2026-09-14**: the `nlink > 1` hardlink-truncation refusal is now
+  implemented in `writeHookFile`. The hook writer opens without `O_TRUNC`, checks
+  `handle.stat().nlink` on the opened fd, refuses shared inodes, and only then
+  truncates and writes. This keeps the original `O_NOFOLLOW` symlink protection while
+  also avoiding truncation of a sibling hardlink. Covered by `ci-hooks.test.ts`
+  ("refuses a hardlinked hook path and leaves the sibling link intact").
 
 > Follow-up (JDA7-012, one line): tighten `assertHookManifestEntry` with `.every((h) => typeof h?.sha256 === "string")` so a `historical:[null]` manifest yields a NAMED error.
 >

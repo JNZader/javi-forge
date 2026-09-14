@@ -276,6 +276,8 @@ export interface ResolvedRunner {
 	image?: string;
 	/** Docker build context directory (execution lands in Slice B) */
 	buildContext?: string;
+	/** Explicit Docker --user override; omitted lets runInContainer use host uid. */
+	user?: string;
 	setupCmds: readonly string[];
 	lintCmds: readonly string[];
 	compileCmds: readonly string[];
@@ -308,6 +310,7 @@ function freezeRunner(runner: {
 	directory: string;
 	image?: string;
 	buildContext?: string;
+	user?: string;
 	setupCmds: string[];
 	lintCmds: string[];
 	compileCmds: string[];
@@ -381,6 +384,7 @@ async function resolveConfiguredRunner(
 		directory: config.directory,
 		image: config.image,
 		buildContext: config.buildContext,
+		user: config.user,
 		setupCmds: config.setup,
 		lintCmds: config.lint.length > 0 ? config.lint : toList(defaults.lintCmd),
 		compileCmds:
@@ -671,7 +675,7 @@ export async function runCI(
 			);
 			throw e;
 		}
-		await openShell(projectDir, shellImage);
+		await openShell(projectDir, shellImage, primary.user);
 		return;
 	}
 
@@ -1243,6 +1247,7 @@ async function runRunner(
 					noDocker,
 					timeout,
 					runner,
+					user: runner.user,
 					image: imageName,
 				});
 			} catch {
@@ -1302,7 +1307,7 @@ async function runRunner(
 					noDocker,
 					timeout,
 					runner,
-					user: phase.user,
+					user: phase.user ?? runner.user,
 					image: imageName,
 				});
 				report(onStep, stepId, `${subject}${suffix} passed`, "done");
@@ -1760,6 +1765,7 @@ async function runGateCommand(
 		timeout: gate.timeout, // undefined ⇒ unbounded (docker.ts gate 7)
 		env: containerEnv,
 		stream: true,
+		user: gate.user,
 	});
 	// Enforce the native invariant in ONE place: timedOut ⇒ 124.
 	return {

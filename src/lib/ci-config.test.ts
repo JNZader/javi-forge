@@ -111,6 +111,23 @@ runners:
 		expect(config.runners[0]?.buildContext).toBe("./ci/docker");
 		expect(config.runners[0]?.image).toBeUndefined();
 	});
+
+	it("accepts runner and gate Docker user overrides", () => {
+		const config = parseCIConfig(`
+version: 2
+runners:
+  - name: custom
+    stack: node
+    user: 1001
+gates:
+  - id: audit
+    image: alpine:3.21
+    user: runner
+    run: "true"
+`);
+		expect(config.runners[0]?.user).toBe("1001");
+		expect(config.gates?.[0]?.user).toBe("runner");
+	});
 });
 
 // =============================================================================
@@ -251,6 +268,13 @@ describe("parseCIConfig — validation errors (fail closed)", () => {
 		expectError(
 			"version: 1\nrunners:\n  - name: bad name!\n    stack: node",
 			/name/i,
+		);
+	});
+
+	it("rejects unsafe runner Docker user overrides", () => {
+		expectError(
+			'version: 1\nrunners:\n  - name: x\n    stack: node\n    user: "root --privileged"',
+			/user/i,
 		);
 	});
 
@@ -446,6 +470,15 @@ describe("parseCIConfig — gates schema", () => {
 
 	it("rejects a gate without a run", () => {
 		expectError(V2("gates:\n  - id: g"), /gates\[0\]\.run/);
+	});
+
+	it("rejects unsafe gate Docker user overrides", () => {
+		expectError(
+			V2(
+				'gates:\n  - id: g\n    image: alpine:3.21\n    user: "-u"\n    run: echo a',
+			),
+			/user/i,
+		);
 	});
 
 	it("rejects an unknown gate field (fail closed)", () => {

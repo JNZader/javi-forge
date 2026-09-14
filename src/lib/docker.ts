@@ -480,15 +480,18 @@ const DOCKER_STOP_GRACE_SEC = 10;
 export async function openShell(
 	projectDir: string,
 	image: string,
+	user?: string,
 ): Promise<void> {
 	const imageName = image;
 
 	// ENV-1: run the interactive shell as the host user too, so anything
 	// written from the debug shell stays host-owned. See runInContainer.
+	// A caller-provided user is the same ci.yaml escape hatch as non-shell runs.
 	const uid = process.getuid?.();
 	const gid = process.getgid?.();
 	const runAsUser =
-		uid !== undefined && gid !== undefined ? `${uid}:${gid}` : undefined;
+		user ??
+		(uid !== undefined && gid !== undefined ? `${uid}:${gid}` : undefined);
 
 	await new Promise<void>((resolve, reject) => {
 		const proc = spawn(

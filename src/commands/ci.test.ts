@@ -1043,12 +1043,14 @@ runners:
   - name: backend
     stack: python
     image: python:3.12-slim
+    user: runner
     setup: pip install -r requirements.txt
     requires: [python, ruff]
 `);
 
 		const runner = (await resolveCIRunners(tmpDir)).runners[0];
 		expect(runner?.image).toBe("python:3.12-slim");
+		expect(runner?.user).toBe("runner");
 		expect(runner?.setupCmds).toEqual(["pip install -r requirements.txt"]);
 		expect(runner?.requiredTools).toEqual(["python", "ruff"]);
 	});
@@ -2352,6 +2354,20 @@ gates:
 		expect(call?.env?.FOO).toBe("bar");
 	});
 
+	it("forwards a gate Docker user override to the container", async () => {
+		await writeConfig(`
+version: 2
+gates:
+  - id: img
+    image: alpine:3.21
+    user: runner
+    run: "true"
+`);
+		await collectGateOutcomes({ projectDir: tmpDir, ...QUICK });
+
+		expect(lastContainerCall()?.user).toBe("runner");
+	});
+
 	it("forwards JAVI_FORGE_CHANGED_FILES into the container allowlist for scope:changed", async () => {
 		vi.mocked(resolveBaseRef).mockReset();
 		vi.mocked(changedFiles).mockReset();
@@ -3102,6 +3118,42 @@ describe("characterization: auto + docker", () => {
 		expect(test[0]?.user).toBeUndefined();
 	});
 
+	it("passes a configured runner Docker user to tool checks and every phase", async () => {
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			`
+version: 1
+runners:
+  - name: api
+    stack: node
+    user: runner
+    requires: [node]
+    setup: "true"
+    lint: "true"
+    build: "true"
+    test: "true"
+`,
+		);
+
+		await runAuto(tmpDir);
+
+		const calls = containerCalls();
+		expect(calls.map((call) => call.user)).toEqual([
+			"runner",
+			"runner",
+			"runner",
+			"runner",
+			"runner",
+		]);
+		expect(calls.map((call) => call.command)).toEqual([
+			`cd ${CONTAINER_WORKDIR} && command -v node`,
+			`cd ${CONTAINER_WORKDIR} && true`,
+			`cd ${CONTAINER_WORKDIR} && true`,
+			`cd ${CONTAINER_WORKDIR} && true`,
+			`cd ${CONTAINER_WORKDIR} && true`,
+		]);
+	});
+
 	it("emits BARE --stack node step ids (B1: implicit name → bare)", async () => {
 		const steps = await runAuto(tmpDir, { stack: "node" });
 
@@ -3548,7 +3600,7 @@ describe("shell mode honors runner image/build context (B2)", () => {
 	let tmpDir: string;
 
 	const openShellCalls = () =>
-		vi.mocked(openShell).mock.calls.map(([, image]) => image);
+		vi.mocked(openShell).mock.calls.map(([, image, user]) => ({ image, user }));
 
 	beforeEach(async () => {
 		vi.mocked(isDockerAvailable).mockReset();
@@ -3578,7 +3630,9 @@ describe("shell mode honors runner image/build context (B2)", () => {
 		await runShell();
 
 		// The pinned image passes through verbatim; no stack-default image is built.
-		expect(openShellCalls()).toEqual(["registry.example/custom-node:99"]);
+		expect(openShellCalls()).toEqual([
+			{ image: "registry.example/custom-node:99", user: undefined },
+		]);
 		expect(ensureImage).not.toHaveBeenCalled();
 	});
 
@@ -3592,7 +3646,9 @@ describe("shell mode honors runner image/build context (B2)", () => {
 		await runShell();
 
 		// PRODUCTION-FAITHFUL mock returns the imageTag for a build-context build.
-		expect(openShellCalls()).toEqual(["javi-forge-ci-web"]);
+		expect(openShellCalls()).toEqual([
+			{ image: "javi-forge-ci-web", user: undefined },
+		]);
 		expect(ensureImage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				buildContext: path.resolve(tmpDir, "./ci/docker"),
@@ -3610,7 +3666,30 @@ describe("shell mode honors runner image/build context (B2)", () => {
 		await runShell();
 
 		// Auto repo, no pinned image → the per-stack default (getImageName("node")).
-		expect(openShellCalls()).toEqual([getImageName("node")]);
+		expect(openShellCalls()).toEqual([
+			{ image: getImageName("node"), user: undefined },
+		]);
+	});
+
+	it("opens the shell with a runner's configured Docker user", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), { scripts: {} });
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			[
+				"version: 1",
+				"runners:",
+				"  - name: web",
+				"    stack: node",
+				"    image: registry.example/custom-node:99",
+				"    user: runner",
+			].join("\n"),
+		);
+
+		await runShell();
+
+		expect(openShellCalls()).toEqual([
+			{ image: "registry.example/custom-node:99", user: "runner" },
+		]);
 	});
 });
 

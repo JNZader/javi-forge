@@ -108,8 +108,8 @@ container runner), which breaks local `vitest` with `EACCES` for uid 1000.
   which can break toolchains that cache under `$HOME` (go/cargo/gradle). uid
   1000 — the reported environment and the near-universal Linux dev uid — is
   unaffected. There is NO runtime warning or per-runner escape hatch for these
-  two edges (no `user:` field exists in `ci.yaml`), so recovery today means not
-  hitting them:
+  two edges; recovery now uses the explicit `user:` field when a project needs
+  its image's baked passwd entry/home:
   - **R4-002** — host uid ≠ 1000 (second account, corporate provisioning) on
     python/go/rust images (only `runner`=1000 exists) → `HOME=/`.
   - **R4-001** — `build-context:` custom images always run as the host uid,
@@ -120,11 +120,14 @@ container runner), which breaks local `vitest` with `EACCES` for uid 1000.
   A writable-`HOME` guard (`-e HOME=/tmp`) was deliberately NOT added — it would
   regress build-context images that bake tool config under a real home.
 
-  **FOLLOW-UP (SEC/DX, own ticket)**: close both edges properly — either a
-  `user:` field in `ci.yaml` (per-runner opt out of the host-uid injection) or
-  a conditional `-e HOME` only when the host uid has no in-image passwd entry.
-  Design decision, not a batch fix. Also R4-003: the non-POSIX omit-branch of
-  the `--user` guard is only covered by a vacuous early-return test.
+  **FOLLOW-UP CLOSED 2026-09-14**: `ci.yaml` now accepts validated `user:`
+  Docker overrides for runners and image-backed gates. Omitted `user:` preserves
+  the default host-uid ownership guard; setting `user: runner`, `user: root`, or
+  `user: uid[:gid]` is the explicit per-runner/per-gate escape hatch for custom
+  images that need their baked passwd entry/home. The field is schema-validated
+  as a plain Docker user value, not a shell string. Also R4-003: the non-POSIX
+  omit-branch of the `--user` guard is only covered by a vacuous early-return
+  test.
 
 ### HOOKS-1 — Adopt the richer `ci-local/hooks/*` variants fleet-wide (deferred change, not a bug)
 

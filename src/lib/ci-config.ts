@@ -54,6 +54,11 @@ export interface CIRunnerConfig {
 	image?: string;
 	/** Docker build context directory (mutually exclusive with `image`) */
 	buildContext?: string;
+	/**
+	 * Optional Docker --user override. Omitted keeps the host uid:gid default
+	 * used by runInContainer; set this when an image needs its baked user/home.
+	 */
+	user?: string;
 	/** Dependency setup commands, run before lint/build/test */
 	setup: string[];
 	lint: string[];
@@ -85,6 +90,11 @@ export interface CIGateConfig {
 	 * routing lands in a later slice; this slice validates the schema only.
 	 */
 	image?: string;
+	/**
+	 * Optional Docker --user override for image-backed gates. Omitted keeps the
+	 * host uid:gid default used by runInContainer.
+	 */
+	user?: string;
 	/**
 	 * Optional per-command wall-clock timeout in seconds (GATE-2). When set, a
 	 * command exceeding it is killed and the gate FAILS (non-zero). Omitted →
@@ -180,6 +190,7 @@ const RUNNER_FIELDS = new Set([
 	"directory",
 	"image",
 	"build-context",
+	"user",
 	"setup",
 	"lint",
 	"build",
@@ -220,6 +231,46 @@ function validateImageRef(
 			path: fieldPath,
 			message:
 				"image must not start with '-' (would be parsed as a docker flag)",
+		});
+		return undefined;
+	}
+	return trimmed;
+}
+
+const DOCKER_USER_PART_RE = /^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/;
+
+/**
+ * Validate an optional Docker --user value. Keep this deliberately narrower
+ * than Docker's full passwd lookup surface: names/ids with an optional
+ * name/id group are enough for the ENV-1 escape hatch, while whitespace,
+ * control chars, slashes and leading dashes never reach docker argv.
+ */
+function validateDockerUser(
+	value: unknown,
+	fieldPath: string,
+	errors: CIConfigValidationError[],
+): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+		return String(value);
+	}
+	if (typeof value !== "string" || !value.trim()) {
+		errors.push({
+			path: fieldPath,
+			message: "user must be a non-empty Docker user or uid[:gid] value",
+		});
+		return undefined;
+	}
+
+	const trimmed = value.trim();
+	const parts = trimmed.split(":");
+	const valid =
+		parts.length <= 2 && parts.every((part) => DOCKER_USER_PART_RE.test(part));
+	if (!valid) {
+		errors.push({
+			path: fieldPath,
+			message:
+				"user must be a plain Docker user or uid[:gid] value (no whitespace, slashes, empty group, or leading dashes)",
 		});
 		return undefined;
 	}
@@ -324,6 +375,7 @@ function validateRunner(
 	}
 
 	const image = validateImageRef(raw.image, `${base}.image`, errors);
+	const user = validateDockerUser(raw.user, `${base}.user`, errors);
 
 	let buildContext: string | undefined;
 	if (raw["build-context"] !== undefined) {
@@ -368,6 +420,7 @@ function validateRunner(
 		directory,
 		image,
 		buildContext,
+		user,
 		setup: normalizeCommands(raw.setup, `${base}.setup`, errors),
 		lint: normalizeCommands(raw.lint, `${base}.lint`, errors),
 		build: normalizeCommands(raw.build, `${base}.build`, errors),
@@ -385,6 +438,7 @@ const GATE_FIELDS = new Set([
 	"baseline",
 	"env",
 	"image",
+	"user",
 	"timeout",
 ]);
 
@@ -493,6 +547,7 @@ function validateGate(
 	}
 
 	const image = validateImageRef(raw.image, `${base}.image`, errors);
+	const user = validateDockerUser(raw.user, `${base}.user`, errors);
 
 	let timeout: number | undefined;
 	if (raw.timeout !== undefined) {
@@ -518,6 +573,7 @@ function validateGate(
 		baseline,
 		env,
 		image,
+		user,
 		timeout,
 	};
 }

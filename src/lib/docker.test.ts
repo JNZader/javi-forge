@@ -715,6 +715,14 @@ describe("openShell", () => {
 		expect(args).toContain("javi-forge-ci-go");
 	});
 
+	it("honors an explicit shell user override", async () => {
+		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
+		await openShell(projectDir, "javi-forge-ci-node", "runner");
+		const args = spawnMock.mock.calls[0]?.[1] as string[];
+		expect(args).toContain("--user");
+		expect(args).toContain("runner");
+	});
+
 	it("propagates spawn errors", async () => {
 		spawnMock.mockReturnValue(fakeProc({ error: new Error("oops") }));
 		await expect(openShell(projectDir, "javi-forge-ci-node")).rejects.toThrow(

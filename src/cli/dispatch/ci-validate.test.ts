@@ -90,6 +90,23 @@ describe("ci validate dispatch", () => {
 		expect(exitCode).toBe(0);
 	});
 
+	it("prints runner and gate Docker user overrides when declared", async () => {
+		validateCIConfig.mockResolvedValue({
+			ok: true,
+			mode: "config",
+			configPath: "/repo/.javi-forge/ci.yaml",
+			runners: [{ name: "api", stack: "go", user: "runner" }],
+			gates: [{ id: "audit", mode: "blocking", scope: "all", user: "root" }],
+		});
+
+		const { out, exitCode } = await runValidate();
+
+		const joined = out.join("\n");
+		expect(joined).toContain("api (go, user: runner)");
+		expect(joined).toContain("audit (blocking, scope: all, user: root)");
+		expect(exitCode).toBe(0);
+	});
+
 	it("reports a zero-config repo as valid auto-detect (exit 0), not a failure", async () => {
 		validateCIConfig.mockResolvedValue({
 			ok: true,

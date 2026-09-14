@@ -53,6 +53,7 @@ runners:                      # required, non-empty, executed in this order
     stack: python             # node|python|go|rust|java-gradle|java-maven|elixir
     directory: backend        # working dir, relative to repo root (default ".")
     image: python:3.12-slim   # optional explicit image (see pinning below)
+    user: runner              # optional Docker --user override
     setup: pip install -r requirements.txt   # string or list; runs first
     lint: ruff check .
     test: pytest
@@ -78,6 +79,7 @@ Field semantics:
 | `directory` | no | Must stay inside the repo root (no `..`, no absolute paths) |
 | `image` | no | Explicit image; mutually exclusive with `build-context` |
 | `build-context` | no | Directory with its own `Dockerfile`; mutually exclusive with `image` |
+| `user` | no | Docker `--user` override for this runner. Omit to keep the default host `uid:gid` ownership guard; set to a plain user, uid, or `uid:gid` when the image needs its baked passwd entry/home |
 | `setup` / `lint` / `build` / `test` / `security` | no | String or list of strings. Omitted phases fall back to the stack defaults (`lint`/`build`/`test`); `setup`/`security` default to none |
 | `requires` | no | Plain tool names only (no spaces or shell metacharacters) |
 
@@ -115,6 +117,35 @@ runners:
 
 A `build-context` without a `Dockerfile` fails closed with an explicit
 error.
+
+## Container user and HOME edge
+
+By default Docker-backed runners execute as the host `uid:gid`, not the image's
+baked user. That keeps bind-mounted artifacts host-owned and avoids local
+`EACCES` after CI. If that host UID has no passwd entry in a custom image, tools
+may resolve `HOME=/`; set `user:` to the image's intended user for that runner:
+
+```yaml
+runners:
+  - name: backend
+    stack: go
+    build-context: ./ci/docker
+    user: runner
+```
+
+Version 2 image-backed gates accept the same escape hatch:
+
+```yaml
+version: 2
+gates:
+  - id: audit
+    image: ghcr.io/acme/audit@sha256:...
+    user: runner
+    run: audit .
+```
+
+Docker build, push, deploy, publish and release remain separate operations; the
+`user:` field only changes the local `docker run --user` value for CI execution.
 
 ## Required tools (fail-closed)
 

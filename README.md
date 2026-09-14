@@ -165,7 +165,9 @@ Runners execute in order, each in its own directory and image, and every
 `requires` tool is verified fail-closed before any phase runs — a missing
 tool aborts with an explicit error instead of a skipped check. Custom
 images, digest pinning (`image: name@sha256:…`) and custom
-`build-context` Dockerfiles are supported.
+`build-context` Dockerfiles are supported. Docker-backed runners default to
+the host `uid:gid` so bind-mounted outputs stay host-owned; set `user:` only
+when a custom image needs its baked user/home.
 
 - `javi-forge ci --config <path>` — load explicit runners
 - `javi-forge ci --stack python` — force a single stack (single-stack

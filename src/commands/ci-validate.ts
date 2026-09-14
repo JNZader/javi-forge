@@ -19,6 +19,8 @@ import {
 export interface CIValidateRunnerSummary {
 	name: string;
 	stack: string;
+	/** Docker --user override, present ONLY when the runner declares one. */
+	user?: string;
 }
 
 /** One validated gate, reduced to what the report shows. */
@@ -28,6 +30,8 @@ export interface CIValidateGateSummary {
 	scope: string;
 	/** Container image ref, present ONLY when the gate declares one. */
 	image?: string;
+	/** Docker --user override, present ONLY when the gate declares one. */
+	user?: string;
 }
 
 export interface CIValidateOk {
@@ -104,6 +108,7 @@ export async function validateCIConfig(
 			runners: ciConfig.runners.map((r) => ({
 				name: r.name,
 				stack: r.stack,
+				...(r.user !== undefined ? { user: r.user } : {}),
 			})),
 			gates: (ciConfig.gates ?? []).map((g) => ({
 				id: g.id,
@@ -112,6 +117,7 @@ export async function validateCIConfig(
 				// Surface `image` ONLY when declared, so an image-less gate summary
 				// stays byte-identical to today (no `image` key).
 				...(g.image !== undefined ? { image: g.image } : {}),
+				...(g.user !== undefined ? { user: g.user } : {}),
 			})),
 		};
 	} catch (e) {

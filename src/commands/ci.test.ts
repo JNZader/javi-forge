@@ -96,6 +96,108 @@ vi.mock("../lib/exec.js", async (importOriginal) => {
 });
 
 // =============================================================================
+// runCI — GitHub Actions parity mode
+// =============================================================================
+
+describe("runCI GitHub Actions parity", () => {
+	let tmpDir: string;
+	let originalPath: string | undefined;
+	let originalLog: string | undefined;
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(
+			path.join(os.tmpdir(), "javi-forge-github-parity-test-"),
+		);
+		originalPath = process.env.PATH;
+		originalLog = process.env.JAVI_FORGE_PARITY_LOG;
+	});
+
+	afterEach(async () => {
+		if (originalPath === undefined) delete process.env.PATH;
+		else process.env.PATH = originalPath;
+		if (originalLog === undefined) delete process.env.JAVI_FORGE_PARITY_LOG;
+		else process.env.JAVI_FORGE_PARITY_LOG = originalLog;
+		await fs.remove(tmpDir);
+	});
+
+	it("runs the reproducible GitHub test-job commands in workflow order and reports hosted work as unavailable", async () => {
+		const binDir = path.join(tmpDir, "bin");
+		const logPath = path.join(tmpDir, "pnpm.log");
+		await fs.ensureDir(binDir);
+		const executable = `#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+printf '%s\\n' "$*" >> "$JAVI_FORGE_PARITY_LOG"
+`;
+		for (const tool of ["pnpm", "ruff", "bwrap"]) {
+			const executablePath = path.join(binDir, tool);
+			await fs.writeFile(executablePath, executable);
+			await fs.chmod(executablePath, 0o755);
+		}
+		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+		process.env.JAVI_FORGE_PARITY_LOG = logPath;
+
+		const steps: CIStep[] = [];
+		await runCI({ projectDir: tmpDir, mode: "github-parity" }, (step) =>
+			steps.push({ ...step }),
+		);
+
+		expect((await fs.readFile(logPath, "utf8")).trim().split("\n")).toEqual([
+			"install --frozen-lockfile",
+			"audit --audit-level=high",
+			"build",
+			"test:coverage",
+			"package:check",
+			"test:hooks",
+		]);
+		expect(
+			steps.some(
+				(step) => step.id === "github-parity:ruff" && step.status === "done",
+			),
+		).toBe(true);
+		expect(
+			steps.some(
+				(step) =>
+					step.id === "github-parity:bubblewrap" && step.status === "done",
+			),
+		).toBe(true);
+		expect(
+			steps.some(
+				(step) =>
+					step.id === "github-parity:runtime-matrix" &&
+					step.status === "skipped" &&
+					step.label.startsWith("SKIP (UNAVAILABLE):"),
+			),
+		).toBe(true);
+		expect(
+			steps.some(
+				(step) =>
+					step.id === "github-parity:self-ci" &&
+					step.status === "skipped" &&
+					step.label.startsWith("SKIP (UNAVAILABLE):"),
+			),
+		).toBe(true);
+	});
+
+	it("applies the configured timeout to each native parity command", async () => {
+		const binDir = path.join(tmpDir, "bin");
+		await fs.ensureDir(binDir);
+		const pnpmPath = path.join(binDir, "pnpm");
+		await fs.writeFile(pnpmPath, "#!/usr/bin/env bash\nexec sleep 10\n");
+		await fs.chmod(pnpmPath, 0o755);
+		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+
+		await expect(
+			runCI(
+				{ projectDir: tmpDir, mode: "github-parity", timeout: 0.01 },
+				() => {},
+			),
+		).rejects.toThrow("Command timed out after 0.01 second(s)");
+	});
+});
+
+// =============================================================================
 // detectCIStack
 // =============================================================================
 

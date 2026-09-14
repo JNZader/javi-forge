@@ -50,6 +50,7 @@ describe("ci --help dispatch", () => {
 		expect(joined).toContain("init");
 		expect(joined).toContain("validate");
 		expect(joined).toContain("--quick");
+		expect(joined).toContain("--github-parity");
 		expect(joined).toContain("--json");
 		expect(exitCode).toBe(0);
 	});

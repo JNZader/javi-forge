@@ -130,14 +130,22 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 		console.log(CI_HELP_TEXT);
 		process.exit(1);
 	}
+	if (cli.flags.githubParity && cli.flags.json) {
+		console.error(
+			"--json is not supported with --github-parity; rerun without --json for PASS/SKIP/UNAVAILABLE local evidence.",
+		);
+		process.exit(1);
+	}
 
-	const ciMode: CIMode = cli.flags.detect
-		? "detect"
-		: cli.flags.shell
-			? "shell"
-			: cli.flags.quick
-				? "quick"
-				: "full";
+	const ciMode: CIMode = cli.flags.githubParity
+		? "github-parity"
+		: cli.flags.detect
+			? "detect"
+			: cli.flags.shell
+				? "shell"
+				: cli.flags.quick
+					? "quick"
+					: "full";
 
 	// Headless gate-run JSON (slice 4): `--json` on the RUN path is a NEW branch,
 	// NOT flag reuse — the flag is otherwise consumed only by `ci validate`. It

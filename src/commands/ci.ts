@@ -33,7 +33,15 @@ import type { Stack } from "../types/index.js";
 // Types
 // =============================================================================
 
-export type CIMode = "full" | "quick" | "shell" | "detect";
+const CI_MODE = {
+	FULL: "full",
+	QUICK: "quick",
+	SHELL: "shell",
+	DETECT: "detect",
+	GITHUB_PARITY: "github-parity",
+} as const;
+
+export type CIMode = (typeof CI_MODE)[keyof typeof CI_MODE];
 
 export interface CIOptions {
 	projectDir?: string;
@@ -538,6 +546,15 @@ export async function runCI(
 		timeout = 600,
 	} = options;
 
+	// GitHub parity is intentionally separate from the generic runner pipeline:
+	// it executes the repository's own main GitHub Actions test job natively, in
+	// workflow order. In particular it must never change the quick path used by
+	// hooks, nor introduce Docker/image setup that does not exist in that job.
+	if (mode === CI_MODE.GITHUB_PARITY) {
+		await runGitHubParity(projectDir, onStep, timeout);
+		return;
+	}
+
 	// ── Run-scoped Docker availability (lazy-memoized) ─────────────────────────
 	// Computed at most ONCE per run and only when an image gate needs it. The
 	// full/quick prologue below assigns its own `isDockerAvailable()` result back
@@ -836,6 +853,151 @@ export async function runCI(
 			onStep,
 			dockerGate,
 			onGateOutcome,
+		);
+	}
+}
+
+// =============================================================================
+// GitHub Actions parity
+// =============================================================================
+
+interface GitHubParityCommand {
+	id: string;
+	command: string;
+}
+
+const GITHUB_PARITY_COMMANDS: readonly GitHubParityCommand[] = [
+	{ id: "github-parity:install", command: "pnpm install --frozen-lockfile" },
+	{ id: "github-parity:audit", command: "pnpm audit --audit-level=high" },
+	{ id: "github-parity:build", command: "pnpm build" },
+	{ id: "github-parity:coverage", command: "pnpm test:coverage" },
+	{ id: "github-parity:package-check", command: "pnpm package:check" },
+	{ id: "github-parity:hooks", command: "pnpm test:hooks" },
+];
+
+interface GitHubParityEnvironmentCheck {
+	id: string;
+	tool: string;
+	ciPurpose: string;
+}
+
+const GITHUB_PARITY_ENVIRONMENT_CHECKS: readonly GitHubParityEnvironmentCheck[] =
+	[
+		{
+			id: "github-parity:ruff",
+			tool: "ruff",
+			ciPurpose: "mixed-stack integration tests",
+		},
+		{
+			id: "github-parity:bubblewrap",
+			tool: "bwrap",
+			ciPurpose: "preparation executor coverage",
+		},
+	];
+
+/**
+ * Execute the locally reproducible portion of `.github/workflows/ci.yml`'s
+ * main `test` job. This is deliberately native and opt-in: it is evidence for
+ * unavailable private GitHub Actions minutes, not a replacement for hooks or
+ * the cross-platform jobs GitHub hosts.
+ */
+async function runGitHubParity(
+	projectDir: string,
+	onStep: CIStepCallback,
+	timeout: number,
+): Promise<void> {
+	// The workflow restores dependencies before auditing or building. Skipping this
+	// locally could produce false-green evidence against stale node_modules.
+	for (const command of GITHUB_PARITY_COMMANDS.slice(0, 2)) {
+		await runGitHubParityCommand(command, projectDir, onStep, timeout);
+	}
+
+	for (const check of GITHUB_PARITY_ENVIRONMENT_CHECKS) {
+		const available = await isGitHubParityToolAvailable(check.tool, projectDir);
+		if (available) {
+			report(
+				onStep,
+				check.id,
+				`PASS: ${check.tool} available (${check.ciPurpose})`,
+				"done",
+			);
+		} else {
+			report(
+				onStep,
+				check.id,
+				`SKIP (UNAVAILABLE): ${check.tool} required by GitHub CI for ${check.ciPurpose}`,
+				"skipped",
+				"Not installed automatically; install it locally to reproduce this CI-only setup.",
+			);
+		}
+	}
+
+	for (const command of GITHUB_PARITY_COMMANDS.slice(2)) {
+		await runGitHubParityCommand(command, projectDir, onStep, timeout);
+	}
+
+	// These workflow jobs are intentionally not emulated. The Windows/Linux hook
+	// matrix is platform-specific, while self-CI mutates the global npm prefix.
+	report(
+		onStep,
+		"github-parity:runtime-matrix",
+		"SKIP (UNAVAILABLE): GitHub-hosted Linux/Windows hook runtime matrix",
+		"skipped",
+		"Run the reusable hook workflows on GitHub; local parity does not emulate their platform matrix.",
+	);
+	report(
+		onStep,
+		"github-parity:self-ci",
+		"SKIP (UNAVAILABLE): packed-tarball global-install self-CI",
+		"skipped",
+		"Skipped because npm install -g mutates the global prefix; no safe non-mutating local equivalent is configured.",
+	);
+}
+
+async function runGitHubParityCommand(
+	step: GitHubParityCommand,
+	projectDir: string,
+	onStep: CIStepCallback,
+	timeout: number,
+): Promise<void> {
+	report(onStep, step.id, `RUN: ${step.command}`, "running");
+	try {
+		await runNativeProjectCommand(step.command, projectDir, timeout);
+		report(onStep, step.id, `PASS: ${step.command}`, "done");
+	} catch (error) {
+		report(onStep, step.id, `FAIL: ${step.command}`, "error", String(error));
+		throw error;
+	}
+}
+
+async function isGitHubParityToolAvailable(
+	tool: string,
+	projectDir: string,
+): Promise<boolean> {
+	try {
+		await execFileAsync(tool, ["--version"], { cwd: projectDir });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function runNativeProjectCommand(
+	command: string,
+	projectDir: string,
+	timeout: number,
+): Promise<void> {
+	const result = await runGateNative(
+		command,
+		projectDir,
+		{ ...filterDefinedEnv(process.env), CI: "true" },
+		timeout,
+	);
+	if (result.code !== 0) {
+		throw new Error(
+			result.timedOut
+				? `Command timed out after ${timeout} second(s)`
+				: `Command failed with code ${result.code}`,
 		);
 	}
 }

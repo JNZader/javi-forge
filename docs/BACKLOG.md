@@ -435,6 +435,13 @@ therefore invisible until someone runs the command by hand.
   committed `node.Dockerfile` + the `getDockerfileContent` template use floating
   `node:22-slim`. For full M8 consistency, standardize all four on the same digest
   (a separate decision, since it changes the built image + the docker.ts content test).
+- **CLOSED 2026-09-14 (backlog reconciliation)** — this follow-up was already fixed
+  before this reconciliation pass. `src/lib/docker.ts`, `ci-local/ci-local.sh`,
+  `ci-local/ci-local.ps1`, and `ci-local/docker/node.Dockerfile` now all use the same
+  pinned `node:22-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb`
+  base and `pnpm@10`. `src/lib/dockerfile-parity.test.ts` enforces byte-identical
+  parity across the canonical TS generator, both standalone script generators, and the
+  committed bundled Dockerfiles, so this drift class is now regression-tested.
 - **The `_tmp_ EACCES` was NOT a code bug for the standard host**: `runInContainer`
   already runs `--user $(uid):$(gid)` (ENV-1), which grants owner+group write on the
   0775 host tree, so pnpm's atomic-temp write at the mount root succeeds for the

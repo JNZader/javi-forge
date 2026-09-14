@@ -44,10 +44,17 @@ function renderDoctor(
 	log(`doctor cursor: ${report.healthy ? "healthy" : "unhealthy"}`);
 	log(`  hooks.json: ${report.hooksJson.state}`);
 	log(`  policy: ${report.policy.state}`);
-	log("  runtime: not verified (installed files only)");
+	log(`  execution: ${report.execution.status}`);
+	for (const unknown of report.execution.unknownSources) {
+		log(`  unknown: ${unknown}`);
+	}
+	for (const residual of report.execution.residual) {
+		log(`  residual: ${residual}`);
+	}
 	for (const remediation of report.remediation)
 		log(`  remediation: ${remediation}`);
-	// Informational: installed files cannot prove Cursor discovered or invoked them.
+	if (report.execution.status === "blocked") return 1;
+	if (report.execution.status === "inconclusive") return 2;
 	return 0;
 }
 

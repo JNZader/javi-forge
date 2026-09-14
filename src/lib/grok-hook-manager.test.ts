@@ -257,14 +257,48 @@ describe("Grok Build SkillGuard manager", () => {
 		expect(edited.errors.join(" ")).toContain("--force");
 	});
 
-	it("doctor reports only file/registration status, never Grok runtime execution", async () => {
+	it("doctor reports file currency and an inconclusive runtime execution verdict", async () => {
 		const report = await doctorGrokSkillGuard(baseDir, {
 			manifest: manifest(),
 		});
 		expect(report.healthy).toBe(false);
 		expect(report.hook.state).toBe("absent");
 		expect(report.policy.state).toBe("absent");
-		expect(report.runtimeEvidence).toBe("not-implemented");
+		expect(report.execution).toEqual({
+			status: "inconclusive",
+			blockers: [],
+			unknownSources: [
+				"Grok hook discovery is not locally verified",
+				"Grok hook loading is not locally verified",
+				"Grok hook execution is not locally verified",
+			],
+			residual: [
+				"Installed file bytes do not prove Grok discovered, loaded, or invoked the hook",
+			],
+		});
+	});
+
+	it("doctor keeps managed-current files inconclusive because runtime is unverified", async () => {
+		fs.mkdirSync(paths().hooksDir, { recursive: true });
+		fs.writeFileSync(
+			paths().hookFile,
+			expectedGrokHookJson(paths().policyFile),
+		);
+		fs.writeFileSync(paths().policyFile, fs.readFileSync(SHIPPED_GROK_POLICY));
+
+		const report = await doctorGrokSkillGuard(baseDir, {
+			manifest: manifest(),
+		});
+
+		expect(report.healthy).toBe(true);
+		expect(report.hook.state).toBe("managed-current");
+		expect(report.policy.state).toBe("managed-current");
+		expect(report.execution.status).toBe("inconclusive");
+		expect(report.execution.unknownSources).toEqual([
+			"Grok hook discovery is not locally verified",
+			"Grok hook loading is not locally verified",
+			"Grok hook execution is not locally verified",
+		]);
 	});
 
 	it("uses the policy marker shipped beside the hook", () => {

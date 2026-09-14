@@ -212,14 +212,51 @@ describe("Cursor SkillGuard manager", () => {
 		expect(fake.fileText(paths().hooksFile)).toBeUndefined();
 	});
 
-	it("doctor reports only file/registration status, never Cursor runtime execution", async () => {
+	it("doctor reports file currency and an inconclusive runtime execution verdict", async () => {
 		const report = await doctorCursorSkillGuard(baseDir, {
 			manifest: manifest(),
 		});
 		expect(report.healthy).toBe(false);
 		expect(report.hooksJson.state).toBe("absent");
 		expect(report.policy.state).toBe("absent");
-		expect(report.runtimeEvidence).toBe("not-implemented");
+		expect(report.execution).toEqual({
+			status: "inconclusive",
+			blockers: [],
+			unknownSources: [
+				"Cursor hook discovery is not locally verified",
+				"Cursor hook loading is not locally verified",
+				"Cursor hook execution is not locally verified",
+			],
+			residual: [
+				"Installed file bytes do not prove Cursor discovered, loaded, or invoked the hook",
+			],
+		});
+	});
+
+	it("doctor keeps managed-current files inconclusive because runtime is unverified", async () => {
+		fs.mkdirSync(paths().hooksDir, { recursive: true });
+		fs.writeFileSync(
+			paths().hooksFile,
+			expectedCursorHooksJson(paths().policyFile),
+		);
+		fs.writeFileSync(
+			paths().policyFile,
+			fs.readFileSync(SHIPPED_CURSOR_POLICY),
+		);
+
+		const report = await doctorCursorSkillGuard(baseDir, {
+			manifest: manifest(),
+		});
+
+		expect(report.healthy).toBe(true);
+		expect(report.hooksJson.state).toBe("managed-current");
+		expect(report.policy.state).toBe("managed-current");
+		expect(report.execution.status).toBe("inconclusive");
+		expect(report.execution.unknownSources).toEqual([
+			"Cursor hook discovery is not locally verified",
+			"Cursor hook loading is not locally verified",
+			"Cursor hook execution is not locally verified",
+		]);
 	});
 
 	it("uses the shared policy marker shipped beside the hook", () => {

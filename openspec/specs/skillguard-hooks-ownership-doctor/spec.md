@@ -335,6 +335,39 @@ currency alone.
 - THEN it reports the component state and remediation
 - AND it still does not claim runtime execution was verified
 
+### Requirement: Grok and Cursor doctors report inconclusive effective execution until runtime evidence exists
+
+`hooks doctor grok` and `hooks doctor cursor` MUST remain read-only and classify
+their managed registration plus adjacent policy runtime. Because installed bytes
+do not prove that the host runtime discovered, loaded, or invoked the managed
+hook, each doctor MUST report an explicit `execution.status` of `inconclusive`
+and MUST exit `2` until a reliable bounded runtime evidence mechanism is
+specified and implemented. They MUST NOT report `runnable` from installed-file
+currency alone.
+
+#### Scenario: Installed Grok files are not runtime proof
+
+- GIVEN the Grok hook registration and adjacent policy runtime are managed-current
+- WHEN `hooks doctor grok` evaluates execution
+- THEN `status` is `inconclusive`
+- AND the report names discovery/loading/execution as locally unverified
+- AND doctor exits `2`
+
+#### Scenario: Installed Cursor files are not runtime proof
+
+- GIVEN the Cursor hook registration and adjacent policy runtime are managed-current
+- WHEN `hooks doctor cursor` evaluates execution
+- THEN `status` is `inconclusive`
+- AND the report names discovery/loading/execution as locally unverified
+- AND doctor exits `2`
+
+#### Scenario: Missing or drifted Grok and Cursor files still report file health separately
+
+- GIVEN the managed registration or adjacent policy runtime is absent, foreign, edited, symlinked, or non-regular
+- WHEN `hooks doctor grok` or `hooks doctor cursor` runs
+- THEN it reports the component state and remediation
+- AND it still does not claim runtime execution was verified
+
 ### Requirement: Codex ownership classification is agent-parameterized
 
 The nine-state ownership classifier MUST recognize the Codex-managed asset and

@@ -195,10 +195,10 @@ export const HOOKS_HELP_TEXT = `
     doctor opencode   Report OpenCode plugin file currency and inconclusive runtime evidence
     repair opencode   Repair the OpenCode plugin pair; --force overwrites edits
     install grok      Install the Grok Build global PreToolUse hook (~/.grok/hooks/)
-    doctor grok       Report Grok hook registration and policy file currency (informational)
+    doctor grok       Report Grok hook file currency and inconclusive runtime evidence
     repair grok       Repair the Grok hook pair; --force overwrites edits
     install cursor    Install the Cursor global preToolUse hook (~/.cursor/)
-    doctor cursor     Report Cursor hook registration and policy file currency (informational)
+    doctor cursor     Report Cursor hook file currency and inconclusive runtime evidence
     repair cursor     Repair the Cursor hook pair; --force overwrites edits
 
   Notes
@@ -213,10 +213,10 @@ export const HOOKS_HELP_TEXT = `
     --force only to overwrite an edited managed asset.
     doctor opencode inspects installed files only and exits 2/inconclusive
     because it cannot prove OpenCode discovered, loaded, or executed the plugin.
-    doctor grok is informational and inspects the global hook registration and
-    adjacent policy runtime only; it does not prove Grok loaded or executed them.
-    doctor cursor is informational and inspects the global hook registration and
-    adjacent policy runtime only; it does not prove Cursor loaded or executed them.
+    doctor grok inspects installed files only and exits 2/inconclusive because
+    it cannot prove Grok discovered, loaded, or executed the hook.
+    doctor cursor inspects installed files only and exits 2/inconclusive because
+    it cannot prove Cursor discovered, loaded, or executed the hook.
     Linux: install/repair claude, grok, and cursor need the acl package (getfacl) to
     prove the parent chain — apt install acl / apk add acl / dnf install acl.
     Without it

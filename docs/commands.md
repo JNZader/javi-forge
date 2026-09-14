@@ -260,19 +260,22 @@ that an OpenCode runtime discovered, loaded, or executed the plugin.
 Grok Build installation writes a `PreToolUse` registration and adjacent policy
 runtime under `~/.grok/hooks/`. The registration intentionally matches only
 `run_terminal_command`, `read_file`, and `search_replace`, which map to the
-shared Bash/Read/Edit policy surfaces. `doctor grok` is informational and
-classifies the registration and policy bytes; it does not claim that Grok loaded
-or executed them. On Linux, install/repair uses the same secure filesystem proof
-chain as Claude and needs `getfacl` from the `acl` package.
+shared Bash/Read/Edit policy surfaces. `doctor grok` classifies the registration
+and policy bytes and reports effective execution as `inconclusive` / exit `2`,
+because installed bytes do not prove that Grok discovered, loaded, or invoked
+the hook. On Linux, install/repair uses the same secure filesystem proof chain
+as Claude and needs `getfacl` from the `acl` package.
 
 Cursor installation merges a `preToolUse` registration into
 `~/.cursor/hooks.json` and writes an adjacent policy runtime under
 `~/.cursor/hooks/`. The registration uses `failClosed: true` and matches
 `Shell`, `Read`, `Write`, and `Delete`, which map to the shared
-Bash/Read/Write/Edit policy surfaces. `doctor cursor` is informational and
-classifies the registration and policy bytes; it does not claim that Cursor
-loaded or executed them. On Linux, install/repair uses the same secure
-filesystem proof chain as Claude and needs `getfacl` from the `acl` package.
+Bash/Read/Write/Edit policy surfaces. `doctor cursor` classifies the
+registration and policy bytes and reports effective execution as
+`inconclusive` / exit `2`, because installed bytes do not prove that Cursor
+discovered, loaded, or invoked the hook. On Linux, install/repair uses the same
+secure filesystem proof chain as Claude and needs `getfacl` from the `acl`
+package.
 
 The `--force` option is only for edited managed assets. Foreign, malformed,
 symlink, and non-regular hook content remains fail-closed and is not forcibly
@@ -372,6 +375,9 @@ two current-user global targets, while project-scoped protection covers
 configuration boundary. Foreign, malformed, symlink, and non-regular targets
 remain fail-closed even with `--force`.
 
+`doctor grok` remains read-only and reports runtime discovery/loading/execution
+as inconclusive until a reliable Grok runtime evidence mechanism exists.
+
 ### Cursor global hook boundary
 
 The Cursor installer owns only `~/.cursor/hooks.json` and
@@ -381,6 +387,9 @@ covers `.cursor/hooks/`, `.cursor/hooks.json`, `.cursor/rules/`, `AGENTS.md`,
 and the existing Claude configuration boundary. Foreign hook registrations are
 preserved when the managed hook is added; malformed, symlink, and non-regular
 targets remain fail-closed even with `--force`.
+
+`doctor cursor` remains read-only and reports runtime discovery/loading/execution
+as inconclusive until a reliable Cursor runtime evidence mechanism exists.
 
 ---
 

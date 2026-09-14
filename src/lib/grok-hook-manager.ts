@@ -10,7 +10,10 @@ import { lstat, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { CLAUDE_HOOK_ASSETS_DIR, FORGE_ROOT } from "../constants.js";
-import type { AssetManifestEntry } from "./claude-hook-manager.js";
+import type {
+	AssetManifestEntry,
+	ExecutionReport,
+} from "./claude-hook-manager.js";
 import type { ClaudeHookComponentState } from "./claude-hook-settings.js";
 import { safeReadFile } from "./safe-read.js";
 import { selectSecureFs } from "./secure-fs-posix.js";
@@ -258,8 +261,8 @@ export interface GrokHookDoctorReport {
 	hook: GrokAssetClassification;
 	policy: GrokAssetClassification;
 	remediation: string[];
-	/** Installed files and registration only; no Grok execution is observed. */
-	runtimeEvidence: "not-implemented";
+	/** Installed-file inspection only; Grok runtime loading is not observed. */
+	execution: ExecutionReport;
 }
 
 export interface GrokDoctorOptions {
@@ -303,7 +306,18 @@ export async function doctorGrokSkillGuard(
 		hook,
 		policy,
 		remediation: [...new Set(remediation)],
-		runtimeEvidence: "not-implemented",
+		execution: {
+			status: "inconclusive",
+			blockers: [],
+			unknownSources: [
+				"Grok hook discovery is not locally verified",
+				"Grok hook loading is not locally verified",
+				"Grok hook execution is not locally verified",
+			],
+			residual: [
+				"Installed file bytes do not prove Grok discovered, loaded, or invoked the hook",
+			],
+		},
 	};
 }
 

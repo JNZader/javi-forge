@@ -10,7 +10,14 @@ const report = (healthy = true): GrokHookDoctorReport => ({
 	hook: { state: healthy ? "managed-current" : "absent" },
 	policy: { state: healthy ? "managed-current" : "absent" },
 	remediation: healthy ? [] : ["install the Grok hook"],
-	runtimeEvidence: "not-implemented",
+	execution: {
+		status: "inconclusive",
+		blockers: [],
+		unknownSources: ["Grok hook execution is not locally verified"],
+		residual: [
+			"Installed file bytes do not prove Grok discovered, loaded, or invoked the hook",
+		],
+	},
 });
 
 const mutation = (): GrokHookMutationResult => ({
@@ -77,7 +84,7 @@ describe("runGrokHookCommand", () => {
 		);
 	});
 
-	it("doctor is informational and says runtime execution is unverified", async () => {
+	it("doctor reports inconclusive execution and exits 2", async () => {
 		const out: string[] = [];
 		expect(
 			await runGrokHookCommand(
@@ -90,7 +97,31 @@ describe("runGrokHookCommand", () => {
 					logError: () => {},
 				},
 			),
-		).toBe(0);
-		expect(out.join("\n")).toContain("runtime: not verified");
+		).toBe(2);
+		expect(out.join("\n")).toContain("execution: inconclusive");
+		expect(out.join("\n")).toContain(
+			"unknown: Grok hook execution is not locally verified",
+		);
+		expect(out.join("\n")).toContain(
+			"residual: Installed file bytes do not prove Grok discovered, loaded, or invoked the hook",
+		);
+	});
+
+	it("doctor still exits 2 when installed files are healthy but runtime is unverified", async () => {
+		const out: string[] = [];
+		expect(
+			await runGrokHookCommand(
+				"doctor",
+				"/cwd",
+				{},
+				{
+					doctor: vi.fn(async () => report(true)),
+					log: (line) => out.push(line),
+					logError: () => {},
+				},
+			),
+		).toBe(2);
+		expect(out.join("\n")).toContain("doctor grok: healthy");
+		expect(out.join("\n")).toContain("execution: inconclusive");
 	});
 });

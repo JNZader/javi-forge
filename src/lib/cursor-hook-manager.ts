@@ -11,7 +11,10 @@ import { lstat, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { CLAUDE_HOOK_ASSETS_DIR } from "../constants.js";
-import type { AssetManifestEntry } from "./claude-hook-manager.js";
+import type {
+	AssetManifestEntry,
+	ExecutionReport,
+} from "./claude-hook-manager.js";
 import type { ClaudeHookComponentState } from "./claude-hook-settings.js";
 import { safeReadFile } from "./safe-read.js";
 import { selectSecureFs } from "./secure-fs-posix.js";
@@ -243,8 +246,8 @@ export interface CursorHookDoctorReport {
 	hooksJson: CursorAssetClassification;
 	policy: CursorAssetClassification;
 	remediation: string[];
-	/** Installed files and registration only; no Cursor execution is observed. */
-	runtimeEvidence: "not-implemented";
+	/** Installed-file inspection only; Cursor runtime loading is not observed. */
+	execution: ExecutionReport;
 }
 
 export interface CursorDoctorOptions {
@@ -322,7 +325,18 @@ export async function doctorCursorSkillGuard(
 		hooksJson,
 		policy,
 		remediation: [...new Set(remediation)],
-		runtimeEvidence: "not-implemented",
+		execution: {
+			status: "inconclusive",
+			blockers: [],
+			unknownSources: [
+				"Cursor hook discovery is not locally verified",
+				"Cursor hook loading is not locally verified",
+				"Cursor hook execution is not locally verified",
+			],
+			residual: [
+				"Installed file bytes do not prove Cursor discovered, loaded, or invoked the hook",
+			],
+		},
 	};
 }
 

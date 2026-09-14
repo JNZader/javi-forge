@@ -54,6 +54,12 @@ function runStepIndex(job: unknown, command: string): number {
 	return index;
 }
 
+function namedStep(job: unknown, name: string): Record<string, unknown> {
+	const step = steps(job).find((candidate) => candidate.name === name);
+	if (step === undefined) throw new Error(`Missing named step: ${name}`);
+	return step;
+}
+
 function runCommand(step: Record<string, unknown>): string {
 	if (typeof step.run !== "string") throw new Error("Expected run command");
 	return step.run;
@@ -160,5 +166,20 @@ describe("dependency-gated delivery workflows", () => {
 				}
 			}
 		}
+	});
+
+	it("bounds the Linux ACL package install with retries and a step timeout", () => {
+		const step = namedStep(linuxJob, "Install the acl toolchain (both legs)");
+		expect(step["timeout-minutes"]).toBe(5);
+		const install = runCommand(step);
+		expect(install).toContain("for attempt in 1 2 3; do");
+		expect(install).toContain("sudo apt-get update");
+		expect(install).toContain(
+			"sudo apt-get install -y --no-install-recommends acl",
+		);
+		expect(install).toContain(
+			"::warning::apt acl install attempt $attempt failed; retrying...",
+		);
+		expect(install).toContain("sleep $((attempt * 10))");
 	});
 });

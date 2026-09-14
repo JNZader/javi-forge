@@ -52,10 +52,19 @@ jobs:
       # leg that skipped the install would fail on a missing `setfacl` instead
       # of proving the adapter-absent refusal path.
       - name: Install the acl toolchain (both legs)
+        timeout-minutes: 5
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends acl
+          for attempt in 1 2 3; do
+            if sudo apt-get update && sudo apt-get install -y --no-install-recommends acl; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            echo "::warning::apt acl install attempt $attempt failed; retrying..."
+            sleep $((attempt * 10))
+          done
 
       # VALIDATION-VIA-REVERT (JD-P-001). The old `JF_INT_BASE=/jf-int` workaround
       # (a 0700 base OUTSIDE /home) is GONE: the ancestor gate now runs the LENIENT

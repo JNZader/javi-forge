@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type StdioOptions, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import fsp from "node:fs/promises";
@@ -58,6 +58,8 @@ export interface CIOptions {
 	config?: string;
 	/** Explicit single-stack override (--stack). Insufficient for hybrid repos */
 	stack?: string;
+	/** Suppress child stdout for machine-readable command modes. */
+	suppressStdout?: boolean;
 }
 
 export type CIStepStatus =
@@ -544,6 +546,7 @@ export async function runCI(
 		noGhagga = false,
 		noSecurity = false,
 		timeout = 600,
+		suppressStdout = false,
 	} = options;
 
 	// GitHub parity is intentionally separate from the generic runner pipeline:
@@ -551,7 +554,7 @@ export async function runCI(
 	// workflow order. In particular it must never change the quick path used by
 	// hooks, nor introduce Docker/image setup that does not exist in that job.
 	if (mode === CI_MODE.GITHUB_PARITY) {
-		await runGitHubParity(projectDir, onStep, timeout);
+		await runGitHubParity(projectDir, onStep, timeout, suppressStdout);
 		return;
 	}
 
@@ -889,6 +892,19 @@ const GITHUB_PARITY_OUTCOME = {
 	GLOBAL_SIDE_EFFECT: "FOLLOW-UP (GLOBAL SIDE EFFECT)",
 } as const;
 
+const GITHUB_PARITY_EVIDENCE_CLASS = {
+	LOCAL: "local",
+	LOCAL_TOOL_MISSING: "local-tool-missing",
+	GITHUB_HOSTED: "github-hosted",
+	GLOBAL_SIDE_EFFECT: "global-side-effect",
+	UNKNOWN: "unknown",
+} as const;
+
+type GitHubParityEvidenceClass =
+	(typeof GITHUB_PARITY_EVIDENCE_CLASS)[keyof typeof GITHUB_PARITY_EVIDENCE_CLASS];
+
+const GITHUB_PARITY_JSON_SCHEMA_VERSION = 1 as const;
+
 const GITHUB_PARITY_ENVIRONMENT_CHECKS: readonly GitHubParityEnvironmentCheck[] =
 	[
 		{
@@ -913,11 +929,18 @@ async function runGitHubParity(
 	projectDir: string,
 	onStep: CIStepCallback,
 	timeout: number,
+	suppressStdout: boolean,
 ): Promise<void> {
 	// The workflow restores dependencies before auditing or building. Skipping this
 	// locally could produce false-green evidence against stale node_modules.
 	for (const command of GITHUB_PARITY_COMMANDS.slice(0, 2)) {
-		await runGitHubParityCommand(command, projectDir, onStep, timeout);
+		await runGitHubParityCommand(
+			command,
+			projectDir,
+			onStep,
+			timeout,
+			suppressStdout,
+		);
 	}
 
 	for (const check of GITHUB_PARITY_ENVIRONMENT_CHECKS) {
@@ -941,7 +964,13 @@ async function runGitHubParity(
 	}
 
 	for (const command of GITHUB_PARITY_COMMANDS.slice(2)) {
-		await runGitHubParityCommand(command, projectDir, onStep, timeout);
+		await runGitHubParityCommand(
+			command,
+			projectDir,
+			onStep,
+			timeout,
+			suppressStdout,
+		);
 	}
 
 	// These workflow jobs are intentionally not emulated. The Windows/Linux hook
@@ -967,6 +996,7 @@ async function runGitHubParityCommand(
 	projectDir: string,
 	onStep: CIStepCallback,
 	timeout: number,
+	suppressStdout: boolean,
 ): Promise<void> {
 	report(
 		onStep,
@@ -975,7 +1005,12 @@ async function runGitHubParityCommand(
 		"running",
 	);
 	try {
-		await runNativeProjectCommand(step.command, projectDir, timeout);
+		await runNativeProjectCommand(
+			step.command,
+			projectDir,
+			timeout,
+			suppressStdout,
+		);
 		report(
 			onStep,
 			step.id,
@@ -1004,12 +1039,14 @@ async function runNativeProjectCommand(
 	command: string,
 	projectDir: string,
 	timeout: number,
+	suppressStdout: boolean,
 ): Promise<void> {
 	const result = await runGateNative(
 		command,
 		projectDir,
 		{ ...filterDefinedEnv(process.env), CI: "true" },
 		timeout,
+		suppressStdout ? ["ignore", "ignore", "inherit"] : "inherit",
 	);
 	if (result.code !== 0) {
 		throw new Error(
@@ -1414,9 +1451,10 @@ export async function runGateNative(
 	cwd: string,
 	env: Record<string, string>,
 	timeoutSec?: number,
+	stdio: StdioOptions = "inherit",
 ): Promise<GateRunResult> {
 	return await new Promise<GateRunResult>((resolve, reject) => {
-		const proc = spawn("bash", ["-c", cmd], { cwd, env, stdio: "inherit" });
+		const proc = spawn("bash", ["-c", cmd], { cwd, env, stdio });
 		let killTimer: NodeJS.Timeout | undefined;
 		let graceTimer: NodeJS.Timeout | undefined;
 		let timedOut = false;
@@ -1906,6 +1944,144 @@ export interface HeadlessGateResult {
 	gates: GateOutcome[];
 	/** The process exit code to set explicitly (1 on a blocking failure or crash). */
 	exitCode: number;
+}
+
+export interface GitHubParityJsonStep {
+	id: string;
+	label: string;
+	status: CIStepStatus;
+	evidenceClass: GitHubParityEvidenceClass;
+	detail?: string;
+}
+
+export interface GitHubParityJsonSummary {
+	localRuns: number;
+	localPassed: number;
+	localFailed: number;
+	followUps: number;
+	localToolMissing: number;
+	githubHosted: number;
+	globalSideEffect: number;
+}
+
+export interface HeadlessGitHubParityResult {
+	schemaVersion: typeof GITHUB_PARITY_JSON_SCHEMA_VERSION;
+	mode: typeof CI_MODE.GITHUB_PARITY;
+	ok: boolean;
+	exitCode: number;
+	steps: GitHubParityJsonStep[];
+	summary: GitHubParityJsonSummary;
+	error?: string;
+}
+
+function classifyGitHubParityEvidence(step: CIStep): GitHubParityEvidenceClass {
+	if (step.id === "github-parity:self-ci") {
+		return GITHUB_PARITY_EVIDENCE_CLASS.GLOBAL_SIDE_EFFECT;
+	}
+	if (step.id === "github-parity:runtime-matrix") {
+		return GITHUB_PARITY_EVIDENCE_CLASS.GITHUB_HOSTED;
+	}
+	if (step.label.startsWith(`${GITHUB_PARITY_OUTCOME.LOCAL_TOOL_MISSING}:`)) {
+		return GITHUB_PARITY_EVIDENCE_CLASS.LOCAL_TOOL_MISSING;
+	}
+	if (step.id.startsWith("github-parity:")) {
+		return GITHUB_PARITY_EVIDENCE_CLASS.LOCAL;
+	}
+	return GITHUB_PARITY_EVIDENCE_CLASS.UNKNOWN;
+}
+
+function toGitHubParityJsonStep(step: CIStep): GitHubParityJsonStep {
+	return {
+		id: step.id,
+		label: step.label,
+		status: step.status,
+		evidenceClass: classifyGitHubParityEvidence(step),
+		...(step.detail !== undefined ? { detail: step.detail } : {}),
+	};
+}
+
+function isGitHubParityFollowUpEvidence(
+	evidenceClass: GitHubParityEvidenceClass,
+): boolean {
+	return (
+		evidenceClass === GITHUB_PARITY_EVIDENCE_CLASS.LOCAL_TOOL_MISSING ||
+		evidenceClass === GITHUB_PARITY_EVIDENCE_CLASS.GITHUB_HOSTED ||
+		evidenceClass === GITHUB_PARITY_EVIDENCE_CLASS.GLOBAL_SIDE_EFFECT
+	);
+}
+
+function summarizeGitHubParitySteps(
+	steps: readonly GitHubParityJsonStep[],
+): GitHubParityJsonSummary {
+	return {
+		localRuns: steps.filter(
+			(step) =>
+				step.evidenceClass === GITHUB_PARITY_EVIDENCE_CLASS.LOCAL &&
+				step.status === "running",
+		).length,
+		localPassed: steps.filter(
+			(step) =>
+				step.evidenceClass === GITHUB_PARITY_EVIDENCE_CLASS.LOCAL &&
+				step.status === "done",
+		).length,
+		localFailed: steps.filter(
+			(step) =>
+				step.evidenceClass === GITHUB_PARITY_EVIDENCE_CLASS.LOCAL &&
+				step.status === "error",
+		).length,
+		followUps: steps.filter((step) =>
+			isGitHubParityFollowUpEvidence(step.evidenceClass),
+		).length,
+		localToolMissing: steps.filter(
+			(step) =>
+				step.evidenceClass === GITHUB_PARITY_EVIDENCE_CLASS.LOCAL_TOOL_MISSING,
+		).length,
+		githubHosted: steps.filter(
+			(step) =>
+				step.evidenceClass === GITHUB_PARITY_EVIDENCE_CLASS.GITHUB_HOSTED,
+		).length,
+		globalSideEffect: steps.filter(
+			(step) =>
+				step.evidenceClass === GITHUB_PARITY_EVIDENCE_CLASS.GLOBAL_SIDE_EFFECT,
+		).length,
+	};
+}
+
+/**
+ * Drive GitHub parity headlessly (no Ink render), preserving the LOCAL/FOLLOW-UP
+ * evidence labels as structured JSON. This is separate from `collectGateOutcomes`:
+ * parity mode is not gate JSON and includes deliberate GitHub-hosted/global-side
+ * effect gaps that remain successful follow-ups, not local failures.
+ */
+export async function collectGitHubParityOutcomes(
+	options: CIOptions,
+): Promise<HeadlessGitHubParityResult> {
+	const steps: GitHubParityJsonStep[] = [];
+	let error: string | undefined;
+	try {
+		await runCI(
+			{ ...options, mode: CI_MODE.GITHUB_PARITY, suppressStdout: true },
+			(step) => steps.push(toGitHubParityJsonStep(step)),
+		);
+	} catch (e) {
+		error = String(e);
+	}
+
+	const localFailed = steps.some(
+		(step) =>
+			step.evidenceClass === GITHUB_PARITY_EVIDENCE_CLASS.LOCAL &&
+			step.status === "error",
+	);
+	const ok = error === undefined && !localFailed;
+	return {
+		schemaVersion: GITHUB_PARITY_JSON_SCHEMA_VERSION,
+		mode: CI_MODE.GITHUB_PARITY,
+		ok,
+		exitCode: ok ? 0 : 1,
+		steps,
+		summary: summarizeGitHubParitySteps(steps),
+		...(error !== undefined ? { error } : {}),
+	};
 }
 
 /**

@@ -17,6 +17,7 @@ import type { Stack } from "../types/index.js";
 import type { CIStep } from "./ci.js";
 import {
 	collectGateOutcomes,
+	collectGitHubParityOutcomes,
 	detectCIStack,
 	installCIHooks,
 	resolveCIRunners,
@@ -199,6 +200,138 @@ printf '%s\\n' "$*" >> "$JAVI_FORGE_PARITY_LOG"
 				() => {},
 			),
 		).rejects.toThrow("Command timed out after 0.01 second(s)");
+	});
+
+	it("collects GitHub parity as structured LOCAL and FOLLOW-UP JSON evidence", async () => {
+		const binDir = path.join(tmpDir, "bin");
+		await fs.ensureDir(binDir);
+		const executable = `#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+exit 0
+`;
+		for (const tool of ["pnpm", "ruff", "bwrap"]) {
+			const executablePath = path.join(binDir, tool);
+			await fs.writeFile(executablePath, executable);
+			await fs.chmod(executablePath, 0o755);
+		}
+		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+
+		const result = await collectGitHubParityOutcomes({
+			projectDir: tmpDir,
+			timeout: 1,
+		});
+
+		expect(result).toMatchObject({
+			schemaVersion: 1,
+			mode: "github-parity",
+			ok: true,
+			exitCode: 0,
+			summary: {
+				localRuns: 6,
+				localPassed: 8,
+				localFailed: 0,
+				followUps: 2,
+				localToolMissing: 0,
+				githubHosted: 1,
+				globalSideEffect: 1,
+			},
+		});
+		expect(
+			result.steps.find((step) => step.id === "github-parity:build"),
+		).toMatchObject({
+			status: "running",
+			evidenceClass: "local",
+			label: "LOCAL RUN: pnpm build",
+		});
+		expect(
+			result.steps.find((step) => step.id === "github-parity:self-ci"),
+		).toMatchObject({
+			status: "skipped",
+			evidenceClass: "global-side-effect",
+		});
+	});
+
+	it("keeps GitHub parity JSON stdout parseable when local commands print output", async () => {
+		const binDir = path.join(tmpDir, "bin");
+		await fs.ensureDir(binDir);
+		const executable = `#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+printf 'NOISE %s\\n' "$*"
+exit 0
+`;
+		for (const tool of ["pnpm", "ruff", "bwrap"]) {
+			const executablePath = path.join(binDir, tool);
+			await fs.writeFile(executablePath, executable);
+			await fs.chmod(executablePath, 0o755);
+		}
+
+		const output = execFileSync(
+			path.join(process.cwd(), "node_modules", ".bin", "tsx"),
+			[
+				"--eval",
+				`
+import { collectGitHubParityOutcomes } from "./src/commands/ci.ts";
+void (async () => {
+  const result = await collectGitHubParityOutcomes({
+    projectDir: ${JSON.stringify(tmpDir)},
+    timeout: 1,
+  });
+  process.stdout.write(JSON.stringify(result));
+})();
+`,
+			],
+			{
+				cwd: process.cwd(),
+				encoding: "utf8",
+				env: {
+					...process.env,
+					PATH: `${binDir}:${originalPath ?? ""}`,
+				},
+			},
+		);
+
+		expect(output).not.toContain("NOISE");
+		expect(JSON.parse(output)).toMatchObject({
+			mode: "github-parity",
+			ok: true,
+			exitCode: 0,
+		});
+	});
+
+	it("marks GitHub parity JSON failed when a local command fails", async () => {
+		const binDir = path.join(tmpDir, "bin");
+		await fs.ensureDir(binDir);
+		const pnpmPath = path.join(binDir, "pnpm");
+		await fs.writeFile(
+			pnpmPath,
+			`#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+exit 7
+`,
+		);
+		await fs.chmod(pnpmPath, 0o755);
+		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+
+		const result = await collectGitHubParityOutcomes({ projectDir: tmpDir });
+
+		expect(result.ok).toBe(false);
+		expect(result.exitCode).toBe(1);
+		expect(result.summary.localFailed).toBe(1);
+		expect(result.error).toContain("Command failed");
+		expect(result.steps).toContainEqual(
+			expect.objectContaining({
+				id: "github-parity:install",
+				status: "error",
+				evidenceClass: "local",
+				label: "FAIL: pnpm install --frozen-lockfile",
+			}),
+		);
 	});
 });
 

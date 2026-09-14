@@ -59,6 +59,7 @@ from marker files. Hybrid repositories declare ordered runners in
 javi-forge ci                                  # full run (Docker)
 javi-forge ci --quick                          # lint + compile only
 javi-forge ci --github-parity                  # native, reproducible subset of the GitHub test job
+javi-forge ci --github-parity --json           # structured LOCAL/FOLLOW-UP parity evidence
 javi-forge ci --detect                         # show resolved runners and exit
 javi-forge ci --stack python                   # force one stack (single-stack repos only)
 javi-forge ci --config .javi-forge/ci.yaml     # explicit runner config
@@ -81,6 +82,13 @@ javi-forge ci --no-docker                      # run natively
 | `--timeout` | number | `600` | Per-step timeout in seconds, including each native GitHub parity command |
 
 `--config` and `--stack` are mutually exclusive (rejected as ambiguous).
+
+`ci --github-parity --json` bypasses Ink and emits schema version `1`:
+`{ schemaVersion, mode: "github-parity", ok, exitCode, steps, summary, error? }`.
+Each step preserves the user-facing `LOCAL`/`FOLLOW-UP` label and adds an
+`evidenceClass` of `local`, `local-tool-missing`, `github-hosted`, or
+`global-side-effect`. Follow-ups remain explicit evidence gaps; only local
+command failures make `ok:false` / `exitCode:1`.
 
 ---
 

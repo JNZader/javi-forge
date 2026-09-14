@@ -58,6 +58,7 @@ from marker files. Hybrid repositories declare ordered runners in
 ```bash
 javi-forge ci                                  # full run (Docker)
 javi-forge ci --quick                          # lint + compile only
+javi-forge ci --github-parity                  # native, reproducible subset of the GitHub test job
 javi-forge ci --detect                         # show resolved runners and exit
 javi-forge ci --stack python                   # force one stack (single-stack repos only)
 javi-forge ci --config .javi-forge/ci.yaml     # explicit runner config
@@ -69,6 +70,7 @@ javi-forge ci --no-docker                      # run natively
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--quick` | boolean | `false` | Lint + compile only (used by the pre-commit hook) |
+| `--github-parity` | boolean | `false` | Run the locally reproducible native subset of `.github/workflows/ci.yml`'s `test` job, including dependency restore. Reports CI-only tooling plus hosted matrix/global-install self-CI as unavailable follow-ups; does not alter quick hooks or certify the complete workflow. |
 | `--shell` | boolean | `false` | Open an interactive shell in the CI container |
 | `--detect` | boolean | `false` | Show resolved stack/runners and exit |
 | `--config` | string | `.javi-forge/ci.yaml` if present | Versioned mixed-runner config |
@@ -76,7 +78,7 @@ javi-forge ci --no-docker                      # run natively
 | `--no-docker` | boolean | `false` | Run commands natively |
 | `--no-ci-ghagga` | boolean | `false` | Skip GHAGGA review |
 | `--no-security` | boolean | `false` | Skip Semgrep scan |
-| `--timeout` | number | `600` | Per-step timeout in seconds |
+| `--timeout` | number | `600` | Per-step timeout in seconds, including each native GitHub parity command |
 
 `--config` and `--stack` are mutually exclusive (rejected as ambiguous).
 

@@ -21,13 +21,18 @@ const cliStub = (flags: Record<string, unknown>): CLI =>
 
 async function runJson(flags: Record<string, unknown>): Promise<{
 	out: string[];
+	err: string[];
 	exitCode: number | undefined;
 }> {
 	const out: string[] = [];
+	const err: string[] = [];
 	let exitCode: number | undefined;
 
 	vi.spyOn(console, "log").mockImplementation((...args) => {
 		out.push(args.join(" "));
+	});
+	vi.spyOn(console, "error").mockImplementation((...args) => {
+		err.push(args.join(" "));
 	});
 	vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
 		exitCode = code;
@@ -39,7 +44,7 @@ async function runJson(flags: Record<string, unknown>): Promise<{
 		"process.exit",
 	);
 
-	return { out, exitCode };
+	return { out, err, exitCode };
 }
 
 describe("ci --json run-path (headless gate JSON)", () => {
@@ -154,5 +159,17 @@ describe("ci --json run-path (headless gate JSON)", () => {
 		expect(collectGateOutcomes).toHaveBeenCalledWith(
 			expect.objectContaining({ mode: "quick" }),
 		);
+	});
+
+	it("refuses --github-parity with --json instead of rendering non-JSON Ink output", async () => {
+		const { err, exitCode } = await runJson({
+			githubParity: true,
+			json: true,
+		});
+
+		expect(collectGateOutcomes).not.toHaveBeenCalled();
+		expect(render).not.toHaveBeenCalled();
+		expect(err.join("\n")).toContain("--json is not supported");
+		expect(exitCode).toBe(1);
 	});
 });

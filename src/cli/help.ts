@@ -71,6 +71,7 @@ export const HELP_TEXT = `
 
   CI options (javi-forge ci)
     --quick         Lint + compile only (fast, for pre-commit)
+    --github-parity Run the locally reproducible subset of GitHub test-job steps
     --shell         Open interactive shell in CI container
     --detect        Show detected stack and exit
     --config PATH   Load ordered CI runners from a versioned config file
@@ -115,6 +116,7 @@ export const HELP_TEXT = `
     $ javi-forge plugin add org/repo --force
     $ javi-forge tdd init
     $ javi-forge ci --quick
+    $ javi-forge ci --github-parity
     $ javi-forge ci --no-ci-ghagga --no-security
     $ javi-forge ci --no-docker
     $ javi-forge ci --shell
@@ -145,6 +147,8 @@ export const CI_HELP_TEXT = `
 
   Options
     --quick         Lint + compile only (fast, for pre-commit)
+    --github-parity Run the locally reproducible subset of GitHub test-job steps
+                    (hosted runtime matrix and global-install self-CI remain follow-ups)
     --no-docker     Run commands natively (no Docker)
     --no-security   Skip Semgrep security scan
     --no-ci-ghagga  Skip GHAGGA review
@@ -152,12 +156,14 @@ export const CI_HELP_TEXT = `
     --config PATH   Load ordered CI runners from a versioned config file
                     (default discovery: .javi-forge/ci.yaml)
     --stack STACK   Force a single explicit stack (single-stack repos only)
-    --json          (ci validate) Emit the result as JSON
+    --timeout N     Per-command timeout in seconds (default: 600)
+    --json          Emit config/gate-run JSON (not supported with --github-parity)
     --help          Show this help
 
   Examples
     $ javi-forge ci
     $ javi-forge ci --quick
+    $ javi-forge ci --github-parity
     $ javi-forge ci validate
     $ javi-forge ci validate --json
     $ javi-forge ci init --force
@@ -255,6 +261,7 @@ export const FLAGS_SCHEMA = {
 	batch: { type: "boolean", default: false },
 	// CI flags
 	quick: { type: "boolean", default: false },
+	githubParity: { type: "boolean", default: false },
 	shell: { type: "boolean", default: false },
 	detect: { type: "boolean", default: false },
 	config: { type: "string", default: "" },

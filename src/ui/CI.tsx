@@ -86,7 +86,13 @@ export default function CI(props: CIProps) {
 
 	const mode = props.mode ?? "full";
 	const subtitle =
-		mode === "quick" ? "ci — quick" : mode === "shell" ? "ci — shell" : "ci";
+		mode === "quick"
+			? "ci — quick"
+			: mode === "shell"
+				? "ci — shell"
+				: mode === "github-parity"
+					? "ci — GitHub parity"
+					: "ci";
 
 	return (
 		<Box flexDirection="column" padding={1}>
@@ -118,7 +124,9 @@ export default function CI(props: CIProps) {
 			{done && success === true && (
 				<Box marginTop={1} flexDirection="column">
 					<Text color={theme.success} bold>
-						✓ CI passed — safe to push!
+						{mode === "github-parity"
+							? "✓ Local GitHub parity checks completed — review unavailable follow-ups before pushing."
+							: "✓ CI passed — safe to push!"}
 					</Text>
 				</Box>
 			)}

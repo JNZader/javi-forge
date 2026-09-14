@@ -76,6 +76,13 @@ and auto-detection yields exactly one runner. The `??` fallbacks are unreachable
 > fails closed instead of receiving a path-following chmod. Covered by
 > `ci-hooks.test.ts` ("refuses a symlink planted before managed-current mode
 > repair").
+>
+> **R1-002 CLOSED 2026-09-14**: `backupHook` now opens the source hook with
+> `O_RDONLY|O_NOFOLLOW` and reads the backup bytes through that fd, so a symlink
+> planted after force-path classification fails before any `.bak` is created.
+> Destination backups are also created through `O_EXCL` and written/chmodded via
+> the created fd. Covered by `ci-hooks.test.ts` ("refuses a source symlink
+> planted before forced backup copy").
 
 ### ENV-1 — Containerized CI runs leave `node_modules/.vite-temp` root-owned — CLOSED
 

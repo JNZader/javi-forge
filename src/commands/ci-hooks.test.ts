@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import fs from "fs-extra";
@@ -657,6 +658,41 @@ describe("installCIHooks --force and the backup protocol", () => {
 		);
 	});
 
+	it("refuses a source symlink planted before forced backup copy", async () => {
+		await fs.writeFile(preCommit, "#!/bin/bash\necho foreign\n");
+		const target = path.join(tmpDir, "backup-source-target");
+		await fs.writeFile(target, "SECRET");
+		const realReadFile = fs.readFile.bind(fs) as typeof fs.readFile;
+		let hookReads = 0;
+		const readSpy = vi.spyOn(fs, "readFile").mockImplementation((async (
+			file: string,
+			encoding: unknown,
+		) => {
+			const content = await realReadFile(file, encoding as never);
+			if (file === preCommit) {
+				hookReads += 1;
+			}
+			if (file === preCommit && hookReads === 2) {
+				await fs.remove(preCommit);
+				await fs.symlink(target, preCommit);
+			}
+			return content;
+		}) as never);
+
+		try {
+			const result = await installCIHooks(tmpDir, { force: true });
+
+			const error = result.errors.find((e) => e.startsWith("pre-commit:"));
+			expect(error).toContain("ELOOP");
+			expect(result.backups).toEqual([]);
+			expect(result.installed).not.toContain("pre-commit");
+			expect(await fs.pathExists(`${preCommit}.bak`)).toBe(false);
+			expect(await fs.readFile(target, "utf8")).toBe("SECRET");
+		} finally {
+			readSpy.mockRestore();
+		}
+	});
+
 	it("backs a managed-edited hook up before overwriting it", async () => {
 		await installCIHooks(tmpDir);
 		const edited = `${await fs.readFile(preCommit, "utf8")}echo mine\n`;
@@ -719,9 +755,19 @@ describe("installCIHooks --force and the backup protocol", () => {
 	it("leaves the hook BYTE-UNCHANGED when the backup write throws, and installs siblings", async () => {
 		const foreign = "#!/bin/bash\necho foreign\n";
 		await fs.writeFile(preCommit, foreign);
-		vi.spyOn(fs, "copyFile").mockRejectedValue(
-			Object.assign(new Error("no space left on device"), { code: "ENOSPC" }),
-		);
+		const realOpen = fsp.open.bind(fsp) as typeof fsp.open;
+		vi.spyOn(fsp, "open").mockImplementation((async (
+			file: string,
+			flags: unknown,
+			mode?: unknown,
+		) => {
+			if (file === `${preCommit}.bak`) {
+				throw Object.assign(new Error("no space left on device"), {
+					code: "ENOSPC",
+				});
+			}
+			return await realOpen(file, flags as never, mode as never);
+		}) as never);
 
 		const result = await installCIHooks(tmpDir, { force: true });
 
@@ -759,18 +805,22 @@ describe("installCIHooks --force and the backup protocol", () => {
 		expect((await fs.lstat(preCommit)).isDirectory()).toBe(true);
 	});
 
-	it("creates the backup with COPYFILE_EXCL so it can never clobber an existing file", async () => {
+	it("creates the backup with O_EXCL so it can never clobber an existing file", async () => {
 		await fs.writeFile(preCommit, "#!/bin/bash\necho foreign\n");
-		const copyFile = vi.spyOn(fs, "copyFile");
+		const open = vi.spyOn(fsp, "open");
 
 		const result = await installCIHooks(tmpDir, { force: true });
 
 		expect(result.errors).toEqual([]);
-		const call = copyFile.mock.calls.find(
-			(args) => String(args[1]) === `${preCommit}.bak`,
+		const call = open.mock.calls.find(
+			(args) => String(args[0]) === `${preCommit}.bak`,
 		);
 		expect(call).toBeDefined();
-		expect(call?.[2]).toBe(constants.COPYFILE_EXCL);
+		const flags = Number(call?.[1]);
+		expect(flags & constants.O_EXCL).toBe(constants.O_EXCL);
+		if (constants.O_NOFOLLOW !== undefined) {
+			expect(flags & constants.O_NOFOLLOW).toBe(constants.O_NOFOLLOW);
+		}
 	});
 
 	it("restores the exec bit when forcing over a 0644 foreign hook", async () => {

@@ -1,6 +1,7 @@
 import { type StdioOptions, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -2498,50 +2499,66 @@ function* backupCandidates(hookPath: string): Generator<string> {
  * path: every candidate is `lstat`ed and a symlink or non-regular file is
  * refused EVEN WITH `--force`, otherwise a planted
  * `pre-commit.bak -> ~/.ssh/authorized_keys` would turn `--force` into an
- * arbitrary-write primitive. Creation goes through `COPYFILE_EXCL`, so
- * "does it exist?" and "create it" are one atomic step: a backup can never
- * clobber an earlier backup, same-millisecond collisions are impossible, and a
- * symlink planted between the `lstat` and the copy loses the race. The copy is
- * of the ORIGINAL BYTES — never a utf8 round-trip, which would corrupt a
- * non-UTF8 hook — and the original mode is restored so a restored backup is
- * still executable.
+ * arbitrary-write primitive. The source hook is opened with `O_NOFOLLOW` before
+ * reading bytes for the backup, so a symlink planted after classification fails
+ * closed instead of copying the link target. Destination creation goes through
+ * `O_EXCL`, so "does it exist?" and "create it" are one atomic step: a backup
+ * can never clobber an earlier backup, same-millisecond collisions are
+ * impossible, and a symlink planted between the `lstat` and the destination
+ * open loses the race. The copy is of the ORIGINAL BYTES — never a utf8
+ * round-trip, which would corrupt a non-UTF8 hook — and the original mode is
+ * restored so a restored backup is still executable.
  *
  * Throwing here ABORTS the hook: the caller never reaches its write.
  */
 async function backupHook(hookPath: string): Promise<string> {
-	const original = await fs.stat(hookPath);
-
-	for (const candidate of backupCandidates(hookPath)) {
-		const existing = await lstatOrNull(candidate);
-		if (existing !== null) {
-			if (existing.isSymbolicLink() || !existing.isFile()) {
-				throw new Error(
-					`refusing to write the backup ${candidate}: it exists and is not a regular file. The hook was left unchanged.`,
-				);
-			}
-			// An earlier backup — keep it, try the next name.
-			continue;
+	const source = await fsp.open(hookPath, constants.O_RDONLY | O_NOFOLLOW);
+	try {
+		const original = await source.stat();
+		if (!original.isFile()) {
+			throw new Error(`${hookPath} exists but is not a regular file`);
 		}
-		try {
-			await fs.copyFile(hookPath, candidate, constants.COPYFILE_EXCL);
-		} catch (copyErr: unknown) {
-			if (errorCode(copyErr) === "EEXIST") {
+		const originalBytes = await source.readFile();
+
+		for (const candidate of backupCandidates(hookPath)) {
+			const existing = await lstatOrNull(candidate);
+			if (existing !== null) {
+				if (existing.isSymbolicLink() || !existing.isFile()) {
+					throw new Error(
+						`refusing to write the backup ${candidate}: it exists and is not a regular file. The hook was left unchanged.`,
+					);
+				}
+				// An earlier backup — keep it, try the next name.
 				continue;
 			}
-			throw new Error(
-				`could not write the backup ${candidate} (${errorCode(copyErr) || "unknown error"}): ${copyErr instanceof Error ? copyErr.message : String(copyErr)}. The hook was left unchanged.`,
-			);
+			let handle: FileHandle;
+			try {
+				handle = await fsp.open(
+					candidate,
+					constants.O_WRONLY |
+						constants.O_CREAT |
+						constants.O_EXCL |
+						O_NOFOLLOW,
+					original.mode,
+				);
+			} catch (openErr: unknown) {
+				if (errorCode(openErr) === "EEXIST") {
+					continue;
+				}
+				throw new Error(
+					`could not write the backup ${candidate} (${errorCode(openErr) || "unknown error"}): ${openErr instanceof Error ? openErr.message : String(openErr)}. The hook was left unchanged.`,
+				);
+			}
+			try {
+				await handle.writeFile(originalBytes);
+				await handle.chmod(original.mode);
+			} finally {
+				await handle.close();
+			}
+			return candidate;
 		}
-		// The mode restore addresses the FD of the file THIS call just created,
-		// not the path: a symlink planted at `candidate` after the
-		// `COPYFILE_EXCL` copy cannot capture the mode change (SEC-1).
-		const handle = await fsp.open(candidate, constants.O_RDONLY | O_NOFOLLOW);
-		try {
-			await handle.chmod(original.mode);
-		} finally {
-			await handle.close();
-		}
-		return candidate;
+	} finally {
+		await source.close();
 	}
 
 	throw new Error(

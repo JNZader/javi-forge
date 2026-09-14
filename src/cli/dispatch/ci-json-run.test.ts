@@ -11,9 +11,13 @@ import type { CLI, RendererCtx } from "./types.js";
  */
 
 const collectGateOutcomes = vi.fn();
+const collectGitHubParityOutcomes = vi.fn();
 const render = vi.fn();
 
-vi.mock("../../commands/ci.js", () => ({ collectGateOutcomes }));
+vi.mock("../../commands/ci.js", () => ({
+	collectGateOutcomes,
+	collectGitHubParityOutcomes,
+}));
 vi.mock("ink", () => ({ render }));
 
 const cliStub = (flags: Record<string, unknown>): CLI =>
@@ -51,6 +55,7 @@ describe("ci --json run-path (headless gate JSON)", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
 		collectGateOutcomes.mockReset();
+		collectGitHubParityOutcomes.mockReset();
 		render.mockReset();
 	});
 
@@ -161,15 +166,61 @@ describe("ci --json run-path (headless gate JSON)", () => {
 		);
 	});
 
-	it("refuses --github-parity with --json instead of rendering non-JSON Ink output", async () => {
-		const { err, exitCode } = await runJson({
+	it("prints structured GitHub parity JSON without rendering Ink", async () => {
+		collectGitHubParityOutcomes.mockResolvedValue({
+			schemaVersion: 1,
+			mode: "github-parity",
+			ok: true,
+			exitCode: 0,
+			steps: [
+				{
+					id: "github-parity:build",
+					label: "LOCAL PASS: pnpm build",
+					status: "done",
+					evidenceClass: "local",
+				},
+				{
+					id: "github-parity:self-ci",
+					label:
+						"FOLLOW-UP (GLOBAL SIDE EFFECT): packed-tarball global-install self-CI",
+					status: "skipped",
+					evidenceClass: "global-side-effect",
+				},
+			],
+			summary: {
+				localRuns: 0,
+				localPassed: 1,
+				localFailed: 0,
+				followUps: 1,
+				localToolMissing: 0,
+				githubHosted: 0,
+				globalSideEffect: 1,
+			},
+		});
+
+		const { out, err, exitCode } = await runJson({
 			githubParity: true,
 			json: true,
 		});
 
 		expect(collectGateOutcomes).not.toHaveBeenCalled();
+		expect(collectGitHubParityOutcomes).toHaveBeenCalledWith(
+			expect.objectContaining({ timeout: undefined }),
+		);
 		expect(render).not.toHaveBeenCalled();
-		expect(err.join("\n")).toContain("--json is not supported");
-		expect(exitCode).toBe(1);
+		expect(err).toEqual([]);
+		const parsed = JSON.parse(out.join("\n"));
+		expect(parsed).toMatchObject({
+			schemaVersion: 1,
+			mode: "github-parity",
+			ok: true,
+			exitCode: 0,
+		});
+		expect(parsed.steps).toHaveLength(2);
+		expect(parsed.steps[1]).toMatchObject({
+			id: "github-parity:self-ci",
+			evidenceClass: "global-side-effect",
+		});
+		expect(exitCode).toBe(0);
 	});
 });

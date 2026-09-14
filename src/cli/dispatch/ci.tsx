@@ -130,13 +130,6 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 		console.log(CI_HELP_TEXT);
 		process.exit(1);
 	}
-	if (cli.flags.githubParity && cli.flags.json) {
-		console.error(
-			"--json is not supported with --github-parity; rerun without --json for LOCAL/FOLLOW-UP evidence.",
-		);
-		process.exit(1);
-	}
-
 	const ciMode: CIMode = cli.flags.githubParity
 		? "github-parity"
 		: cli.flags.detect
@@ -160,6 +153,18 @@ export async function handleCi(cli: CLI, ctx: RendererCtx): Promise<void> {
 	// success. Surfacing the top-level `exitCode` (non-zero on ANY run failure,
 	// including a crash) closes that gap without reinterpreting `ok`.
 	if (cli.flags.json) {
+		if (ciMode === "github-parity") {
+			const { collectGitHubParityOutcomes } = await import(
+				"../../commands/ci.js"
+			);
+			const result = await collectGitHubParityOutcomes({
+				projectDir: process.cwd(),
+				timeout: cli.flags.timeout,
+			});
+			console.log(JSON.stringify(result, null, 2));
+			process.exit(result.exitCode);
+		}
+
 		const { collectGateOutcomes } = await import("../../commands/ci.js");
 		const result = await collectGateOutcomes({
 			projectDir: process.cwd(),

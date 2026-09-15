@@ -4,6 +4,7 @@ import { handleAi } from "./dispatch/ai.js";
 import { handleCi } from "./dispatch/ci.js";
 import { handleHooks } from "./dispatch/hooks.js";
 import { handlePi } from "./dispatch/pi.js";
+import { handlePreparation } from "./dispatch/preparation.js";
 import { handleSecurity } from "./dispatch/security.js";
 import {
 	handleAnalyze,
@@ -31,6 +32,7 @@ const KNOWN_COMMANDS = new Set([
 	"ai",
 	"plugin",
 	"pi",
+	"preparation",
 	"skills",
 	"skill",
 	"security",
@@ -122,6 +124,11 @@ export async function runCli(): Promise<void> {
 
 		case "pi": {
 			await handlePi(cli);
+			break;
+		}
+
+		case "preparation": {
+			await handlePreparation(cli);
 			break;
 		}
 

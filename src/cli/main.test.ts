@@ -25,6 +25,7 @@ vi.mock("./dispatch/simple-renderers.js", () => ({
 vi.mock("./dispatch/ai.js", () => ({ handleAi: vi.fn() }));
 vi.mock("./dispatch/ci.js", () => ({ handleCi: vi.fn() }));
 vi.mock("./dispatch/hooks.js", () => ({ handleHooks: vi.fn() }));
+vi.mock("./dispatch/preparation.js", () => ({ handlePreparation: vi.fn() }));
 vi.mock("./dispatch/security.js", () => ({ handleSecurity: vi.fn() }));
 vi.mock("./dispatch/skill-publish.js", () => ({ handleSkillPublish: vi.fn() }));
 vi.mock("./dispatch/skills-cmd.js", () => ({ handleSkillsCmd: vi.fn() }));

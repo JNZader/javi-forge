@@ -95,6 +95,18 @@ afterAll(() => {
 });
 
 describe("production preparation preflight contract", () => {
+	it("rejects malformed production config without runtime measurement", () => {
+		expect(
+			inspectPreparationProductionPreflight(
+				{ ...config(), workerExecutableDigest: "not-a-digest" },
+				policy(),
+			),
+		).toEqual({
+			status: PREPARATION_PREFLIGHT_STATUS.DENIED,
+			reason: PREPARATION_PREFLIGHT_REASON.INVALID_CONFIG,
+		});
+	});
+
 	it("parses an exact production config without retaining mutability", () => {
 		const parsed = parsePreparationProductionConfig(config());
 		expect(parsed.cwd).toBe(control);

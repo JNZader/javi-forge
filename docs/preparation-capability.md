@@ -65,6 +65,9 @@ the non-overwrite run, and measures the pinned worker/source/launcher digests.
 It returns only bounded statuses and reason codes (`ready`, `unavailable`, or
 `denied`). It does not execute the worker, stage outputs, verify or consume an
 approval, contact a model, or authorize production helper execution.
+The CLI exposes this as `javi-forge preparation preflight --config <file>
+[--json]`; it is diagnostic only and shares the same no-execution/no-consumption
+boundary.
 
 Remaining work is to connect this boundary through a separately reviewed
 production route with real operator configuration, production identity

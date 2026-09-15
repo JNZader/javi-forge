@@ -208,6 +208,26 @@ runtime-visible model list.
 
 ---
 
+## preparation
+
+Run read-only production preparation diagnostics.
+
+```bash
+javi-forge preparation preflight --config preparation.config.json
+javi-forge preparation preflight --config preparation.config.json --json
+```
+
+The preflight command parses an exact production preparation configuration,
+checks the configured cwd/destination against policy, validates the Ed25519
+public key shape, verifies the operator-owned state/control directories, confirms
+the destination is absent for the non-overwrite run, and measures pinned
+worker/source/launcher digests.
+
+It does **not** execute the worker, stage outputs, verify or consume approvals,
+contact a model, deploy, publish, release, or write generated artifacts.
+
+---
+
 ## doctor
 
 Show a comprehensive health report.

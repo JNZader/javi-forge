@@ -143,6 +143,24 @@ describe("help — pi free-provider export", () => {
 });
 
 // =============================================================================
+// Preparation production preflight
+// =============================================================================
+
+describe("help — preparation preflight", () => {
+	it("documents the read-only preparation preflight command", () => {
+		expect(HELP_TEXT).toContain("preparation preflight");
+		expect(HELP_TEXT).toContain("Read-only production preparation preflight");
+		expect(HELP_TEXT).toContain("Production preparation config JSON");
+		expect(HELP_TEXT).toContain("--json");
+	});
+
+	it("shows a preparation preflight example", () => {
+		const examples = HELP_TEXT.split("Examples")[1] ?? "";
+		expect(examples).toContain("preparation preflight --config");
+	});
+});
+
+// =============================================================================
 // CI_HELP_TEXT — per-command help for `ci`
 // =============================================================================
 

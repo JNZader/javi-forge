@@ -167,7 +167,12 @@ export function inspectPreparationProductionPreflight(
 	let stateDirectory: ProtectedDirectory | undefined;
 	let controlDirectory: ProtectedDirectory | undefined;
 	try {
-		const config = parsePreparationProductionConfig(input);
+		let config: PreparationProductionConfig;
+		try {
+			config = parsePreparationProductionConfig(input);
+		} catch {
+			return denied(PREPARATION_PREFLIGHT_REASON.INVALID_CONFIG);
+		}
 		if (
 			config.cwd !== policy.cwd ||
 			config.destination !== policy.destination

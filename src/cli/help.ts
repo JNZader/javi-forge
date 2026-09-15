@@ -30,6 +30,7 @@ export const HELP_TEXT = `
     ai providers convert  Convert provider metadata between Pi and OpenCode
     ai providers smoke-test  Probe Pi/OpenCode provider/model routes and write JSONL evidence
     ai providers apply-scope  Apply smoke-test pass scope to Pi/OpenCode config
+    preparation preflight  Read-only production preparation preflight
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
     plugin list       List installed plugins
@@ -89,6 +90,7 @@ export const HELP_TEXT = `
     --pass-list PATH Provider smoke-test .pass.tsv input for apply-scope
     --pi-settings PATH Pi settings.json path for apply-scope
     --opencode-config PATH OpenCode opencode.json path for apply-scope
+    --json          Emit JSON for commands that support structured output
     --version       Show version
     --help          Show this help
 
@@ -114,6 +116,10 @@ export const HELP_TEXT = `
                     content is copied to a .bak sibling first; if that backup
                     cannot be written, the hook is left untouched. Symlinked
                     hook paths are refused even with --force.
+
+  Preparation options (javi-forge preparation preflight)
+    --config PATH   Production preparation config JSON
+    --json          Emit the bounded preflight result as JSON
 
   SkillGuard install gate (plugin add / plugin import / skills auto)
     Every install is scanned before anything is written. Refusals are
@@ -160,6 +166,7 @@ export const HELP_TEXT = `
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.jsonl --target both
     $ javi-forge pi providers export-free
     $ javi-forge pi providers export-free /tmp/pi-free-providers
+    $ javi-forge preparation preflight --config preparation.config.json --json
 `;
 
 /**

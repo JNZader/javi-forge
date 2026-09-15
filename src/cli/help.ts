@@ -26,6 +26,8 @@ export const HELP_TEXT = `
     workflow show     Render a workflow graph as ASCII (--template <name> or file path)
     workflow validate Validate project state against a workflow graph
     workflow list     List available workflows and built-in templates
+    ai providers export-free  Generate portable Pi/OpenCode free-provider bundles
+    ai providers convert  Convert provider metadata between Pi and OpenCode
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
     plugin list       List installed plugins
@@ -37,6 +39,7 @@ export const HELP_TEXT = `
     plugin export-skills  Generate aggregated skills.json from all installed plugins
     plugin export-skills global  Generate global skills.json from all globally installed plugins
     plugin import     Import an Agent Skills spec package as a javi-forge plugin
+    pi providers export-free  Generate an exportable Pi free-provider bundle (no secrets)
     skills doctor     Show skills health report (add --deep for conflict detection)
     skills budget     Show token cost of loaded skills (add -b N for custom budget)
     skills score      Score a skill on quality dimensions (completeness, clarity, testability, token-efficiency)
@@ -66,6 +69,7 @@ export const HELP_TEXT = `
     --skills-dir    Custom skills directory path
     --author        Author name for skill publish
     --repo          Repository URL for skill publish
+    --target        Provider bundle target (pi, opencode, both)
     --version       Show version
     --help          Show this help
 
@@ -127,6 +131,10 @@ export const HELP_TEXT = `
     $ javi-forge doctor
     $ javi-forge plugin add mapbox/agent-skills
     $ javi-forge plugin list
+    $ javi-forge ai providers export-free --target both
+    $ javi-forge ai providers convert pi opencode /tmp/pi-to-opencode --config ~/.pi/agent/models.json
+    $ javi-forge pi providers export-free
+    $ javi-forge pi providers export-free /tmp/pi-free-providers
 `;
 
 /**
@@ -284,6 +292,7 @@ export const FLAGS_SCHEMA = {
 	// Skill publish flags
 	author: { type: "string", default: "" },
 	repo: { type: "string", default: "" },
+	target: { type: "string", default: "" },
 	// Workflow flags
 	template: { type: "string", default: "" },
 	// TDD flags

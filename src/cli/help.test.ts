@@ -99,6 +99,26 @@ describe("help / FLAGS_SCHEMA — doctor --refresh-context", () => {
 });
 
 // =============================================================================
+// Pi free-provider export
+// =============================================================================
+
+describe("help — pi free-provider export", () => {
+	it("documents the pi providers export-free command", () => {
+		expect(HELP_TEXT).toContain("pi providers export-free");
+		expect(HELP_TEXT).toContain("ai providers export-free");
+		expect(HELP_TEXT).toContain("ai providers convert");
+	});
+
+	it("shows pi providers export-free examples", () => {
+		const examples = HELP_TEXT.split("Examples")[1] ?? "";
+		expect(examples).toContain("pi providers export-free");
+		expect(examples).toContain("ai providers export-free --target both");
+		expect(examples).toContain("ai providers convert pi opencode");
+		expect(examples).toContain("/tmp/pi-free-providers");
+	});
+});
+
+// =============================================================================
 // CI_HELP_TEXT — per-command help for `ci`
 // =============================================================================
 

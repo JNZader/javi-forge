@@ -1,7 +1,9 @@
 import { createRequire } from "node:module";
 import meow from "meow";
+import { handleAi } from "./dispatch/ai.js";
 import { handleCi } from "./dispatch/ci.js";
 import { handleHooks } from "./dispatch/hooks.js";
+import { handlePi } from "./dispatch/pi.js";
 import { handleSecurity } from "./dispatch/security.js";
 import {
 	handleAnalyze,
@@ -26,7 +28,9 @@ const KNOWN_COMMANDS = new Set([
 	"analyze",
 	"workflow",
 	"llms-txt",
+	"ai",
 	"plugin",
+	"pi",
 	"skills",
 	"skill",
 	"security",
@@ -106,8 +110,18 @@ export async function runCli(): Promise<void> {
 			break;
 		}
 
+		case "ai": {
+			await handleAi(cli);
+			break;
+		}
+
 		case "plugin": {
 			handlePlugin(cli, { inkStdin, isCI });
+			break;
+		}
+
+		case "pi": {
+			await handlePi(cli);
 			break;
 		}
 

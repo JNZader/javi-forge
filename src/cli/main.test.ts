@@ -22,6 +22,7 @@ vi.mock("./dispatch/simple-renderers.js", () => ({
 	handleLlmsTxt: vi.fn(),
 	handlePlugin: vi.fn(),
 }));
+vi.mock("./dispatch/ai.js", () => ({ handleAi: vi.fn() }));
 vi.mock("./dispatch/ci.js", () => ({ handleCi: vi.fn() }));
 vi.mock("./dispatch/hooks.js", () => ({ handleHooks: vi.fn() }));
 vi.mock("./dispatch/security.js", () => ({ handleSecurity: vi.fn() }));

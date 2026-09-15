@@ -41,6 +41,9 @@ describe("ai dispatch", () => {
 				piCommand: "",
 				envFile: "",
 				prompt: "",
+				passList: "",
+				piSettings: "",
+				opencodeConfig: "",
 			},
 		} as CLI);
 
@@ -64,6 +67,9 @@ describe("ai dispatch", () => {
 				piCommand: "",
 				envFile: "",
 				prompt: "",
+				passListPath: "",
+				piSettingsPath: "",
+				opencodeConfigPath: "",
 				dryRun: true,
 			},
 			expect.any(Function),
@@ -91,6 +97,9 @@ describe("ai dispatch", () => {
 				piCommand: "",
 				envFile: "",
 				prompt: "",
+				passList: "",
+				piSettings: "",
+				opencodeConfig: "",
 			},
 		} as CLI);
 
@@ -125,6 +134,9 @@ describe("ai dispatch", () => {
 				piCommand: "pi",
 				envFile: "/secrets/providers.env",
 				prompt: "pong",
+				passList: "",
+				piSettings: "",
+				opencodeConfig: "",
 			},
 		} as CLI);
 
@@ -144,6 +156,46 @@ describe("ai dispatch", () => {
 				piCommand: "pi",
 				envFile: "/secrets/providers.env",
 				prompt: "pong",
+			}),
+			expect.any(Function),
+		);
+	});
+
+	it("routes apply-scope arguments", async () => {
+		mockRun.mockResolvedValue({ status: "success" });
+
+		await handleAi({
+			input: ["ai", "providers", "apply-scope", "/target/smoke.pass.tsv"],
+			flags: {
+				target: "both",
+				config: "",
+				dryRun: true,
+				report: "",
+				provider: "",
+				family: "",
+				model: "",
+				status: "",
+				limit: 0,
+				timeout: 600,
+				includeLocal: false,
+				piCommand: "",
+				envFile: "",
+				prompt: "",
+				passList: "/override/pass.tsv",
+				piSettings: "/pi/settings.json",
+				opencodeConfig: "/opencode/opencode.json",
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			expect.objectContaining({
+				providersAction: "apply-scope",
+				outputDir: "/target/smoke.pass.tsv",
+				target: "both",
+				passListPath: "/override/pass.tsv",
+				piSettingsPath: "/pi/settings.json",
+				opencodeConfigPath: "/opencode/opencode.json",
+				dryRun: true,
 			}),
 			expect.any(Function),
 		);

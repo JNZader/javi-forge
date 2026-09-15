@@ -3,6 +3,7 @@ import {
 	convertProviderBundle,
 	writeFreeProvidersBundle,
 } from "../lib/ai-provider-bundles.js";
+import { applyProviderScope } from "../lib/ai-provider-scope.js";
 import { runProviderSmokeTests } from "../lib/ai-provider-smoke.js";
 import type { InitStep } from "../types/index.js";
 import {
@@ -21,9 +22,14 @@ vi.mock("../lib/ai-provider-smoke.js", () => ({
 	runProviderSmokeTests: vi.fn(),
 }));
 
+vi.mock("../lib/ai-provider-scope.js", () => ({
+	applyProviderScope: vi.fn(),
+}));
+
 const mockWriteBundle = vi.mocked(writeFreeProvidersBundle);
 const mockConvertBundle = vi.mocked(convertProviderBundle);
 const mockRunSmokeTests = vi.mocked(runProviderSmokeTests);
+const mockApplyScope = vi.mocked(applyProviderScope);
 
 function collectSteps(): {
 	steps: InitStep[];
@@ -163,6 +169,86 @@ describe("runAiProvidersCommand", () => {
 		expect(steps[1]!.detail).toContain("pass: 1");
 	});
 
+	it("applies smoke-test pass scope to runtime configs", async () => {
+		mockApplyScope.mockResolvedValue({
+			inputPath: "/target/smoke.pass.tsv",
+			target: "both",
+			dryRun: true,
+			wrote: false,
+			passModels: 2,
+			scopedProviders: ["opencode-go", "openrouter-free"],
+			files: ["/pi/settings.json", "/opencode/opencode.json"],
+			backups: [],
+			piEnabledModels: 2,
+			opencodeProviderModelCounts: {
+				"opencode-go": 1,
+				"openrouter-free": 1,
+			},
+		});
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "apply-scope",
+				outputDir: "/target/smoke.pass.tsv",
+				target: "both",
+				passListPath: "/override/pass.tsv",
+				piSettingsPath: "/pi/settings.json",
+				opencodeConfigPath: "/opencode/opencode.json",
+				dryRun: true,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS });
+		expect(mockApplyScope).toHaveBeenCalledExactlyOnceWith({
+			inputPath: "/override/pass.tsv",
+			target: "both",
+			piSettingsPath: "/pi/settings.json",
+			opencodeConfigPath: "/opencode/opencode.json",
+			dryRun: true,
+		});
+		expect(steps[1]!.detail).toContain("dry-run: would update");
+		expect(steps[1]!.detail).toContain("pi enabledModels: 2");
+		expect(steps[1]!.detail).toContain("opencode-go: 1");
+	});
+
+	it("uses the apply-scope positional path when --pass-list is omitted", async () => {
+		mockApplyScope.mockResolvedValue({
+			inputPath: "/target/smoke.pass.tsv",
+			target: "pi",
+			dryRun: true,
+			wrote: false,
+			passModels: 1,
+			scopedProviders: ["openrouter-free"],
+			files: ["/pi/settings.json"],
+			backups: [],
+			piEnabledModels: 1,
+		});
+		const { onStep } = collectSteps();
+
+		await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "apply-scope",
+				outputDir: "/target/smoke.pass.tsv",
+				target: "pi",
+				passListPath: "",
+				dryRun: true,
+			},
+			onStep,
+		);
+
+		expect(mockApplyScope).toHaveBeenCalledExactlyOnceWith({
+			inputPath: "/target/smoke.pass.tsv",
+			target: "pi",
+			piSettingsPath: undefined,
+			opencodeConfigPath: undefined,
+			dryRun: true,
+		});
+	});
+
 	it("reports usage for unsupported subcommands", async () => {
 		const { steps, onStep } = collectSteps();
 
@@ -175,6 +261,7 @@ describe("runAiProvidersCommand", () => {
 		expect(mockWriteBundle).not.toHaveBeenCalled();
 		expect(mockConvertBundle).not.toHaveBeenCalled();
 		expect(mockRunSmokeTests).not.toHaveBeenCalled();
+		expect(mockApplyScope).not.toHaveBeenCalled();
 		expect(steps[0]!.detail).toContain("javi-forge ai providers export-free");
 	});
 });

@@ -7,6 +7,10 @@ import {
 	writeFreeProvidersBundle,
 } from "../lib/ai-provider-bundles.js";
 import {
+	applyProviderScope,
+	type ProviderScopeTarget,
+} from "../lib/ai-provider-scope.js";
+import {
 	type ProviderSmokeFilters,
 	runProviderSmokeTests,
 } from "../lib/ai-provider-smoke.js";
@@ -30,6 +34,7 @@ export const AI_PROVIDERS_PROVIDER_ACTION = {
 	EXPORT_FREE: "export-free",
 	CONVERT: "convert",
 	SMOKE_TEST: "smoke-test",
+	APPLY_SCOPE: "apply-scope",
 } as const;
 
 export interface AiProvidersCommandResult {
@@ -55,6 +60,9 @@ export interface AiProvidersCommandRequest {
 	piCommand?: string;
 	envFile?: string;
 	prompt?: string;
+	passListPath?: string;
+	piSettingsPath?: string;
+	opencodeConfigPath?: string;
 	dryRun: boolean;
 }
 
@@ -105,6 +113,7 @@ function usage(): string {
 		"  javi-forge ai providers export-free [output-dir] --target pi|opencode|both",
 		"  javi-forge ai providers convert <pi|opencode> <pi|opencode> [output-dir] --config <input-path>",
 		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--provider id] [--family text] [--model text] [--status pass|failed|...] --report <previous.jsonl>",
+		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both [--dry-run]",
 	].join("\n");
 }
 
@@ -244,6 +253,73 @@ async function smokeTest(
 	return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
 }
 
+function normalizeScopeTarget(value?: string): ProviderScopeTarget | undefined {
+	if (!value) return undefined;
+	if (value === "pi" || value === "opencode" || value === "both") return value;
+	throw new Error(`unknown target: ${value}`);
+}
+
+function scopeDetail(
+	result: Awaited<ReturnType<typeof applyProviderScope>>,
+): string {
+	return [
+		`${result.dryRun ? "dry-run: would update" : "updated"}: ${result.files.length}`,
+		`pass models: ${result.passModels}`,
+		`scoped providers: ${result.scopedProviders.join(", ") || "(none)"}`,
+		"files:",
+		...result.files.map((file) => `  - ${file}`),
+		...(result.backups.length
+			? ["backups:", ...result.backups.map((file) => `  - ${file}`)]
+			: []),
+		...(result.piEnabledModels !== undefined
+			? [`pi enabledModels: ${result.piEnabledModels}`]
+			: []),
+		...(result.opencodeProviderModelCounts
+			? [
+					"opencode provider models:",
+					renderCounts(result.opencodeProviderModelCounts),
+				]
+			: []),
+		...(result.opencodeMissingProviders?.length
+			? [
+					`opencode missing providers: ${result.opencodeMissingProviders.join(", ")}`,
+				]
+			: []),
+	].join("\n");
+}
+
+async function applyScope(
+	request: AiProvidersCommandRequest,
+	onStep: StepCallback,
+): Promise<AiProvidersCommandResult> {
+	report(
+		onStep,
+		"ai-providers-apply-scope",
+		"Apply AI provider scope",
+		"running",
+	);
+	const inputPath =
+		emptyToUndefined(request.passListPath) ??
+		emptyToUndefined(request.outputDir);
+	if (!inputPath)
+		throw new Error("apply-scope requires <pass.tsv|report.jsonl>");
+	const result = await applyProviderScope({
+		inputPath,
+		target: normalizeScopeTarget(request.target),
+		piSettingsPath: emptyToUndefined(request.piSettingsPath),
+		opencodeConfigPath: emptyToUndefined(request.opencodeConfigPath),
+		dryRun: request.dryRun,
+	});
+	report(
+		onStep,
+		"ai-providers-apply-scope",
+		"Apply AI provider scope",
+		"done",
+		scopeDetail(result),
+	);
+	return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
+}
+
 export async function runAiProvidersCommand(
 	request: AiProvidersCommandRequest,
 	onStep: StepCallback,
@@ -262,6 +338,9 @@ export async function runAiProvidersCommand(
 		}
 		if (request.providersAction === AI_PROVIDERS_PROVIDER_ACTION.SMOKE_TEST) {
 			return await smokeTest(request, onStep);
+		}
+		if (request.providersAction === AI_PROVIDERS_PROVIDER_ACTION.APPLY_SCOPE) {
+			return await applyScope(request, onStep);
 		}
 		report(onStep, "ai-providers-usage", "AI providers", "error", usage());
 		return { status: AI_PROVIDERS_COMMAND_STATUS.FAILURE };

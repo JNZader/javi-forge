@@ -29,6 +29,7 @@ export const HELP_TEXT = `
     ai providers export-free  Generate portable Pi/OpenCode free-provider bundles
     ai providers convert  Convert provider metadata between Pi and OpenCode
     ai providers smoke-test  Probe Pi provider/model routes and write JSONL evidence
+    ai providers apply-scope  Apply smoke-test pass scope to Pi/OpenCode config
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
     plugin list       List installed plugins
@@ -80,6 +81,9 @@ export const HELP_TEXT = `
     --include-local Include local providers such as Ollama in provider smoke tests
     --env-file PATH Load machine-local provider keys for provider smoke tests
     --pi-command    Pi executable for provider smoke tests (default: pi)
+    --pass-list PATH Provider smoke-test .pass.tsv input for apply-scope
+    --pi-settings PATH Pi settings.json path for apply-scope
+    --opencode-config PATH OpenCode opencode.json path for apply-scope
     --version       Show version
     --help          Show this help
 
@@ -146,6 +150,8 @@ export const HELP_TEXT = `
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --provider openrouter-free --env-file ~/.config/javi-forge/secrets/providers.env
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --family deepseek --limit 5
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --status failed --report /tmp/previous-smoke.jsonl
+    $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.pass.tsv --target pi --dry-run
+    $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.jsonl --target both
     $ javi-forge pi providers export-free
     $ javi-forge pi providers export-free /tmp/pi-free-providers
 `;
@@ -316,6 +322,9 @@ export const FLAGS_SCHEMA = {
 	envFile: { type: "string", default: "" },
 	piCommand: { type: "string", default: "" },
 	prompt: { type: "string", default: "" },
+	passList: { type: "string", default: "" },
+	piSettings: { type: "string", default: "" },
+	opencodeConfig: { type: "string", default: "" },
 	// Workflow flags
 	template: { type: "string", default: "" },
 	// TDD flags

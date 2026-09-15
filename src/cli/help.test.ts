@@ -107,6 +107,7 @@ describe("help — pi free-provider export", () => {
 		expect(HELP_TEXT).toContain("pi providers export-free");
 		expect(HELP_TEXT).toContain("ai providers export-free");
 		expect(HELP_TEXT).toContain("ai providers convert");
+		expect(HELP_TEXT).toContain("ai providers apply-scope");
 	});
 
 	it("shows pi providers export-free examples", () => {
@@ -114,7 +115,17 @@ describe("help — pi free-provider export", () => {
 		expect(examples).toContain("pi providers export-free");
 		expect(examples).toContain("ai providers export-free --target both");
 		expect(examples).toContain("ai providers convert pi opencode");
+		expect(examples).toContain("ai providers apply-scope");
 		expect(examples).toContain("/tmp/pi-free-providers");
+	});
+
+	it("declares apply-scope config flags", () => {
+		expect(FLAGS_SCHEMA).toHaveProperty("passList");
+		expect(FLAGS_SCHEMA.passList.type).toBe("string");
+		expect(FLAGS_SCHEMA).toHaveProperty("piSettings");
+		expect(FLAGS_SCHEMA.piSettings.type).toBe("string");
+		expect(FLAGS_SCHEMA).toHaveProperty("opencodeConfig");
+		expect(FLAGS_SCHEMA.opencodeConfig.type).toBe("string");
 	});
 });
 

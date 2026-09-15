@@ -57,6 +57,15 @@ it. Its fixture identities are test-only claims, not deployment measurements.
 The top-level availability route remains unavailable, and this slice does not
 authorize running generated preparation helpers.
 
+This source now also exposes a read-only **production preflight contract**. It
+parses an exact operator configuration, checks the configured cwd/destination
+against the expected policy, validates an Ed25519 public key, verifies the
+operator-owned state/control directories, confirms the destination is absent for
+the non-overwrite run, and measures the pinned worker/source/launcher digests.
+It returns only bounded statuses and reason codes (`ready`, `unavailable`, or
+`denied`). It does not execute the worker, stage outputs, verify or consume an
+approval, contact a model, or authorize production helper execution.
+
 Remaining work is to connect this boundary through a separately reviewed
 production route with real operator configuration, production identity
 measurement, operator UX, packaging, install/rollback procedure, and runtime

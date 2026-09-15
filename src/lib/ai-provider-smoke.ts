@@ -105,6 +105,7 @@ export interface ProviderSmokeResult {
 const DEFAULT_PROMPT =
 	"Reply with exactly: pong. Do not call tools. Do not include markdown.";
 const DEFAULT_TIMEOUT_SECONDS = 30;
+const TIMEOUT_SIGKILL_GRACE_MS = 1500;
 const SENSITIVE_LINE =
 	/(api[-_ ]?key|token|secret|credential|authorization|bearer)/i;
 const LOCAL_PROVIDER = /(ollama|localhost|local)/i;
@@ -378,54 +379,78 @@ class PiProviderSmokeRunner implements ProviderSmokeRunner {
 			>
 		> & { env: NodeJS.ProcessEnv; runtime: ProviderSmokeRuntime },
 	): Promise<ProviderSmokeRunOutput> {
-		const args = [
-			"-p",
-			"--no-tools",
-			"--no-skills",
-			"--no-context-files",
-			"--no-prompt-templates",
-			"--no-extensions",
-			"--provider",
-			model.provider,
-			"--model",
-			model.model,
-			options.prompt,
-		];
-		return new Promise((resolveRun) => {
-			const child = spawn(options.piCommand, args, {
-				env: options.env,
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-			let stdout = "";
-			let stderr = "";
-			let timedOut = false;
-			const timer = setTimeout(() => {
-				timedOut = true;
-				child.kill("SIGTERM");
-			}, options.timeoutSeconds * 1000);
-			child.stdout.setEncoding("utf8");
-			child.stderr.setEncoding("utf8");
-			child.stdout.on("data", (chunk: string) => {
-				stdout += chunk;
-			});
-			child.stderr.on("data", (chunk: string) => {
-				stderr += chunk;
-			});
-			child.on("error", (error) => {
-				clearTimeout(timer);
-				resolveRun({
-					exitCode: null,
-					stdout,
-					stderr: `${stderr}\n${error.message}`,
-					timedOut,
-				});
-			});
-			child.on("close", (exitCode) => {
-				clearTimeout(timer);
-				resolveRun({ exitCode, stdout, stderr, timedOut });
+		return runSmokeCommandWithTimeout(
+			options.piCommand,
+			[
+				"-p",
+				"--no-tools",
+				"--no-skills",
+				"--no-context-files",
+				"--no-prompt-templates",
+				"--no-extensions",
+				"--provider",
+				model.provider,
+				"--model",
+				model.model,
+				options.prompt,
+			],
+			options,
+		);
+	}
+}
+
+function runSmokeCommandWithTimeout(
+	command: string,
+	args: string[],
+	options: {
+		env: NodeJS.ProcessEnv;
+		timeoutSeconds: number;
+	},
+): Promise<ProviderSmokeRunOutput> {
+	return new Promise((resolveRun) => {
+		const child = spawn(command, args, {
+			env: options.env,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stdout = "";
+		let stderr = "";
+		let timedOut = false;
+		let sigkillTimer: NodeJS.Timeout | undefined;
+		const clearTimers = () => {
+			clearTimeout(timer);
+			if (sigkillTimer) clearTimeout(sigkillTimer);
+		};
+		const timer = setTimeout(() => {
+			timedOut = true;
+			child.kill("SIGTERM");
+			sigkillTimer = setTimeout(() => {
+				if (child.exitCode === null && child.signalCode === null) {
+					child.kill("SIGKILL");
+				}
+			}, TIMEOUT_SIGKILL_GRACE_MS);
+		}, options.timeoutSeconds * 1000);
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (chunk: string) => {
+			stdout += chunk;
+		});
+		child.stderr.on("data", (chunk: string) => {
+			stderr += chunk;
+		});
+		child.on("error", (error) => {
+			clearTimers();
+			resolveRun({
+				exitCode: null,
+				stdout,
+				stderr: `${stderr}\n${error.message}`,
+				timedOut,
 			});
 		});
-	}
+		child.on("close", (exitCode) => {
+			clearTimers();
+			resolveRun({ exitCode, stdout, stderr, timedOut });
+		});
+	});
 }
 
 class OpenCodeProviderSmokeRunner implements ProviderSmokeRunner {
@@ -438,49 +463,19 @@ class OpenCodeProviderSmokeRunner implements ProviderSmokeRunner {
 			>
 		> & { env: NodeJS.ProcessEnv; runtime: ProviderSmokeRuntime },
 	): Promise<ProviderSmokeRunOutput> {
-		const args = [
-			"run",
-			"--pure",
-			"--model",
-			`${model.provider}/${model.model}`,
-			"--format",
-			"json",
-			options.prompt,
-		];
-		return new Promise((resolveRun) => {
-			const child = spawn(options.opencodeCommand, args, {
-				env: options.env,
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-			let stdout = "";
-			let stderr = "";
-			let timedOut = false;
-			const timer = setTimeout(() => {
-				timedOut = true;
-				child.kill("SIGTERM");
-			}, options.timeoutSeconds * 1000);
-			child.stdout.setEncoding("utf8");
-			child.stderr.setEncoding("utf8");
-			child.stdout.on("data", (chunk: string) => {
-				stdout += chunk;
-			});
-			child.stderr.on("data", (chunk: string) => {
-				stderr += chunk;
-			});
-			child.on("error", (error) => {
-				clearTimeout(timer);
-				resolveRun({
-					exitCode: null,
-					stdout,
-					stderr: `${stderr}\n${error.message}`,
-					timedOut,
-				});
-			});
-			child.on("close", (exitCode) => {
-				clearTimeout(timer);
-				resolveRun({ exitCode, stdout, stderr, timedOut });
-			});
-		});
+		return runSmokeCommandWithTimeout(
+			options.opencodeCommand,
+			[
+				"run",
+				"--pure",
+				"--model",
+				`${model.provider}/${model.model}`,
+				"--format",
+				"json",
+				options.prompt,
+			],
+			options,
+		);
 	}
 }
 

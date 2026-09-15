@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -255,6 +255,46 @@ describe("provider smoke tests", () => {
 		expect(seen).toEqual([
 			"opencode:opencode-custom:openrouter-free/cohere/north-mini-code:free",
 		]);
+		expect(result.counts).toEqual({ timeout: 1 });
+	});
+
+	it("force-kills OpenCode commands that ignore SIGTERM after timeout", async () => {
+		const dir = await tempDir();
+		const configPath = join(dir, "opencode.json");
+		const commandPath = join(dir, "ignore-sigterm.mjs");
+		await writeFile(
+			configPath,
+			JSON.stringify({
+				provider: {
+					"openrouter-free": {
+						models: {
+							"cohere/north-mini-code:free": { name: "North Mini" },
+						},
+					},
+				},
+			}),
+		);
+		await writeFile(
+			commandPath,
+			[
+				"#!/usr/bin/env node",
+				"process.on('SIGTERM', () => {});",
+				"setInterval(() => {}, 1000);",
+				"",
+			].join("\n"),
+		);
+		await chmod(commandPath, 0o755);
+		const started = Date.now();
+
+		const result = await runProviderSmokeTests({
+			runtime: PROVIDER_SMOKE_RUNTIME.OPENCODE,
+			modelsPath: configPath,
+			outputPath: join(dir, "smoke.jsonl"),
+			opencodeCommand: commandPath,
+			timeoutSeconds: 1,
+		});
+
+		expect(Date.now() - started).toBeLessThan(5000);
 		expect(result.counts).toEqual({ timeout: 1 });
 	});
 });

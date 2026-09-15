@@ -29,6 +29,7 @@ function printStep(step: InitStep): void {
 export async function handleAi(cli: CLI): Promise<void> {
 	const providersAction = cli.input[2];
 	const outputDir = providersAction === "convert" ? cli.input[5] : cli.input[3];
+	const limit = cli.flags.limit > 0 ? cli.flags.limit : undefined;
 	const result = await runAiProvidersCommand(
 		{
 			action: cli.input[1],
@@ -38,6 +39,17 @@ export async function handleAi(cli: CLI): Promise<void> {
 			outputDir,
 			target: cli.flags.target,
 			inputPath: cli.flags.config,
+			reportPath: cli.flags.report,
+			provider: cli.flags.provider,
+			family: cli.flags.family,
+			model: cli.flags.model,
+			statusFilter: cli.flags.status,
+			limit,
+			timeoutSeconds: cli.flags.timeout,
+			includeLocal: cli.flags.includeLocal,
+			piCommand: cli.flags.piCommand,
+			envFile: cli.flags.envFile,
+			prompt: cli.flags.prompt,
 			dryRun: cli.flags.dryRun,
 		},
 		printStep,

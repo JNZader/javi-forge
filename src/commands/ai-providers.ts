@@ -6,6 +6,10 @@ import {
 	type ProviderBundleTarget,
 	writeFreeProvidersBundle,
 } from "../lib/ai-provider-bundles.js";
+import {
+	type ProviderSmokeFilters,
+	runProviderSmokeTests,
+} from "../lib/ai-provider-smoke.js";
 import type { InitStep } from "../types/index.js";
 
 type StepCallback = (step: InitStep) => void;
@@ -25,6 +29,7 @@ export const AI_PROVIDERS_ACTION = {
 export const AI_PROVIDERS_PROVIDER_ACTION = {
 	EXPORT_FREE: "export-free",
 	CONVERT: "convert",
+	SMOKE_TEST: "smoke-test",
 } as const;
 
 export interface AiProvidersCommandResult {
@@ -39,6 +44,17 @@ export interface AiProvidersCommandRequest {
 	from?: string;
 	to?: string;
 	inputPath?: string;
+	reportPath?: string;
+	provider?: string;
+	family?: string;
+	model?: string;
+	statusFilter?: string;
+	limit?: number;
+	timeoutSeconds?: number;
+	includeLocal?: boolean;
+	piCommand?: string;
+	envFile?: string;
+	prompt?: string;
 	dryRun: boolean;
 }
 
@@ -88,6 +104,7 @@ function usage(): string {
 		"Usage:",
 		"  javi-forge ai providers export-free [output-dir] --target pi|opencode|both",
 		"  javi-forge ai providers convert <pi|opencode> <pi|opencode> [output-dir] --config <input-path>",
+		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--provider id] [--family text] [--model text] [--status pass|failed|...] --report <previous.jsonl>",
 	].join("\n");
 }
 
@@ -163,6 +180,70 @@ async function convert(
 	return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
 }
 
+function emptyToUndefined(value?: string): string | undefined {
+	const trimmed = value?.trim();
+	return trimmed ? trimmed : undefined;
+}
+
+function smokeFilters(
+	request: AiProvidersCommandRequest,
+): ProviderSmokeFilters {
+	return {
+		provider: emptyToUndefined(request.provider),
+		family: emptyToUndefined(request.family),
+		model: emptyToUndefined(request.model),
+		status: emptyToUndefined(request.statusFilter),
+		limit: request.limit,
+		includeLocal: request.includeLocal,
+	};
+}
+
+function smokeDetail(
+	result: Awaited<ReturnType<typeof runProviderSmokeTests>>,
+): string {
+	return [
+		`${result.dryRun ? "dry-run: selected" : "tested"}: ${result.selected}`,
+		`ran: ${result.ran}`,
+		"artifacts:",
+		`  - ${result.reportPath}`,
+		`  - ${result.summaryPath}`,
+		`  - ${result.passListPath}`,
+		"status counts:",
+		renderCounts(result.counts),
+	].join("\n");
+}
+
+async function smokeTest(
+	request: AiProvidersCommandRequest,
+	onStep: StepCallback,
+): Promise<AiProvidersCommandResult> {
+	report(
+		onStep,
+		"ai-providers-smoke-test",
+		"Smoke-test AI providers",
+		"running",
+	);
+	const result = await runProviderSmokeTests({
+		modelsPath: request.inputPath,
+		previousReportPath: emptyToUndefined(request.reportPath),
+		outputPath: request.outputDir,
+		timeoutSeconds: request.timeoutSeconds,
+		piCommand: emptyToUndefined(request.piCommand),
+		envFile: emptyToUndefined(request.envFile),
+		prompt: emptyToUndefined(request.prompt),
+		dryRun: request.dryRun,
+		filters: smokeFilters(request),
+	});
+	report(
+		onStep,
+		"ai-providers-smoke-test",
+		"Smoke-test AI providers",
+		"done",
+		smokeDetail(result),
+	);
+	return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
+}
+
 export async function runAiProvidersCommand(
 	request: AiProvidersCommandRequest,
 	onStep: StepCallback,
@@ -178,6 +259,9 @@ export async function runAiProvidersCommand(
 		}
 		if (request.providersAction === AI_PROVIDERS_PROVIDER_ACTION.CONVERT) {
 			return await convert(request, onStep);
+		}
+		if (request.providersAction === AI_PROVIDERS_PROVIDER_ACTION.SMOKE_TEST) {
+			return await smokeTest(request, onStep);
 		}
 		report(onStep, "ai-providers-usage", "AI providers", "error", usage());
 		return { status: AI_PROVIDERS_COMMAND_STATUS.FAILURE };

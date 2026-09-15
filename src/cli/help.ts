@@ -28,6 +28,7 @@ export const HELP_TEXT = `
     workflow list     List available workflows and built-in templates
     ai providers export-free  Generate portable Pi/OpenCode free-provider bundles
     ai providers convert  Convert provider metadata between Pi and OpenCode
+    ai providers smoke-test  Probe Pi provider/model routes and write JSONL evidence
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
     plugin list       List installed plugins
@@ -70,6 +71,15 @@ export const HELP_TEXT = `
     --author        Author name for skill publish
     --repo          Repository URL for skill publish
     --target        Provider bundle target (pi, opencode, both)
+    --provider      Provider id filter for provider smoke tests
+    --family        Provider/model/name substring filter for provider smoke tests
+    --model         Model id substring filter for provider smoke tests
+    --status        Retest only models with this status from --report
+    --report PATH   Previous provider smoke-test JSONL report for --status retests
+    --limit N       Maximum provider smoke-test routes to run
+    --include-local Include local providers such as Ollama in provider smoke tests
+    --env-file PATH Load machine-local provider keys for provider smoke tests
+    --pi-command    Pi executable for provider smoke tests (default: pi)
     --version       Show version
     --help          Show this help
 
@@ -133,6 +143,9 @@ export const HELP_TEXT = `
     $ javi-forge plugin list
     $ javi-forge ai providers export-free --target both
     $ javi-forge ai providers convert pi opencode /tmp/pi-to-opencode --config ~/.pi/agent/models.json
+    $ javi-forge ai providers smoke-test /tmp/pi-smoke --provider openrouter-free --env-file ~/.config/javi-forge/secrets/providers.env
+    $ javi-forge ai providers smoke-test /tmp/pi-smoke --family deepseek --limit 5
+    $ javi-forge ai providers smoke-test /tmp/pi-smoke --status failed --report /tmp/previous-smoke.jsonl
     $ javi-forge pi providers export-free
     $ javi-forge pi providers export-free /tmp/pi-free-providers
 `;
@@ -293,6 +306,16 @@ export const FLAGS_SCHEMA = {
 	author: { type: "string", default: "" },
 	repo: { type: "string", default: "" },
 	target: { type: "string", default: "" },
+	provider: { type: "string", default: "" },
+	family: { type: "string", default: "" },
+	model: { type: "string", default: "" },
+	status: { type: "string", default: "" },
+	report: { type: "string", default: "" },
+	limit: { type: "number", default: 0 },
+	includeLocal: { type: "boolean", default: false },
+	envFile: { type: "string", default: "" },
+	piCommand: { type: "string", default: "" },
+	prompt: { type: "string", default: "" },
 	// Workflow flags
 	template: { type: "string", default: "" },
 	// TDD flags

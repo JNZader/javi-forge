@@ -26,7 +26,22 @@ describe("ai dispatch", () => {
 
 		await handleAi({
 			input: ["ai", "providers", "export-free", "/target"],
-			flags: { target: "both", config: "", dryRun: true },
+			flags: {
+				target: "both",
+				config: "",
+				dryRun: true,
+				report: "",
+				provider: "",
+				family: "",
+				model: "",
+				status: "",
+				limit: 0,
+				timeout: 600,
+				includeLocal: false,
+				piCommand: "",
+				envFile: "",
+				prompt: "",
+			},
 		} as CLI);
 
 		expect(mockRun).toHaveBeenCalledWith(
@@ -38,6 +53,17 @@ describe("ai dispatch", () => {
 				outputDir: "/target",
 				target: "both",
 				inputPath: "",
+				reportPath: "",
+				provider: "",
+				family: "",
+				model: "",
+				statusFilter: "",
+				limit: undefined,
+				timeoutSeconds: 600,
+				includeLocal: false,
+				piCommand: "",
+				envFile: "",
+				prompt: "",
 				dryRun: true,
 			},
 			expect.any(Function),
@@ -50,7 +76,22 @@ describe("ai dispatch", () => {
 
 		await handleAi({
 			input: ["ai", "providers", "convert", "pi", "opencode", "/target"],
-			flags: { target: "", config: "/source/models.json", dryRun: false },
+			flags: {
+				target: "",
+				config: "/source/models.json",
+				dryRun: false,
+				report: "",
+				provider: "",
+				family: "",
+				model: "",
+				status: "",
+				limit: 0,
+				timeout: 600,
+				includeLocal: false,
+				piCommand: "",
+				envFile: "",
+				prompt: "",
+			},
 		} as CLI);
 
 		expect(mockRun).toHaveBeenCalledWith(
@@ -59,6 +100,50 @@ describe("ai dispatch", () => {
 				to: "opencode",
 				outputDir: "/target",
 				inputPath: "/source/models.json",
+			}),
+			expect.any(Function),
+		);
+	});
+
+	it("routes smoke-test filters", async () => {
+		mockRun.mockResolvedValue({ status: "success" });
+
+		await handleAi({
+			input: ["ai", "providers", "smoke-test", "/target"],
+			flags: {
+				target: "",
+				config: "/source/models.json",
+				dryRun: false,
+				report: "/source/previous.jsonl",
+				provider: "openrouter-free",
+				family: "deepseek",
+				model: "free",
+				status: "failed",
+				limit: 3,
+				timeout: 12,
+				includeLocal: true,
+				piCommand: "pi",
+				envFile: "/secrets/providers.env",
+				prompt: "pong",
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			expect.objectContaining({
+				providersAction: "smoke-test",
+				outputDir: "/target",
+				inputPath: "/source/models.json",
+				reportPath: "/source/previous.jsonl",
+				provider: "openrouter-free",
+				family: "deepseek",
+				model: "free",
+				statusFilter: "failed",
+				limit: 3,
+				timeoutSeconds: 12,
+				includeLocal: true,
+				piCommand: "pi",
+				envFile: "/secrets/providers.env",
+				prompt: "pong",
 			}),
 			expect.any(Function),
 		);

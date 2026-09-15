@@ -20,6 +20,14 @@ export const PROVIDER_SMOKE_STATUS = {
 export type ProviderSmokeStatus =
 	(typeof PROVIDER_SMOKE_STATUS)[keyof typeof PROVIDER_SMOKE_STATUS];
 
+export const PROVIDER_SMOKE_RUNTIME = {
+	PI: "pi",
+	OPENCODE: "opencode",
+} as const;
+
+export type ProviderSmokeRuntime =
+	(typeof PROVIDER_SMOKE_RUNTIME)[keyof typeof PROVIDER_SMOKE_RUNTIME];
+
 export interface ProviderSmokeModel {
 	provider: string;
 	model: string;
@@ -43,7 +51,9 @@ export interface ProviderSmokeOptions {
 	previousReportPath?: string;
 	outputPath?: string;
 	timeoutSeconds?: number;
+	runtime?: ProviderSmokeRuntime;
 	piCommand?: string;
+	opencodeCommand?: string;
 	envFile?: string;
 	prompt?: string;
 	dryRun?: boolean;
@@ -62,8 +72,11 @@ export interface ProviderSmokeRunner {
 	run(
 		model: ProviderSmokeModel,
 		options: Required<
-			Pick<ProviderSmokeOptions, "piCommand" | "prompt" | "timeoutSeconds">
-		> & { env: NodeJS.ProcessEnv },
+			Pick<
+				ProviderSmokeOptions,
+				"opencodeCommand" | "piCommand" | "prompt" | "timeoutSeconds"
+			>
+		> & { env: NodeJS.ProcessEnv; runtime: ProviderSmokeRuntime },
 	): Promise<ProviderSmokeRunOutput>;
 }
 
@@ -168,12 +181,49 @@ function extractPiModels(
 	return models;
 }
 
+function extractOpenCodeModels(
+	root: JsonRecord,
+	source: string,
+	includeLocal: boolean,
+): ProviderSmokeModel[] {
+	const providers = isRecord(root.provider)
+		? root.provider
+		: isRecord(root.providers)
+			? root.providers
+			: {};
+	const models: ProviderSmokeModel[] = [];
+	for (const [providerId, providerConfig] of Object.entries(providers)) {
+		if (!includeLocal && isLocalProvider(providerId)) continue;
+		if (!isRecord(providerConfig) || !isRecord(providerConfig.models)) continue;
+		for (const [modelId, entry] of Object.entries(providerConfig.models)) {
+			const name = isRecord(entry) ? asString(entry.name) : undefined;
+			models.push({
+				provider: providerId,
+				model: modelId,
+				name: name ?? modelId,
+				local: isLocalProvider(providerId),
+				source,
+			});
+		}
+	}
+	return models;
+}
+
 export async function loadProviderSmokeModels(options: {
 	modelsPath?: string;
 	modelsStorePath?: string;
 	includeLocal?: boolean;
+	runtime?: ProviderSmokeRuntime;
 }): Promise<ProviderSmokeModel[]> {
 	const includeLocal = options.includeLocal ?? false;
+	if (options.runtime === PROVIDER_SMOKE_RUNTIME.OPENCODE) {
+		const path = options.modelsPath ?? "~/.config/opencode/opencode.json";
+		const resolved = normalizePath(path);
+		const json = parseJson(await readFile(resolved, "utf8"), resolved);
+		return extractOpenCodeModels(json, resolved, includeLocal).sort((a, b) =>
+			`${a.provider}/${a.model}`.localeCompare(`${b.provider}/${b.model}`),
+		);
+	}
 	const paths = [
 		options.modelsPath ?? "~/.pi/agent/models.json",
 		options.modelsStorePath ?? "~/.pi/agent/models-store.json",
@@ -322,8 +372,11 @@ class PiProviderSmokeRunner implements ProviderSmokeRunner {
 	run(
 		model: ProviderSmokeModel,
 		options: Required<
-			Pick<ProviderSmokeOptions, "piCommand" | "prompt" | "timeoutSeconds">
-		> & { env: NodeJS.ProcessEnv },
+			Pick<
+				ProviderSmokeOptions,
+				"opencodeCommand" | "piCommand" | "prompt" | "timeoutSeconds"
+			>
+		> & { env: NodeJS.ProcessEnv; runtime: ProviderSmokeRuntime },
 	): Promise<ProviderSmokeRunOutput> {
 		const args = [
 			"-p",
@@ -340,6 +393,62 @@ class PiProviderSmokeRunner implements ProviderSmokeRunner {
 		];
 		return new Promise((resolveRun) => {
 			const child = spawn(options.piCommand, args, {
+				env: options.env,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			let stdout = "";
+			let stderr = "";
+			let timedOut = false;
+			const timer = setTimeout(() => {
+				timedOut = true;
+				child.kill("SIGTERM");
+			}, options.timeoutSeconds * 1000);
+			child.stdout.setEncoding("utf8");
+			child.stderr.setEncoding("utf8");
+			child.stdout.on("data", (chunk: string) => {
+				stdout += chunk;
+			});
+			child.stderr.on("data", (chunk: string) => {
+				stderr += chunk;
+			});
+			child.on("error", (error) => {
+				clearTimeout(timer);
+				resolveRun({
+					exitCode: null,
+					stdout,
+					stderr: `${stderr}\n${error.message}`,
+					timedOut,
+				});
+			});
+			child.on("close", (exitCode) => {
+				clearTimeout(timer);
+				resolveRun({ exitCode, stdout, stderr, timedOut });
+			});
+		});
+	}
+}
+
+class OpenCodeProviderSmokeRunner implements ProviderSmokeRunner {
+	run(
+		model: ProviderSmokeModel,
+		options: Required<
+			Pick<
+				ProviderSmokeOptions,
+				"opencodeCommand" | "piCommand" | "prompt" | "timeoutSeconds"
+			>
+		> & { env: NodeJS.ProcessEnv; runtime: ProviderSmokeRuntime },
+	): Promise<ProviderSmokeRunOutput> {
+		const args = [
+			"run",
+			"--pure",
+			"--model",
+			`${model.provider}/${model.model}`,
+			"--format",
+			"json",
+			options.prompt,
+		];
+		return new Promise((resolveRun) => {
+			const child = spawn(options.opencodeCommand, args, {
 				env: options.env,
 				stdio: ["ignore", "pipe", "pipe"],
 			});
@@ -472,6 +581,7 @@ export async function runProviderSmokeTests(
 	options: ProviderSmokeOptions,
 ): Promise<ProviderSmokeResult> {
 	const timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
+	const runtime = options.runtime ?? PROVIDER_SMOKE_RUNTIME.PI;
 	if (timeoutSeconds <= 0)
 		throw new Error("--timeout must be greater than zero");
 	const normalizedStatus = normalizeSmokeStatus(options.filters?.status);
@@ -486,6 +596,7 @@ export async function runProviderSmokeTests(
 		modelsPath: options.modelsPath,
 		modelsStorePath: options.modelsStorePath,
 		includeLocal: filters.includeLocal,
+		runtime,
 	});
 	const selected = await filterProviderSmokeModels(
 		models,
@@ -494,7 +605,11 @@ export async function runProviderSmokeTests(
 	);
 	const paths = artifactPaths(resolveReportPath(options.outputPath));
 	await mkdir(dirname(paths.reportPath), { recursive: true });
-	const runner = options.runner ?? new PiProviderSmokeRunner();
+	const runner =
+		options.runner ??
+		(runtime === PROVIDER_SMOKE_RUNTIME.OPENCODE
+			? new OpenCodeProviderSmokeRunner()
+			: new PiProviderSmokeRunner());
 	const env = await loadEnvFile(options.envFile);
 	const rows: ProviderSmokeReportRow[] = [];
 	const counts: Record<string, number> = {};
@@ -506,9 +621,11 @@ export async function runProviderSmokeTests(
 			? { exitCode: 0, stdout: "dry-run", stderr: "" }
 			: await runner.run(model, {
 					piCommand: options.piCommand ?? "pi",
+					opencodeCommand: options.opencodeCommand ?? "opencode",
 					prompt: options.prompt ?? DEFAULT_PROMPT,
 					timeoutSeconds,
 					env,
+					runtime,
 				});
 		const status = options.dryRun
 			? PROVIDER_SMOKE_STATUS.PASS

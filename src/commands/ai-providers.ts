@@ -56,8 +56,10 @@ export interface AiProvidersCommandRequest {
 	statusFilter?: string;
 	limit?: number;
 	timeoutSeconds?: number;
+	runtime?: string;
 	includeLocal?: boolean;
 	piCommand?: string;
+	opencodeCommand?: string;
 	envFile?: string;
 	prompt?: string;
 	passListPath?: string;
@@ -112,7 +114,7 @@ function usage(): string {
 		"Usage:",
 		"  javi-forge ai providers export-free [output-dir] --target pi|opencode|both",
 		"  javi-forge ai providers convert <pi|opencode> <pi|opencode> [output-dir] --config <input-path>",
-		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--provider id] [--family text] [--model text] [--status pass|failed|...] --report <previous.jsonl>",
+		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--runtime pi|opencode] [--provider id] [--family text] [--model text] [--status pass|failed|...] --report <previous.jsonl>",
 		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both [--dry-run]",
 	].join("\n");
 }
@@ -207,6 +209,12 @@ function smokeFilters(
 	};
 }
 
+function normalizeSmokeRuntime(value?: string): "opencode" | "pi" | undefined {
+	if (!value) return undefined;
+	if (value === "pi" || value === "opencode") return value;
+	throw new Error(`unknown runtime: ${value}`);
+}
+
 function smokeDetail(
 	result: Awaited<ReturnType<typeof runProviderSmokeTests>>,
 ): string {
@@ -237,7 +245,9 @@ async function smokeTest(
 		previousReportPath: emptyToUndefined(request.reportPath),
 		outputPath: request.outputDir,
 		timeoutSeconds: request.timeoutSeconds,
+		runtime: normalizeSmokeRuntime(request.runtime),
 		piCommand: emptyToUndefined(request.piCommand),
+		opencodeCommand: emptyToUndefined(request.opencodeCommand),
 		envFile: emptyToUndefined(request.envFile),
 		prompt: emptyToUndefined(request.prompt),
 		dryRun: request.dryRun,

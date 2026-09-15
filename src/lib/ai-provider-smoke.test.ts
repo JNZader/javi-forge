@@ -6,6 +6,7 @@ import {
 	classifySmokeOutput,
 	filterProviderSmokeModels,
 	loadProviderSmokeModels,
+	PROVIDER_SMOKE_RUNTIME,
 	PROVIDER_SMOKE_STATUS,
 	type ProviderSmokeModel,
 	type ProviderSmokeRunner,
@@ -78,6 +79,39 @@ describe("provider smoke tests", () => {
 
 		expect(models.map((model) => `${model.provider}/${model.model}`)).toEqual([
 			"opencode-go/deepseek-v4-pro",
+		]);
+	});
+
+	it("loads OpenCode provider models from opencode.json", async () => {
+		const dir = await tempDir();
+		const configPath = join(dir, "opencode.json");
+		await writeFile(
+			configPath,
+			JSON.stringify({
+				provider: {
+					"openrouter-free": {
+						models: {
+							"cohere/north-mini-code:free": { name: "North Mini" },
+							alias: { modelID: "cohere/north-mini-code:free" },
+						},
+					},
+					"ollama-local": {
+						models: {
+							llama: { name: "Llama" },
+						},
+					},
+				},
+			}),
+		);
+
+		const models = await loadProviderSmokeModels({
+			modelsPath: configPath,
+			runtime: PROVIDER_SMOKE_RUNTIME.OPENCODE,
+		});
+
+		expect(models.map((model) => `${model.provider}/${model.model}`)).toEqual([
+			"openrouter-free/alias",
+			"openrouter-free/cohere/north-mini-code:free",
 		]);
 	});
 
@@ -183,5 +217,44 @@ describe("provider smoke tests", () => {
 		await expect(readFile(result.passListPath, "utf8")).resolves.toContain(
 			"openrouter-free\tdeepseek/free",
 		);
+	});
+
+	it("smoke-tests OpenCode runtime subsets through the injected runner", async () => {
+		const dir = await tempDir();
+		const configPath = join(dir, "opencode.json");
+		await writeFile(
+			configPath,
+			JSON.stringify({
+				provider: {
+					"openrouter-free": {
+						models: {
+							"cohere/north-mini-code:free": { name: "North Mini" },
+						},
+					},
+				},
+			}),
+		);
+		const seen: string[] = [];
+		const runner: ProviderSmokeRunner = {
+			async run(model, options) {
+				seen.push(
+					`${options.runtime}:${options.opencodeCommand}:${model.provider}/${model.model}`,
+				);
+				return { exitCode: null, stdout: "", stderr: "", timedOut: true };
+			},
+		};
+
+		const result = await runProviderSmokeTests({
+			runtime: PROVIDER_SMOKE_RUNTIME.OPENCODE,
+			modelsPath: configPath,
+			outputPath: join(dir, "smoke.jsonl"),
+			opencodeCommand: "opencode-custom",
+			runner,
+		});
+
+		expect(seen).toEqual([
+			"opencode:opencode-custom:openrouter-free/cohere/north-mini-code:free",
+		]);
+		expect(result.counts).toEqual({ timeout: 1 });
 	});
 });

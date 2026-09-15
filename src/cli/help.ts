@@ -73,6 +73,7 @@ export const HELP_TEXT = `
     --repo          Repository URL for skill publish
     --target        Provider bundle target (pi, opencode, both)
     --provider      Provider id filter for provider smoke tests
+    --runtime       Provider smoke-test runtime (pi, opencode)
     --family        Provider/model/name substring filter for provider smoke tests
     --model         Model id substring filter for provider smoke tests
     --status        Retest only models with this status from --report
@@ -81,6 +82,7 @@ export const HELP_TEXT = `
     --include-local Include local providers such as Ollama in provider smoke tests
     --env-file PATH Load machine-local provider keys for provider smoke tests
     --pi-command    Pi executable for provider smoke tests (default: pi)
+    --opencode-command OpenCode executable for provider smoke tests (default: opencode)
     --pass-list PATH Provider smoke-test .pass.tsv input for apply-scope
     --pi-settings PATH Pi settings.json path for apply-scope
     --opencode-config PATH OpenCode opencode.json path for apply-scope
@@ -148,6 +150,7 @@ export const HELP_TEXT = `
     $ javi-forge ai providers export-free --target both
     $ javi-forge ai providers convert pi opencode /tmp/pi-to-opencode --config ~/.pi/agent/models.json
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --provider openrouter-free --env-file ~/.config/javi-forge/secrets/providers.env
+    $ javi-forge ai providers smoke-test /tmp/opencode-smoke --runtime opencode --provider openrouter-free --config ~/.config/opencode/opencode.json
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --family deepseek --limit 5
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --status failed --report /tmp/previous-smoke.jsonl
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.pass.tsv --target pi --dry-run
@@ -312,6 +315,7 @@ export const FLAGS_SCHEMA = {
 	author: { type: "string", default: "" },
 	repo: { type: "string", default: "" },
 	target: { type: "string", default: "" },
+	runtime: { type: "string", default: "" },
 	provider: { type: "string", default: "" },
 	family: { type: "string", default: "" },
 	model: { type: "string", default: "" },
@@ -321,6 +325,7 @@ export const FLAGS_SCHEMA = {
 	includeLocal: { type: "boolean", default: false },
 	envFile: { type: "string", default: "" },
 	piCommand: { type: "string", default: "" },
+	opencodeCommand: { type: "string", default: "" },
 	prompt: { type: "string", default: "" },
 	passList: { type: "string", default: "" },
 	piSettings: { type: "string", default: "" },

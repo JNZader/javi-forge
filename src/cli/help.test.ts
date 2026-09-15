@@ -110,6 +110,8 @@ describe("help — pi free-provider export", () => {
 		expect(HELP_TEXT).toContain("ai providers apply-scope");
 		expect(HELP_TEXT).toContain("--runtime");
 		expect(HELP_TEXT).toContain("--opencode-command");
+		expect(HELP_TEXT).toContain("--opencode-agent");
+		expect(HELP_TEXT).toContain("--smoke-cwd");
 	});
 
 	it("shows pi providers export-free examples", () => {
@@ -127,6 +129,10 @@ describe("help — pi free-provider export", () => {
 		expect(FLAGS_SCHEMA.runtime.type).toBe("string");
 		expect(FLAGS_SCHEMA).toHaveProperty("opencodeCommand");
 		expect(FLAGS_SCHEMA.opencodeCommand.type).toBe("string");
+		expect(FLAGS_SCHEMA).toHaveProperty("opencodeAgent");
+		expect(FLAGS_SCHEMA.opencodeAgent.type).toBe("string");
+		expect(FLAGS_SCHEMA).toHaveProperty("smokeCwd");
+		expect(FLAGS_SCHEMA.smokeCwd.type).toBe("string");
 		expect(FLAGS_SCHEMA).toHaveProperty("passList");
 		expect(FLAGS_SCHEMA.passList.type).toBe("string");
 		expect(FLAGS_SCHEMA).toHaveProperty("piSettings");

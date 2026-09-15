@@ -153,6 +153,61 @@ npx javi-forge analyze --dry-run
 
 ---
 
+## ai providers
+
+Generate, test, and apply portable AI provider catalogs for Gentle Pi and
+OpenCode without copying machine-local secrets.
+
+```bash
+javi-forge ai providers export-free /tmp/free-providers --target both
+javi-forge ai providers convert pi opencode /tmp/pi-to-opencode --config ~/.pi/agent/models.json
+javi-forge ai providers smoke-test /tmp/pi-smoke --runtime pi --provider openrouter-free --env-file ~/.config/javi-forge/secrets/providers.env
+javi-forge ai providers smoke-test /tmp/opencode-smoke --runtime opencode --provider google --env-file ~/.config/javi-forge/secrets/providers.env
+javi-forge ai providers apply-scope /tmp/opencode-smoke/smoke.jsonl --target opencode --dry-run
+```
+
+### OpenCode smoke-test behavior
+
+When `--runtime opencode` is used without `--config`, `javi-forge` discovers the
+currently visible OpenCode model list by running `opencode models`. This catches
+built-in providers and whitelists that are not represented as `provider.models`
+inside `opencode.json`.
+
+OpenCode probes are intentionally low-noise:
+
+- run sequentially, never concurrently;
+- run from a clean working directory (`--smoke-cwd`, default: OS temp dir);
+- call `opencode run --pure`;
+- use the lightweight OpenCode agent from `--opencode-agent` (default: `title`);
+- write JSONL, markdown summary, and `.pass.tsv` artifacts for repeatable
+  retests and scoped apply.
+
+Pass `--config ~/.config/opencode/opencode.json` only when you deliberately want
+to test the provider metadata declared in that file instead of the active
+runtime-visible model list.
+
+### Provider smoke-test flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--runtime` | string | `pi` | Runtime to probe: `pi` or `opencode` |
+| `--config` | string | runtime default | Provider catalog/config path. For OpenCode, omit to discover via `opencode models` |
+| `--provider` | string | — | Exact provider id filter |
+| `--family` | string | — | Provider/model/name substring filter |
+| `--model` | string | — | Model id substring filter |
+| `--status` | string | — | Retest only rows with this status from `--report` |
+| `--report` | string | — | Previous JSONL report used by `--status` |
+| `--limit` | number | — | Maximum selected routes to probe |
+| `--include-local` | boolean | `false` | Include local providers such as Ollama |
+| `--env-file` | string | — | Load machine-local provider keys; values are never written to reports |
+| `--pi-command` | string | `pi` | Pi executable |
+| `--opencode-command` | string | `opencode` | OpenCode executable |
+| `--opencode-agent` | string | `title` | OpenCode agent used by smoke probes |
+| `--smoke-cwd` | string | OS temp dir for OpenCode | Working directory for smoke commands |
+| `--timeout` | number | `30` | Per-model timeout in seconds |
+
+---
+
 ## doctor
 
 Show a comprehensive health report.

@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -113,6 +113,36 @@ describe("provider smoke tests", () => {
 			"openrouter-free/alias",
 			"openrouter-free/cohere/north-mini-code:free",
 		]);
+	});
+
+	it("discovers active OpenCode models from the runtime when no config path is supplied", async () => {
+		const dir = await tempDir();
+		const commandPath = join(dir, "opencode-models.sh");
+		await writeFile(
+			commandPath,
+			[
+				"#!/bin/sh",
+				"[ \"$1\" = 'models' ] || exit 2",
+				"printf '%s\\n' '[skill-registry] skipping refresh: not a project root: /'",
+				"printf '%s\\n' 'google/gemini-3.1-flash-lite'",
+				"printf '%s\\n' 'opencode-go/kimi-k2.7-code'",
+				"printf '%s\\n' 'ollama-local/llama3'",
+				"",
+			].join("\n"),
+		);
+		await chmod(commandPath, 0o755);
+
+		const models = await loadProviderSmokeModels({
+			runtime: PROVIDER_SMOKE_RUNTIME.OPENCODE,
+			opencodeCommand: commandPath,
+			smokeCwd: dir,
+		});
+
+		expect(models.map((model) => `${model.provider}/${model.model}`)).toEqual([
+			"google/gemini-3.1-flash-lite",
+			"opencode-go/kimi-k2.7-code",
+		]);
+		expect(models[0]!.source).toBe(`${commandPath} models`);
 	});
 
 	it("filters by provider, family, model, previous status, and limit", async () => {
@@ -296,5 +326,71 @@ describe("provider smoke tests", () => {
 
 		expect(Date.now() - started).toBeLessThan(5000);
 		expect(result.counts).toEqual({ timeout: 1 });
+	});
+
+	it("runs OpenCode smoke probes in pure title-agent mode from a clean cwd", async () => {
+		const dir = await tempDir();
+		const smokeCwd = join(dir, "clean-cwd");
+		const configPath = join(dir, "opencode.json");
+		const commandPath = join(dir, "opencode-run.mjs");
+		const argvPath = join(dir, "argv.json");
+		await mkdir(smokeCwd);
+		await writeFile(
+			configPath,
+			JSON.stringify({
+				provider: {
+					google: {
+						models: {
+							"gemini-3.1-flash-lite": { name: "Gemini Flash Lite" },
+						},
+					},
+				},
+			}),
+		);
+		await writeFile(
+			commandPath,
+			[
+				"#!/usr/bin/env node",
+				"const { writeFileSync } = await import('node:fs');",
+				`writeFileSync(${JSON.stringify(argvPath)}, JSON.stringify({`,
+				"  argv: process.argv.slice(2),",
+				"  cwd: process.cwd(),",
+				"}));",
+				"console.log(JSON.stringify({ type: 'text', part: { text: 'pong' } }));",
+				"",
+			].join("\n"),
+		);
+		await chmod(commandPath, 0o755);
+
+		const result = await runProviderSmokeTests({
+			runtime: PROVIDER_SMOKE_RUNTIME.OPENCODE,
+			modelsPath: configPath,
+			outputPath: join(dir, "smoke.jsonl"),
+			opencodeCommand: commandPath,
+			opencodeAgent: "title",
+			smokeCwd,
+			envFile: undefined,
+			runner: undefined,
+		});
+		const captured = JSON.parse(await readFile(argvPath, "utf8")) as {
+			argv: string[];
+			cwd: string;
+		};
+
+		expect(result.counts).toEqual({ pass: 1 });
+		expect(captured).toEqual({
+			argv: [
+				"run",
+				"--pure",
+				"--agent",
+				"title",
+				"--model",
+				"google/gemini-3.1-flash-lite",
+				"--format",
+				"json",
+				"Reply with exactly: pong. Do not call tools. Do not include markdown.",
+			],
+			cwd: smokeCwd,
+		});
 	});
 });

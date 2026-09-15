@@ -60,6 +60,8 @@ export interface AiProvidersCommandRequest {
 	includeLocal?: boolean;
 	piCommand?: string;
 	opencodeCommand?: string;
+	opencodeAgent?: string;
+	smokeCwd?: string;
 	envFile?: string;
 	prompt?: string;
 	passListPath?: string;
@@ -114,7 +116,7 @@ function usage(): string {
 		"Usage:",
 		"  javi-forge ai providers export-free [output-dir] --target pi|opencode|both",
 		"  javi-forge ai providers convert <pi|opencode> <pi|opencode> [output-dir] --config <input-path>",
-		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--runtime pi|opencode] [--provider id] [--family text] [--model text] [--status pass|failed|...] --report <previous.jsonl>",
+		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--runtime pi|opencode] [--provider id] [--family text] [--model text] [--status pass|failed|...] [--report <previous.jsonl>]",
 		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both [--dry-run]",
 	].join("\n");
 }
@@ -248,6 +250,8 @@ async function smokeTest(
 		runtime: normalizeSmokeRuntime(request.runtime),
 		piCommand: emptyToUndefined(request.piCommand),
 		opencodeCommand: emptyToUndefined(request.opencodeCommand),
+		opencodeAgent: emptyToUndefined(request.opencodeAgent),
+		smokeCwd: emptyToUndefined(request.smokeCwd),
 		envFile: emptyToUndefined(request.envFile),
 		prompt: emptyToUndefined(request.prompt),
 		dryRun: request.dryRun,

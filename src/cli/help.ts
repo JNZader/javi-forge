@@ -28,7 +28,7 @@ export const HELP_TEXT = `
     workflow list     List available workflows and built-in templates
     ai providers export-free  Generate portable Pi/OpenCode free-provider bundles
     ai providers convert  Convert provider metadata between Pi and OpenCode
-    ai providers smoke-test  Probe Pi provider/model routes and write JSONL evidence
+    ai providers smoke-test  Probe Pi/OpenCode provider/model routes and write JSONL evidence
     ai providers apply-scope  Apply smoke-test pass scope to Pi/OpenCode config
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
@@ -74,6 +74,7 @@ export const HELP_TEXT = `
     --target        Provider bundle target (pi, opencode, both)
     --provider      Provider id filter for provider smoke tests
     --runtime       Provider smoke-test runtime (pi, opencode)
+                    For OpenCode, omit --config to discover active \`opencode models\`
     --family        Provider/model/name substring filter for provider smoke tests
     --model         Model id substring filter for provider smoke tests
     --status        Retest only models with this status from --report
@@ -83,6 +84,8 @@ export const HELP_TEXT = `
     --env-file PATH Load machine-local provider keys for provider smoke tests
     --pi-command    Pi executable for provider smoke tests (default: pi)
     --opencode-command OpenCode executable for provider smoke tests (default: opencode)
+    --opencode-agent OpenCode agent for smoke tests (default: title)
+    --smoke-cwd PATH Working directory for provider smoke commands
     --pass-list PATH Provider smoke-test .pass.tsv input for apply-scope
     --pi-settings PATH Pi settings.json path for apply-scope
     --opencode-config PATH OpenCode opencode.json path for apply-scope
@@ -150,7 +153,7 @@ export const HELP_TEXT = `
     $ javi-forge ai providers export-free --target both
     $ javi-forge ai providers convert pi opencode /tmp/pi-to-opencode --config ~/.pi/agent/models.json
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --provider openrouter-free --env-file ~/.config/javi-forge/secrets/providers.env
-    $ javi-forge ai providers smoke-test /tmp/opencode-smoke --runtime opencode --provider openrouter-free --config ~/.config/opencode/opencode.json
+    $ javi-forge ai providers smoke-test /tmp/opencode-smoke --runtime opencode --provider google --env-file ~/.config/javi-forge/secrets/providers.env
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --family deepseek --limit 5
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --status failed --report /tmp/previous-smoke.jsonl
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.pass.tsv --target pi --dry-run
@@ -326,6 +329,8 @@ export const FLAGS_SCHEMA = {
 	envFile: { type: "string", default: "" },
 	piCommand: { type: "string", default: "" },
 	opencodeCommand: { type: "string", default: "" },
+	opencodeAgent: { type: "string", default: "" },
+	smokeCwd: { type: "string", default: "" },
 	prompt: { type: "string", default: "" },
 	passList: { type: "string", default: "" },
 	piSettings: { type: "string", default: "" },

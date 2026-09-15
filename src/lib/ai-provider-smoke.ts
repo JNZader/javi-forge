@@ -54,6 +54,8 @@ export interface ProviderSmokeOptions {
 	runtime?: ProviderSmokeRuntime;
 	piCommand?: string;
 	opencodeCommand?: string;
+	opencodeAgent?: string;
+	smokeCwd?: string;
 	envFile?: string;
 	prompt?: string;
 	dryRun?: boolean;
@@ -71,13 +73,24 @@ export interface ProviderSmokeRunOutput {
 export interface ProviderSmokeRunner {
 	run(
 		model: ProviderSmokeModel,
-		options: Required<
-			Pick<
-				ProviderSmokeOptions,
-				"opencodeCommand" | "piCommand" | "prompt" | "timeoutSeconds"
-			>
-		> & { env: NodeJS.ProcessEnv; runtime: ProviderSmokeRuntime },
+		options: ProviderSmokeRunContext,
 	): Promise<ProviderSmokeRunOutput>;
+}
+
+interface ProviderSmokeRunContext
+	extends Required<
+		Pick<
+			ProviderSmokeOptions,
+			| "opencodeAgent"
+			| "opencodeCommand"
+			| "piCommand"
+			| "prompt"
+			| "timeoutSeconds"
+		>
+	> {
+	env: NodeJS.ProcessEnv;
+	runtime: ProviderSmokeRuntime;
+	smokeCwd?: string;
 }
 
 export interface ProviderSmokeReportRow {
@@ -105,6 +118,7 @@ export interface ProviderSmokeResult {
 const DEFAULT_PROMPT =
 	"Reply with exactly: pong. Do not call tools. Do not include markdown.";
 const DEFAULT_TIMEOUT_SECONDS = 30;
+const DEFAULT_OPENCODE_AGENT = "title";
 const TIMEOUT_SIGKILL_GRACE_MS = 1500;
 const SENSITIVE_LINE =
 	/(api[-_ ]?key|token|secret|credential|authorization|bearer)/i;
@@ -215,10 +229,23 @@ export async function loadProviderSmokeModels(options: {
 	modelsStorePath?: string;
 	includeLocal?: boolean;
 	runtime?: ProviderSmokeRuntime;
+	opencodeCommand?: string;
+	env?: NodeJS.ProcessEnv;
+	timeoutSeconds?: number;
+	smokeCwd?: string;
 }): Promise<ProviderSmokeModel[]> {
 	const includeLocal = options.includeLocal ?? false;
 	if (options.runtime === PROVIDER_SMOKE_RUNTIME.OPENCODE) {
-		const path = options.modelsPath ?? "~/.config/opencode/opencode.json";
+		if (!options.modelsPath) {
+			return await loadOpenCodeRuntimeModels({
+				command: options.opencodeCommand ?? "opencode",
+				env: options.env ?? process.env,
+				includeLocal,
+				timeoutSeconds: options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS,
+				smokeCwd: options.smokeCwd ?? tmpdir(),
+			});
+		}
+		const path = options.modelsPath;
 		const resolved = normalizePath(path);
 		const json = parseJson(await readFile(resolved, "utf8"), resolved);
 		return extractOpenCodeModels(json, resolved, includeLocal).sort((a, b) =>
@@ -244,6 +271,55 @@ export async function loadProviderSmokeModels(options: {
 		}
 	}
 	return [...byKey.values()].sort((a, b) =>
+		`${a.provider}/${a.model}`.localeCompare(`${b.provider}/${b.model}`),
+	);
+}
+
+function stripAnsi(value: string): string {
+	const ansiEscape = String.fromCharCode(27);
+	return value.replace(
+		new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g"),
+		"",
+	);
+}
+
+async function loadOpenCodeRuntimeModels(options: {
+	command: string;
+	env: NodeJS.ProcessEnv;
+	includeLocal: boolean;
+	timeoutSeconds: number;
+	smokeCwd: string;
+}): Promise<ProviderSmokeModel[]> {
+	const output = await runSmokeCommandWithTimeout(options.command, ["models"], {
+		env: options.env,
+		timeoutSeconds: options.timeoutSeconds,
+		cwd: options.smokeCwd,
+	});
+	if (output.exitCode !== 0 || output.timedOut) {
+		const status = output.timedOut ? "timed out" : `exited ${output.exitCode}`;
+		const evidence = sanitizeEvidence(output);
+		throw new Error(
+			`opencode models ${status}${evidence ? `:\n${evidence}` : ""}`,
+		);
+	}
+	const models = new Map<string, ProviderSmokeModel>();
+	for (const rawLine of output.stdout.split(/\r?\n/)) {
+		const line = stripAnsi(rawLine).trim();
+		if (!line || line.startsWith("[skill-registry]")) continue;
+		const slash = line.indexOf("/");
+		if (slash <= 0 || slash === line.length - 1) continue;
+		const provider = line.slice(0, slash);
+		const model = line.slice(slash + 1);
+		if (!options.includeLocal && isLocalProvider(provider)) continue;
+		models.set(`${provider}\u0000${model}`, {
+			provider,
+			model,
+			name: model,
+			local: isLocalProvider(provider),
+			source: `${options.command} models`,
+		});
+	}
+	return [...models.values()].sort((a, b) =>
 		`${a.provider}/${a.model}`.localeCompare(`${b.provider}/${b.model}`),
 	);
 }
@@ -372,12 +448,7 @@ function sanitizeEvidence(output: ProviderSmokeRunOutput): string {
 class PiProviderSmokeRunner implements ProviderSmokeRunner {
 	run(
 		model: ProviderSmokeModel,
-		options: Required<
-			Pick<
-				ProviderSmokeOptions,
-				"opencodeCommand" | "piCommand" | "prompt" | "timeoutSeconds"
-			>
-		> & { env: NodeJS.ProcessEnv; runtime: ProviderSmokeRuntime },
+		options: ProviderSmokeRunContext,
 	): Promise<ProviderSmokeRunOutput> {
 		return runSmokeCommandWithTimeout(
 			options.piCommand,
@@ -405,10 +476,12 @@ function runSmokeCommandWithTimeout(
 	options: {
 		env: NodeJS.ProcessEnv;
 		timeoutSeconds: number;
+		cwd?: string;
 	},
 ): Promise<ProviderSmokeRunOutput> {
 	return new Promise((resolveRun) => {
 		const child = spawn(command, args, {
+			cwd: options.cwd,
 			env: options.env,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
@@ -456,25 +529,26 @@ function runSmokeCommandWithTimeout(
 class OpenCodeProviderSmokeRunner implements ProviderSmokeRunner {
 	run(
 		model: ProviderSmokeModel,
-		options: Required<
-			Pick<
-				ProviderSmokeOptions,
-				"opencodeCommand" | "piCommand" | "prompt" | "timeoutSeconds"
-			>
-		> & { env: NodeJS.ProcessEnv; runtime: ProviderSmokeRuntime },
+		options: ProviderSmokeRunContext,
 	): Promise<ProviderSmokeRunOutput> {
 		return runSmokeCommandWithTimeout(
 			options.opencodeCommand,
 			[
 				"run",
 				"--pure",
+				"--agent",
+				options.opencodeAgent,
 				"--model",
 				`${model.provider}/${model.model}`,
 				"--format",
 				"json",
 				options.prompt,
 			],
-			options,
+			{
+				env: options.env,
+				timeoutSeconds: options.timeoutSeconds,
+				cwd: options.smokeCwd,
+			},
 		);
 	}
 }
@@ -486,7 +560,7 @@ async function loadEnvFile(path?: string): Promise<NodeJS.ProcessEnv> {
 	for (const line of content.split(/\r?\n/)) {
 		const trimmed = line.trim();
 		if (!trimmed || trimmed.startsWith("#")) continue;
-		const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
+		const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(trimmed);
 		if (!match) continue;
 		const [, key, rawValue] = match;
 		const value = rawValue.replace(/^(['"])(.*)\1$/, "$2");
@@ -577,6 +651,7 @@ export async function runProviderSmokeTests(
 ): Promise<ProviderSmokeResult> {
 	const timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
 	const runtime = options.runtime ?? PROVIDER_SMOKE_RUNTIME.PI;
+	const env = await loadEnvFile(options.envFile);
 	if (timeoutSeconds <= 0)
 		throw new Error("--timeout must be greater than zero");
 	const normalizedStatus = normalizeSmokeStatus(options.filters?.status);
@@ -592,6 +667,10 @@ export async function runProviderSmokeTests(
 		modelsStorePath: options.modelsStorePath,
 		includeLocal: filters.includeLocal,
 		runtime,
+		opencodeCommand: options.opencodeCommand ?? "opencode",
+		env,
+		timeoutSeconds,
+		smokeCwd: options.smokeCwd,
 	});
 	const selected = await filterProviderSmokeModels(
 		models,
@@ -605,7 +684,6 @@ export async function runProviderSmokeTests(
 		(runtime === PROVIDER_SMOKE_RUNTIME.OPENCODE
 			? new OpenCodeProviderSmokeRunner()
 			: new PiProviderSmokeRunner());
-	const env = await loadEnvFile(options.envFile);
 	const rows: ProviderSmokeReportRow[] = [];
 	const counts: Record<string, number> = {};
 	const providerStatusCounts: Record<string, Record<string, number>> = {};
@@ -617,10 +695,15 @@ export async function runProviderSmokeTests(
 			: await runner.run(model, {
 					piCommand: options.piCommand ?? "pi",
 					opencodeCommand: options.opencodeCommand ?? "opencode",
+					opencodeAgent: options.opencodeAgent ?? DEFAULT_OPENCODE_AGENT,
 					prompt: options.prompt ?? DEFAULT_PROMPT,
 					timeoutSeconds,
 					env,
 					runtime,
+					smokeCwd:
+						runtime === PROVIDER_SMOKE_RUNTIME.OPENCODE
+							? (options.smokeCwd ?? tmpdir())
+							: options.smokeCwd,
 				});
 		const status = options.dryRun
 			? PROVIDER_SMOKE_STATUS.PASS

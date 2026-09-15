@@ -50,6 +50,8 @@ export async function handleAi(cli: CLI): Promise<void> {
 			includeLocal: cli.flags.includeLocal,
 			piCommand: cli.flags.piCommand,
 			opencodeCommand: cli.flags.opencodeCommand,
+			opencodeAgent: cli.flags.opencodeAgent,
+			smokeCwd: cli.flags.smokeCwd,
 			envFile: cli.flags.envFile,
 			prompt: cli.flags.prompt,
 			passListPath: cli.flags.passList,

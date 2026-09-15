@@ -51,6 +51,10 @@ export interface DockerRunOptions {
 	 * A caller passing no map yields the same argv as today (only `-e CI=true`).
 	 */
 	env?: Record<string, string>;
+	/** Docker-managed dependency volume shared by all phases of one CI run. */
+	nodeModulesVolume?: string;
+	/** Container path for the runner's dependency directory. */
+	nodeModulesTarget?: string;
 }
 
 export interface DockerRunResult {
@@ -339,6 +343,8 @@ export async function runInContainer(
 		stream = true,
 		user,
 		env,
+		nodeModulesVolume,
+		nodeModulesTarget = `${CONTAINER_WORKDIR}/node_modules`,
 	} = options;
 	// The image is always pre-resolved by the caller (resolveCIRunners →
 	// ensureImage or an explicit/digest-pinned config image). No marker
@@ -395,12 +401,45 @@ export async function runInContainer(
 		...(runAsUser ? ["--user", runAsUser] : []),
 		"--mount",
 		`type=bind,source=${projectDir},target=${CONTAINER_WORKDIR}`,
+		...(nodeModulesVolume
+			? [
+					"--mount",
+					`type=volume,source=${nodeModulesVolume},target=${nodeModulesTarget}`,
+				]
+			: []),
 		...envArgs,
 		imageName,
 		"bash",
 		"-c",
 		command,
 	];
+
+	// A fresh named volume is root-owned by Docker. Initialize it once with the
+	// same host uid that will run the real phases, otherwise pnpm cannot install
+	// into the isolated volume while bind-mounted artifacts remain host-owned.
+	if (
+		nodeModulesVolume &&
+		!preparedNodeModulesVolumes.has(nodeModulesVolume) &&
+		uid !== undefined &&
+		gid !== undefined &&
+		runAsUser === `${uid}:${gid}`
+	) {
+		await execFileAsync("docker", [
+			"run",
+			"--rm",
+			"--user",
+			"root",
+			"--entrypoint",
+			"",
+			"--mount",
+			`type=volume,source=${nodeModulesVolume},target=${nodeModulesTarget}`,
+			imageName,
+			"bash",
+			"-c",
+			`chown ${uid}:${gid} ${nodeModulesTarget}`,
+		]);
+		preparedNodeModulesVolumes.add(nodeModulesVolume);
+	}
 
 	return new Promise<DockerRunResult>((resolve, reject) => {
 		const proc = spawn("docker", dockerArgs, {
@@ -472,6 +511,8 @@ export async function runInContainer(
  * after this window to guarantee the run promise always resolves.
  */
 const DOCKER_STOP_GRACE_SEC = 10;
+
+const preparedNodeModulesVolumes = new Set<string>();
 
 /**
  * Open an interactive shell inside the CI container.

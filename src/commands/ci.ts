@@ -1,5 +1,5 @@
 import { type StdioOptions, spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { constants, type Stats } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import fsp from "node:fs/promises";
@@ -685,6 +685,25 @@ export async function runCI(
 	// executor so nothing downstream re-derives it. Set iff
 	// `resolved.source === "auto" && !noDocker`.
 	let autoImage: string | undefined;
+	const nodeModulesRunId = !noDocker
+		? randomBytes(6).toString("hex")
+		: undefined;
+	const nodeModulesVolumes = new Map<string, string>();
+	const nodeModulesVolumeForRunner = (
+		runner: ResolvedRunner,
+	): string | undefined => {
+		if (!nodeModulesRunId || runner.stack !== "node") return undefined;
+		const key = runner.directory;
+		const current = nodeModulesVolumes.get(key);
+		if (current) return current;
+		const directoryHash = createHash("sha256")
+			.update(key)
+			.digest("hex")
+			.slice(0, 12);
+		const volume = `javi-forge-ci-node-modules-${nodeModulesRunId}-${directoryHash}`;
+		nodeModulesVolumes.set(key, volume);
+		return volume;
+	};
 	if (!noDocker) {
 		const stepDocker = "docker-check";
 		report(onStep, stepDocker, "Checking Docker", "running");
@@ -782,17 +801,28 @@ export async function runCI(
 	const naming: NamingMode = implicitName
 		? NAMING_MODE.BARE
 		: NAMING_MODE.SUFFIXED;
-	for (const runner of resolved.runners) {
-		await runRunner(runner, {
-			projectDir,
-			mode,
-			noDocker,
-			noSecurity,
-			timeout,
-			onStep,
-			naming,
-			preresolvedImage: resolved.source === "auto" ? autoImage : undefined,
-		});
+	try {
+		for (const runner of resolved.runners) {
+			await runRunner(runner, {
+				projectDir,
+				mode,
+				noDocker,
+				noSecurity,
+				timeout,
+				onStep,
+				naming,
+				preresolvedImage: resolved.source === "auto" ? autoImage : undefined,
+				nodeModulesVolume: nodeModulesVolumeForRunner(runner),
+			});
+		}
+	} finally {
+		for (const nodeModulesVolume of nodeModulesVolumes.values()) {
+			try {
+				await execFileAsync("docker", ["volume", "rm", nodeModulesVolume]);
+			} catch {
+				// Best-effort cleanup; the CI result is determined by the runner.
+			}
+		}
 	}
 
 	// ── Security scan (full mode only) ──────────────────────────────────────────
@@ -1118,6 +1148,8 @@ interface RunnerExecContext {
 	naming: NamingMode;
 	/** Set only for `source === "auto"`: image built in the prologue. */
 	preresolvedImage?: string;
+	/** Docker-managed dependency volume shared by phases for this runner directory. */
+	nodeModulesVolume?: string;
 }
 
 interface RunPhase {
@@ -1143,6 +1175,14 @@ interface RunStepOptions {
 	user?: string;
 	/** REQUIRED when `!noDocker` — resolved upstream, never re-derived here. */
 	image?: string;
+	nodeModulesVolume?: string;
+	nodeModulesTarget?: string;
+}
+
+function getNodeModulesTarget(runner: ResolvedRunner): string {
+	return runner.directory === "."
+		? `${CONTAINER_WORKDIR}/node_modules`
+		: `${CONTAINER_WORKDIR}/${runner.directory}/node_modules`;
 }
 
 /**
@@ -1250,6 +1290,8 @@ async function runRunner(
 					runner,
 					user: runner.user,
 					image: imageName,
+					nodeModulesVolume: ctx.nodeModulesVolume,
+					nodeModulesTarget: getNodeModulesTarget(runner),
 				});
 			} catch {
 				const message =
@@ -1310,6 +1352,8 @@ async function runRunner(
 					runner,
 					user: phase.user ?? runner.user,
 					image: imageName,
+					nodeModulesVolume: ctx.nodeModulesVolume,
+					nodeModulesTarget: getNodeModulesTarget(runner),
 				});
 				report(onStep, stepId, `${subject}${suffix} passed`, "done");
 			} catch (e) {
@@ -1327,8 +1371,17 @@ async function runRunner(
 }
 
 async function runStep(options: RunStepOptions): Promise<void> {
-	const { command, projectDir, noDocker, timeout, runner, user, image } =
-		options;
+	const {
+		command,
+		projectDir,
+		noDocker,
+		timeout,
+		runner,
+		user,
+		image,
+		nodeModulesVolume,
+		nodeModulesTarget,
+	} = options;
 	if (noDocker) {
 		// Run natively, in the runner's working directory.
 		const cwd = path.join(projectDir, runner.directory);
@@ -1368,6 +1421,10 @@ async function runStep(options: RunStepOptions): Promise<void> {
 			timeout,
 			stream: true,
 			user,
+			nodeModulesVolume:
+				runner.stack === "node" ? nodeModulesVolume : undefined,
+			nodeModulesTarget:
+				runner.stack === "node" ? nodeModulesTarget : undefined,
 		});
 		if (result.exitCode !== 0) {
 			throw new Error(`Command failed with exit code ${result.exitCode}`);

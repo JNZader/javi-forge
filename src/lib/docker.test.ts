@@ -400,6 +400,26 @@ describe("runInContainer", () => {
 		expect(args[args.length - 1]).toBe("pnpm test");
 	});
 
+	it("mounts node_modules from a Docker-managed volume, never the host", async () => {
+		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
+		await runInContainer({
+			projectDir,
+			image: "javi-forge-ci-node",
+			command: "pnpm test",
+			nodeModulesVolume: "javi-forge-ci-node-modules-test",
+			user: "root",
+			stream: false,
+		});
+
+		const args = spawnMock.mock.calls[0]?.[1] as string[];
+		expect(args).toContain(
+			"type=volume,source=javi-forge-ci-node-modules-test,target=/home/runner/work/node_modules",
+		);
+		expect(args).not.toContain(
+			`type=bind,source=${projectDir}/node_modules,target=/home/runner/work/node_modules`,
+		);
+	});
+
 	it("never performs marker detection — the image comes from the caller", async () => {
 		spawnMock.mockReturnValue(fakeProc({ exit: 0 }));
 		await runInContainer({

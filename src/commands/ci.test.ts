@@ -3140,6 +3140,89 @@ describe("characterization: auto + docker", () => {
 		}
 	});
 
+	it("shares one Docker-managed node_modules volume across setup and test", async () => {
+		await fs.writeJson(path.join(tmpDir, "package.json"), {
+			scripts: { test: "true" },
+		});
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			`version: 1
+runners:
+  - name: api
+    stack: node
+    setup: pnpm install --frozen-lockfile
+    test: pnpm test
+`,
+		);
+
+		await runCI({ projectDir: tmpDir, ...AUTO_DOCKER }, () => {});
+
+		const calls = containerCalls();
+		const setup = calls.find((call) => call.command.includes("pnpm install"));
+		const test = calls.find((call) => call.command.includes("pnpm test"));
+		expect(setup?.nodeModulesVolume).toMatch(
+			/^javi-forge-ci-node-modules-[0-9a-f]{12}-[0-9a-f]{12}$/,
+		);
+		expect(test?.nodeModulesVolume).toBe(setup?.nodeModulesVolume);
+	});
+
+	it("isolates Docker-managed node_modules volumes by runner directory", async () => {
+		await fs.ensureDir(path.join(tmpDir, "apps", "api"));
+		await fs.ensureDir(path.join(tmpDir, "apps", "web"));
+		await fs.outputFile(
+			path.join(tmpDir, ".javi-forge", "ci.yaml"),
+			`version: 1
+runners:
+  - name: api
+    stack: node
+    directory: apps/api
+    setup: pnpm install --frozen-lockfile
+    test: pnpm test
+  - name: web
+    stack: node
+    directory: apps/web
+    setup: pnpm install --frozen-lockfile
+    test: pnpm test
+`,
+		);
+
+		await runCI({ projectDir: tmpDir, ...AUTO_DOCKER }, () => {});
+
+		const calls = containerCalls();
+		const apiCalls = calls.filter((call) =>
+			call.command.includes("cd /home/runner/work/apps/api"),
+		);
+		const webCalls = calls.filter((call) =>
+			call.command.includes("cd /home/runner/work/apps/web"),
+		);
+		const apiVolume = apiCalls.find((call) =>
+			call.command.includes("pnpm install"),
+		)?.nodeModulesVolume;
+		const webVolume = webCalls.find((call) =>
+			call.command.includes("pnpm install"),
+		)?.nodeModulesVolume;
+
+		expect(apiVolume).toMatch(
+			/^javi-forge-ci-node-modules-[0-9a-f]{12}-[0-9a-f]{12}$/,
+		);
+		expect(webVolume).toMatch(
+			/^javi-forge-ci-node-modules-[0-9a-f]{12}-[0-9a-f]{12}$/,
+		);
+		expect(apiVolume).not.toBe(webVolume);
+		for (const call of apiCalls) {
+			expect(call.nodeModulesVolume).toBe(apiVolume);
+			expect(call.nodeModulesTarget).toBe(
+				"/home/runner/work/apps/api/node_modules",
+			);
+		}
+		for (const call of webCalls) {
+			expect(call.nodeModulesVolume).toBe(webVolume);
+			expect(call.nodeModulesTarget).toBe(
+				"/home/runner/work/apps/web/node_modules",
+			);
+		}
+	});
+
 	it("threads the resolved image for a non-node stack too", async () => {
 		const goDir = await fs.mkdtemp(
 			path.join(os.tmpdir(), "javi-forge-char-go-"),

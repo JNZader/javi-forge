@@ -114,4 +114,36 @@ describe("runCI() — auto resolution in real Docker", () => {
 		},
 		300_000,
 	);
+
+	it.skipIf(!NODE_IMAGE_OK)(
+		"isolates host node_modules and shares dependencies between setup and test",
+		async () => {
+			await fs.writeJson(path.join(tmpDir, "package.json"), {
+				name: "node-modules-isolation-fixture",
+			});
+			await fs.ensureDir(path.join(tmpDir, ".javi-forge"));
+			await fs.ensureDir(path.join(tmpDir, "node_modules"));
+			await fs.writeFile(
+				path.join(tmpDir, "node_modules", "host-marker"),
+				"host",
+			);
+			await fs.writeFile(
+				path.join(tmpDir, ".javi-forge", "ci.yaml"),
+				[
+					"version: 1",
+					"runners:",
+					"  - name: node",
+					"    stack: node",
+					"    setup: mkdir -p node_modules && node -p process.versions.node > node_modules/runtime-node-version",
+					'    test: test ! -e node_modules/host-marker && test "$(cat node_modules/runtime-node-version)" = "$(node -p process.versions.node)"',
+				].join("\n"),
+			);
+
+			const { steps, onStep } = collectSteps();
+			await runCI({ projectDir: tmpDir, ...DOCKER_RUN }, onStep);
+
+			expect(steps.find((s) => s.id === "test:node")?.status).toBe("done");
+		},
+		300_000,
+	);
 });

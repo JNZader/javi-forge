@@ -7,6 +7,10 @@ import {
 	writeFreeProvidersBundle,
 } from "../lib/ai-provider-bundles.js";
 import {
+	applyModelAssignmentProfileOverlay,
+	rollbackModelAssignmentProfileOverlay,
+} from "../lib/ai-provider-profile-apply.js";
+import {
 	MODEL_ASSIGNMENT_PRESET,
 	MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET,
 	type ModelAssignmentProfileExportTarget,
@@ -44,6 +48,7 @@ export const AI_PROVIDERS_PROVIDER_ACTION = {
 	APPLY_SCOPE: "apply-scope",
 	PROFILE_PLAN: "profile-plan",
 	PROFILE_EXPORT: "profile-export",
+	PROFILE_APPLY: "profile-apply",
 } as const;
 
 export interface AiProvidersCommandResult {
@@ -75,6 +80,8 @@ export interface AiProvidersCommandRequest {
 	prompt?: string;
 	passListPath?: string;
 	profilePlanPath?: string;
+	overlayPath?: string;
+	rollbackPath?: string;
 	preset?: string;
 	piSettingsPath?: string;
 	opencodeConfigPath?: string;
@@ -131,6 +138,8 @@ function usage(): string {
 		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both [--dry-run]",
 		`  javi-forge ai providers profile-plan <output-dir> --pass-list <pass.tsv|report.jsonl> [--preset ${MODEL_ASSIGNMENT_PRESET.COMMUNITY_BACKEND_OPENCODE_GO}] [--limit candidates-per-profile] [--dry-run]`,
 		"  javi-forge ai providers profile-export <profile-plan.json> [output-dir] --target pi|opencode|codex|both [--dry-run]",
+		"  javi-forge ai providers profile-apply <overlay.json> --pass-list <pass.tsv|report.jsonl> --target pi|opencode [--dry-run]",
+		"  javi-forge ai providers profile-apply --rollback <backup-path> --target pi|opencode",
 	].join("\n");
 }
 
@@ -462,6 +471,90 @@ async function profileExport(
 	return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
 }
 
+function normalizeProfileApplyTarget(value?: string): "pi" | "opencode" {
+	if (!value) throw new Error("profile-apply requires --target pi|opencode");
+	if (value === "both") {
+		throw new Error("profile-apply refuses --target both");
+	}
+	if (value === "codex") {
+		throw new Error("profile-apply refuses --target codex");
+	}
+	if (value === "pi" || value === "opencode") return value;
+	throw new Error(`unknown target: ${value}`);
+}
+
+function profileApplyDetail(
+	result: Awaited<ReturnType<typeof applyModelAssignmentProfileOverlay>>,
+): string {
+	return [
+		`${result.dryRun ? "dry-run: would update" : "updated"}: ${result.files.length}`,
+		...(result.passModels !== undefined
+			? [`pass models: ${result.passModels}`]
+			: []),
+		"files:",
+		...result.files.map((file) => `  - ${file}`),
+		...(result.backups.length
+			? ["backups:", ...result.backups.map((file) => `  - ${file}`)]
+			: []),
+		"secrets: none written; provider auth unchanged",
+	].join("\n");
+}
+
+function defaultRuntimePath(
+	target: "pi" | "opencode",
+	request: AiProvidersCommandRequest,
+): { piSettingsPath?: string; opencodeConfigPath?: string } {
+	return {
+		piSettingsPath:
+			emptyToUndefined(request.piSettingsPath) ??
+			(target === "pi" ? "~/.pi/agent/settings.json" : undefined),
+		opencodeConfigPath:
+			emptyToUndefined(request.opencodeConfigPath) ??
+			(target === "opencode" ? "~/.config/opencode/opencode.json" : undefined),
+	};
+}
+
+async function profileApply(
+	request: AiProvidersCommandRequest,
+	onStep: StepCallback,
+): Promise<AiProvidersCommandResult> {
+	report(
+		onStep,
+		"ai-providers-profile-apply",
+		"Apply AI model profile overlay",
+		"running",
+	);
+	const target = normalizeProfileApplyTarget(emptyToUndefined(request.target));
+	const rollbackPath = emptyToUndefined(request.rollbackPath);
+	const runtimePaths = defaultRuntimePath(target, request);
+	const result = rollbackPath
+		? await rollbackModelAssignmentProfileOverlay({
+				backupPath: rollbackPath,
+				target,
+				...runtimePaths,
+				dryRun: request.dryRun,
+			})
+		: await applyModelAssignmentProfileOverlay({
+				overlayPath:
+					emptyToUndefined(request.overlayPath) ??
+					emptyToUndefined(request.outputDir),
+				passListPath:
+					emptyToUndefined(request.passListPath) ??
+					emptyToUndefined(request.reportPath),
+				target,
+				...runtimePaths,
+				dryRun: request.dryRun,
+			});
+	report(
+		onStep,
+		"ai-providers-profile-apply",
+		"Apply AI model profile overlay",
+		"done",
+		profileApplyDetail(result),
+	);
+	return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
+}
+
 export async function runAiProvidersCommand(
 	request: AiProvidersCommandRequest,
 	onStep: StepCallback,
@@ -491,6 +584,11 @@ export async function runAiProvidersCommand(
 			request.providersAction === AI_PROVIDERS_PROVIDER_ACTION.PROFILE_EXPORT
 		) {
 			return await profileExport(request, onStep);
+		}
+		if (
+			request.providersAction === AI_PROVIDERS_PROVIDER_ACTION.PROFILE_APPLY
+		) {
+			return await profileApply(request, onStep);
 		}
 		report(onStep, "ai-providers-usage", "AI providers", "error", usage());
 		return { status: AI_PROVIDERS_COMMAND_STATUS.FAILURE };

@@ -108,6 +108,7 @@ describe("help — pi free-provider export", () => {
 		expect(HELP_TEXT).toContain("ai providers export-free");
 		expect(HELP_TEXT).toContain("ai providers convert");
 		expect(HELP_TEXT).toContain("ai providers apply-scope");
+		expect(HELP_TEXT).toContain("ai providers profile-apply");
 		expect(HELP_TEXT).toContain("--runtime");
 		expect(HELP_TEXT).toContain("--opencode-command");
 		expect(HELP_TEXT).toContain("--opencode-agent");
@@ -121,6 +122,7 @@ describe("help — pi free-provider export", () => {
 		expect(examples).toContain("ai providers export-free --target both");
 		expect(examples).toContain("ai providers convert pi opencode");
 		expect(examples).toContain("ai providers apply-scope");
+		expect(examples).toContain("ai providers profile-apply");
 		expect(examples).toContain("smoke-test /tmp/opencode-smoke");
 		expect(examples).toContain("/tmp/pi-free-providers");
 	});
@@ -142,6 +144,8 @@ describe("help — pi free-provider export", () => {
 		expect(FLAGS_SCHEMA.piSettings.type).toBe("string");
 		expect(FLAGS_SCHEMA).toHaveProperty("opencodeConfig");
 		expect(FLAGS_SCHEMA.opencodeConfig.type).toBe("string");
+		expect(FLAGS_SCHEMA).toHaveProperty("rollback");
+		expect(FLAGS_SCHEMA.rollback.type).toBe("string");
 	});
 });
 

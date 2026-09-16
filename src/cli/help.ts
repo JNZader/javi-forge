@@ -32,6 +32,7 @@ export const HELP_TEXT = `
     ai providers apply-scope  Apply smoke-test pass scope to Pi/OpenCode config
     ai providers profile-plan  Generate advisory SDD/JD model assignment plans
     ai providers profile-export  Export advisory Pi/OpenCode/Codex profile previews
+    ai providers profile-apply  Apply a generated Pi/OpenCode model profile overlay
     preparation template   Write an operator-owned preparation config template
     preparation outputs-template  Write an operator-owned outputs JSON template
     preparation policy    Print the fixed preparation policy and output names
@@ -99,10 +100,11 @@ export const HELP_TEXT = `
     --opencode-command OpenCode executable for provider smoke tests (default: opencode)
     --opencode-agent OpenCode agent for smoke tests (default: title)
     --smoke-cwd PATH Working directory for provider smoke commands
-    --pass-list PATH Provider smoke-test .pass.tsv input for apply-scope
+    --pass-list PATH Provider smoke-test .pass.tsv input for apply-scope/profile-apply
     --preset NAME   Advisory model assignment preset for profile-plan
-    --pi-settings PATH Pi settings.json path for apply-scope
-    --opencode-config PATH OpenCode opencode.json path for apply-scope
+    --pi-settings PATH Pi settings.json path for apply-scope/profile-apply
+    --opencode-config PATH OpenCode opencode.json path for apply-scope/profile-apply
+    --rollback PATH Restore a profile-apply backup onto the target config
     --json          Emit JSON for commands that support structured output
     --version       Show version
     --help          Show this help
@@ -188,6 +190,8 @@ export const HELP_TEXT = `
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.pass.tsv --target pi --dry-run
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.jsonl --target both
     $ javi-forge ai providers profile-plan /tmp/model-profiles --pass-list /tmp/opencode-smoke/smoke.jsonl --preset community-backend-opencode-go
+    $ javi-forge ai providers profile-apply /tmp/pi.model-profiles.generated.json --pass-list /tmp/opencode-smoke/smoke.jsonl --target pi --dry-run
+    $ javi-forge ai providers profile-apply --rollback /tmp/settings.json.bak-20260916T120000Z --target pi --pi-settings /tmp/settings.json
     $ javi-forge pi providers export-free
     $ javi-forge pi providers export-free /tmp/pi-free-providers
     $ javi-forge preparation template --output preparation.config.example.json
@@ -377,6 +381,7 @@ export const FLAGS_SCHEMA = {
 	preset: { type: "string", default: "" },
 	piSettings: { type: "string", default: "" },
 	opencodeConfig: { type: "string", default: "" },
+	rollback: { type: "string", default: "" },
 	file: { type: "string", default: "" },
 	outputs: { type: "string", default: "" },
 	approval: { type: "string", default: "" },

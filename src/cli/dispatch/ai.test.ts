@@ -78,9 +78,11 @@ describe("ai dispatch", () => {
 				prompt: "",
 				passListPath: "",
 				profilePlanPath: undefined,
+				overlayPath: undefined,
 				preset: "",
 				piSettingsPath: "",
 				opencodeConfigPath: "",
+				rollbackPath: undefined,
 				dryRun: true,
 			},
 			expect.any(Function),
@@ -267,6 +269,94 @@ describe("ai dispatch", () => {
 				preset: "community-backend-opencode-go",
 				limit: 4,
 				dryRun: true,
+			}),
+			expect.any(Function),
+		);
+	});
+
+	it("routes profile-apply overlay, pass-list, and rollback", async () => {
+		mockRun.mockResolvedValue({ status: "success" });
+
+		await handleAi({
+			input: [
+				"ai",
+				"providers",
+				"profile-apply",
+				"/preview/pi.model-profiles.generated.json",
+			],
+			flags: {
+				target: "pi",
+				config: "",
+				dryRun: true,
+				report: "",
+				provider: "",
+				family: "",
+				model: "",
+				status: "",
+				limit: 0,
+				timeout: 600,
+				runtime: "",
+				includeLocal: false,
+				piCommand: "",
+				opencodeCommand: "",
+				opencodeAgent: "",
+				smokeCwd: "",
+				envFile: "",
+				prompt: "",
+				passList: "/target/smoke.pass.tsv",
+				piSettings: "/pi/settings.json",
+				opencodeConfig: "",
+				rollback: "",
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			expect.objectContaining({
+				providersAction: "profile-apply",
+				overlayPath: "/preview/pi.model-profiles.generated.json",
+				passListPath: "/target/smoke.pass.tsv",
+				target: "pi",
+				piSettingsPath: "/pi/settings.json",
+				rollbackPath: "",
+				dryRun: true,
+			}),
+			expect.any(Function),
+		);
+
+		await handleAi({
+			input: ["ai", "providers", "profile-apply"],
+			flags: {
+				target: "opencode",
+				config: "",
+				dryRun: false,
+				report: "",
+				provider: "",
+				family: "",
+				model: "",
+				status: "",
+				limit: 0,
+				timeout: 600,
+				runtime: "",
+				includeLocal: false,
+				piCommand: "",
+				opencodeCommand: "",
+				opencodeAgent: "",
+				smokeCwd: "",
+				envFile: "",
+				prompt: "",
+				passList: "",
+				piSettings: "",
+				opencodeConfig: "/opencode/opencode.json",
+				rollback: "/opencode/opencode.json.bak-20260916T120000Z",
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				providersAction: "profile-apply",
+				rollbackPath: "/opencode/opencode.json.bak-20260916T120000Z",
+				target: "opencode",
+				opencodeConfigPath: "/opencode/opencode.json",
 			}),
 			expect.any(Function),
 		);

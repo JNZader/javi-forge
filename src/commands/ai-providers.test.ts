@@ -4,6 +4,10 @@ import {
 	writeFreeProvidersBundle,
 } from "../lib/ai-provider-bundles.js";
 import {
+	applyModelAssignmentProfileOverlay,
+	rollbackModelAssignmentProfileOverlay,
+} from "../lib/ai-provider-profile-apply.js";
+import {
 	writeModelAssignmentProfileExport,
 	writeModelAssignmentProfiles,
 } from "../lib/ai-provider-profiles.js";
@@ -30,6 +34,11 @@ vi.mock("../lib/ai-provider-scope.js", () => ({
 	applyProviderScope: vi.fn(),
 }));
 
+vi.mock("../lib/ai-provider-profile-apply.js", () => ({
+	applyModelAssignmentProfileOverlay: vi.fn(),
+	rollbackModelAssignmentProfileOverlay: vi.fn(),
+}));
+
 vi.mock("../lib/ai-provider-profiles.js", () => ({
 	MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET: {
 		PI: "pi",
@@ -50,6 +59,8 @@ const mockRunSmokeTests = vi.mocked(runProviderSmokeTests);
 const mockApplyScope = vi.mocked(applyProviderScope);
 const mockWriteProfiles = vi.mocked(writeModelAssignmentProfiles);
 const mockWriteProfileExport = vi.mocked(writeModelAssignmentProfileExport);
+const mockApplyProfile = vi.mocked(applyModelAssignmentProfileOverlay);
+const mockRollbackProfile = vi.mocked(rollbackModelAssignmentProfileOverlay);
 
 function collectSteps(): {
 	steps: InitStep[];
@@ -366,6 +377,79 @@ describe("runAiProvidersCommand", () => {
 			dryRun: true,
 		});
 		expect(steps[1]!.detail).toContain("runtime configs, secrets, auth");
+	});
+
+	it("applies a model assignment overlay with pass-list evidence", async () => {
+		mockApplyProfile.mockResolvedValue({
+			overlayPath: "/preview/pi.model-profiles.generated.json",
+			target: "pi",
+			dryRun: true,
+			wrote: false,
+			files: ["/pi/settings.json"],
+			backups: ["/pi/settings.json.bak-20260916T120000Z"],
+			passModels: 1,
+		});
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "profile-apply",
+				overlayPath: "/preview/pi.model-profiles.generated.json",
+				passListPath: "/target/smoke.pass.tsv",
+				target: "pi",
+				piSettingsPath: "/pi/settings.json",
+				dryRun: true,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS });
+		expect(mockApplyProfile).toHaveBeenCalledExactlyOnceWith({
+			overlayPath: "/preview/pi.model-profiles.generated.json",
+			passListPath: "/target/smoke.pass.tsv",
+			target: "pi",
+			piSettingsPath: "/pi/settings.json",
+			opencodeConfigPath: undefined,
+			dryRun: true,
+		});
+		expect(steps[1]!.detail).toContain("dry-run: would update");
+		expect(steps[1]!.detail).toContain("/pi/settings.json");
+		expect(mockRollbackProfile).not.toHaveBeenCalled();
+	});
+
+	it("rolls back a profile-apply backup without a pass-list", async () => {
+		mockRollbackProfile.mockResolvedValue({
+			target: "opencode",
+			dryRun: false,
+			wrote: true,
+			files: ["/opencode/opencode.json"],
+			backups: ["/opencode/opencode.json.bak-20260916T120000Z"],
+		});
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "profile-apply",
+				rollbackPath: "/opencode/opencode.json.bak-20260916T120000Z",
+				target: "opencode",
+				opencodeConfigPath: "/opencode/opencode.json",
+				dryRun: false,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS });
+		expect(mockRollbackProfile).toHaveBeenCalledExactlyOnceWith({
+			backupPath: "/opencode/opencode.json.bak-20260916T120000Z",
+			target: "opencode",
+			piSettingsPath: undefined,
+			opencodeConfigPath: "/opencode/opencode.json",
+			dryRun: false,
+		});
+		expect(mockApplyProfile).not.toHaveBeenCalled();
+		expect(steps[1]!.detail).toContain("updated");
 	});
 
 	it("reports usage for unsupported subcommands", async () => {

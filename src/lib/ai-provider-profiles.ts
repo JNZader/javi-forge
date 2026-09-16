@@ -763,6 +763,77 @@ function isRoutingRow(value: unknown): value is ModelAssignmentRoutingRow {
 	);
 }
 
+function isExportCandidate(
+	value: unknown,
+): value is ModelAssignmentProfileExportCandidate {
+	if (!isRecord(value)) return false;
+	return (
+		typeof value.provider === "string" &&
+		typeof value.model === "string" &&
+		typeof value.ref === "string" &&
+		(value.name === undefined || typeof value.name === "string")
+	);
+}
+
+function isExportProfile(
+	value: unknown,
+): value is ModelAssignmentProfileExportProfile {
+	if (!isRecord(value)) return false;
+	return (
+		isProfile(value.profile) &&
+		typeof value.purpose === "string" &&
+		Array.isArray(value.phases) &&
+		value.phases.every((phase) => typeof phase === "string") &&
+		(value.primaryRef === null || typeof value.primaryRef === "string") &&
+		Array.isArray(value.candidates) &&
+		value.candidates.every(isExportCandidate)
+	);
+}
+
+export function parseModelAssignmentProfileOverlay(
+	content: string,
+	inputPath: string,
+): ModelAssignmentProfileOverlay {
+	let value: unknown;
+	try {
+		value = JSON.parse(content) as unknown;
+	} catch {
+		throw new Error(`${inputPath} is not valid profile overlay JSON`);
+	}
+	if (!isRecord(value)) {
+		throw new Error(`${inputPath} is not a model assignment profile overlay`);
+	}
+	for (const key of [
+		"defaultProvider",
+		"defaultModel",
+		"enabledModels",
+		"provider",
+	] as const) {
+		if (Object.hasOwn(value, key)) {
+			throw new Error(`${inputPath} must not include ${key}`);
+		}
+	}
+	const profiles = value.profiles;
+	if (!isRecord(profiles)) {
+		throw new Error(`${inputPath} is not a model assignment profile overlay`);
+	}
+	if (
+		typeof value.generatedAt !== "string" ||
+		typeof value.sourcePlanPath !== "string" ||
+		(value.target !== "pi" &&
+			value.target !== "opencode" &&
+			value.target !== "codex") ||
+		!Array.isArray(value.routing) ||
+		!value.routing.every(isRoutingRow) ||
+		!Array.isArray(value.warnings) ||
+		!value.warnings.every((warning) => typeof warning === "string") ||
+		!PROFILE_ORDER.every((profile) => isExportProfile(profiles[profile]))
+	) {
+		throw new Error(`${inputPath} is not a model assignment profile overlay`);
+	}
+	return value as unknown as ModelAssignmentProfileOverlay;
+}
+
 function parseModelAssignmentPlan(
 	content: string,
 	inputPath: string,

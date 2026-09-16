@@ -266,4 +266,52 @@ describe("ai dispatch", () => {
 			expect.any(Function),
 		);
 	});
+
+	it("routes profile-export input and optional output directory", async () => {
+		mockRun.mockResolvedValue({ status: "success" });
+
+		await handleAi({
+			input: [
+				"ai",
+				"providers",
+				"profile-export",
+				"/profiles/model-assignment.profiles.generated.json",
+				"/preview",
+			],
+			flags: {
+				target: "codex",
+				config: "",
+				dryRun: true,
+				report: "",
+				provider: "",
+				family: "",
+				model: "",
+				status: "",
+				limit: 0,
+				timeout: 600,
+				runtime: "",
+				includeLocal: false,
+				piCommand: "",
+				opencodeCommand: "",
+				opencodeAgent: "",
+				smokeCwd: "",
+				envFile: "",
+				prompt: "",
+				passList: "",
+				piSettings: "",
+				opencodeConfig: "",
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			expect.objectContaining({
+				providersAction: "profile-export",
+				profilePlanPath: "/profiles/model-assignment.profiles.generated.json",
+				outputDir: "/preview",
+				target: "codex",
+				dryRun: true,
+			}),
+			expect.any(Function),
+		);
+	});
 });

@@ -237,6 +237,25 @@ fresh directory instead of overwriting existing artifacts. Do not feed profile
 plans from smoke-test dry-run output; `profile-plan` rejects dry-run JSONL
 reports, and dry-run smoke pass lists are intentionally empty.
 
+### Model assignment profile export previews
+
+`javi-forge ai providers profile-export <profile-plan.json> [output-dir] --target pi|opencode|codex|both`
+turns a generated `model-assignment.profiles.generated.json` plan into advisory
+target-specific previews. Omitting `output-dir` writes beside the input plan.
+
+- `--target pi` writes `pi.model-profiles.generated.json`.
+- `--target opencode` writes `opencode.model-profiles.generated.json`.
+- `--target both` writes both Pi and OpenCode previews.
+- `--target codex` writes `codex.model-profiles.generated.md`, a report-only
+  warning: Pi/OpenCode provider references are not Codex GPT-5.6 model IDs.
+
+Every preview records its source plan path, generated time, routing, candidate
+provider/model splits, and warnings. These files are not applied configuration:
+the command never modifies Pi or OpenCode settings, Codex configuration, secrets,
+credentials, auth/provider state, or runtime configuration. Use `--dry-run` to
+list planned paths without writing. Generated preview files use exclusive create,
+so rerun into a fresh output directory rather than overwriting an artifact.
+
 ---
 
 ## preparation

@@ -28,7 +28,12 @@ function printStep(step: InitStep): void {
 
 export async function handleAi(cli: CLI): Promise<void> {
 	const providersAction = cli.input[2];
-	const outputDir = providersAction === "convert" ? cli.input[5] : cli.input[3];
+	const outputDir =
+		providersAction === "convert"
+			? cli.input[5]
+			: providersAction === "profile-export"
+				? cli.input[4]
+				: cli.input[3];
 	const limit = cli.flags.limit > 0 ? cli.flags.limit : undefined;
 	const result = await runAiProvidersCommand(
 		{
@@ -55,6 +60,8 @@ export async function handleAi(cli: CLI): Promise<void> {
 			envFile: cli.flags.envFile,
 			prompt: cli.flags.prompt,
 			passListPath: cli.flags.passList,
+			profilePlanPath:
+				providersAction === "profile-export" ? cli.input[3] : undefined,
 			piSettingsPath: cli.flags.piSettings,
 			opencodeConfigPath: cli.flags.opencodeConfig,
 			dryRun: cli.flags.dryRun,

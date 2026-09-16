@@ -1,6 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
 	type ProviderScopeInput,
 	type ProviderScopeModel,
@@ -97,6 +97,58 @@ export interface WriteModelAssignmentProfilesResult {
 	passModels: number;
 	profileCounts: Record<ModelAssignmentProfile, number>;
 	profilePrimaries: Record<ModelAssignmentProfile, string | null>;
+	warnings: string[];
+}
+
+export const MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET = {
+	PI: "pi",
+	OPENCODE: "opencode",
+	CODEX: "codex",
+	BOTH: "both",
+} as const;
+
+export type ModelAssignmentProfileExportTarget =
+	(typeof MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET)[keyof typeof MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET];
+
+export interface ModelAssignmentProfileExportCandidate {
+	provider: string;
+	model: string;
+	name?: string;
+	ref: string;
+}
+
+export interface ModelAssignmentProfileExportProfile {
+	profile: ModelAssignmentProfile;
+	purpose: string;
+	phases: string[];
+	primaryRef: string | null;
+	candidates: ModelAssignmentProfileExportCandidate[];
+}
+
+export interface ModelAssignmentProfileOverlay {
+	generatedAt: string;
+	sourcePlanPath: string;
+	target: ModelAssignmentProfileExportRuntimeTarget;
+	profiles: Record<ModelAssignmentProfile, ModelAssignmentProfileExportProfile>;
+	routing: ModelAssignmentRoutingRow[];
+	warnings: string[];
+}
+
+export interface WriteModelAssignmentProfileExportOptions {
+	inputPath: string;
+	outputDir?: string;
+	target: ModelAssignmentProfileExportTarget;
+	dryRun?: boolean;
+	now?: Date;
+}
+
+export interface WriteModelAssignmentProfileExportResult {
+	inputPath: string;
+	outputDir: string;
+	target: ModelAssignmentProfileExportTarget;
+	dryRun: boolean;
+	wrote: boolean;
+	files: string[];
 	warnings: string[];
 }
 
@@ -379,6 +431,20 @@ async function writeGeneratedFile(
 	await writeFile(path, content, { flag: "wx" });
 }
 
+async function assertGeneratedFilesDoNotExist(paths: string[]): Promise<void> {
+	for (const path of paths) {
+		try {
+			await lstat(path);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			throw error;
+		}
+		const error = new Error(`EEXIST: file already exists, open '${path}'`);
+		Object.assign(error, { code: "EEXIST", path });
+		throw error;
+	}
+}
+
 export async function writeModelAssignmentProfiles(
 	options: WriteModelAssignmentProfilesOptions,
 ): Promise<WriteModelAssignmentProfilesResult> {
@@ -425,5 +491,277 @@ export async function writeModelAssignmentProfiles(
 			PROFILE_ORDER.map((profile) => [profile, plan.profiles[profile].primary]),
 		) as Record<ModelAssignmentProfile, string | null>,
 		warnings: plan.warnings,
+	};
+}
+
+type ModelAssignmentProfileExportRuntimeTarget = Exclude<
+	ModelAssignmentProfileExportTarget,
+	"both"
+>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isProfile(value: unknown): value is ModelAssignmentProfile {
+	return PROFILE_ORDER.includes(value as ModelAssignmentProfile);
+}
+
+function isPlanCandidate(value: unknown): value is ModelAssignmentCandidate {
+	if (!isRecord(value)) return false;
+	return (
+		typeof value.provider === "string" &&
+		typeof value.model === "string" &&
+		typeof value.ref === "string" &&
+		typeof value.score === "number" &&
+		Array.isArray(value.reasons) &&
+		value.reasons.every((reason) => typeof reason === "string") &&
+		(value.name === undefined || typeof value.name === "string")
+	);
+}
+
+function isPlanProfile(value: unknown): value is ModelAssignmentProfilePlan {
+	if (!isRecord(value)) return false;
+	return (
+		isProfile(value.profile) &&
+		typeof value.purpose === "string" &&
+		Array.isArray(value.phases) &&
+		value.phases.every((phase) => typeof phase === "string") &&
+		(value.primary === null || typeof value.primary === "string") &&
+		Array.isArray(value.candidates) &&
+		value.candidates.every(isPlanCandidate)
+	);
+}
+
+function isRoutingRow(value: unknown): value is ModelAssignmentRoutingRow {
+	if (!isRecord(value)) return false;
+	return (
+		typeof value.phase === "string" &&
+		isProfile(value.profile) &&
+		(value.primary === null || typeof value.primary === "string")
+	);
+}
+
+function parseModelAssignmentPlan(
+	content: string,
+	inputPath: string,
+): ModelAssignmentPlan {
+	let value: unknown;
+	try {
+		value = JSON.parse(content) as unknown;
+	} catch {
+		throw new Error(`${inputPath} is not valid profile-plan JSON`);
+	}
+	if (!isRecord(value)) {
+		throw new Error(`${inputPath} is not a model assignment profile plan`);
+	}
+	const profiles = value.profiles;
+	if (!isRecord(profiles)) {
+		throw new Error(`${inputPath} is not a model assignment profile plan`);
+	}
+	if (
+		typeof value.generatedAt !== "string" ||
+		typeof value.inputPath !== "string" ||
+		typeof value.sourceKind !== "string" ||
+		typeof value.passModels !== "number" ||
+		typeof value.maxCandidatesPerProfile !== "number" ||
+		!Array.isArray(value.routing) ||
+		!value.routing.every(isRoutingRow) ||
+		!Array.isArray(value.warnings) ||
+		!value.warnings.every((warning) => typeof warning === "string") ||
+		!PROFILE_ORDER.every((profile) => isPlanProfile(profiles[profile]))
+	) {
+		throw new Error(`${inputPath} is not a model assignment profile plan`);
+	}
+	return value as unknown as ModelAssignmentPlan;
+}
+
+function exportWarnings(
+	target: ModelAssignmentProfileExportRuntimeTarget,
+): string[] {
+	const targetLabel = target === "pi" ? "Pi" : "OpenCode";
+	return [
+		"Advisory preview only: this file is not runtime configuration and is not applied automatically.",
+		`Review and manually merge this ${targetLabel} draft only if its provider references are valid for your local setup.`,
+		"No secrets, credentials, auth state, provider state, or runtime configuration were read or written.",
+	];
+}
+
+function exportProfiles(
+	plan: ModelAssignmentPlan,
+): Record<ModelAssignmentProfile, ModelAssignmentProfileExportProfile> {
+	return Object.fromEntries(
+		PROFILE_ORDER.map((profile) => {
+			const source = plan.profiles[profile];
+			const exported: ModelAssignmentProfileExportProfile = {
+				profile: source.profile,
+				purpose: source.purpose,
+				phases: source.phases,
+				primaryRef: source.primary,
+				candidates: source.candidates.map((candidate) => ({
+					provider: candidate.provider,
+					model: candidate.model,
+					name: candidate.name,
+					ref: candidate.ref,
+				})),
+			};
+			return [profile, exported];
+		}),
+	) as Record<ModelAssignmentProfile, ModelAssignmentProfileExportProfile>;
+}
+
+function createOverlay(
+	plan: ModelAssignmentPlan,
+	sourcePlanPath: string,
+	target: ModelAssignmentProfileExportRuntimeTarget,
+	now: Date,
+): ModelAssignmentProfileOverlay {
+	return {
+		generatedAt: now.toISOString(),
+		sourcePlanPath,
+		target,
+		profiles: exportProfiles(plan),
+		routing: plan.routing,
+		warnings: [...plan.warnings, ...exportWarnings(target)],
+	};
+}
+
+function renderCodexProfileExport(
+	plan: ModelAssignmentPlan,
+	sourcePlanPath: string,
+	now: Date,
+): string {
+	const warnings = [
+		...plan.warnings,
+		"Advisory report only: this file is not a Codex configuration and is not applied automatically.",
+		"The provider/model references in this plan are not Codex GPT-5.6 model IDs; do not copy them into Codex model settings.",
+		"No secrets, credentials, auth state, provider state, or runtime configuration were read or written.",
+	];
+	const lines = [
+		"# Codex Model Profile Export Preview",
+		"",
+		"## Metadata",
+		"",
+		`- generatedAt: \`${now.toISOString()}\``,
+		`- sourcePlanPath: \`${sourcePlanPath}\``,
+		"- target: `codex`",
+		"",
+		"## Profiles",
+		"",
+	];
+	for (const profile of PROFILE_ORDER) {
+		const source = plan.profiles[profile];
+		lines.push(
+			`### ${profile}`,
+			"",
+			`Primary ref: \`${source.primary ?? "n/a"}\``,
+			"",
+		);
+		lines.push("| Candidate | Provider | Model |", "| --- | --- | --- |");
+		if (source.candidates.length === 0) {
+			lines.push("| n/a | n/a | n/a |");
+		} else {
+			for (const candidate of source.candidates) {
+				lines.push(
+					`| ${candidate.ref} | ${candidate.provider} | ${candidate.model} |`,
+				);
+			}
+		}
+		lines.push("");
+	}
+	lines.push(
+		"## Routing",
+		"",
+		"| Phase | Profile | Primary ref |",
+		"| --- | --- | --- |",
+	);
+	for (const row of plan.routing) {
+		lines.push(`| ${row.phase} | ${row.profile} | ${row.primary ?? "n/a"} |`);
+	}
+	lines.push(
+		"",
+		"## Warnings",
+		"",
+		...warnings.map((warning) => `- ${warning}`),
+		"",
+	);
+	return `${lines.join("\n")}\n`;
+}
+
+function targetFiles(
+	outputDir: string,
+	target: ModelAssignmentProfileExportTarget,
+): string[] {
+	if (target === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.PI) {
+		return [join(outputDir, "pi.model-profiles.generated.json")];
+	}
+	if (target === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.OPENCODE) {
+		return [join(outputDir, "opencode.model-profiles.generated.json")];
+	}
+	if (target === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.CODEX) {
+		return [join(outputDir, "codex.model-profiles.generated.md")];
+	}
+	return [
+		join(outputDir, "pi.model-profiles.generated.json"),
+		join(outputDir, "opencode.model-profiles.generated.json"),
+	];
+}
+
+export async function writeModelAssignmentProfileExport(
+	options: WriteModelAssignmentProfileExportOptions,
+): Promise<WriteModelAssignmentProfileExportResult> {
+	const inputPath = resolvePath(options.inputPath);
+	const outputDir = resolvePath(options.outputDir ?? dirname(inputPath));
+	const target = options.target;
+	const dryRun = options.dryRun ?? false;
+	const now = options.now ?? new Date();
+	const plan = parseModelAssignmentPlan(
+		await readFile(inputPath, "utf8"),
+		inputPath,
+	);
+	const files = targetFiles(outputDir, target);
+	const warnings = [
+		...plan.warnings,
+		...(target === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.CODEX
+			? [
+					"Codex export is report-only because OpenCode/Pi provider references are not Codex GPT-5.6 model IDs.",
+				]
+			: target === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.BOTH
+				? [...exportWarnings("pi"), ...exportWarnings("opencode")]
+				: exportWarnings(target)),
+	];
+
+	if (!dryRun) {
+		await mkdir(outputDir, { recursive: true });
+		await assertGeneratedFilesDoNotExist(files);
+		if (target === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.CODEX) {
+			await writeGeneratedFile(
+				join(outputDir, "codex.model-profiles.generated.md"),
+				renderCodexProfileExport(plan, inputPath, now),
+			);
+		} else {
+			const targets: ModelAssignmentProfileExportRuntimeTarget[] =
+				target === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.BOTH
+					? ["pi", "opencode"]
+					: [target];
+			for (const runtimeTarget of targets) {
+				const path =
+					runtimeTarget === "pi"
+						? join(outputDir, "pi.model-profiles.generated.json")
+						: join(outputDir, "opencode.model-profiles.generated.json");
+				const overlay = createOverlay(plan, inputPath, runtimeTarget, now);
+				await writeGeneratedFile(path, `${JSON.stringify(overlay, null, 2)}\n`);
+			}
+		}
+	}
+
+	return {
+		inputPath,
+		outputDir,
+		target,
+		dryRun,
+		wrote: !dryRun,
+		files,
+		warnings,
 	};
 }

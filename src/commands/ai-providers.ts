@@ -6,7 +6,12 @@ import {
 	type ProviderBundleTarget,
 	writeFreeProvidersBundle,
 } from "../lib/ai-provider-bundles.js";
-import { writeModelAssignmentProfiles } from "../lib/ai-provider-profiles.js";
+import {
+	MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET,
+	type ModelAssignmentProfileExportTarget,
+	writeModelAssignmentProfileExport,
+	writeModelAssignmentProfiles,
+} from "../lib/ai-provider-profiles.js";
 import {
 	applyProviderScope,
 	type ProviderScopeTarget,
@@ -37,6 +42,7 @@ export const AI_PROVIDERS_PROVIDER_ACTION = {
 	SMOKE_TEST: "smoke-test",
 	APPLY_SCOPE: "apply-scope",
 	PROFILE_PLAN: "profile-plan",
+	PROFILE_EXPORT: "profile-export",
 } as const;
 
 export interface AiProvidersCommandResult {
@@ -67,6 +73,7 @@ export interface AiProvidersCommandRequest {
 	envFile?: string;
 	prompt?: string;
 	passListPath?: string;
+	profilePlanPath?: string;
 	piSettingsPath?: string;
 	opencodeConfigPath?: string;
 	dryRun: boolean;
@@ -121,6 +128,7 @@ function usage(): string {
 		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--runtime pi|opencode] [--provider id] [--family text] [--model text] [--status pass|failed|...] [--report <previous.jsonl>]",
 		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both [--dry-run]",
 		"  javi-forge ai providers profile-plan <output-dir> --pass-list <pass.tsv|report.jsonl> [--limit candidates-per-profile] [--dry-run]",
+		"  javi-forge ai providers profile-export <profile-plan.json> [output-dir] --target pi|opencode|codex|both [--dry-run]",
 	].join("\n");
 }
 
@@ -392,6 +400,65 @@ async function profilePlan(
 	return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
 }
 
+function normalizeProfileExportTarget(
+	value?: string,
+): ModelAssignmentProfileExportTarget {
+	if (!value)
+		throw new Error("profile-export requires --target pi|opencode|codex|both");
+	if (
+		value === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.PI ||
+		value === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.OPENCODE ||
+		value === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.CODEX ||
+		value === MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET.BOTH
+	) {
+		return value;
+	}
+	throw new Error(`unknown target: ${value}`);
+}
+
+function profileExportDetail(
+	result: Awaited<ReturnType<typeof writeModelAssignmentProfileExport>>,
+): string {
+	return [
+		`${result.dryRun ? "dry-run: would generate" : "generated"}: ${result.files.length}`,
+		"files:",
+		...result.files.map((file) => `  - ${file}`),
+		...(result.warnings.length
+			? ["warnings:", ...result.warnings.map((warning) => `  - ${warning}`)]
+			: []),
+		"advisory previews only; runtime configs, secrets, auth, and provider state unchanged",
+	].join("\n");
+}
+
+async function profileExport(
+	request: AiProvidersCommandRequest,
+	onStep: StepCallback,
+): Promise<AiProvidersCommandResult> {
+	report(
+		onStep,
+		"ai-providers-profile-export",
+		"Export AI model profile previews",
+		"running",
+	);
+	const inputPath = emptyToUndefined(request.profilePlanPath);
+	if (!inputPath)
+		throw new Error("profile-export requires <profile-plan.json>");
+	const result = await writeModelAssignmentProfileExport({
+		inputPath,
+		outputDir: emptyToUndefined(request.outputDir),
+		target: normalizeProfileExportTarget(emptyToUndefined(request.target)),
+		dryRun: request.dryRun,
+	});
+	report(
+		onStep,
+		"ai-providers-profile-export",
+		"Export AI model profile previews",
+		"done",
+		profileExportDetail(result),
+	);
+	return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
+}
+
 export async function runAiProvidersCommand(
 	request: AiProvidersCommandRequest,
 	onStep: StepCallback,
@@ -416,6 +483,11 @@ export async function runAiProvidersCommand(
 		}
 		if (request.providersAction === AI_PROVIDERS_PROVIDER_ACTION.PROFILE_PLAN) {
 			return await profilePlan(request, onStep);
+		}
+		if (
+			request.providersAction === AI_PROVIDERS_PROVIDER_ACTION.PROFILE_EXPORT
+		) {
+			return await profileExport(request, onStep);
 		}
 		report(onStep, "ai-providers-usage", "AI providers", "error", usage());
 		return { status: AI_PROVIDERS_COMMAND_STATUS.FAILURE };

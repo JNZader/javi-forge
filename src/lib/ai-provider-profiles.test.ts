@@ -9,8 +9,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ModelAssignmentPlan } from "./ai-provider-profiles.js";
-import { writeModelAssignmentProfiles } from "./ai-provider-profiles.js";
+import type {
+	ModelAssignmentPlan,
+	ModelAssignmentProfileOverlay,
+} from "./ai-provider-profiles.js";
+import {
+	writeModelAssignmentProfileExport,
+	writeModelAssignmentProfiles,
+} from "./ai-provider-profiles.js";
 
 let dir: string;
 
@@ -140,5 +146,143 @@ describe("writeModelAssignmentProfiles", () => {
 			writeModelAssignmentProfiles({ inputPath, outputDir }),
 		).rejects.toThrow(/smoke-test --dry-run/);
 		expect(existsSync(outputDir)).toBe(false);
+	});
+});
+
+describe("writeModelAssignmentProfileExport", () => {
+	async function createProfilePlan(
+		models = [
+			"opencode-go\tqwen3-coder\tQwen Coder",
+			"google\tgemini-3.1-flash-lite\tGemini Flash Lite",
+		],
+	): Promise<string> {
+		const inputPath = join(dir, "smoke.pass.tsv");
+		const planDir = join(dir, "plan");
+		writeFileSync(inputPath, ["provider\tmodel\tname", ...models].join("\n"));
+		const result = await writeModelAssignmentProfiles({
+			inputPath,
+			outputDir: planDir,
+		});
+		return result.files[0]!;
+	}
+
+	it("writes a non-applied Pi overlay with split provider and model references", async () => {
+		const inputPath = await createProfilePlan();
+		const outputDir = join(dir, "preview");
+
+		const result = await writeModelAssignmentProfileExport({
+			inputPath,
+			outputDir,
+			target: "pi",
+			now: new Date("2026-09-16T01:00:00.000Z"),
+		});
+
+		expect(result.files).toEqual([
+			join(outputDir, "pi.model-profiles.generated.json"),
+		]);
+		const overlay = JSON.parse(
+			readFileSync(result.files[0]!, "utf8"),
+		) as ModelAssignmentProfileOverlay;
+		expect(overlay).toMatchObject({
+			generatedAt: "2026-09-16T01:00:00.000Z",
+			sourcePlanPath: inputPath,
+			target: "pi",
+		});
+		expect(overlay.profiles["sdd-mid"].candidates[0]).toMatchObject({
+			provider: "opencode-go",
+			model: "qwen3-coder",
+			ref: "opencode-go/qwen3-coder",
+		});
+		expect(overlay.warnings.join(" ")).toContain("not runtime configuration");
+	});
+
+	it("writes Pi and OpenCode overlays for both without writing a Codex config", async () => {
+		const inputPath = await createProfilePlan();
+		const outputDir = join(dir, "preview");
+
+		const result = await writeModelAssignmentProfileExport({
+			inputPath,
+			outputDir,
+			target: "both",
+		});
+
+		expect(result.files).toEqual([
+			join(outputDir, "pi.model-profiles.generated.json"),
+			join(outputDir, "opencode.model-profiles.generated.json"),
+		]);
+		for (const path of result.files) expect(existsSync(path)).toBe(true);
+		expect(
+			existsSync(join(outputDir, "codex.model-profiles.generated.md")),
+		).toBe(false);
+	});
+
+	it("preflights every target path before writing either overlay", async () => {
+		const inputPath = await createProfilePlan();
+		const outputDir = join(dir, "preview");
+		mkdirSync(outputDir, { recursive: true });
+		const existing = join(outputDir, "opencode.model-profiles.generated.json");
+		writeFileSync(existing, "keep me");
+
+		await expect(
+			writeModelAssignmentProfileExport({
+				inputPath,
+				outputDir,
+				target: "both",
+			}),
+		).rejects.toMatchObject({ code: "EEXIST", path: existing });
+		expect(
+			existsSync(join(outputDir, "pi.model-profiles.generated.json")),
+		).toBe(false);
+		expect(readFileSync(existing, "utf8")).toBe("keep me");
+	});
+
+	it("preserves source plan warnings in overlays, reports, and results", async () => {
+		const inputPath = await createProfilePlan([]);
+		const sourceWarning = "No passing models were found in the input.";
+		const overlayResult = await writeModelAssignmentProfileExport({
+			inputPath,
+			outputDir: join(dir, "overlay"),
+			target: "pi",
+		});
+		const overlay = JSON.parse(
+			readFileSync(overlayResult.files[0]!, "utf8"),
+		) as ModelAssignmentProfileOverlay;
+		expect(overlay.warnings).toContain(sourceWarning);
+		expect(overlayResult.warnings).toContain(sourceWarning);
+
+		const reportResult = await writeModelAssignmentProfileExport({
+			inputPath,
+			outputDir: join(dir, "report"),
+			target: "codex",
+		});
+		expect(reportResult.warnings).toContain(sourceWarning);
+		expect(readFileSync(reportResult.files[0]!, "utf8")).toContain(
+			sourceWarning,
+		);
+	});
+
+	it("dry-runs and refuses to overwrite an existing preview", async () => {
+		const inputPath = await createProfilePlan();
+		const outputDir = join(dir, "preview");
+		const dryRun = await writeModelAssignmentProfileExport({
+			inputPath,
+			outputDir,
+			target: "codex",
+			dryRun: true,
+		});
+		expect(dryRun.wrote).toBe(false);
+		expect(existsSync(dryRun.files[0]!)).toBe(false);
+
+		mkdirSync(outputDir, { recursive: true });
+		const existing = join(outputDir, "codex.model-profiles.generated.md");
+		writeFileSync(existing, "keep me");
+		await expect(
+			writeModelAssignmentProfileExport({
+				inputPath,
+				outputDir,
+				target: "codex",
+			}),
+		).rejects.toMatchObject({ code: "EEXIST" });
+		expect(readFileSync(existing, "utf8")).toBe("keep me");
 	});
 });

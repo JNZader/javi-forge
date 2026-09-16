@@ -3,7 +3,10 @@ import {
 	convertProviderBundle,
 	writeFreeProvidersBundle,
 } from "../lib/ai-provider-bundles.js";
-import { writeModelAssignmentProfiles } from "../lib/ai-provider-profiles.js";
+import {
+	writeModelAssignmentProfileExport,
+	writeModelAssignmentProfiles,
+} from "../lib/ai-provider-profiles.js";
 import { applyProviderScope } from "../lib/ai-provider-scope.js";
 import { runProviderSmokeTests } from "../lib/ai-provider-smoke.js";
 import type { InitStep } from "../types/index.js";
@@ -28,6 +31,13 @@ vi.mock("../lib/ai-provider-scope.js", () => ({
 }));
 
 vi.mock("../lib/ai-provider-profiles.js", () => ({
+	MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET: {
+		PI: "pi",
+		OPENCODE: "opencode",
+		CODEX: "codex",
+		BOTH: "both",
+	},
+	writeModelAssignmentProfileExport: vi.fn(),
 	writeModelAssignmentProfiles: vi.fn(),
 }));
 
@@ -36,6 +46,7 @@ const mockConvertBundle = vi.mocked(convertProviderBundle);
 const mockRunSmokeTests = vi.mocked(runProviderSmokeTests);
 const mockApplyScope = vi.mocked(applyProviderScope);
 const mockWriteProfiles = vi.mocked(writeModelAssignmentProfiles);
+const mockWriteProfileExport = vi.mocked(writeModelAssignmentProfileExport);
 
 function collectSteps(): {
 	steps: InitStep[];
@@ -315,6 +326,43 @@ describe("runAiProvidersCommand", () => {
 		expect(steps[1]!.detail).toContain("runtime configs unchanged");
 	});
 
+	it("exports advisory model profile previews without applying runtime config", async () => {
+		mockWriteProfileExport.mockResolvedValue({
+			inputPath: "/profiles/model-assignment.profiles.generated.json",
+			outputDir: "/preview",
+			target: "both",
+			dryRun: true,
+			wrote: false,
+			files: [
+				"/preview/pi.model-profiles.generated.json",
+				"/preview/opencode.model-profiles.generated.json",
+			],
+			warnings: ["Advisory preview only"],
+		});
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "profile-export",
+				profilePlanPath: "/profiles/model-assignment.profiles.generated.json",
+				outputDir: "/preview",
+				target: "both",
+				dryRun: true,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS });
+		expect(mockWriteProfileExport).toHaveBeenCalledExactlyOnceWith({
+			inputPath: "/profiles/model-assignment.profiles.generated.json",
+			outputDir: "/preview",
+			target: "both",
+			dryRun: true,
+		});
+		expect(steps[1]!.detail).toContain("runtime configs, secrets, auth");
+	});
+
 	it("reports usage for unsupported subcommands", async () => {
 		const { steps, onStep } = collectSteps();
 
@@ -329,6 +377,7 @@ describe("runAiProvidersCommand", () => {
 		expect(mockRunSmokeTests).not.toHaveBeenCalled();
 		expect(mockApplyScope).not.toHaveBeenCalled();
 		expect(mockWriteProfiles).not.toHaveBeenCalled();
+		expect(mockWriteProfileExport).not.toHaveBeenCalled();
 		expect(steps[0]!.detail).toContain("javi-forge ai providers export-free");
 	});
 });

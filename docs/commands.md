@@ -218,6 +218,7 @@ javi-forge preparation preflight --config preparation.config.json
 javi-forge preparation preflight --config preparation.config.json --json
 javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
 javi-forge preparation approval-message --binding <hex> --json
+javi-forge preparation approval-check --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
 ```
 
 The template command writes an operator-owned JSON config skeleton with the exact
@@ -239,8 +240,13 @@ The approval-message command prepares the exact domain-separated message and
 payload an external operator signer must sign for a binding. It may generate a
 nonce and bounded timestamps, but it never reads a private key and never signs.
 
-These commands do **not** execute the worker, stage outputs, sign, verify or
-consume approvals, contact a model, deploy, publish, release, or write generated
+The approval-check command reads the operator-owned approval evidence, verifies
+the Ed25519 signature and binding with the public key in the production config,
+and reports only bounded approval metadata. It does not print the approval
+evidence, signature, or payload body, and it does not consume the nonce.
+
+These commands do **not** execute the worker, stage outputs, sign or consume
+approvals, contact a model, deploy, publish, release, or write generated
 artifacts.
 
 ---

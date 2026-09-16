@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import {
 	type ApprovalPayload,
 	approvalMessage,
@@ -8,9 +8,11 @@ import {
 import { POLICY } from "../lib/preparation-capability.js";
 import {
 	createPreparationProductionConfigTemplate,
+	inspectPreparationApprovalCheck,
 	inspectPreparationProductionBinding,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_STATUS,
+	type PreparationApprovalCheckResult,
 	type PreparationPreflightResult,
 	type PreparationProductionBindingResult,
 } from "../lib/preparation-production.js";
@@ -27,6 +29,7 @@ export type PreparationCommandStatus =
 	(typeof PREPARATION_COMMAND_STATUS)[keyof typeof PREPARATION_COMMAND_STATUS];
 
 export const PREPARATION_ACTION = {
+	APPROVAL_CHECK: "approval-check",
 	APPROVAL_MESSAGE: "approval-message",
 	BIND: "bind",
 	TEMPLATE: "template",
@@ -35,6 +38,7 @@ export const PREPARATION_ACTION = {
 
 export interface PreparationCommandRequest {
 	action?: string;
+	approvalPath?: string;
 	binding?: string;
 	configPath?: string;
 	expiresAt?: number;
@@ -55,6 +59,7 @@ export interface PreparationCommandResult {
 	status: PreparationCommandStatus;
 	preflight?: PreparationPreflightResult;
 	binding?: PreparationProductionBindingResult;
+	approvalCheck?: PreparationApprovalCheckResult;
 	approvalMessage?: PreparationApprovalMessageResult;
 	outputPath?: string;
 	error?: string;
@@ -77,13 +82,28 @@ function usage(): string {
 		"  javi-forge preparation preflight --config <path> [--json]",
 		"  javi-forge preparation bind --config <path> --outputs <path> [--json]",
 		"  javi-forge preparation approval-message --binding <hex> [--nonce <hex>] [--issued-at <ms>] [--expires-at <ms>] [--json]",
+		"  javi-forge preparation approval-check --config <path> --binding <hex> --approval <path> [--json]",
 	].join("\n");
 }
 
-function detail(preflight: PreparationProductionBindingResult): string {
+function detail(
+	preflight:
+		| PreparationProductionBindingResult
+		| PreparationApprovalCheckResult,
+): string {
 	return [
 		`status: ${preflight.status}`,
-		...(preflight.binding ? [`binding: ${preflight.binding}`] : []),
+		...("binding" in preflight && preflight.binding
+			? [`binding: ${preflight.binding}`]
+			: []),
+		...("approval" in preflight && preflight.approval
+			? [
+					"approval:",
+					`  nonce: ${preflight.approval.nonce}`,
+					`  issuedAt: ${preflight.approval.issuedAt}`,
+					`  expiresAt: ${preflight.approval.expiresAt}`,
+				]
+			: []),
 		...(preflight.reason ? [`reason: ${preflight.reason}`] : []),
 		...(preflight.measurements
 			? [
@@ -122,6 +142,16 @@ async function readOutputs(outputsPath?: string): Promise<unknown> {
 		}
 		throw error;
 	}
+}
+
+async function readApprovalEvidence(approvalPath?: string): Promise<string> {
+	const path = approvalPath?.trim();
+	if (!path) throw new Error("approval-check requires --approval <path>");
+	const info = await stat(path);
+	if (!info.isFile() || info.size > 4096) {
+		throw new Error("preparation approval evidence is not a bounded file");
+	}
+	return readFile(path, "utf8");
 }
 
 async function writeConfigTemplate(
@@ -178,6 +208,7 @@ export async function runPreparationCommand(
 	onStep: StepCallback,
 ): Promise<PreparationCommandResult> {
 	if (
+		request.action !== PREPARATION_ACTION.APPROVAL_CHECK &&
 		request.action !== PREPARATION_ACTION.APPROVAL_MESSAGE &&
 		request.action !== PREPARATION_ACTION.BIND &&
 		request.action !== PREPARATION_ACTION.PREFLIGHT &&
@@ -235,6 +266,36 @@ export async function runPreparationCommand(
 			return {
 				status: PREPARATION_COMMAND_STATUS.SUCCESS,
 				approvalMessage: prepared,
+			};
+		}
+
+		if (request.action === PREPARATION_ACTION.APPROVAL_CHECK) {
+			report(
+				onStep,
+				"preparation-approval-check",
+				"Preparation approval check",
+				"running",
+			);
+			const config = await readConfig(request.configPath);
+			const approval = await readApprovalEvidence(request.approvalPath);
+			const approvalCheck = inspectPreparationApprovalCheck(
+				config,
+				request.binding?.trim() ?? "",
+				approval,
+			);
+			const ok = approvalCheck.status === PREPARATION_PREFLIGHT_STATUS.READY;
+			report(
+				onStep,
+				"preparation-approval-check",
+				"Preparation approval check",
+				ok ? "done" : "error",
+				detail(approvalCheck),
+			);
+			return {
+				status: ok
+					? PREPARATION_COMMAND_STATUS.SUCCESS
+					: PREPARATION_COMMAND_STATUS.FAILURE,
+				approvalCheck,
 			};
 		}
 

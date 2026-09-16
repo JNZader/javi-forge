@@ -33,6 +33,7 @@ describe("preparation dispatch", () => {
 		await handlePreparation({
 			input: ["preparation", "preflight"],
 			flags: {
+				approval: "",
 				binding: "",
 				config: "/safe/config.json",
 				expiresAt: 0,
@@ -48,6 +49,7 @@ describe("preparation dispatch", () => {
 		expect(mockRun).toHaveBeenCalledWith(
 			{
 				action: "preflight",
+				approvalPath: "",
 				binding: "",
 				configPath: "/safe/config.json",
 				expiresAt: 0,
@@ -72,6 +74,7 @@ describe("preparation dispatch", () => {
 		await handlePreparation({
 			input: ["preparation", "preflight"],
 			flags: {
+				approval: "",
 				config: "/safe/config.json",
 				binding: "",
 				nonce: "",
@@ -109,6 +112,7 @@ describe("preparation dispatch", () => {
 		await handlePreparation({
 			input: ["preparation", "template"],
 			flags: {
+				approval: "",
 				binding: "",
 				config: "",
 				expiresAt: 0,
@@ -124,6 +128,7 @@ describe("preparation dispatch", () => {
 		expect(mockRun).toHaveBeenCalledWith(
 			{
 				action: "template",
+				approvalPath: "",
 				binding: "",
 				configPath: "",
 				expiresAt: 0,
@@ -148,6 +153,7 @@ describe("preparation dispatch", () => {
 		await handlePreparation({
 			input: ["preparation", "bind"],
 			flags: {
+				approval: "",
 				binding: "",
 				config: "/safe/config.json",
 				expiresAt: 0,
@@ -163,6 +169,7 @@ describe("preparation dispatch", () => {
 		expect(mockRun).toHaveBeenCalledWith(
 			{
 				action: "bind",
+				approvalPath: "",
 				binding: "",
 				configPath: "/safe/config.json",
 				expiresAt: 0,
@@ -198,6 +205,7 @@ describe("preparation dispatch", () => {
 		await handlePreparation({
 			input: ["preparation", "approval-message"],
 			flags: {
+				approval: "",
 				binding: "b".repeat(64),
 				config: "",
 				expiresAt: 601000,
@@ -213,6 +221,7 @@ describe("preparation dispatch", () => {
 		expect(mockRun).toHaveBeenCalledWith(
 			{
 				action: "approval-message",
+				approvalPath: "",
 				binding: "b".repeat(64),
 				configPath: "",
 				expiresAt: 601000,
@@ -222,6 +231,54 @@ describe("preparation dispatch", () => {
 				issuedAt: 1000,
 				json: false,
 				nonce: "a".repeat(64),
+			},
+			expect.any(Function),
+		);
+		expect(process.exitCode).toBe(0);
+	});
+
+	it("routes approval-check arguments", async () => {
+		mockRun.mockResolvedValue({
+			status: "success",
+			approvalCheck: {
+				status: "ready",
+				approval: {
+					nonce: "a".repeat(64),
+					issuedAt: 1000,
+					expiresAt: 601000,
+				},
+			},
+		});
+
+		await handlePreparation({
+			input: ["preparation", "approval-check"],
+			flags: {
+				approval: "/safe/approval.json",
+				binding: "b".repeat(64),
+				config: "/safe/config.json",
+				expiresAt: 0,
+				issuedAt: 0,
+				nonce: "",
+				outputs: "",
+				output: "",
+				force: false,
+				json: false,
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			{
+				action: "approval-check",
+				approvalPath: "/safe/approval.json",
+				binding: "b".repeat(64),
+				configPath: "/safe/config.json",
+				expiresAt: 0,
+				outputsPath: "",
+				outputPath: "",
+				force: false,
+				issuedAt: 0,
+				json: false,
+				nonce: "",
 			},
 			expect.any(Function),
 		);

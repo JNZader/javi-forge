@@ -83,6 +83,11 @@ contact a model, deploy, publish, or release.
 exact domain-separated payload/message for that external signer. It can generate
 a nonce and bounded validity window, but it does not read a private key, sign,
 verify, consume, execute, stage, call a model, deploy, publish, or release.
+`javi-forge preparation approval-check --config <file> --binding <hex>
+--approval <file> [--json]` verifies operator approval evidence with the
+configured Ed25519 public key and reports only bounded approval metadata. It does
+not print the evidence, signature, or payload body, and it does not consume,
+execute, stage, call a model, deploy, publish, or release.
 
 Remaining work is to connect this boundary through a separately reviewed
 production route with real operator configuration, production identity

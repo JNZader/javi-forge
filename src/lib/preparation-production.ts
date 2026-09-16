@@ -1,5 +1,9 @@
-import { createPublicKey } from "node:crypto";
+import { createPublicKey, type KeyObject } from "node:crypto";
 import { lstatSync } from "node:fs";
+import {
+	ApprovalAuthority,
+	type ApprovalPayload,
+} from "./preparation-authorization.js";
 import { OUTPUTS, POLICY } from "./preparation-capability.js";
 import {
 	bindPreparationRuntime,
@@ -21,6 +25,7 @@ export const PREPARATION_PREFLIGHT_REASON = {
 	CONTROL_DIRECTORY_UNSAFE: "control-directory-unsafe",
 	DESTINATION_PRESENT: "destination-present",
 	DESTINATION_UNSAFE: "destination-unsafe",
+	APPROVAL_DENIED: "approval-denied",
 	RUNTIME_UNAVAILABLE: "runtime-unavailable",
 } as const;
 
@@ -66,6 +71,11 @@ export interface PreparationPreflightResult {
 export interface PreparationProductionBindingResult
 	extends PreparationPreflightResult {
 	binding?: string;
+}
+
+export interface PreparationApprovalCheckResult
+	extends PreparationPreflightResult {
+	approval?: Pick<ApprovalPayload, "nonce" | "issuedAt" | "expiresAt">;
 }
 
 export interface PreparationProductionConfigTemplateOptions {
@@ -213,12 +223,15 @@ function close(directory: ProtectedDirectory | undefined): void {
 	}
 }
 
-function inspectPublicKey(publicKeyPem: string): boolean {
+function productionPublicKey(publicKeyPem: string): KeyObject | undefined {
 	try {
 		const key = createPublicKey(publicKeyPem);
-		return key.type === "public" && key.asymmetricKeyType === "ed25519";
+		if (key.type === "public" && key.asymmetricKeyType === "ed25519") {
+			return key;
+		}
+		return undefined;
 	} catch {
-		return false;
+		return undefined;
 	}
 }
 
@@ -241,7 +254,7 @@ export function inspectPreparationProductionPreflight(
 		) {
 			return denied(PREPARATION_PREFLIGHT_REASON.POLICY_MISMATCH);
 		}
-		if (!inspectPublicKey(config.publicKeyPem)) {
+		if (!productionPublicKey(config.publicKeyPem)) {
 			return denied(PREPARATION_PREFLIGHT_REASON.PUBLIC_KEY_UNAVAILABLE);
 		}
 		try {
@@ -319,7 +332,7 @@ export function inspectPreparationProductionBinding(
 		) {
 			return denied(PREPARATION_PREFLIGHT_REASON.POLICY_MISMATCH);
 		}
-		if (!inspectPublicKey(config.publicKeyPem)) {
+		if (!productionPublicKey(config.publicKeyPem)) {
 			return denied(PREPARATION_PREFLIGHT_REASON.PUBLIC_KEY_UNAVAILABLE);
 		}
 		try {
@@ -380,5 +393,53 @@ export function inspectPreparationProductionBinding(
 	} finally {
 		close(controlDirectory);
 		close(stateDirectory);
+	}
+}
+
+export function inspectPreparationApprovalCheck(
+	input: unknown,
+	binding: string,
+	approvalEvidence: string,
+	now = Date.now(),
+	policy: PreparationProductionPolicy = POLICY,
+): PreparationApprovalCheckResult {
+	let authority: ApprovalAuthority | undefined;
+	try {
+		let config: PreparationProductionConfig;
+		try {
+			config = parsePreparationProductionConfig(input);
+		} catch {
+			return denied(PREPARATION_PREFLIGHT_REASON.INVALID_CONFIG);
+		}
+		if (
+			config.cwd !== policy.cwd ||
+			config.destination !== policy.destination
+		) {
+			return denied(PREPARATION_PREFLIGHT_REASON.POLICY_MISMATCH);
+		}
+		const publicKey = productionPublicKey(config.publicKeyPem);
+		if (!publicKey) {
+			return denied(PREPARATION_PREFLIGHT_REASON.PUBLIC_KEY_UNAVAILABLE);
+		}
+		try {
+			authority = new ApprovalAuthority(publicKey, config.stateDirectory);
+		} catch {
+			return denied(PREPARATION_PREFLIGHT_REASON.STATE_DIRECTORY_UNSAFE);
+		}
+		try {
+			const approval = authority.verify(approvalEvidence, binding, now);
+			return {
+				status: PREPARATION_PREFLIGHT_STATUS.READY,
+				approval: {
+					nonce: approval.payload.nonce,
+					issuedAt: approval.payload.issuedAt,
+					expiresAt: approval.payload.expiresAt,
+				},
+			};
+		} catch {
+			return denied(PREPARATION_PREFLIGHT_REASON.APPROVAL_DENIED);
+		}
+	} finally {
+		authority?.close();
 	}
 }

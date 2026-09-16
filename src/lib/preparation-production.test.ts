@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import {
 	chmodSync,
 	mkdirSync,
@@ -13,10 +13,12 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { approvalMessage } from "./preparation-authorization.js";
 import { OUTPUTS } from "./preparation-capability.js";
 import { createExecutorFixture } from "./preparation-executor.js";
 import {
 	createPreparationProductionConfigTemplate,
+	inspectPreparationApprovalCheck,
 	inspectPreparationProductionBinding,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_REASON,
@@ -66,6 +68,26 @@ function config(overrides: Record<string, unknown> = {}) {
 
 function outputs() {
 	return Object.fromEntries(OUTPUTS.map((name) => [name, "inert"]));
+}
+
+function approvalEvidence(preparationBinding: string) {
+	const payload = {
+		version: 1,
+		purpose: "six-file-preparation",
+		binding: preparationBinding,
+		nonce: "a".repeat(64),
+		issuedAt: 1000,
+		expiresAt: 601000,
+		maxUses: 1,
+	};
+	return JSON.stringify({
+		payload,
+		signature: sign(
+			null,
+			Buffer.from(approvalMessage(payload)),
+			keys.privateKey,
+		).toString("base64"),
+	});
 }
 
 beforeAll(() => {
@@ -198,6 +220,54 @@ describe("production preparation preflight contract", () => {
 			status: PREPARATION_PREFLIGHT_STATUS.DENIED,
 			reason: PREPARATION_PREFLIGHT_REASON.INVALID_CONFIG,
 		});
+	});
+
+	it("verifies approval evidence without consuming the nonce", () => {
+		const binding = inspectPreparationProductionBinding(
+			config(),
+			outputs(),
+			policy(),
+		).binding;
+
+		expect(
+			inspectPreparationApprovalCheck(
+				config(),
+				binding ?? "",
+				approvalEvidence(binding ?? ""),
+				1000,
+				policy(),
+			),
+		).toEqual({
+			status: PREPARATION_PREFLIGHT_STATUS.READY,
+			approval: {
+				nonce: "a".repeat(64),
+				issuedAt: 1000,
+				expiresAt: 601000,
+			},
+		});
+		expect(readdirSync(state)).toEqual([]);
+	});
+
+	it("rejects invalid approval evidence without terminal ledger writes", () => {
+		const binding = inspectPreparationProductionBinding(
+			config(),
+			outputs(),
+			policy(),
+		).binding;
+
+		expect(
+			inspectPreparationApprovalCheck(
+				config(),
+				binding ?? "",
+				"not approval evidence",
+				1000,
+				policy(),
+			),
+		).toEqual({
+			status: PREPARATION_PREFLIGHT_STATUS.DENIED,
+			reason: PREPARATION_PREFLIGHT_REASON.APPROVAL_DENIED,
+		});
+		expect(readdirSync(state)).toEqual([]);
 	});
 
 	it("rejects policy cwd and destination mismatches", () => {

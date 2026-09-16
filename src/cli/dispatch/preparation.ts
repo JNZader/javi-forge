@@ -31,6 +31,7 @@ export async function handlePreparation(cli: CLI): Promise<void> {
 	const result = await runPreparationCommand(
 		{
 			action: cli.input[1],
+			approvalPath: cli.flags.approval,
 			binding: cli.flags.binding,
 			configPath: cli.flags.config,
 			expiresAt: cli.flags.expiresAt,

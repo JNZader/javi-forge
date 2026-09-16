@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	inspectPreparationApprovalCheck,
 	inspectPreparationProductionBinding,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_STATUS,
@@ -28,6 +29,7 @@ vi.mock("../lib/preparation-production.js", () => ({
 		destination:
 			"/home/javier/.local/share/ere-gateway-runtime/structured-1/attempt-3",
 	}),
+	inspectPreparationApprovalCheck: vi.fn(),
 	inspectPreparationProductionBinding: vi.fn(),
 	inspectPreparationProductionPreflight: vi.fn(),
 	PREPARATION_PREFLIGHT_STATUS: {
@@ -39,6 +41,7 @@ vi.mock("../lib/preparation-production.js", () => ({
 
 const mockInspect = vi.mocked(inspectPreparationProductionPreflight);
 const mockBind = vi.mocked(inspectPreparationProductionBinding);
+const mockApprovalCheck = vi.mocked(inspectPreparationApprovalCheck);
 
 function collectSteps(): {
 	steps: InitStep[];
@@ -136,6 +139,7 @@ describe("runPreparationCommand", () => {
 		const unsupported = await runPreparationCommand(
 			{
 				action: "execute",
+				approvalPath: "",
 				configPath: "/tmp/config.json",
 				outputsPath: "",
 				force: false,
@@ -149,6 +153,7 @@ describe("runPreparationCommand", () => {
 		expect(unsupported.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
 		expect(unsupported.error).toContain("preparation bind");
 		expect(unsupported.error).toContain("approval-message");
+		expect(unsupported.error).toContain("approval-check");
 		expect(mockInspect).not.toHaveBeenCalled();
 		expect(steps.at(-1)?.detail).toContain("preparation preflight");
 	});
@@ -297,6 +302,77 @@ describe("runPreparationCommand", () => {
 		expect(steps.at(-1)?.detail).toBe("approval-denied");
 		expect(mockInspect).not.toHaveBeenCalled();
 		expect(mockBind).not.toHaveBeenCalled();
+	});
+
+	it("checks approval evidence without printing its contents", async () => {
+		mockApprovalCheck.mockReturnValue({
+			status: PREPARATION_PREFLIGHT_STATUS.READY,
+			approval: {
+				nonce: "a".repeat(64),
+				issuedAt: 1000,
+				expiresAt: 601000,
+			},
+		});
+		const config = { workerExecutable: "/worker" };
+		const binding = "b".repeat(64);
+		const configPath = await writeConfig(config);
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const approvalPath = path.join(root, "approval.json");
+		await writeFile(approvalPath, "secret-approval-evidence", { mode: 0o600 });
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "approval-check",
+				approvalPath,
+				binding,
+				configPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.SUCCESS);
+		expect(result.approvalCheck?.approval?.nonce).toBe("a".repeat(64));
+		expect(mockApprovalCheck).toHaveBeenCalledExactlyOnceWith(
+			config,
+			binding,
+			"secret-approval-evidence",
+		);
+		expect(steps.at(-1)?.detail).toContain(`nonce: ${"a".repeat(64)}`);
+		expect(steps.at(-1)?.detail).not.toContain("secret-approval-evidence");
+		expect(mockInspect).not.toHaveBeenCalled();
+		expect(mockBind).not.toHaveBeenCalled();
+	});
+
+	it("rejects oversized approval evidence without printing contents", async () => {
+		const configPath = await writeConfig({ workerExecutable: "/worker" });
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const approvalPath = path.join(root, "approval.json");
+		await writeFile(approvalPath, "S".repeat(4097), { mode: 0o600 });
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "approval-check",
+				approvalPath,
+				binding: "b".repeat(64),
+				configPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
+		expect(result.error).toBe(
+			"preparation approval evidence is not a bounded file",
+		);
+		expect(steps.at(-1)?.detail).toBe(
+			"preparation approval evidence is not a bounded file",
+		);
+		expect(mockApprovalCheck).not.toHaveBeenCalled();
 	});
 
 	it("writes a template without executing the preflight runtime", async () => {

@@ -73,6 +73,10 @@ the exact JSON skeleton an operator can fill before preflight. It writes only th
 template, refuses overwrite unless `--force` is explicit, and includes no private
 key, approval evidence, model credential, generated artifact, or production
 execution path.
+`javi-forge preparation outputs-template --output <file>` writes the exact
+six-output JSON skeleton an operator can fill before binding. It writes only the
+template, refuses overwrite unless `--force` is explicit, and does not stage
+outputs or generate helper code.
 `javi-forge preparation bind --config <file> --outputs <file> [--json]` adds a
 second read-only diagnostic step: it validates the same runtime boundary, parses
 an exact six-output JSON object, and computes the approval binding an external

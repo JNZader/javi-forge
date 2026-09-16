@@ -149,6 +149,7 @@ describe("help — pi free-provider export", () => {
 describe("help — preparation preflight", () => {
 	it("documents the read-only preparation preflight command", () => {
 		expect(HELP_TEXT).toContain("preparation template");
+		expect(HELP_TEXT).toContain("preparation outputs-template");
 		expect(HELP_TEXT).toContain("preparation preflight");
 		expect(HELP_TEXT).toContain("preparation bind");
 		expect(HELP_TEXT).toContain("preparation approval-message");
@@ -156,6 +157,9 @@ describe("help — preparation preflight", () => {
 		expect(HELP_TEXT).toContain("preparation approval-revoke");
 		expect(HELP_TEXT).toContain(
 			"Write an operator-owned preparation config template",
+		);
+		expect(HELP_TEXT).toContain(
+			"Write an operator-owned outputs JSON template",
 		);
 		expect(HELP_TEXT).toContain("Read-only production preparation preflight");
 		expect(HELP_TEXT).toContain(
@@ -166,7 +170,7 @@ describe("help — preparation preflight", () => {
 			"Verify approval evidence without consuming it",
 		);
 		expect(HELP_TEXT).toContain("Revoke approval evidence without executing");
-		expect(HELP_TEXT).toContain("Write a preparation config template");
+		expect(HELP_TEXT).toContain("Write a preparation config/outputs template");
 		expect(HELP_TEXT).toContain("Production preparation config JSON");
 		expect(HELP_TEXT).toContain("Production preparation outputs JSON");
 		expect(HELP_TEXT).toContain("Production preparation binding");
@@ -198,6 +202,7 @@ describe("help — preparation preflight", () => {
 	it("shows a preparation preflight example", () => {
 		const examples = HELP_TEXT.split("Examples")[1] ?? "";
 		expect(examples).toContain("preparation template --output");
+		expect(examples).toContain("preparation outputs-template --output");
 		expect(examples).toContain("preparation preflight --config");
 		expect(examples).toContain("preparation bind --config");
 		expect(examples).toContain("preparation approval-message --binding");

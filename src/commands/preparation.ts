@@ -5,7 +5,7 @@ import {
 	approvalMessage,
 	createApprovalPayload,
 } from "../lib/preparation-authorization.js";
-import { POLICY } from "../lib/preparation-capability.js";
+import { OUTPUTS, POLICY } from "../lib/preparation-capability.js";
 import {
 	createPreparationProductionConfigTemplate,
 	inspectPreparationApprovalCheck,
@@ -35,6 +35,7 @@ export const PREPARATION_ACTION = {
 	APPROVAL_MESSAGE: "approval-message",
 	APPROVAL_REVOKE: "approval-revoke",
 	BIND: "bind",
+	OUTPUTS_TEMPLATE: "outputs-template",
 	TEMPLATE: "template",
 	PREFLIGHT: "preflight",
 } as const;
@@ -83,6 +84,7 @@ function usage(): string {
 	return [
 		"Usage:",
 		"  javi-forge preparation template --output <path> [--force]",
+		"  javi-forge preparation outputs-template --output <path> [--force]",
 		"  javi-forge preparation preflight --config <path> [--json]",
 		"  javi-forge preparation bind --config <path> --outputs <path> [--json]",
 		"  javi-forge preparation approval-message --binding <hex> [--nonce <hex>] [--issued-at <ms>] [--expires-at <ms>] [--json]",
@@ -126,6 +128,10 @@ function detail(
 			: []),
 		sideEffects,
 	].join("\n");
+}
+
+function preparationOutputsTemplate(): Readonly<Record<string, string>> {
+	return Object.freeze(Object.fromEntries(OUTPUTS.map((name) => [name, ""])));
 }
 
 async function readConfig(configPath?: string): Promise<unknown> {
@@ -183,6 +189,23 @@ async function writeConfigTemplate(
 	return path;
 }
 
+async function writeOutputsTemplate(
+	outputPath: string | undefined,
+	force: boolean,
+): Promise<string> {
+	const path = outputPath?.trim();
+	if (!path) throw new Error("outputs-template requires --output <path>");
+	await writeFile(
+		path,
+		`${JSON.stringify(preparationOutputsTemplate(), null, 2)}\n`,
+		{
+			flag: force ? "w" : "wx",
+			mode: 0o600,
+		},
+	);
+	return path;
+}
+
 function optionalPositiveInteger(
 	value: number | undefined,
 ): number | undefined {
@@ -224,6 +247,7 @@ export async function runPreparationCommand(
 		request.action !== PREPARATION_ACTION.APPROVAL_MESSAGE &&
 		request.action !== PREPARATION_ACTION.APPROVAL_REVOKE &&
 		request.action !== PREPARATION_ACTION.BIND &&
+		request.action !== PREPARATION_ACTION.OUTPUTS_TEMPLATE &&
 		request.action !== PREPARATION_ACTION.PREFLIGHT &&
 		request.action !== PREPARATION_ACTION.TEMPLATE
 	) {
@@ -249,6 +273,27 @@ export async function runPreparationCommand(
 				"Preparation config template",
 				"done",
 				`wrote ${outputPath}\nside effects: wrote template only; no worker execution, approval verification, approval consumption, staging, model call, deploy, publish, or release`,
+			);
+			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, outputPath };
+		}
+
+		if (request.action === PREPARATION_ACTION.OUTPUTS_TEMPLATE) {
+			report(
+				onStep,
+				"preparation-outputs-template",
+				"Preparation outputs template",
+				"running",
+			);
+			const outputPath = await writeOutputsTemplate(
+				request.outputPath,
+				request.force,
+			);
+			report(
+				onStep,
+				"preparation-outputs-template",
+				"Preparation outputs template",
+				"done",
+				`wrote ${outputPath}\nside effects: wrote outputs template only; no worker execution, approval verification, approval consumption, staging, model call, deploy, publish, or release`,
 			);
 			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, outputPath };
 		}

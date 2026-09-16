@@ -31,6 +31,7 @@ export const HELP_TEXT = `
     ai providers smoke-test  Probe Pi/OpenCode provider/model routes and write JSONL evidence
     ai providers apply-scope  Apply smoke-test pass scope to Pi/OpenCode config
     preparation template   Write an operator-owned preparation config template
+    preparation outputs-template  Write an operator-owned outputs JSON template
     preparation preflight  Read-only production preparation preflight
     preparation bind       Compute a read-only production preparation binding
     preparation approval-message  Prepare the exact approval message to sign
@@ -123,7 +124,7 @@ export const HELP_TEXT = `
                     hook paths are refused even with --force.
 
   Preparation options (javi-forge preparation)
-    --output PATH   Write a preparation config template to this path
+    --output PATH   Write a preparation config/outputs template to this path
     --config PATH   Production preparation config JSON
     --outputs PATH  Production preparation outputs JSON for binding computation
     --binding HEX   Production preparation binding for approval-message
@@ -180,6 +181,7 @@ export const HELP_TEXT = `
     $ javi-forge pi providers export-free
     $ javi-forge pi providers export-free /tmp/pi-free-providers
     $ javi-forge preparation template --output preparation.config.example.json
+    $ javi-forge preparation outputs-template --output preparation.outputs.example.json
     $ javi-forge preparation preflight --config preparation.config.json --json
     $ javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
     $ javi-forge preparation approval-message --binding <hex> --json

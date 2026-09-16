@@ -144,6 +144,47 @@ describe("preparation dispatch", () => {
 		expect(process.exitCode).toBe(0);
 	});
 
+	it("routes outputs-template arguments", async () => {
+		mockRun.mockResolvedValue({
+			status: "success",
+			outputPath: "/safe/preparation.outputs.example.json",
+		});
+
+		await handlePreparation({
+			input: ["preparation", "outputs-template"],
+			flags: {
+				approval: "",
+				binding: "",
+				config: "",
+				expiresAt: 0,
+				issuedAt: 0,
+				nonce: "",
+				outputs: "",
+				output: "/safe/preparation.outputs.example.json",
+				force: true,
+				json: false,
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			{
+				action: "outputs-template",
+				approvalPath: "",
+				binding: "",
+				configPath: "",
+				expiresAt: 0,
+				outputsPath: "",
+				outputPath: "/safe/preparation.outputs.example.json",
+				force: true,
+				issuedAt: 0,
+				json: false,
+				nonce: "",
+			},
+			expect.any(Function),
+		);
+		expect(process.exitCode).toBe(0);
+	});
+
 	it("routes bind arguments", async () => {
 		mockRun.mockResolvedValue({
 			status: "success",

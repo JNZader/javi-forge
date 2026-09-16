@@ -29,7 +29,7 @@ The operator owns these files and values:
 | Input | Source | Notes |
 | --- | --- | --- |
 | Preparation config | `preparation template` output, then manually filled | Contains pinned worker/source/launcher digests, public key, state directory, cwd, and destination. Never contains a private key. |
-| Outputs JSON | Operator-provided six-output JSON | Used only to compute the approval binding. Payload contents are not printed by the CLI. |
+| Outputs JSON | `preparation outputs-template` output, then manually filled | Used only to compute the approval binding. Payload contents are not printed by the CLI. |
 | Private signing key | External signer only | `javi-forge` never reads it and never signs. |
 | Approval evidence | External signer output | Bounded JSON envelope consumed by `approval-check` or `approval-revoke`. |
 
@@ -41,13 +41,24 @@ The operator owns these files and values:
    javi-forge preparation template --output preparation.config.example.json
    ```
 
-2. Fill a real config as `preparation.config.json`.
+2. Generate the outputs skeleton:
+
+   ```bash
+   javi-forge preparation outputs-template --output preparation.outputs.example.json
+   ```
+
+3. Fill a real config as `preparation.config.json` and real outputs as
+   `preparation.outputs.json`.
 
    Verify every pinned path and digest externally before trusting it. The public
    key must be Ed25519. The state directory and control directory must be owned
    by the current user and mode `0700`.
 
-3. Run the preflight:
+   The outputs template contains exactly the six supported output keys with
+   empty-string values. Fill those values externally; do not treat the template
+   as generated helper code.
+
+4. Run the preflight:
 
    ```bash
    javi-forge preparation preflight --config preparation.config.json --json
@@ -57,7 +68,7 @@ The operator owns these files and values:
    operator input or filesystem boundary is unacceptable. `unavailable` means a
    measured runtime prerequisite is not currently usable.
 
-4. Compute the approval binding:
+5. Compute the approval binding:
 
    ```bash
    javi-forge preparation bind \
@@ -69,7 +80,7 @@ The operator owns these files and values:
    Record the returned binding. Do not edit the config, outputs, worker,
    source, launcher, cwd, or destination between binding and approval.
 
-5. Prepare the exact external-signing message:
+6. Prepare the exact external-signing message:
 
    ```bash
    javi-forge preparation approval-message --binding <binding> --json
@@ -78,13 +89,13 @@ The operator owns these files and values:
    The returned message is the exact domain-separated string to sign. It is not
    a signature and it is not an authorization by itself.
 
-6. Sign externally.
+7. Sign externally.
 
    The external signer must return approval evidence that contains exactly the
    signed payload and signature. Do not copy private keys into this repository,
    the preparation config, or any javi-forge state file.
 
-7. Verify the approval evidence without consuming it:
+8. Verify the approval evidence without consuming it:
 
    ```bash
    javi-forge preparation approval-check \

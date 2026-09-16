@@ -2,6 +2,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { OUTPUTS } from "../lib/preparation-capability.js";
 import {
 	inspectPreparationApprovalCheck,
 	inspectPreparationApprovalRevocation,
@@ -155,6 +156,7 @@ describe("runPreparationCommand", () => {
 		expect(missing.error).toContain("--config");
 		expect(unsupported.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
 		expect(unsupported.error).toContain("preparation bind");
+		expect(unsupported.error).toContain("outputs-template");
 		expect(unsupported.error).toContain("approval-message");
 		expect(unsupported.error).toContain("approval-check");
 		expect(unsupported.error).toContain("approval-revoke");
@@ -456,6 +458,72 @@ describe("runPreparationCommand", () => {
 		expect(mockInspect).not.toHaveBeenCalled();
 		expect(steps.at(-1)?.detail).toContain("wrote ");
 		expect(steps.at(-1)?.detail).toContain("side effects: wrote template only");
+	});
+
+	it("writes an outputs template without printing or staging payload contents", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const outputPath = path.join(root, "preparation.outputs.example.json");
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "outputs-template",
+				outputPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		const parsed = JSON.parse(await readFile(outputPath, "utf8")) as Record<
+			string,
+			unknown
+		>;
+		expect(result).toEqual({
+			status: PREPARATION_COMMAND_STATUS.SUCCESS,
+			outputPath,
+		});
+		expect(Object.keys(parsed).sort()).toEqual([...OUTPUTS].sort());
+		expect(Object.values(parsed)).toEqual(OUTPUTS.map(() => ""));
+		expect(mockInspect).not.toHaveBeenCalled();
+		expect(mockBind).not.toHaveBeenCalled();
+		expect(steps.at(-1)?.detail).toContain("wrote ");
+		expect(steps.at(-1)?.detail).toContain(
+			"side effects: wrote outputs template only",
+		);
+		expect(steps.at(-1)?.detail).not.toContain("secret-output");
+	});
+
+	it("refuses to overwrite an outputs template unless --force is set", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const outputPath = path.join(root, "preparation.outputs.example.json");
+		await writeFile(outputPath, "operator-owned\n", { mode: 0o600 });
+		const { onStep } = collectSteps();
+
+		const refused = await runPreparationCommand(
+			{
+				action: "outputs-template",
+				outputPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+		const preserved = await readFile(outputPath, "utf8");
+		const overwritten = await runPreparationCommand(
+			{
+				action: "outputs-template",
+				outputPath,
+				force: true,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(refused.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
+		expect(preserved).toBe("operator-owned\n");
+		expect(overwritten.status).toBe(PREPARATION_COMMAND_STATUS.SUCCESS);
+		expect(await readFile(outputPath, "utf8")).toContain("minimal.py");
 	});
 
 	it("refuses to overwrite a template unless --force is set", async () => {

@@ -90,6 +90,13 @@ an exact six-output JSON object, and computes the approval binding an external
 operator signer would sign. It does not print output payload contents and still
 does not verify or consume approval evidence, execute the worker, stage outputs,
 contact a model, deploy, publish, or release.
+`javi-forge preparation readiness --config <file> --outputs <file>
+--approval <file> [--json]` is a combined read-only gate: it recomputes the
+binding from config plus outputs and verifies the approval evidence against that
+computed binding. It prints only bounded binding and approval metadata, never
+output payload contents or approval evidence, and it does not consume approval
+evidence, execute the worker, stage outputs, call a model, deploy, publish, or
+release.
 `javi-forge preparation approval-message --binding <hex> [--json]` prepares the
 exact domain-separated payload/message for that external signer. It can generate
 a nonce and bounded validity window, but it does not read a private key, sign,

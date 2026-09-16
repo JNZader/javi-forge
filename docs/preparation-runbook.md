@@ -121,6 +121,22 @@ The operator owns these files and values:
    A ready result proves the evidence matches the binding, is within the
    configured lifetime, and has not been terminally consumed or revoked.
 
+   To avoid copying the binding between two read-only checks, use the combined
+   readiness gate:
+
+   ```bash
+   javi-forge preparation readiness \
+     --config preparation.config.json \
+     --outputs preparation.outputs.json \
+     --approval preparation.approval.json \
+     --json
+   ```
+
+   `readiness` recomputes the binding from config plus outputs and verifies the
+   approval evidence against that computed binding. It does not consume the
+   approval, execute the worker, stage outputs, sign, call a model, deploy,
+   publish, or release.
+
 ## Revocation sequence
 
 Use revocation when an approval should be burned before any future execution

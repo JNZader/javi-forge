@@ -160,6 +160,7 @@ describe("runPreparationCommand", () => {
 		expect(unsupported.error).toContain("outputs-template");
 		expect(unsupported.error).toContain("preparation digest");
 		expect(unsupported.error).toContain("preparation policy");
+		expect(unsupported.error).toContain("preparation readiness");
 		expect(unsupported.error).toContain("approval-message");
 		expect(unsupported.error).toContain("approval-check");
 		expect(unsupported.error).toContain("approval-revoke");
@@ -437,6 +438,104 @@ describe("runPreparationCommand", () => {
 		expect(steps.at(-1)?.detail).not.toContain("secret-approval-evidence");
 		expect(mockInspect).not.toHaveBeenCalled();
 		expect(mockBind).not.toHaveBeenCalled();
+	});
+
+	it("checks readiness by deriving binding before verifying approval", async () => {
+		mockBind.mockReturnValue({
+			status: PREPARATION_PREFLIGHT_STATUS.READY,
+			binding: "e".repeat(64),
+			measurements: {
+				executableDigest: "a".repeat(64),
+				codeDigest: "b".repeat(64),
+				dependenciesDigest: "c".repeat(64),
+				launcherDigest: "d".repeat(64),
+			},
+		});
+		mockApprovalCheck.mockReturnValue({
+			status: PREPARATION_PREFLIGHT_STATUS.READY,
+			approval: {
+				nonce: "a".repeat(64),
+				issuedAt: 1000,
+				expiresAt: 601000,
+			},
+		});
+		const config = { workerExecutable: "/worker" };
+		const outputs = { "minimal.py": "secret-output" };
+		const configPath = await writeConfig(config);
+		const outputsPath = await writeConfig(outputs);
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const approvalPath = path.join(root, "approval.json");
+		await writeFile(approvalPath, "secret-approval-evidence", { mode: 0o600 });
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "readiness",
+				approvalPath,
+				configPath,
+				outputsPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.SUCCESS);
+		expect(result.readiness?.binding.binding).toBe("e".repeat(64));
+		expect(result.readiness?.approvalCheck?.approval?.nonce).toBe(
+			"a".repeat(64),
+		);
+		expect(mockBind).toHaveBeenCalledExactlyOnceWith(config, outputs);
+		expect(mockApprovalCheck).toHaveBeenCalledExactlyOnceWith(
+			config,
+			"e".repeat(64),
+			"secret-approval-evidence",
+		);
+		expect(steps.at(-1)?.detail).toContain(`binding: ${"e".repeat(64)}`);
+		expect(steps.at(-1)?.detail).toContain(`nonce: ${"a".repeat(64)}`);
+		expect(steps.at(-1)?.detail).not.toContain("secret-output");
+		expect(steps.at(-1)?.detail).not.toContain("secret-approval-evidence");
+		expect(mockInspect).not.toHaveBeenCalled();
+		expect(mockApprovalRevoke).not.toHaveBeenCalled();
+	});
+
+	it("does not verify readiness approval when binding is not ready", async () => {
+		mockBind.mockReturnValue({
+			status: PREPARATION_PREFLIGHT_STATUS.DENIED,
+			reason: "policy-mismatch",
+		});
+		const config = { workerExecutable: "/worker" };
+		const outputs = { "minimal.py": "secret-output" };
+		const configPath = await writeConfig(config);
+		const outputsPath = await writeConfig(outputs);
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const approvalPath = path.join(root, "missing-approval.json");
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "readiness",
+				approvalPath,
+				configPath,
+				outputsPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
+		expect(result.readiness).toEqual({
+			binding: {
+				status: PREPARATION_PREFLIGHT_STATUS.DENIED,
+				reason: "policy-mismatch",
+			},
+			approvalCheck: undefined,
+		});
+		expect(mockApprovalCheck).not.toHaveBeenCalled();
+		expect(steps.at(-1)?.detail).toContain("reason: policy-mismatch");
+		expect(steps.at(-1)?.detail).not.toContain("secret-output");
+		expect(steps.at(-1)?.detail).not.toContain("secret-approval-evidence");
 	});
 
 	it("revokes approval evidence without printing its contents", async () => {

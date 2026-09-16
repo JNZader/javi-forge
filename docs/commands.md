@@ -219,6 +219,7 @@ javi-forge preparation template --output preparation.config.example.json
 javi-forge preparation outputs-template --output preparation.outputs.example.json
 javi-forge preparation policy --json
 javi-forge preparation digest --file /usr/bin/bwrap --json
+javi-forge preparation readiness --config preparation.config.json --outputs preparation.outputs.json --approval preparation.approval.json --json
 javi-forge preparation preflight --config preparation.config.json
 javi-forge preparation preflight --config preparation.config.json --json
 javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
@@ -252,6 +253,13 @@ public key shape, verifies the operator-owned state/control directories, confirm
 the destination is absent for the non-overwrite run, and measures pinned
 worker/source/launcher digests.
 
+The readiness command recomputes the production binding from the config and
+outputs, then verifies the approval evidence against that computed binding. It
+prints only bounded binding and approval metadata, never output payload contents
+or approval evidence, and it does not consume approvals, execute the worker,
+stage outputs, contact a model, deploy, publish, release, or write generated
+artifacts.
+
 The bind command additionally parses an exact six-output JSON object and computes
 the production approval binding for an external operator signer. It prints only
 bounded measurements and the binding, never the output payload contents.
@@ -272,9 +280,10 @@ execute the worker, stage outputs, consume an approval, contact a model, deploy,
 publish, release, or write generated artifacts.
 
 These commands do **not** execute the worker, stage outputs, sign approvals,
-contact a model, deploy, publish, release, or write generated artifacts. Only
-`approval-revoke` writes state, and that state is the bounded terminal revocation
-marker.
+contact a model, deploy, publish, release, or write generated artifacts.
+`readiness` is a read-only gate: it verifies approval evidence but never consumes
+it. Only `approval-revoke` writes state, and that state is the bounded terminal
+revocation marker.
 
 ---
 

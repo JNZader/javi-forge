@@ -34,6 +34,7 @@ export const HELP_TEXT = `
     preparation outputs-template  Write an operator-owned outputs JSON template
     preparation policy    Print the fixed preparation policy and output names
     preparation digest    Compute a bounded SHA-256 digest for operator pins
+    preparation readiness Verify config, outputs, and approval without consuming
     preparation preflight  Read-only production preparation preflight
     preparation bind       Compute a read-only production preparation binding
     preparation approval-message  Prepare the exact approval message to sign
@@ -187,6 +188,7 @@ export const HELP_TEXT = `
     $ javi-forge preparation outputs-template --output preparation.outputs.example.json
     $ javi-forge preparation policy --json
     $ javi-forge preparation digest --file /usr/bin/bwrap --json
+    $ javi-forge preparation readiness --config preparation.config.json --outputs preparation.outputs.json --approval preparation.approval.json --json
     $ javi-forge preparation preflight --config preparation.config.json --json
     $ javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
     $ javi-forge preparation approval-message --binding <hex> --json

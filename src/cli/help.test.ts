@@ -152,6 +152,7 @@ describe("help — preparation preflight", () => {
 		expect(HELP_TEXT).toContain("preparation outputs-template");
 		expect(HELP_TEXT).toContain("preparation policy");
 		expect(HELP_TEXT).toContain("preparation digest");
+		expect(HELP_TEXT).toContain("preparation readiness");
 		expect(HELP_TEXT).toContain("preparation preflight");
 		expect(HELP_TEXT).toContain("preparation bind");
 		expect(HELP_TEXT).toContain("preparation approval-message");
@@ -168,6 +169,9 @@ describe("help — preparation preflight", () => {
 		);
 		expect(HELP_TEXT).toContain(
 			"Compute a bounded SHA-256 digest for operator pins",
+		);
+		expect(HELP_TEXT).toContain(
+			"Verify config, outputs, and approval without consuming",
 		);
 		expect(HELP_TEXT).toContain("Read-only production preparation preflight");
 		expect(HELP_TEXT).toContain(
@@ -216,6 +220,7 @@ describe("help — preparation preflight", () => {
 		expect(examples).toContain("preparation outputs-template --output");
 		expect(examples).toContain("preparation policy --json");
 		expect(examples).toContain("preparation digest --file");
+		expect(examples).toContain("preparation readiness --config");
 		expect(examples).toContain("preparation preflight --config");
 		expect(examples).toContain("preparation bind --config");
 		expect(examples).toContain("preparation approval-message --binding");

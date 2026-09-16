@@ -41,6 +41,7 @@ export const PREPARATION_ACTION = {
 	POLICY: "policy",
 	TEMPLATE: "template",
 	PREFLIGHT: "preflight",
+	READINESS: "readiness",
 } as const;
 
 export interface PreparationCommandRequest {
@@ -73,6 +74,11 @@ export interface PreparationDigestResult {
 	bytes: number;
 }
 
+export interface PreparationReadinessResult {
+	binding: PreparationProductionBindingResult;
+	approvalCheck?: PreparationApprovalCheckResult;
+}
+
 export interface PreparationCommandResult {
 	status: PreparationCommandStatus;
 	preflight?: PreparationPreflightResult;
@@ -82,6 +88,7 @@ export interface PreparationCommandResult {
 	approvalRevoke?: PreparationApprovalRevokeResult;
 	policy?: PreparationPolicyResult;
 	digest?: PreparationDigestResult;
+	readiness?: PreparationReadinessResult;
 	outputPath?: string;
 	error?: string;
 }
@@ -103,6 +110,7 @@ function usage(): string {
 		"  javi-forge preparation outputs-template --output <path> [--force]",
 		"  javi-forge preparation policy [--json]",
 		"  javi-forge preparation digest --file <path> [--json]",
+		"  javi-forge preparation readiness --config <path> --outputs <path> --approval <path> [--json]",
 		"  javi-forge preparation preflight --config <path> [--json]",
 		"  javi-forge preparation bind --config <path> --outputs <path> [--json]",
 		"  javi-forge preparation approval-message --binding <hex> [--nonce <hex>] [--issued-at <ms>] [--expires-at <ms>] [--json]",
@@ -175,6 +183,29 @@ function policyDetail(result: PreparationPolicyResult): string {
 		"outputs:",
 		...result.outputs.map((name) => `  - ${name}`),
 		"side effects: none; no file reads, writes, worker execution, approval verification, approval consumption, staging, model call, deploy, publish, or release",
+	].join("\n");
+}
+
+function readinessDetail(result: PreparationReadinessResult): string {
+	return [
+		"binding:",
+		...detail(
+			result.binding,
+			"side effects: none; no approval consumption, worker execution, staging, model call, deploy, publish, or release",
+		)
+			.split("\n")
+			.map((line) => `  ${line}`),
+		...(result.approvalCheck
+			? [
+					"approval check:",
+					...detail(
+						result.approvalCheck,
+						"side effects: none; no signing, private key access, worker execution, approval consumption, staging, model call, deploy, publish, or release",
+					)
+						.split("\n")
+						.map((line) => `  ${line}`),
+				]
+			: []),
 	].join("\n");
 }
 
@@ -318,6 +349,7 @@ export async function runPreparationCommand(
 		request.action !== PREPARATION_ACTION.OUTPUTS_TEMPLATE &&
 		request.action !== PREPARATION_ACTION.POLICY &&
 		request.action !== PREPARATION_ACTION.PREFLIGHT &&
+		request.action !== PREPARATION_ACTION.READINESS &&
 		request.action !== PREPARATION_ACTION.TEMPLATE
 	) {
 		report(onStep, "preparation-usage", "Preparation", "error", usage());
@@ -515,6 +547,43 @@ export async function runPreparationCommand(
 					? PREPARATION_COMMAND_STATUS.SUCCESS
 					: PREPARATION_COMMAND_STATUS.FAILURE,
 				binding,
+			};
+		}
+
+		if (request.action === PREPARATION_ACTION.READINESS) {
+			report(
+				onStep,
+				"preparation-readiness",
+				"Preparation readiness",
+				"running",
+			);
+			const config = await readConfig(request.configPath);
+			const outputs = await readOutputs(request.outputsPath);
+			const binding = inspectPreparationProductionBinding(config, outputs);
+			const approvalCheck =
+				binding.status === PREPARATION_PREFLIGHT_STATUS.READY && binding.binding
+					? inspectPreparationApprovalCheck(
+							config,
+							binding.binding,
+							await readApprovalEvidence(request.approvalPath),
+						)
+					: undefined;
+			const readiness = { binding, approvalCheck };
+			const ok =
+				binding.status === PREPARATION_PREFLIGHT_STATUS.READY &&
+				approvalCheck?.status === PREPARATION_PREFLIGHT_STATUS.READY;
+			report(
+				onStep,
+				"preparation-readiness",
+				"Preparation readiness",
+				ok ? "done" : "error",
+				readinessDetail(readiness),
+			);
+			return {
+				status: ok
+					? PREPARATION_COMMAND_STATUS.SUCCESS
+					: PREPARATION_COMMAND_STATUS.FAILURE,
+				readiness,
 			};
 		}
 

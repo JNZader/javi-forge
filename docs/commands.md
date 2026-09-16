@@ -167,6 +167,8 @@ javi-forge ai providers apply-scope /tmp/opencode-smoke/smoke.jsonl --target ope
 profile_dir="$(mktemp -d "${TMPDIR:-/tmp}/javi-forge-model-profiles.XXXXXX")"
 javi-forge ai providers profile-plan "$profile_dir" --pass-list /tmp/opencode-smoke/javi-forge-provider-smoke-<timestamp>.pass.tsv --limit 8
 javi-forge ai providers profile-plan "$profile_dir" --pass-list /tmp/opencode-smoke/javi-forge-provider-smoke-<timestamp>.jsonl --preset community-backend-opencode-go --limit 8
+javi-forge ai providers profile-export "$profile_dir/model-assignment.profiles.generated.json" --target opencode
+javi-forge ai providers profile-apply /tmp/opencode.model-profiles.generated.json --pass-list /tmp/opencode-smoke/smoke.jsonl --target opencode --opencode-config /tmp/opencode.json --dry-run
 ```
 
 `apply-scope` only accepts evidence with at least one passing model. It rejects
@@ -242,7 +244,8 @@ Use `--preset community-backend-opencode-go` to generate a smoke-evidence-gated
 pilot plan from the community OpenCode Go backend SDD/JD assignment. The preset
 is still advisory: every referenced model must appear in the passing evidence,
 the global coordinator/default remains out of scope, and runtime config remains
-unchanged until a separate apply/rollback flow is explicitly run.
+unchanged until `profile-apply` is run with explicit `--pi-settings` or
+`--opencode-config`.
 
 ### Model assignment profile export previews
 
@@ -262,6 +265,30 @@ the command never modifies Pi or OpenCode settings, Codex configuration, secrets
 credentials, auth/provider state, or runtime configuration. Use `--dry-run` to
 list planned paths without writing. Generated preview files use exclusive create,
 so rerun into a fresh output directory rather than overwriting an artifact.
+
+### Model assignment profile apply
+
+`javi-forge ai providers profile-apply <overlay.json> --pass-list <pass.tsv|report.jsonl> --target pi|opencode --pi-settings|--opencode-config <path> [--dry-run]`
+applies one generated overlay to one runtime config. There is no homedir default:
+Pi requires `--pi-settings`, OpenCode requires `--opencode-config`.
+
+- `--target pi` merges the overlay into `modelProfiles` and must leave
+  `defaultProvider`, `defaultModel`, and `enabledModels` unchanged.
+- `--target opencode` sets `agent.<phase>.model` only for routing phases that
+  already exist. Missing phases fail closed. Protected agents (`build`, `plan`,
+  `gentle-orchestrator`, `dangerous-gentleman`, `title`, `summary`, `compaction`)
+  are refused. `provider` auth/state is not modified.
+- `--target both` and `--target codex` are refused.
+- `--pass-list` must contain real passing models. Dry-run smoke JSONL and empty
+  pass lists are rejected.
+- A timestamped sibling backup is created with exclusive create (`*.bak-<UTC>`).
+- `--dry-run` validates and prints paths without writing.
+
+Restore a backup with:
+
+```bash
+javi-forge ai providers profile-apply --rollback /tmp/opencode.json.bak-20260916T120000Z --target opencode --opencode-config /tmp/opencode.json
+```
 
 ---
 

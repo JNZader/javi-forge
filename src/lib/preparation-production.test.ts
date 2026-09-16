@@ -30,6 +30,7 @@ import {
 
 let root: string;
 let worker: string;
+let unsupportedWorker: string;
 let control: string;
 let state: string;
 
@@ -37,6 +38,13 @@ const source = new URL("../../assets/preparation-worker.c", import.meta.url);
 const keys = generateKeyPairSync("ed25519");
 const digest = (data: Buffer) =>
 	createHash("sha256").update(data).digest("hex");
+
+function writeUnsupportedWorkerFixture(target: string) {
+	const bytes = readFileSync(worker);
+	const programHeaderOffset = Number(bytes.readBigUInt64LE(32));
+	bytes.writeUInt32LE(3, programHeaderOffset);
+	writeFileSync(target, bytes, { mode: 0o700 });
+}
 
 function publicKeyPem() {
 	return keys.publicKey.export({ format: "pem", type: "spki" }).toString();
@@ -94,6 +102,7 @@ function approvalEvidence(preparationBinding: string, nonce = "a".repeat(64)) {
 beforeAll(() => {
 	root = mkdtempSync(path.join(os.tmpdir(), "preparation-production-test-"));
 	worker = path.join(root, "worker");
+	unsupportedWorker = path.join(root, "unsupported-worker");
 	control = path.join(root, "control");
 	state = path.join(root, "state");
 	mkdirSync(control, { mode: 0o700 });
@@ -113,6 +122,7 @@ beforeAll(() => {
 		],
 		{ env: {}, timeout: 10000 },
 	);
+	writeUnsupportedWorkerFixture(unsupportedWorker);
 });
 
 afterAll(() => {
@@ -363,8 +373,8 @@ describe("production preparation preflight contract", () => {
 		expect(
 			inspectPreparationProductionPreflight(
 				config({
-					workerExecutable: "/usr/bin/true",
-					workerExecutableDigest: digest(readFileSync("/usr/bin/true")),
+					workerExecutable: unsupportedWorker,
+					workerExecutableDigest: digest(readFileSync(unsupportedWorker)),
 				}),
 				policy(),
 			),

@@ -15,6 +15,7 @@ export const PROVIDER_SMOKE_STATUS = {
 	TEMPORARY_UNAVAILABLE: "temporary_unavailable",
 	TIMEOUT: "timeout",
 	FAILED: "failed",
+	DRY_RUN: "dry_run",
 } as const;
 
 export type ProviderSmokeStatus =
@@ -706,7 +707,7 @@ export async function runProviderSmokeTests(
 							: options.smokeCwd,
 				});
 		const status = options.dryRun
-			? PROVIDER_SMOKE_STATUS.PASS
+			? PROVIDER_SMOKE_STATUS.DRY_RUN
 			: classifySmokeOutput(output);
 		const row: ProviderSmokeReportRow = {
 			provider: model.provider,

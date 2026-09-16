@@ -121,6 +121,86 @@ describe("provider scope application", () => {
 		expect(result.backups).toEqual([]);
 	});
 
+	it("refuses an empty pass-list without changing Pi settings", async () => {
+		const dir = await tempDir();
+		const passPath = join(dir, "smoke.pass.tsv");
+		const settingsPath = join(dir, "settings.json");
+		await writeFile(passPath, "\n");
+		await writeFile(
+			settingsPath,
+			JSON.stringify({ enabledModels: ["old/model"] }),
+		);
+
+		await expect(
+			applyProviderScope({
+				inputPath: passPath,
+				target: "pi",
+				piSettingsPath: settingsPath,
+			}),
+		).rejects.toThrow(/contains no passing models/);
+		await expect(readFile(settingsPath, "utf8")).resolves.toContain(
+			"old/model",
+		);
+	});
+
+	it("refuses smoke-test dry-run reports without changing Pi settings", async () => {
+		const dir = await tempDir();
+		const reportPath = join(dir, "smoke.jsonl");
+		const settingsPath = join(dir, "settings.json");
+		await writeFile(
+			reportPath,
+			`${JSON.stringify({
+				provider: "openrouter-free",
+				model: "deepseek/free",
+				status: "dry_run",
+			})}\n`,
+		);
+		await writeFile(
+			settingsPath,
+			JSON.stringify({ enabledModels: ["old/model"] }),
+		);
+
+		await expect(
+			applyProviderScope({
+				inputPath: reportPath,
+				target: "pi",
+				piSettingsPath: settingsPath,
+			}),
+		).rejects.toThrow(/smoke-test --dry-run/);
+		await expect(readFile(settingsPath, "utf8")).resolves.toContain(
+			"old/model",
+		);
+	});
+
+	it("refuses reports with no passing models without changing OpenCode config", async () => {
+		const dir = await tempDir();
+		const reportPath = join(dir, "smoke.jsonl");
+		const opencodePath = join(dir, "opencode.json");
+		await writeFile(
+			reportPath,
+			`${JSON.stringify({
+				provider: "opencode-go",
+				model: "broken",
+				status: "failed",
+			})}\n`,
+		);
+		await writeFile(
+			opencodePath,
+			JSON.stringify({
+				provider: { "opencode-go": { models: { broken: {} } } },
+			}),
+		);
+
+		await expect(
+			applyProviderScope({
+				inputPath: reportPath,
+				target: "opencode",
+				opencodeConfigPath: opencodePath,
+			}),
+		).rejects.toThrow(/contains no passing models/);
+		await expect(readFile(opencodePath, "utf8")).resolves.toContain('"broken"');
+	});
+
 	it("filters only scoped OpenCode providers and preserves unrelated config", async () => {
 		const dir = await tempDir();
 		const reportPath = join(dir, "smoke.jsonl");

@@ -249,6 +249,44 @@ describe("provider smoke tests", () => {
 		);
 	});
 
+	it("marks dry-run probes as dry_run and leaves pass-list empty", async () => {
+		const dir = await tempDir();
+		const modelsPath = join(dir, "models.json");
+		await writeFile(
+			modelsPath,
+			JSON.stringify({
+				providers: {
+					"openrouter-free": {
+						models: [{ id: "deepseek/free", name: "DeepSeek Free" }],
+					},
+				},
+			}),
+		);
+		const reportPath = join(dir, "smoke.jsonl");
+
+		const result = await runProviderSmokeTests({
+			modelsPath,
+			modelsStorePath: modelsPath,
+			outputPath: reportPath,
+			dryRun: true,
+		});
+
+		expect(result).toMatchObject({
+			selected: 1,
+			ran: 0,
+			dryRun: true,
+			counts: { dry_run: 1 },
+			reportPath,
+		});
+		await expect(readFile(reportPath, "utf8")).resolves.toContain(
+			'"status":"dry_run"',
+		);
+		await expect(readFile(result.passListPath, "utf8")).resolves.toBe("\n");
+		await expect(readFile(result.summaryPath, "utf8")).resolves.toContain(
+			"- dry_run: 1",
+		);
+	});
+
 	it("smoke-tests OpenCode runtime subsets through the injected runner", async () => {
 		const dir = await tempDir();
 		const configPath = join(dir, "opencode.json");

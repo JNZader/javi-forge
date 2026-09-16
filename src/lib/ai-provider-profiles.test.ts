@@ -132,8 +132,7 @@ describe("writeModelAssignmentProfiles", () => {
 				provider: "openrouter-free",
 				model: "deepseek/free",
 				name: "DeepSeek Free",
-				status: "pass",
-				evidence: "dry-run",
+				status: "dry_run",
 			})}\n`,
 		);
 

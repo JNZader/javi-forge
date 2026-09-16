@@ -238,7 +238,11 @@ async function writeJsonWithExclusiveBackup(options: {
 	if (options.dryRun) return backupPath;
 	const original = await readFile(options.path, "utf8");
 	await writeFile(backupPath, original, { flag: "wx" });
-	await writeFile(options.path, `${JSON.stringify(options.value, null, 2)}\n`);
+	const tmpPath = `${options.path}.apply-tmp-${timestamp(options.now)}`;
+	await writeFile(tmpPath, `${JSON.stringify(options.value, null, 2)}\n`, {
+		flag: "wx",
+	});
+	await rename(tmpPath, options.path);
 	return backupPath;
 }
 

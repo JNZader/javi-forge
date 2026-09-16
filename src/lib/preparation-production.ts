@@ -60,6 +60,15 @@ export interface PreparationPreflightResult {
 	measurements?: PreparationPreflightMeasurements;
 }
 
+export interface PreparationProductionConfigTemplateOptions {
+	workerExecutable?: string;
+	workerSource?: string;
+	launcher?: string;
+	publicKeyPem?: string;
+	stateDirectory?: string;
+	policy?: PreparationProductionPolicy;
+}
+
 const CONFIG_KEYS = [
 	"workerExecutable",
 	"workerExecutableDigest",
@@ -74,6 +83,9 @@ const CONFIG_KEYS = [
 ] as const;
 
 const HEX = /^[a-f0-9]{64}$/;
+const TEMPLATE_DIGEST = "0".repeat(64);
+const TEMPLATE_PUBLIC_KEY =
+	"-----BEGIN PUBLIC KEY-----\n<replace-with-ed25519-public-key>\n-----END PUBLIC KEY-----";
 
 function object(value: unknown): Record<string, unknown> {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -128,6 +140,28 @@ export function parsePreparationProductionConfig(
 		stateDirectory: stringField(record, "stateDirectory"),
 		cwd: stringField(record, "cwd"),
 		destination: stringField(record, "destination"),
+	});
+}
+
+export function createPreparationProductionConfigTemplate(
+	options: PreparationProductionConfigTemplateOptions = {},
+): PreparationProductionConfig {
+	const policy = options.policy ?? POLICY;
+	return Object.freeze({
+		workerExecutable:
+			options.workerExecutable ?? "/absolute/path/to/pinned/preparation-worker",
+		workerExecutableDigest: TEMPLATE_DIGEST,
+		workerSource:
+			options.workerSource ?? "/absolute/path/to/pinned/preparation-worker.c",
+		workerSourceDigest: TEMPLATE_DIGEST,
+		launcher: options.launcher ?? "/usr/bin/bwrap",
+		launcherDigest: TEMPLATE_DIGEST,
+		publicKeyPem: options.publicKeyPem ?? TEMPLATE_PUBLIC_KEY,
+		stateDirectory:
+			options.stateDirectory ??
+			"/home/javier/.local/state/javi-forge/preparation",
+		cwd: policy.cwd,
+		destination: policy.destination,
 	});
 }
 

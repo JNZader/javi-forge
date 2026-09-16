@@ -1,5 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import {
+	createPreparationProductionConfigTemplate,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_STATUS,
 	type PreparationPreflightResult,
@@ -17,18 +18,22 @@ export type PreparationCommandStatus =
 	(typeof PREPARATION_COMMAND_STATUS)[keyof typeof PREPARATION_COMMAND_STATUS];
 
 export const PREPARATION_ACTION = {
+	TEMPLATE: "template",
 	PREFLIGHT: "preflight",
 } as const;
 
 export interface PreparationCommandRequest {
 	action?: string;
 	configPath?: string;
+	outputPath?: string;
+	force: boolean;
 	json: boolean;
 }
 
 export interface PreparationCommandResult {
 	status: PreparationCommandStatus;
 	preflight?: PreparationPreflightResult;
+	outputPath?: string;
 	error?: string;
 }
 
@@ -45,6 +50,7 @@ function report(
 function usage(): string {
 	return [
 		"Usage:",
+		"  javi-forge preparation template --output <path> [--force]",
 		"  javi-forge preparation preflight --config <path> [--json]",
 	].join("\n");
 }
@@ -79,16 +85,57 @@ async function readConfig(configPath?: string): Promise<unknown> {
 	}
 }
 
+async function writeConfigTemplate(
+	outputPath: string | undefined,
+	force: boolean,
+): Promise<string> {
+	const path = outputPath?.trim();
+	if (!path) throw new Error("template requires --output <path>");
+	await writeFile(
+		path,
+		`${JSON.stringify(createPreparationProductionConfigTemplate(), null, 2)}\n`,
+		{
+			flag: force ? "w" : "wx",
+			mode: 0o600,
+		},
+	);
+	return path;
+}
+
 export async function runPreparationCommand(
 	request: PreparationCommandRequest,
 	onStep: StepCallback,
 ): Promise<PreparationCommandResult> {
-	if (request.action !== PREPARATION_ACTION.PREFLIGHT) {
+	if (
+		request.action !== PREPARATION_ACTION.PREFLIGHT &&
+		request.action !== PREPARATION_ACTION.TEMPLATE
+	) {
 		report(onStep, "preparation-usage", "Preparation", "error", usage());
 		return { status: PREPARATION_COMMAND_STATUS.FAILURE, error: usage() };
 	}
 
 	try {
+		if (request.action === PREPARATION_ACTION.TEMPLATE) {
+			report(
+				onStep,
+				"preparation-template",
+				"Preparation config template",
+				"running",
+			);
+			const outputPath = await writeConfigTemplate(
+				request.outputPath,
+				request.force,
+			);
+			report(
+				onStep,
+				"preparation-template",
+				"Preparation config template",
+				"done",
+				`wrote ${outputPath}\nside effects: wrote template only; no worker execution, approval verification, approval consumption, staging, model call, deploy, publish, or release`,
+			);
+			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, outputPath };
+		}
+
 		report(
 			onStep,
 			"preparation-preflight",

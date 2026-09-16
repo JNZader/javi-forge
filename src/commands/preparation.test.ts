@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,20 @@ import {
 } from "./preparation.js";
 
 vi.mock("../lib/preparation-production.js", () => ({
+	createPreparationProductionConfigTemplate: () => ({
+		workerExecutable: "/absolute/path/to/pinned/preparation-worker",
+		workerExecutableDigest: "0".repeat(64),
+		workerSource: "/absolute/path/to/pinned/preparation-worker.c",
+		workerSourceDigest: "0".repeat(64),
+		launcher: "/usr/bin/bwrap",
+		launcherDigest: "0".repeat(64),
+		publicKeyPem:
+			"-----BEGIN PUBLIC KEY-----\n<replace-with-ed25519-public-key>\n-----END PUBLIC KEY-----",
+		stateDirectory: "/home/javier/.local/state/javi-forge/preparation",
+		cwd: "/home/javier/.local/share/ere-gateway-runtime/structured-1",
+		destination:
+			"/home/javier/.local/share/ere-gateway-runtime/structured-1/attempt-3",
+	}),
 	inspectPreparationProductionPreflight: vi.fn(),
 	PREPARATION_PREFLIGHT_STATUS: {
 		READY: "ready",
@@ -61,6 +75,7 @@ describe("runPreparationCommand", () => {
 			{
 				action: "preflight",
 				configPath,
+				force: false,
 				json: false,
 			},
 			onStep,
@@ -86,7 +101,7 @@ describe("runPreparationCommand", () => {
 		const { steps, onStep } = collectSteps();
 
 		const result = await runPreparationCommand(
-			{ action: "preflight", configPath, json: false },
+			{ action: "preflight", configPath, force: false, json: false },
 			onStep,
 		);
 
@@ -105,11 +120,16 @@ describe("runPreparationCommand", () => {
 		const { steps, onStep } = collectSteps();
 
 		const missing = await runPreparationCommand(
-			{ action: "preflight", configPath: "", json: false },
+			{ action: "preflight", configPath: "", force: false, json: false },
 			onStep,
 		);
 		const unsupported = await runPreparationCommand(
-			{ action: "execute", configPath: "/tmp/config.json", json: false },
+			{
+				action: "execute",
+				configPath: "/tmp/config.json",
+				force: false,
+				json: false,
+			},
 			onStep,
 		);
 
@@ -128,7 +148,7 @@ describe("runPreparationCommand", () => {
 		const { steps, onStep } = collectSteps();
 
 		const result = await runPreparationCommand(
-			{ action: "preflight", configPath, json: false },
+			{ action: "preflight", configPath, force: false, json: false },
 			onStep,
 		);
 
@@ -136,5 +156,70 @@ describe("runPreparationCommand", () => {
 		expect(result.error).toBe("preflight config is not valid JSON");
 		expect(steps.at(-1)?.detail).toBe("preflight config is not valid JSON");
 		expect(steps.at(-1)?.detail).not.toContain("secret");
+	});
+
+	it("writes a template without executing the preflight runtime", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const outputPath = path.join(root, "preparation.config.example.json");
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "template",
+				outputPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		const parsed = JSON.parse(await readFile(outputPath, "utf8")) as Record<
+			string,
+			unknown
+		>;
+		expect(result).toEqual({
+			status: PREPARATION_COMMAND_STATUS.SUCCESS,
+			outputPath,
+		});
+		expect(parsed.workerExecutableDigest).toBe("0".repeat(64));
+		expect(parsed.publicKeyPem).toContain("PUBLIC KEY");
+		expect(parsed.publicKeyPem).not.toContain("PRIVATE KEY");
+		expect(mockInspect).not.toHaveBeenCalled();
+		expect(steps.at(-1)?.detail).toContain("wrote ");
+		expect(steps.at(-1)?.detail).toContain("side effects: wrote template only");
+	});
+
+	it("refuses to overwrite a template unless --force is set", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const outputPath = path.join(root, "preparation.config.example.json");
+		await writeFile(outputPath, "operator-owned\n", { mode: 0o600 });
+		const { onStep } = collectSteps();
+
+		const refused = await runPreparationCommand(
+			{
+				action: "template",
+				outputPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+		const preserved = await readFile(outputPath, "utf8");
+		const overwritten = await runPreparationCommand(
+			{
+				action: "template",
+				outputPath,
+				force: true,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(refused.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
+		expect(preserved).toBe("operator-owned\n");
+		expect(overwritten.status).toBe(PREPARATION_COMMAND_STATUS.SUCCESS);
+		expect(await readFile(outputPath, "utf8")).toContain(
+			"workerExecutableDigest",
+		);
 	});
 });

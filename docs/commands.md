@@ -213,9 +213,15 @@ runtime-visible model list.
 Run read-only production preparation diagnostics.
 
 ```bash
+javi-forge preparation template --output preparation.config.example.json
 javi-forge preparation preflight --config preparation.config.json
 javi-forge preparation preflight --config preparation.config.json --json
 ```
+
+The template command writes an operator-owned JSON config skeleton with the exact
+keys the preflight parser accepts. It writes with exclusive create by default and
+requires `--force` to replace an existing file. The template contains no private
+key, secret, approval evidence, model credential or generated artifact.
 
 The preflight command parses an exact production preparation configuration,
 checks the configured cwd/destination against policy, validates the Ed25519

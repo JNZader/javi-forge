@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { OUTPUTS } from "./preparation-capability.js";
 import { createExecutorFixture } from "./preparation-executor.js";
 import {
+	createPreparationProductionConfigTemplate,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_REASON,
 	PREPARATION_PREFLIGHT_STATUS,
@@ -111,6 +112,27 @@ describe("production preparation preflight contract", () => {
 		const parsed = parsePreparationProductionConfig(config());
 		expect(parsed.cwd).toBe(control);
 		expect(Object.isFrozen(parsed)).toBe(true);
+	});
+
+	it("creates an exact public-key-only operator config template", () => {
+		const template = createPreparationProductionConfigTemplate({
+			policy: policy(),
+			stateDirectory: state,
+		});
+
+		expect(Object.isFrozen(template)).toBe(true);
+		expect(() => parsePreparationProductionConfig(template)).not.toThrow();
+		expect(template.cwd).toBe(control);
+		expect(template.destination).toBe(path.join(control, "attempt-3"));
+		expect(template.workerExecutableDigest).toBe("0".repeat(64));
+		expect(template.publicKeyPem).toContain("PUBLIC KEY");
+		expect(template.publicKeyPem).not.toContain("PRIVATE KEY");
+		expect(
+			inspectPreparationProductionPreflight(template, policy()),
+		).toMatchObject({
+			status: PREPARATION_PREFLIGHT_STATUS.DENIED,
+			reason: PREPARATION_PREFLIGHT_REASON.PUBLIC_KEY_UNAVAILABLE,
+		});
 	});
 
 	it("reports ready with bounded measurements for a valid config", () => {

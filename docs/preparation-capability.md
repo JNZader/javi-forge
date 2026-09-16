@@ -68,6 +68,11 @@ approval, contact a model, or authorize production helper execution.
 The CLI exposes this as `javi-forge preparation preflight --config <file>
 [--json]`; it is diagnostic only and shares the same no-execution/no-consumption
 boundary.
+The CLI also exposes `javi-forge preparation template --output <file>` to write
+the exact JSON skeleton an operator can fill before preflight. It writes only the
+template, refuses overwrite unless `--force` is explicit, and includes no private
+key, approval evidence, model credential, generated artifact, or production
+execution path.
 
 Remaining work is to connect this boundary through a separately reviewed
 production route with real operator configuration, production identity

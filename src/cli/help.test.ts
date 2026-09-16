@@ -148,14 +148,23 @@ describe("help — pi free-provider export", () => {
 
 describe("help — preparation preflight", () => {
 	it("documents the read-only preparation preflight command", () => {
+		expect(HELP_TEXT).toContain("preparation template");
 		expect(HELP_TEXT).toContain("preparation preflight");
+		expect(HELP_TEXT).toContain(
+			"Write an operator-owned preparation config template",
+		);
 		expect(HELP_TEXT).toContain("Read-only production preparation preflight");
+		expect(HELP_TEXT).toContain("Write a preparation config template");
 		expect(HELP_TEXT).toContain("Production preparation config JSON");
+		expect(HELP_TEXT).toContain("--output");
 		expect(HELP_TEXT).toContain("--json");
+		expect(FLAGS_SCHEMA).toHaveProperty("output");
+		expect(FLAGS_SCHEMA.output.type).toBe("string");
 	});
 
 	it("shows a preparation preflight example", () => {
 		const examples = HELP_TEXT.split("Examples")[1] ?? "";
+		expect(examples).toContain("preparation template --output");
 		expect(examples).toContain("preparation preflight --config");
 	});
 });

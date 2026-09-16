@@ -30,6 +30,7 @@ export const HELP_TEXT = `
     ai providers convert  Convert provider metadata between Pi and OpenCode
     ai providers smoke-test  Probe Pi/OpenCode provider/model routes and write JSONL evidence
     ai providers apply-scope  Apply smoke-test pass scope to Pi/OpenCode config
+    preparation template   Write an operator-owned preparation config template
     preparation preflight  Read-only production preparation preflight
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
@@ -117,8 +118,10 @@ export const HELP_TEXT = `
                     cannot be written, the hook is left untouched. Symlinked
                     hook paths are refused even with --force.
 
-  Preparation options (javi-forge preparation preflight)
+  Preparation options (javi-forge preparation)
+    --output PATH   Write a preparation config template to this path
     --config PATH   Production preparation config JSON
+    --force         Overwrite an existing preparation template output
     --json          Emit the bounded preflight result as JSON
 
   SkillGuard install gate (plugin add / plugin import / skills auto)
@@ -166,6 +169,7 @@ export const HELP_TEXT = `
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.jsonl --target both
     $ javi-forge pi providers export-free
     $ javi-forge pi providers export-free /tmp/pi-free-providers
+    $ javi-forge preparation template --output preparation.config.example.json
     $ javi-forge preparation preflight --config preparation.config.json --json
 `;
 
@@ -344,6 +348,7 @@ export const FLAGS_SCHEMA = {
 	opencodeConfig: { type: "string", default: "" },
 	// Workflow flags
 	template: { type: "string", default: "" },
+	output: { type: "string", default: "" },
 	// TDD flags
 	mode: { type: "string", default: "strict" },
 } as const;

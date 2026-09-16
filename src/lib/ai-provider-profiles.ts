@@ -16,6 +16,13 @@ export const MODEL_ASSIGNMENT_PROFILE = {
 export type ModelAssignmentProfile =
 	(typeof MODEL_ASSIGNMENT_PROFILE)[keyof typeof MODEL_ASSIGNMENT_PROFILE];
 
+export const MODEL_ASSIGNMENT_PRESET = {
+	COMMUNITY_BACKEND_OPENCODE_GO: "community-backend-opencode-go",
+} as const;
+
+export type ModelAssignmentPreset =
+	(typeof MODEL_ASSIGNMENT_PRESET)[keyof typeof MODEL_ASSIGNMENT_PRESET];
+
 const DEFAULT_MAX_CANDIDATES_PER_PROFILE = 8;
 
 const PROFILE_ORDER = [
@@ -73,6 +80,7 @@ export interface ModelAssignmentPlan {
 	generatedAt: string;
 	inputPath: string;
 	sourceKind: ProviderScopeInput["sourceKind"];
+	preset?: ModelAssignmentPreset;
 	passModels: number;
 	maxCandidatesPerProfile: number;
 	profiles: Record<ModelAssignmentProfile, ModelAssignmentProfilePlan>;
@@ -84,6 +92,7 @@ export interface WriteModelAssignmentProfilesOptions {
 	inputPath: string;
 	outputDir: string;
 	maxCandidatesPerProfile?: number;
+	preset?: string;
 	dryRun?: boolean;
 	now?: Date;
 }
@@ -156,6 +165,89 @@ interface SmokeReportEvidenceRow {
 	status?: unknown;
 	evidence?: unknown;
 }
+
+interface ModelAssignmentPresetRoute {
+	phase: string;
+	profile: ModelAssignmentProfile;
+	ref: string;
+}
+
+const COMMUNITY_BACKEND_OPENCODE_GO_ROUTES: readonly ModelAssignmentPresetRoute[] =
+	[
+		{
+			phase: "sdd-init",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_CHEAP,
+			ref: "opencode-go/deepseek-v4-flash",
+		},
+		{
+			phase: "sdd-explore",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_STRONG,
+			ref: "opencode-go/deepseek-v4-pro",
+		},
+		{
+			phase: "sdd-propose",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_CHEAP,
+			ref: "opencode-go/gpt-5.6-luna",
+		},
+		{
+			phase: "sdd-spec",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_CHEAP,
+			ref: "opencode-go/minimax-m3",
+		},
+		{
+			phase: "sdd-design",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_STRONG,
+			ref: "opencode-go/qwen3.7-plus",
+		},
+		{
+			phase: "sdd-tasks",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_CHEAP,
+			ref: "opencode-go/deepseek-v4-flash",
+		},
+		{
+			phase: "sdd-apply",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_MID,
+			ref: "opencode-go/gpt-5.6-luna",
+		},
+		{
+			phase: "sdd-verify",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_STRONG,
+			ref: "opencode-go/deepseek-v4-pro",
+		},
+		{
+			phase: "sdd-archive",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_CHEAP,
+			ref: "opencode-go/mimo-v2.5",
+		},
+		{
+			phase: "sdd-onboard",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_CHEAP,
+			ref: "opencode-go/deepseek-v4-flash",
+		},
+		{
+			phase: "jd-judge-a",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_STRONG,
+			ref: "opencode-go/minimax-m3",
+		},
+		{
+			phase: "jd-judge-b",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_STRONG,
+			ref: "opencode-go/hy3",
+		},
+		{
+			phase: "jd-fix-agent",
+			profile: MODEL_ASSIGNMENT_PROFILE.SDD_MID,
+			ref: "opencode-go/qwen3.7-plus",
+		},
+	] as const;
+
+const PRESET_ROUTES: Record<
+	ModelAssignmentPreset,
+	readonly ModelAssignmentPresetRoute[]
+> = {
+	[MODEL_ASSIGNMENT_PRESET.COMMUNITY_BACKEND_OPENCODE_GO]:
+		COMMUNITY_BACKEND_OPENCODE_GO_ROUTES,
+};
 
 function resolvePath(path: string): string {
 	return path.startsWith("~/") ? join(homedir(), path.slice(2)) : resolve(path);
@@ -286,6 +378,19 @@ function sortCandidates(
 	});
 }
 
+function uniqueCandidatesInOrder(
+	candidates: readonly ModelAssignmentCandidate[],
+): ModelAssignmentCandidate[] {
+	const seen = new Set<string>();
+	const unique: ModelAssignmentCandidate[] = [];
+	for (const candidate of candidates) {
+		if (seen.has(candidate.ref)) continue;
+		seen.add(candidate.ref);
+		unique.push(candidate);
+	}
+	return unique;
+}
+
 function rankForProfile(
 	profile: ModelAssignmentProfile,
 	models: ProviderScopeModel[],
@@ -297,6 +402,76 @@ function rankForProfile(
 				? scoreMid
 				: scoreCheap;
 	return sortCandidates(models.map(ranker));
+}
+
+function normalizePreset(value?: string): ModelAssignmentPreset | undefined {
+	const trimmed = value?.trim();
+	if (!trimmed) return undefined;
+	if (trimmed === MODEL_ASSIGNMENT_PRESET.COMMUNITY_BACKEND_OPENCODE_GO) {
+		return trimmed;
+	}
+	throw new Error(`unknown profile preset: ${trimmed}`);
+}
+
+function isPresetValue(value: unknown): value is ModelAssignmentPreset {
+	return value === MODEL_ASSIGNMENT_PRESET.COMMUNITY_BACKEND_OPENCODE_GO;
+}
+
+function passModelByRef(
+	models: readonly ProviderScopeModel[],
+): Map<string, ProviderScopeModel> {
+	return new Map(models.map((model) => [modelRef(model), model]));
+}
+
+function presetCandidate(
+	preset: ModelAssignmentPreset,
+	model: ProviderScopeModel,
+): ModelAssignmentCandidate {
+	return candidate(model, 100, [`preset:${preset}`, "smoke-tested-pass"]);
+}
+
+function assertPresetRefsAreSmokeTested(
+	preset: ModelAssignmentPreset,
+	routes: readonly ModelAssignmentPresetRoute[],
+	modelsByRef: ReadonlyMap<string, ProviderScopeModel>,
+): void {
+	const missing = uniqueCandidatesInOrder(
+		routes.map((route) => ({
+			provider: "",
+			model: "",
+			ref: route.ref,
+			score: 0,
+			reasons: [],
+		})),
+	)
+		.map((candidate) => candidate.ref)
+		.filter((ref) => !modelsByRef.has(ref));
+	if (missing.length) {
+		throw new Error(
+			`profile preset ${preset} references models missing from pass evidence: ${missing.join(", ")}`,
+		);
+	}
+}
+
+function buildPresetCandidatesForProfile(
+	profile: ModelAssignmentProfile,
+	preset: ModelAssignmentPreset,
+	routes: readonly ModelAssignmentPresetRoute[],
+	modelsByRef: ReadonlyMap<string, ProviderScopeModel>,
+): ModelAssignmentCandidate[] {
+	return uniqueCandidatesInOrder(
+		routes
+			.filter((route) => route.profile === profile)
+			.map((route) => {
+				const model = modelsByRef.get(route.ref);
+				if (!model) {
+					throw new Error(
+						`profile preset ${preset} references models missing from pass evidence: ${route.ref}`,
+					);
+				}
+				return presetCandidate(preset, model);
+			}),
+	);
 }
 
 function assertReportIsNotDryRun(content: string, inputPath: string): void {
@@ -330,23 +505,59 @@ function buildPlan(options: {
 	inputPath: string;
 	input: ProviderScopeInput;
 	maxCandidatesPerProfile: number;
+	preset?: ModelAssignmentPreset;
 	now: Date;
 }): ModelAssignmentPlan {
 	const warnings: string[] = [];
 	if (options.input.passModels.length === 0) {
 		warnings.push("No passing models were found in the input.");
 	}
+	const preset = options.preset;
+	if (preset) {
+		warnings.push(
+			`Preset ${preset} was applied only from smoke-tested passing evidence; run role-specific pilot probes before promotion.`,
+			"Preset output is advisory and does not modify Pi, OpenCode, Codex, provider auth, secrets, or runtime configuration.",
+			"The community preset intentionally omits the global coordinator default; keep coordinator/default changes as a separate explicit decision.",
+		);
+	}
+
+	const presetRoutes = preset ? PRESET_ROUTES[preset] : undefined;
+	const modelsByRef = passModelByRef(options.input.passModels);
+	if (preset && presetRoutes) {
+		assertPresetRefsAreSmokeTested(preset, presetRoutes, modelsByRef);
+	}
 
 	const profiles = Object.fromEntries(
 		PROFILE_ORDER.map((profile) => {
-			const candidates = rankForProfile(
+			const presetCandidates =
+				preset && presetRoutes
+					? buildPresetCandidatesForProfile(
+							profile,
+							preset,
+							presetRoutes,
+							modelsByRef,
+						)
+					: [];
+			const presetRefs = new Set(
+				presetCandidates.map((candidate) => candidate.ref),
+			);
+			const rankedCandidates = rankForProfile(
 				profile,
 				options.input.passModels,
-			).slice(0, options.maxCandidatesPerProfile);
+			).filter((candidate) => !presetRefs.has(candidate.ref));
+			const candidates = [...presetCandidates, ...rankedCandidates].slice(
+				0,
+				options.maxCandidatesPerProfile,
+			);
 			const plan: ModelAssignmentProfilePlan = {
 				profile,
 				purpose: PROFILE_PURPOSE[profile],
-				phases: PROFILE_PHASES[profile],
+				phases:
+					presetRoutes && presetCandidates.length
+						? presetRoutes
+								.filter((route) => route.profile === profile)
+								.map((route) => route.phase)
+						: PROFILE_PHASES[profile],
 				primary: candidates[0]?.ref ?? null,
 				candidates,
 			};
@@ -354,18 +565,25 @@ function buildPlan(options: {
 		}),
 	) as Record<ModelAssignmentProfile, ModelAssignmentProfilePlan>;
 
-	const routing = PROFILE_ORDER.flatMap((profile) =>
-		PROFILE_PHASES[profile].map((phase) => ({
-			phase,
-			profile,
-			primary: profiles[profile].primary,
-		})),
-	);
+	const routing = presetRoutes
+		? presetRoutes.map((route) => ({
+				phase: route.phase,
+				profile: route.profile,
+				primary: route.ref,
+			}))
+		: PROFILE_ORDER.flatMap((profile) =>
+				PROFILE_PHASES[profile].map((phase) => ({
+					phase,
+					profile,
+					primary: profiles[profile].primary,
+				})),
+			);
 
 	return {
 		generatedAt: options.now.toISOString(),
 		inputPath: options.inputPath,
 		sourceKind: options.input.sourceKind,
+		preset,
 		passModels: options.input.passModels.length,
 		maxCandidatesPerProfile: options.maxCandidatesPerProfile,
 		profiles,
@@ -383,12 +601,13 @@ function renderMarkdown(plan: ModelAssignmentPlan): string {
 		"",
 		`- Input: \`${plan.inputPath}\``,
 		`- Source kind: \`${plan.sourceKind}\``,
+		`- Preset: \`${plan.preset ?? "none"}\``,
 		`- Passing models: ${plan.passModels}`,
 		`- Max candidates per profile: ${plan.maxCandidatesPerProfile}`,
 		"",
 		"## Routing",
 		"",
-		"| SDD phase | Profile | Primary model |",
+		"| Role / phase | Profile | Primary model |",
 		"| --- | --- | --- |",
 		...plan.routing.map(
 			(row) => `| ${row.phase} | ${row.profile} | ${row.primary ?? "n/a"} |`,
@@ -458,10 +677,12 @@ export async function writeModelAssignmentProfiles(
 	);
 	const dryRun = options.dryRun ?? false;
 	const input = await readVerifiedProviderScopeInput(inputPath);
+	const preset = normalizePreset(options.preset);
 	const plan = buildPlan({
 		inputPath,
 		input,
 		maxCandidatesPerProfile,
+		preset,
 		now: options.now ?? new Date(),
 	});
 	const jsonPath = join(outputDir, "model-assignment.profiles.generated.json");
@@ -563,6 +784,7 @@ function parseModelAssignmentPlan(
 		typeof value.generatedAt !== "string" ||
 		typeof value.inputPath !== "string" ||
 		typeof value.sourceKind !== "string" ||
+		(value.preset !== undefined && !isPresetValue(value.preset)) ||
 		typeof value.passModels !== "number" ||
 		typeof value.maxCandidatesPerProfile !== "number" ||
 		!Array.isArray(value.routing) ||
@@ -672,7 +894,7 @@ function renderCodexProfileExport(
 	lines.push(
 		"## Routing",
 		"",
-		"| Phase | Profile | Primary ref |",
+		"| Role / phase | Profile | Primary ref |",
 		"| --- | --- | --- |",
 	);
 	for (const row of plan.routing) {

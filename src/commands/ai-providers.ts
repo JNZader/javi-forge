@@ -7,6 +7,7 @@ import {
 	writeFreeProvidersBundle,
 } from "../lib/ai-provider-bundles.js";
 import {
+	MODEL_ASSIGNMENT_PRESET,
 	MODEL_ASSIGNMENT_PROFILE_EXPORT_TARGET,
 	type ModelAssignmentProfileExportTarget,
 	writeModelAssignmentProfileExport,
@@ -74,6 +75,7 @@ export interface AiProvidersCommandRequest {
 	prompt?: string;
 	passListPath?: string;
 	profilePlanPath?: string;
+	preset?: string;
 	piSettingsPath?: string;
 	opencodeConfigPath?: string;
 	dryRun: boolean;
@@ -127,7 +129,7 @@ function usage(): string {
 		"  javi-forge ai providers convert <pi|opencode> <pi|opencode> [output-dir] --config <input-path>",
 		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--runtime pi|opencode] [--provider id] [--family text] [--model text] [--status pass|failed|...] [--report <previous.jsonl>]",
 		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both [--dry-run]",
-		"  javi-forge ai providers profile-plan <output-dir> --pass-list <pass.tsv|report.jsonl> [--limit candidates-per-profile] [--dry-run]",
+		`  javi-forge ai providers profile-plan <output-dir> --pass-list <pass.tsv|report.jsonl> [--preset ${MODEL_ASSIGNMENT_PRESET.COMMUNITY_BACKEND_OPENCODE_GO}] [--limit candidates-per-profile] [--dry-run]`,
 		"  javi-forge ai providers profile-export <profile-plan.json> [output-dir] --target pi|opencode|codex|both [--dry-run]",
 	].join("\n");
 }
@@ -388,6 +390,7 @@ async function profilePlan(
 		inputPath,
 		outputDir,
 		maxCandidatesPerProfile: request.limit,
+		preset: emptyToUndefined(request.preset),
 		dryRun: request.dryRun,
 	});
 	report(

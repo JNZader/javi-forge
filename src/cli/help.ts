@@ -30,6 +30,8 @@ export const HELP_TEXT = `
     ai providers convert  Convert provider metadata between Pi and OpenCode
     ai providers smoke-test  Probe Pi/OpenCode provider/model routes and write JSONL evidence
     ai providers apply-scope  Apply smoke-test pass scope to Pi/OpenCode config
+    ai providers profile-plan  Generate advisory SDD/JD model assignment plans
+    ai providers profile-export  Export advisory Pi/OpenCode/Codex profile previews
     preparation template   Write an operator-owned preparation config template
     preparation outputs-template  Write an operator-owned outputs JSON template
     preparation policy    Print the fixed preparation policy and output names
@@ -98,6 +100,7 @@ export const HELP_TEXT = `
     --opencode-agent OpenCode agent for smoke tests (default: title)
     --smoke-cwd PATH Working directory for provider smoke commands
     --pass-list PATH Provider smoke-test .pass.tsv input for apply-scope
+    --preset NAME   Advisory model assignment preset for profile-plan
     --pi-settings PATH Pi settings.json path for apply-scope
     --opencode-config PATH OpenCode opencode.json path for apply-scope
     --json          Emit JSON for commands that support structured output
@@ -184,6 +187,7 @@ export const HELP_TEXT = `
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --status failed --report /tmp/previous-smoke.jsonl
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.pass.tsv --target pi --dry-run
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.jsonl --target both
+    $ javi-forge ai providers profile-plan /tmp/model-profiles --pass-list /tmp/opencode-smoke/smoke.jsonl --preset community-backend-opencode-go
     $ javi-forge pi providers export-free
     $ javi-forge pi providers export-free /tmp/pi-free-providers
     $ javi-forge preparation template --output preparation.config.example.json
@@ -370,6 +374,7 @@ export const FLAGS_SCHEMA = {
 	smokeCwd: { type: "string", default: "" },
 	prompt: { type: "string", default: "" },
 	passList: { type: "string", default: "" },
+	preset: { type: "string", default: "" },
 	piSettings: { type: "string", default: "" },
 	opencodeConfig: { type: "string", default: "" },
 	file: { type: "string", default: "" },

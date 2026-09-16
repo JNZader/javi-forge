@@ -77,6 +77,83 @@ describe("writeModelAssignmentProfiles", () => {
 		);
 	});
 
+	it("generates a smoke-evidence-gated community backend OpenCode Go pilot preset", async () => {
+		const inputPath = join(dir, "smoke.jsonl");
+		const outputDir = join(dir, "profiles");
+		const passingModels = [
+			["deepseek-v4-flash", "DeepSeek V4 Flash"],
+			["deepseek-v4-pro", "DeepSeek V4 Pro"],
+			["gpt-5.6-luna", "GPT-5.6 Luna"],
+			["minimax-m3", "MiniMax-M3"],
+			["qwen3.7-plus", "Qwen3.7 Plus"],
+			["mimo-v2.5", "MiMo V2.5"],
+			["hy3", "Hy3"],
+		];
+		writeFileSync(
+			inputPath,
+			passingModels
+				.map(([model, name]) =>
+					JSON.stringify({
+						provider: "opencode-go",
+						model,
+						name,
+						status: "pass",
+					}),
+				)
+				.join("\n"),
+		);
+
+		const result = await writeModelAssignmentProfiles({
+			inputPath,
+			outputDir,
+			maxCandidatesPerProfile: 4,
+			preset: "community-backend-opencode-go",
+			now: new Date("2026-09-16T02:00:00.000Z"),
+		});
+
+		expect(result.profilePrimaries).toMatchObject({
+			"sdd-strong": "opencode-go/deepseek-v4-pro",
+			"sdd-mid": "opencode-go/gpt-5.6-luna",
+			"sdd-cheap": "opencode-go/deepseek-v4-flash",
+		});
+		const plan = JSON.parse(
+			readFileSync(result.files[0]!, "utf8"),
+		) as ModelAssignmentPlan;
+		expect(plan.preset).toBe("community-backend-opencode-go");
+		expect(plan.routing).toContainEqual({
+			phase: "sdd-design",
+			profile: "sdd-strong",
+			primary: "opencode-go/qwen3.7-plus",
+		});
+		expect(plan.routing).toContainEqual({
+			phase: "jd-judge-b",
+			profile: "sdd-strong",
+			primary: "opencode-go/hy3",
+		});
+		expect(plan.warnings.join(" ")).toContain("role-specific pilot probes");
+		expect(readFileSync(result.files[1]!, "utf8")).toContain(
+			"Preset: `community-backend-opencode-go`",
+		);
+	});
+
+	it("rejects community presets when a referenced model did not pass", async () => {
+		const inputPath = join(dir, "smoke.pass.tsv");
+		const outputDir = join(dir, "profiles");
+		writeFileSync(
+			inputPath,
+			"provider\tmodel\tname\nopencode-go\tdeepseek-v4-flash\tDeepSeek V4 Flash\n",
+		);
+
+		await expect(
+			writeModelAssignmentProfiles({
+				inputPath,
+				outputDir,
+				preset: "community-backend-opencode-go",
+			}),
+		).rejects.toThrow(/models missing from pass evidence/);
+		expect(existsSync(outputDir)).toBe(false);
+	});
+
 	it("dry-runs without writing generated files", async () => {
 		const inputPath = join(dir, "smoke.jsonl");
 		const outputDir = join(dir, "profiles");

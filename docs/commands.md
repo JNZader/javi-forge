@@ -166,6 +166,7 @@ javi-forge ai providers smoke-test /tmp/opencode-smoke --runtime opencode --prov
 javi-forge ai providers apply-scope /tmp/opencode-smoke/smoke.jsonl --target opencode --dry-run
 profile_dir="$(mktemp -d "${TMPDIR:-/tmp}/javi-forge-model-profiles.XXXXXX")"
 javi-forge ai providers profile-plan "$profile_dir" --pass-list /tmp/opencode-smoke/javi-forge-provider-smoke-<timestamp>.pass.tsv --limit 8
+javi-forge ai providers profile-plan "$profile_dir" --pass-list /tmp/opencode-smoke/javi-forge-provider-smoke-<timestamp>.jsonl --preset community-backend-opencode-go --limit 8
 ```
 
 `apply-scope` only accepts evidence with at least one passing model. It rejects
@@ -236,6 +237,12 @@ counts without writing. Generated files are created exclusively; rerun into a
 fresh directory instead of overwriting existing artifacts. Do not feed profile
 plans from smoke-test dry-run output; `profile-plan` rejects dry-run JSONL
 reports, and dry-run smoke pass lists are intentionally empty.
+
+Use `--preset community-backend-opencode-go` to generate a smoke-evidence-gated
+pilot plan from the community OpenCode Go backend SDD/JD assignment. The preset
+is still advisory: every referenced model must appear in the passing evidence,
+the global coordinator/default remains out of scope, and runtime config remains
+unchanged until a separate apply/rollback flow is explicitly run.
 
 ### Model assignment profile export previews
 

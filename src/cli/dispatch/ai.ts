@@ -62,6 +62,7 @@ export async function handleAi(cli: CLI): Promise<void> {
 			passListPath: cli.flags.passList,
 			profilePlanPath:
 				providersAction === "profile-export" ? cli.input[3] : undefined,
+			preset: cli.flags.preset,
 			piSettingsPath: cli.flags.piSettings,
 			opencodeConfigPath: cli.flags.opencodeConfig,
 			dryRun: cli.flags.dryRun,

@@ -37,6 +37,9 @@ vi.mock("../lib/ai-provider-profiles.js", () => ({
 		CODEX: "codex",
 		BOTH: "both",
 	},
+	MODEL_ASSIGNMENT_PRESET: {
+		COMMUNITY_BACKEND_OPENCODE_GO: "community-backend-opencode-go",
+	},
 	writeModelAssignmentProfileExport: vi.fn(),
 	writeModelAssignmentProfiles: vi.fn(),
 }));
@@ -305,6 +308,7 @@ describe("runAiProvidersCommand", () => {
 				providersAction: "profile-plan",
 				outputDir: "/profiles",
 				passListPath: "/target/smoke.pass.tsv",
+				preset: "community-backend-opencode-go",
 				limit: 2,
 				dryRun: true,
 			},
@@ -316,6 +320,7 @@ describe("runAiProvidersCommand", () => {
 			inputPath: "/target/smoke.pass.tsv",
 			outputDir: "/profiles",
 			maxCandidatesPerProfile: 2,
+			preset: "community-backend-opencode-go",
 			dryRun: true,
 		});
 		expect(steps[1]!.detail).toContain("dry-run: would generate");

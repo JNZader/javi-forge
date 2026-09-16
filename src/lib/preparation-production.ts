@@ -27,6 +27,10 @@ export const PREPARATION_PREFLIGHT_REASON = {
 	DESTINATION_UNSAFE: "destination-unsafe",
 	APPROVAL_DENIED: "approval-denied",
 	RUNTIME_UNAVAILABLE: "runtime-unavailable",
+	WORKER_EXECUTABLE_UNAVAILABLE: "worker-executable-unavailable",
+	WORKER_SOURCE_UNAVAILABLE: "worker-source-unavailable",
+	WORKER_EXECUTABLE_UNSUPPORTED: "worker-executable-unsupported",
+	LAUNCHER_UNAVAILABLE: "launcher-unavailable",
 } as const;
 
 export type PreparationPreflightStatus =
@@ -235,6 +239,23 @@ function close(directory: ProtectedDirectory | undefined): void {
 	}
 }
 
+const RUNTIME_MEASUREMENT_REASONS = new Set<string>([
+	PREPARATION_PREFLIGHT_REASON.WORKER_EXECUTABLE_UNAVAILABLE,
+	PREPARATION_PREFLIGHT_REASON.WORKER_SOURCE_UNAVAILABLE,
+	PREPARATION_PREFLIGHT_REASON.WORKER_EXECUTABLE_UNSUPPORTED,
+	PREPARATION_PREFLIGHT_REASON.LAUNCHER_UNAVAILABLE,
+]);
+
+function runtimeMeasurementReason(error: unknown): PreparationPreflightReason {
+	if (
+		error instanceof Error &&
+		RUNTIME_MEASUREMENT_REASONS.has(error.message)
+	) {
+		return error.message as PreparationPreflightReason;
+	}
+	return PREPARATION_PREFLIGHT_REASON.RUNTIME_UNAVAILABLE;
+}
+
 function productionPublicKey(publicKeyPem: string): KeyObject | undefined {
 	try {
 		const key = createPublicKey(publicKeyPem);
@@ -314,8 +335,8 @@ export function inspectPreparationProductionPreflight(
 				launcherDigest: worker.launcherDigest,
 			},
 		};
-	} catch {
-		return unavailable(PREPARATION_PREFLIGHT_REASON.RUNTIME_UNAVAILABLE);
+	} catch (error) {
+		return unavailable(runtimeMeasurementReason(error));
 	} finally {
 		close(controlDirectory);
 		close(stateDirectory);
@@ -400,8 +421,8 @@ export function inspectPreparationProductionBinding(
 				launcherDigest: worker.launcherDigest,
 			},
 		};
-	} catch {
-		return unavailable(PREPARATION_PREFLIGHT_REASON.RUNTIME_UNAVAILABLE);
+	} catch (error) {
+		return unavailable(runtimeMeasurementReason(error));
 	} finally {
 		close(controlDirectory);
 		close(stateDirectory);

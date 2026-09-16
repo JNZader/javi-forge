@@ -2,7 +2,7 @@
 
 No hook, CLI, configuration, production key, or real preparation destination is
 activated. The interpreter prohibition is unchanged. `inspectAuthorization`
-returns `runtime-unavailable` **before contacting or consuming an authority**;
+returns runtime-unavailable status **before contacting or consuming an authority**;
 an absent authority returns `authorization-unavailable`.
 
 ## Implemented and tested

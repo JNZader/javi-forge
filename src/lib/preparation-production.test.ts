@@ -343,7 +343,34 @@ describe("production preparation preflight contract", () => {
 			),
 		).toEqual({
 			status: PREPARATION_PREFLIGHT_STATUS.UNAVAILABLE,
-			reason: PREPARATION_PREFLIGHT_REASON.RUNTIME_UNAVAILABLE,
+			reason: PREPARATION_PREFLIGHT_REASON.WORKER_EXECUTABLE_UNAVAILABLE,
+		});
+	});
+
+	it("reports source measurement failures separately from worker executable failures", () => {
+		expect(
+			inspectPreparationProductionPreflight(
+				config({ workerSourceDigest: "b".repeat(64) }),
+				policy(),
+			),
+		).toEqual({
+			status: PREPARATION_PREFLIGHT_STATUS.UNAVAILABLE,
+			reason: PREPARATION_PREFLIGHT_REASON.WORKER_SOURCE_UNAVAILABLE,
+		});
+	});
+
+	it("reports unsupported worker executables after digest verification", () => {
+		expect(
+			inspectPreparationProductionPreflight(
+				config({
+					workerExecutable: "/usr/bin/true",
+					workerExecutableDigest: digest(readFileSync("/usr/bin/true")),
+				}),
+				policy(),
+			),
+		).toEqual({
+			status: PREPARATION_PREFLIGHT_STATUS.UNAVAILABLE,
+			reason: PREPARATION_PREFLIGHT_REASON.WORKER_EXECUTABLE_UNSUPPORTED,
 		});
 	});
 
@@ -355,7 +382,7 @@ describe("production preparation preflight contract", () => {
 			),
 		).toEqual({
 			status: PREPARATION_PREFLIGHT_STATUS.UNAVAILABLE,
-			reason: PREPARATION_PREFLIGHT_REASON.RUNTIME_UNAVAILABLE,
+			reason: PREPARATION_PREFLIGHT_REASON.LAUNCHER_UNAVAILABLE,
 		});
 	});
 

@@ -171,7 +171,11 @@ After revocation, `approval-check` for the same evidence must fail with
 | `destination-present` | Non-overwrite destination already exists. | Inspect manually; do not overwrite through preparation. |
 | `destination-unsafe` | Destination state is symlinked or otherwise unsafe. | Stop and inspect manually. |
 | `approval-denied` | Evidence failed validation, expired, mismatched binding, or nonce already terminal. | Generate a new binding/approval if appropriate. Never delete terminal files to retry. |
-| `runtime-unavailable` | Pinned worker/source/launcher measurement failed. | Re-measure and repair operator-owned pins; do not weaken checks. |
+| `worker-executable-unavailable` | Pinned worker executable is absent, unreadable, malformed, oversized, empty, or digest-mismatched. | Re-measure the intended pinned worker executable; do not substitute an unreviewed worker. |
+| `worker-source-unavailable` | Pinned worker source is absent, unreadable, oversized, empty, or digest-mismatched. | Re-measure the reviewed worker source and keep it paired with the executable pin. |
+| `worker-executable-unsupported` | Worker executable digest matches, but the binary is not the supported static Linux x86-64 ELF shape. | Replace with the reviewed static worker build; do not use a dynamic binary. |
+| `launcher-unavailable` | Pinned launcher is absent, unreadable, digest-mismatched, group/world-writable, or not root-owned. | Repair the system launcher ownership/mode or run on a host where the launcher satisfies the trust boundary. |
+| `runtime-unavailable` | A runtime measurement failed outside the more specific categories above. | Re-measure and repair operator-owned pins; do not weaken checks. |
 
 ## Rollback
 

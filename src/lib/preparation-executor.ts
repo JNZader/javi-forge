@@ -54,12 +54,31 @@ interface PreparationRuntimeBinding {
 const snapshots = new WeakMap<CapturedWorker, WorkerBytes>();
 const hash = (data: Buffer | string) =>
 	createHash("sha256").update(data).digest("hex");
-const denied = () => new Error("runtime-unavailable");
+const PREPARATION_RUNTIME_REASON = {
+	RUNTIME_UNAVAILABLE: "runtime-unavailable",
+	WORKER_EXECUTABLE_UNAVAILABLE: "worker-executable-unavailable",
+	WORKER_SOURCE_UNAVAILABLE: "worker-source-unavailable",
+	WORKER_EXECUTABLE_UNSUPPORTED: "worker-executable-unsupported",
+	LAUNCHER_UNAVAILABLE: "launcher-unavailable",
+} as const;
+type PreparationRuntimeReason =
+	(typeof PREPARATION_RUNTIME_REASON)[keyof typeof PREPARATION_RUNTIME_REASON];
+const RUNTIME_REASONS = new Set<string>(
+	Object.values(PREPARATION_RUNTIME_REASON),
+);
+const denied = (
+	reason: PreparationRuntimeReason = PREPARATION_RUNTIME_REASON.RUNTIME_UNAVAILABLE,
+) => new Error(reason);
 function ensure(valid: boolean) {
 	if (!valid) throw denied();
 }
 const same = (a: Identity, b: Identity) => a.dev === b.dev && a.ino === b.ino;
-function capture(file: string, expected: string, rootOwned = false) {
+function capture(
+	file: string,
+	expected: string,
+	reason: PreparationRuntimeReason,
+	rootOwned = false,
+) {
 	const fd = openSync(file, FS.O_RDONLY | FS.O_NOFOLLOW);
 	try {
 		const stat = fstatSync(fd);
@@ -69,14 +88,18 @@ function capture(file: string, expected: string, rootOwned = false) {
 			stat.size < 1 ||
 			(rootOwned && (stat.uid !== 0 || stat.mode & 0o022))
 		)
-			throw denied();
+			throw denied(reason);
 		const bytes = readFileSync(fd);
 		if (!/^[a-f0-9]{64}$/.test(expected) || hash(bytes) !== expected)
-			throw denied();
+			throw denied(reason);
 		return bytes;
 	} finally {
 		closeSync(fd);
 	}
+}
+function preserveRuntimeReason(error: unknown): never {
+	if (error instanceof Error && RUNTIME_REASONS.has(error.message)) throw error;
+	throw denied();
 }
 /** Explicit operator build pins; no discovery/download/build or approval issuance.
  * The compiler/toolchain provenance of the pinned binary is an operator trust input.
@@ -85,15 +108,28 @@ function capture(file: string, expected: string, rootOwned = false) {
 export function captureWorker(config: WorkerConfig): CapturedWorker {
 	try {
 		if (process.platform !== "linux" || process.arch !== "x64") throw denied();
-		const bytes = capture(config.executable, config.executableDigest);
-		capture(config.source, config.sourceDigest);
-		capture(config.launcher, config.launcherDigest, true);
+		const bytes = capture(
+			config.executable,
+			config.executableDigest,
+			PREPARATION_RUNTIME_REASON.WORKER_EXECUTABLE_UNAVAILABLE,
+		);
+		capture(
+			config.source,
+			config.sourceDigest,
+			PREPARATION_RUNTIME_REASON.WORKER_SOURCE_UNAVAILABLE,
+		);
+		capture(
+			config.launcher,
+			config.launcherDigest,
+			PREPARATION_RUNTIME_REASON.LAUNCHER_UNAVAILABLE,
+			true,
+		);
 		if (
 			bytes.length < 64 ||
 			bytes.subarray(0, 6).toString("hex") !== "7f454c460201" ||
 			bytes.readUInt16LE(18) !== 62
 		)
-			throw denied();
+			throw denied(PREPARATION_RUNTIME_REASON.WORKER_EXECUTABLE_UNSUPPORTED);
 		const start = Number(bytes.readBigUInt64LE(32)),
 			size = bytes.readUInt16LE(54),
 			count = bytes.readUInt16LE(56);
@@ -104,9 +140,10 @@ export function captureWorker(config: WorkerConfig): CapturedWorker {
 			count > 1024 ||
 			start + size * count > bytes.length
 		)
-			throw denied();
+			throw denied(PREPARATION_RUNTIME_REASON.WORKER_EXECUTABLE_UNSUPPORTED);
 		for (let i = 0; i < count; i++)
-			if ([2, 3].includes(bytes.readUInt32LE(start + i * size))) throw denied();
+			if ([2, 3].includes(bytes.readUInt32LE(start + i * size)))
+				throw denied(PREPARATION_RUNTIME_REASON.WORKER_EXECUTABLE_UNSUPPORTED);
 		const captured = Object.freeze({
 			executableDigest: hash(bytes),
 			codeDigest: config.sourceDigest,
@@ -115,8 +152,8 @@ export function captureWorker(config: WorkerConfig): CapturedWorker {
 		});
 		snapshots.set(captured, { executable: bytes, launcher: config.launcher });
 		return captured;
-	} catch {
-		throw denied();
+	} catch (error) {
+		preserveRuntimeReason(error);
 	}
 }
 const FIXED_ARGS = [
@@ -219,7 +256,12 @@ function executor(
 				);
 				attempted = true;
 				// Runtime readiness must fail before consume if the trusted launcher changed.
-				capture(bytes.launcher, worker.launcherDigest, true);
+				capture(
+					bytes.launcher,
+					worker.launcherDigest,
+					PREPARATION_RUNTIME_REASON.LAUNCHER_UNAVAILABLE,
+					true,
+				);
 				temp = mkdtempSync(path.join(os.tmpdir(), "preparation-runtime-"));
 				const snapshotFd = (content: Buffer) => {
 					const file = path.join(temp as string, String(fds.length));

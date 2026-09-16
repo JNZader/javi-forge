@@ -28,7 +28,7 @@ interface WorkerConfig {
 	launcher: string;
 	launcherDigest: string;
 }
-interface CapturedWorker {
+export interface CapturedWorker {
 	readonly executableDigest: string;
 	readonly codeDigest: string;
 	readonly dependenciesDigest: string;
@@ -42,9 +42,14 @@ interface Identity {
 	dev: number;
 	ino: number;
 }
-interface Limits {
+export interface PreparationRuntimeLimits {
 	overallMs: number;
 	testsMs: number;
+}
+interface PreparationRuntimeBinding {
+	readonly binding: string;
+	readonly identities: Readonly<{ destination: string }>;
+	readonly outputs: Readonly<Record<string, string>>;
 }
 const snapshots = new WeakMap<CapturedWorker, WorkerBytes>();
 const hash = (data: Buffer | string) =>
@@ -137,16 +142,14 @@ const FIXED_ARGS = [
 	"/payload",
 ];
 
-function executor(
+export function bindPreparationRuntime(
 	worker: CapturedWorker,
 	outputs: Readonly<Record<string, string>>,
 	directory: ProtectedDirectory,
-	limits: Limits,
+	limits: PreparationRuntimeLimits,
 	fixture: boolean,
-) {
-	const bytes = snapshots.get(worker);
-	if (!bytes) throw denied();
-	const binding = bindPreparation({
+): PreparationRuntimeBinding {
+	return bindPreparation({
 		cwd: POLICY.cwd,
 		destination: POLICY.destination,
 		entrypoint: POLICY.entrypoint,
@@ -172,6 +175,24 @@ function executor(
 			destination: directory.identity(),
 		},
 	});
+}
+
+function executor(
+	worker: CapturedWorker,
+	outputs: Readonly<Record<string, string>>,
+	directory: ProtectedDirectory,
+	limits: PreparationRuntimeLimits,
+	fixture: boolean,
+) {
+	const bytes = snapshots.get(worker);
+	if (!bytes) throw denied();
+	const binding = bindPreparationRuntime(
+		worker,
+		outputs,
+		directory,
+		limits,
+		fixture,
+	);
 	let attempted = false;
 	return {
 		binding: binding.binding,
@@ -484,7 +505,10 @@ export function createPreparationExecutor(
 export function createExecutorFixture(
 	worker: CapturedWorker,
 	outputs: Readonly<Record<string, string>>,
-	limits: Limits = { overallMs: POLICY.overallMs, testsMs: POLICY.testsMs },
+	limits: PreparationRuntimeLimits = {
+		overallMs: POLICY.overallMs,
+		testsMs: POLICY.testsMs,
+	},
 ) {
 	if (
 		!Number.isSafeInteger(limits.overallMs) ||

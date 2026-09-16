@@ -34,6 +34,7 @@ describe("preparation dispatch", () => {
 			input: ["preparation", "preflight"],
 			flags: {
 				config: "/safe/config.json",
+				outputs: "",
 				output: "",
 				force: false,
 				json: false,
@@ -44,6 +45,7 @@ describe("preparation dispatch", () => {
 			{
 				action: "preflight",
 				configPath: "/safe/config.json",
+				outputsPath: "",
 				outputPath: "",
 				force: false,
 				json: false,
@@ -63,6 +65,7 @@ describe("preparation dispatch", () => {
 			input: ["preparation", "preflight"],
 			flags: {
 				config: "/safe/config.json",
+				outputs: "",
 				output: "",
 				force: false,
 				json: true,
@@ -95,6 +98,7 @@ describe("preparation dispatch", () => {
 			input: ["preparation", "template"],
 			flags: {
 				config: "",
+				outputs: "",
 				output: "/safe/preparation.config.example.json",
 				force: true,
 				json: false,
@@ -105,8 +109,40 @@ describe("preparation dispatch", () => {
 			{
 				action: "template",
 				configPath: "",
+				outputsPath: "",
 				outputPath: "/safe/preparation.config.example.json",
 				force: true,
+				json: false,
+			},
+			expect.any(Function),
+		);
+		expect(process.exitCode).toBe(0);
+	});
+
+	it("routes bind arguments", async () => {
+		mockRun.mockResolvedValue({
+			status: "success",
+			binding: { status: "ready", binding: "a".repeat(64) },
+		});
+
+		await handlePreparation({
+			input: ["preparation", "bind"],
+			flags: {
+				config: "/safe/config.json",
+				outputs: "/safe/outputs.json",
+				output: "",
+				force: false,
+				json: false,
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			{
+				action: "bind",
+				configPath: "/safe/config.json",
+				outputsPath: "/safe/outputs.json",
+				outputPath: "",
+				force: false,
 				json: false,
 			},
 			expect.any(Function),

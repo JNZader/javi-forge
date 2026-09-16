@@ -1,9 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import {
 	createPreparationProductionConfigTemplate,
+	inspectPreparationProductionBinding,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_STATUS,
 	type PreparationPreflightResult,
+	type PreparationProductionBindingResult,
 } from "../lib/preparation-production.js";
 import type { InitStep } from "../types/index.js";
 
@@ -18,6 +20,7 @@ export type PreparationCommandStatus =
 	(typeof PREPARATION_COMMAND_STATUS)[keyof typeof PREPARATION_COMMAND_STATUS];
 
 export const PREPARATION_ACTION = {
+	BIND: "bind",
 	TEMPLATE: "template",
 	PREFLIGHT: "preflight",
 } as const;
@@ -25,6 +28,7 @@ export const PREPARATION_ACTION = {
 export interface PreparationCommandRequest {
 	action?: string;
 	configPath?: string;
+	outputsPath?: string;
 	outputPath?: string;
 	force: boolean;
 	json: boolean;
@@ -33,6 +37,7 @@ export interface PreparationCommandRequest {
 export interface PreparationCommandResult {
 	status: PreparationCommandStatus;
 	preflight?: PreparationPreflightResult;
+	binding?: PreparationProductionBindingResult;
 	outputPath?: string;
 	error?: string;
 }
@@ -52,12 +57,14 @@ function usage(): string {
 		"Usage:",
 		"  javi-forge preparation template --output <path> [--force]",
 		"  javi-forge preparation preflight --config <path> [--json]",
+		"  javi-forge preparation bind --config <path> --outputs <path> [--json]",
 	].join("\n");
 }
 
-function detail(preflight: PreparationPreflightResult): string {
+function detail(preflight: PreparationProductionBindingResult): string {
 	return [
 		`status: ${preflight.status}`,
+		...(preflight.binding ? [`binding: ${preflight.binding}`] : []),
 		...(preflight.reason ? [`reason: ${preflight.reason}`] : []),
 		...(preflight.measurements
 			? [
@@ -74,12 +81,25 @@ function detail(preflight: PreparationPreflightResult): string {
 
 async function readConfig(configPath?: string): Promise<unknown> {
 	const path = configPath?.trim();
-	if (!path) throw new Error("preflight requires --config <path>");
+	if (!path) throw new Error("preparation requires --config <path>");
 	try {
 		return JSON.parse(await readFile(path, "utf8")) as unknown;
 	} catch (error) {
 		if (error instanceof SyntaxError) {
-			throw new Error("preflight config is not valid JSON");
+			throw new Error("preparation config is not valid JSON");
+		}
+		throw error;
+	}
+}
+
+async function readOutputs(outputsPath?: string): Promise<unknown> {
+	const path = outputsPath?.trim();
+	if (!path) throw new Error("bind requires --outputs <path>");
+	try {
+		return JSON.parse(await readFile(path, "utf8")) as unknown;
+	} catch (error) {
+		if (error instanceof SyntaxError) {
+			throw new Error("preparation outputs are not valid JSON");
 		}
 		throw error;
 	}
@@ -107,6 +127,7 @@ export async function runPreparationCommand(
 	onStep: StepCallback,
 ): Promise<PreparationCommandResult> {
 	if (
+		request.action !== PREPARATION_ACTION.BIND &&
 		request.action !== PREPARATION_ACTION.PREFLIGHT &&
 		request.action !== PREPARATION_ACTION.TEMPLATE
 	) {
@@ -134,6 +155,32 @@ export async function runPreparationCommand(
 				`wrote ${outputPath}\nside effects: wrote template only; no worker execution, approval verification, approval consumption, staging, model call, deploy, publish, or release`,
 			);
 			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, outputPath };
+		}
+
+		if (request.action === PREPARATION_ACTION.BIND) {
+			report(
+				onStep,
+				"preparation-binding",
+				"Preparation production binding",
+				"running",
+			);
+			const config = await readConfig(request.configPath);
+			const outputs = await readOutputs(request.outputsPath);
+			const binding = inspectPreparationProductionBinding(config, outputs);
+			const ok = binding.status === PREPARATION_PREFLIGHT_STATUS.READY;
+			report(
+				onStep,
+				"preparation-binding",
+				"Preparation production binding",
+				ok ? "done" : "error",
+				detail(binding),
+			);
+			return {
+				status: ok
+					? PREPARATION_COMMAND_STATUS.SUCCESS
+					: PREPARATION_COMMAND_STATUS.FAILURE,
+				binding,
+			};
 		}
 
 		report(

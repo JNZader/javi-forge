@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	inspectPreparationProductionBinding,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_STATUS,
 } from "../lib/preparation-production.js";
@@ -27,6 +28,7 @@ vi.mock("../lib/preparation-production.js", () => ({
 		destination:
 			"/home/javier/.local/share/ere-gateway-runtime/structured-1/attempt-3",
 	}),
+	inspectPreparationProductionBinding: vi.fn(),
 	inspectPreparationProductionPreflight: vi.fn(),
 	PREPARATION_PREFLIGHT_STATUS: {
 		READY: "ready",
@@ -36,6 +38,7 @@ vi.mock("../lib/preparation-production.js", () => ({
 }));
 
 const mockInspect = vi.mocked(inspectPreparationProductionPreflight);
+const mockBind = vi.mocked(inspectPreparationProductionBinding);
 
 function collectSteps(): {
 	steps: InitStep[];
@@ -75,6 +78,7 @@ describe("runPreparationCommand", () => {
 			{
 				action: "preflight",
 				configPath,
+				outputsPath: "",
 				force: false,
 				json: false,
 			},
@@ -120,13 +124,20 @@ describe("runPreparationCommand", () => {
 		const { steps, onStep } = collectSteps();
 
 		const missing = await runPreparationCommand(
-			{ action: "preflight", configPath: "", force: false, json: false },
+			{
+				action: "preflight",
+				configPath: "",
+				outputsPath: "",
+				force: false,
+				json: false,
+			},
 			onStep,
 		);
 		const unsupported = await runPreparationCommand(
 			{
 				action: "execute",
 				configPath: "/tmp/config.json",
+				outputsPath: "",
 				force: false,
 				json: false,
 			},
@@ -136,7 +147,7 @@ describe("runPreparationCommand", () => {
 		expect(missing.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
 		expect(missing.error).toContain("--config");
 		expect(unsupported.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
-		expect(unsupported.error).toContain("preparation preflight");
+		expect(unsupported.error).toContain("preparation bind");
 		expect(mockInspect).not.toHaveBeenCalled();
 		expect(steps.at(-1)?.detail).toContain("preparation preflight");
 	});
@@ -148,14 +159,83 @@ describe("runPreparationCommand", () => {
 		const { steps, onStep } = collectSteps();
 
 		const result = await runPreparationCommand(
-			{ action: "preflight", configPath, force: false, json: false },
+			{
+				action: "preflight",
+				configPath,
+				outputsPath: "",
+				force: false,
+				json: false,
+			},
 			onStep,
 		);
 
 		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
-		expect(result.error).toBe("preflight config is not valid JSON");
-		expect(steps.at(-1)?.detail).toBe("preflight config is not valid JSON");
+		expect(result.error).toBe("preparation config is not valid JSON");
+		expect(steps.at(-1)?.detail).toBe("preparation config is not valid JSON");
 		expect(steps.at(-1)?.detail).not.toContain("secret");
+	});
+
+	it("computes a read-only production binding without printing outputs", async () => {
+		mockBind.mockReturnValue({
+			status: PREPARATION_PREFLIGHT_STATUS.READY,
+			binding: "e".repeat(64),
+			measurements: {
+				executableDigest: "a".repeat(64),
+				codeDigest: "b".repeat(64),
+				dependenciesDigest: "c".repeat(64),
+				launcherDigest: "d".repeat(64),
+			},
+		});
+		const config = { workerExecutable: "/worker" };
+		const outputs = { "minimal.py": "secret-output" };
+		const configPath = await writeConfig(config);
+		const outputsPath = await writeConfig(outputs);
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "bind",
+				configPath,
+				outputsPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.SUCCESS);
+		expect(result.binding?.binding).toBe("e".repeat(64));
+		expect(mockBind).toHaveBeenCalledExactlyOnceWith(config, outputs);
+		expect(mockInspect).not.toHaveBeenCalled();
+		expect(steps.at(-1)?.detail).toContain(`binding: ${"e".repeat(64)}`);
+		expect(steps.at(-1)?.detail).not.toContain("secret-output");
+	});
+
+	it("rejects malformed outputs without printing output content", async () => {
+		const configPath = await writeConfig({ workerExecutable: "/worker" });
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const outputsPath = path.join(root, "outputs.json");
+		await writeFile(outputsPath, '{"minimal.py":"secret-output"', {
+			mode: 0o600,
+		});
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "bind",
+				configPath,
+				outputsPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
+		expect(result.error).toBe("preparation outputs are not valid JSON");
+		expect(steps.at(-1)?.detail).toBe("preparation outputs are not valid JSON");
+		expect(steps.at(-1)?.detail).not.toContain("secret-output");
+		expect(mockBind).not.toHaveBeenCalled();
 	});
 
 	it("writes a template without executing the preflight runtime", async () => {

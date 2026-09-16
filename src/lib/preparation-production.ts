@@ -1,7 +1,10 @@
 import { createPublicKey } from "node:crypto";
 import { lstatSync } from "node:fs";
-import { POLICY } from "./preparation-capability.js";
-import { captureWorker } from "./preparation-executor.js";
+import { OUTPUTS, POLICY } from "./preparation-capability.js";
+import {
+	bindPreparationRuntime,
+	captureWorker,
+} from "./preparation-executor.js";
 import { ProtectedDirectory } from "./preparation-stager.js";
 
 export const PREPARATION_PREFLIGHT_STATUS = {
@@ -58,6 +61,11 @@ export interface PreparationPreflightResult {
 	status: PreparationPreflightStatus;
 	reason?: PreparationPreflightReason;
 	measurements?: PreparationPreflightMeasurements;
+}
+
+export interface PreparationProductionBindingResult
+	extends PreparationPreflightResult {
+	binding?: string;
 }
 
 export interface PreparationProductionConfigTemplateOptions {
@@ -122,6 +130,26 @@ function digestField(
 		throw new Error(PREPARATION_PREFLIGHT_REASON.INVALID_CONFIG);
 	}
 	return field;
+}
+
+function preparationOutputs(value: unknown): Readonly<Record<string, string>> {
+	const record = object(value);
+	if (
+		Object.keys(record).sort().join("\0") !== [...OUTPUTS].sort().join("\0")
+	) {
+		throw new Error(PREPARATION_PREFLIGHT_REASON.INVALID_CONFIG);
+	}
+	return Object.freeze(
+		Object.fromEntries(
+			OUTPUTS.map((name) => {
+				const output = record[name];
+				if (typeof output !== "string") {
+					throw new Error(PREPARATION_PREFLIGHT_REASON.INVALID_CONFIG);
+				}
+				return [name, output];
+			}),
+		),
+	);
 }
 
 export function parsePreparationProductionConfig(
@@ -254,6 +282,92 @@ export function inspectPreparationProductionPreflight(
 		});
 		return {
 			status: PREPARATION_PREFLIGHT_STATUS.READY,
+			measurements: {
+				executableDigest: worker.executableDigest,
+				codeDigest: worker.codeDigest,
+				dependenciesDigest: worker.dependenciesDigest,
+				launcherDigest: worker.launcherDigest,
+			},
+		};
+	} catch {
+		return unavailable(PREPARATION_PREFLIGHT_REASON.RUNTIME_UNAVAILABLE);
+	} finally {
+		close(controlDirectory);
+		close(stateDirectory);
+	}
+}
+
+export function inspectPreparationProductionBinding(
+	input: unknown,
+	outputsInput: unknown,
+	policy: PreparationProductionPolicy = POLICY,
+): PreparationProductionBindingResult {
+	let stateDirectory: ProtectedDirectory | undefined;
+	let controlDirectory: ProtectedDirectory | undefined;
+	try {
+		let config: PreparationProductionConfig;
+		let outputs: Readonly<Record<string, string>>;
+		try {
+			config = parsePreparationProductionConfig(input);
+			outputs = preparationOutputs(outputsInput);
+		} catch {
+			return denied(PREPARATION_PREFLIGHT_REASON.INVALID_CONFIG);
+		}
+		if (
+			config.cwd !== policy.cwd ||
+			config.destination !== policy.destination
+		) {
+			return denied(PREPARATION_PREFLIGHT_REASON.POLICY_MISMATCH);
+		}
+		if (!inspectPublicKey(config.publicKeyPem)) {
+			return denied(PREPARATION_PREFLIGHT_REASON.PUBLIC_KEY_UNAVAILABLE);
+		}
+		try {
+			stateDirectory = new ProtectedDirectory(config.stateDirectory);
+		} catch {
+			return denied(PREPARATION_PREFLIGHT_REASON.STATE_DIRECTORY_UNSAFE);
+		}
+		try {
+			controlDirectory = new ProtectedDirectory(config.cwd);
+		} catch {
+			return denied(PREPARATION_PREFLIGHT_REASON.CONTROL_DIRECTORY_UNSAFE);
+		}
+		try {
+			const destination = lstatSync(config.destination);
+			if (destination.isSymbolicLink()) {
+				return denied(PREPARATION_PREFLIGHT_REASON.DESTINATION_UNSAFE);
+			}
+			return unavailable(PREPARATION_PREFLIGHT_REASON.DESTINATION_PRESENT);
+		} catch (error) {
+			if (
+				!(
+					error &&
+					typeof error === "object" &&
+					"code" in error &&
+					error.code === "ENOENT"
+				)
+			) {
+				return denied(PREPARATION_PREFLIGHT_REASON.DESTINATION_UNSAFE);
+			}
+		}
+		const worker = captureWorker({
+			executable: config.workerExecutable,
+			executableDigest: config.workerExecutableDigest,
+			source: config.workerSource,
+			sourceDigest: config.workerSourceDigest,
+			launcher: config.launcher,
+			launcherDigest: config.launcherDigest,
+		});
+		const binding = bindPreparationRuntime(
+			worker,
+			outputs,
+			controlDirectory,
+			{ overallMs: policy.overallMs, testsMs: policy.testsMs },
+			false,
+		);
+		return {
+			status: PREPARATION_PREFLIGHT_STATUS.READY,
+			binding: binding.binding,
 			measurements: {
 				executableDigest: worker.executableDigest,
 				codeDigest: worker.codeDigest,

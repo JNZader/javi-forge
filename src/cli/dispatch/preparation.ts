@@ -32,6 +32,7 @@ export async function handlePreparation(cli: CLI): Promise<void> {
 		{
 			action: cli.input[1],
 			configPath: cli.flags.config,
+			outputsPath: cli.flags.outputs,
 			outputPath: cli.flags.output,
 			force: cli.flags.force,
 			json,

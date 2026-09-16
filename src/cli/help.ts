@@ -32,6 +32,7 @@ export const HELP_TEXT = `
     ai providers apply-scope  Apply smoke-test pass scope to Pi/OpenCode config
     preparation template   Write an operator-owned preparation config template
     preparation preflight  Read-only production preparation preflight
+    preparation bind       Compute a read-only production preparation binding
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
     plugin list       List installed plugins
@@ -121,6 +122,7 @@ export const HELP_TEXT = `
   Preparation options (javi-forge preparation)
     --output PATH   Write a preparation config template to this path
     --config PATH   Production preparation config JSON
+    --outputs PATH  Production preparation outputs JSON for binding computation
     --force         Overwrite an existing preparation template output
     --json          Emit the bounded preflight result as JSON
 
@@ -171,6 +173,7 @@ export const HELP_TEXT = `
     $ javi-forge pi providers export-free /tmp/pi-free-providers
     $ javi-forge preparation template --output preparation.config.example.json
     $ javi-forge preparation preflight --config preparation.config.json --json
+    $ javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
 `;
 
 /**
@@ -346,6 +349,7 @@ export const FLAGS_SCHEMA = {
 	passList: { type: "string", default: "" },
 	piSettings: { type: "string", default: "" },
 	opencodeConfig: { type: "string", default: "" },
+	outputs: { type: "string", default: "" },
 	// Workflow flags
 	template: { type: "string", default: "" },
 	output: { type: "string", default: "" },

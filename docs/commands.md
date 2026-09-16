@@ -216,6 +216,7 @@ Run read-only production preparation diagnostics.
 javi-forge preparation template --output preparation.config.example.json
 javi-forge preparation preflight --config preparation.config.json
 javi-forge preparation preflight --config preparation.config.json --json
+javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
 ```
 
 The template command writes an operator-owned JSON config skeleton with the exact
@@ -229,8 +230,13 @@ public key shape, verifies the operator-owned state/control directories, confirm
 the destination is absent for the non-overwrite run, and measures pinned
 worker/source/launcher digests.
 
-It does **not** execute the worker, stage outputs, verify or consume approvals,
-contact a model, deploy, publish, release, or write generated artifacts.
+The bind command additionally parses an exact six-output JSON object and computes
+the production approval binding for an external operator signer. It prints only
+bounded measurements and the binding, never the output payload contents.
+
+These commands do **not** execute the worker, stage outputs, verify or consume
+approvals, contact a model, deploy, publish, release, or write generated
+artifacts.
 
 ---
 

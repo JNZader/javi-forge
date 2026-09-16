@@ -17,6 +17,7 @@ import { OUTPUTS } from "./preparation-capability.js";
 import { createExecutorFixture } from "./preparation-executor.js";
 import {
 	createPreparationProductionConfigTemplate,
+	inspectPreparationProductionBinding,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_REASON,
 	PREPARATION_PREFLIGHT_STATUS,
@@ -159,6 +160,44 @@ describe("production preparation preflight contract", () => {
 				outputs(),
 			),
 		).toThrow("runtime-unavailable");
+	});
+
+	it("computes a bounded production approval binding without executing", () => {
+		const result = inspectPreparationProductionBinding(
+			config(),
+			outputs(),
+			policy(),
+		);
+
+		expect(result.status).toBe(PREPARATION_PREFLIGHT_STATUS.READY);
+		expect(result.binding).toMatch(/^[a-f0-9]{64}$/);
+		expect(result.measurements).toEqual({
+			executableDigest: digest(readFileSync(worker)),
+			codeDigest: digest(readFileSync(source)),
+			dependenciesDigest: digest(Buffer.from("[]")),
+			launcherDigest: digest(readFileSync("/usr/bin/bwrap")),
+		});
+		expect(readdirSync(control)).toEqual([]);
+		expect(readdirSync(state)).toEqual([]);
+		expect(() =>
+			createExecutorFixture(
+				result.measurements as Parameters<typeof createExecutorFixture>[0],
+				outputs(),
+			),
+		).toThrow("runtime-unavailable");
+	});
+
+	it("rejects malformed production outputs before binding", () => {
+		expect(
+			inspectPreparationProductionBinding(
+				config(),
+				{ ...outputs(), "extra.py": "surprise" },
+				policy(),
+			),
+		).toEqual({
+			status: PREPARATION_PREFLIGHT_STATUS.DENIED,
+			reason: PREPARATION_PREFLIGHT_REASON.INVALID_CONFIG,
+		});
 	});
 
 	it("rejects policy cwd and destination mismatches", () => {

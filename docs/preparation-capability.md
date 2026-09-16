@@ -73,6 +73,12 @@ the exact JSON skeleton an operator can fill before preflight. It writes only th
 template, refuses overwrite unless `--force` is explicit, and includes no private
 key, approval evidence, model credential, generated artifact, or production
 execution path.
+`javi-forge preparation bind --config <file> --outputs <file> [--json]` adds a
+second read-only diagnostic step: it validates the same runtime boundary, parses
+an exact six-output JSON object, and computes the approval binding an external
+operator signer would sign. It does not print output payload contents and still
+does not verify or consume approval evidence, execute the worker, stage outputs,
+contact a model, deploy, publish, or release.
 
 Remaining work is to connect this boundary through a separately reviewed
 production route with real operator configuration, production identity

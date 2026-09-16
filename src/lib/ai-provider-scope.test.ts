@@ -97,6 +97,32 @@ describe("provider scope application", () => {
 		);
 	});
 
+	it("refuses to overwrite an existing exclusive backup", async () => {
+		const dir = await tempDir();
+		const passPath = join(dir, "smoke.pass.tsv");
+		const settingsPath = join(dir, "settings.json");
+		const backupPath = `${settingsPath}.bak-20260915T120000Z`;
+		await writeFile(passPath, "openrouter-free\tdeepseek/free\tDeepSeek\n");
+		await writeFile(
+			settingsPath,
+			JSON.stringify({ enabledModels: ["old/model"] }),
+		);
+		await writeFile(backupPath, "existing-backup");
+
+		await expect(
+			applyProviderScope({
+				inputPath: passPath,
+				target: "pi",
+				piSettingsPath: settingsPath,
+				now: new Date("2026-09-15T12:00:00Z"),
+			}),
+		).rejects.toMatchObject({ code: "EEXIST" });
+		await expect(readFile(backupPath, "utf8")).resolves.toBe("existing-backup");
+		await expect(readFile(settingsPath, "utf8")).resolves.toContain(
+			"old/model",
+		);
+	});
+
 	it("dry-runs without writing Pi settings", async () => {
 		const dir = await tempDir();
 		const passPath = join(dir, "smoke.pass.tsv");

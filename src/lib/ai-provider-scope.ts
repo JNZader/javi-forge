@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -208,7 +208,8 @@ async function writeJsonWithBackup(
 	if (dryRun) return undefined;
 	await mkdir(dirname(path), { recursive: true });
 	const backupPath = `${path}.bak-${timestamp(now)}`;
-	await copyFile(path, backupPath);
+	const original = await readFile(path, "utf8");
+	await writeFile(backupPath, original, { flag: "wx" });
 	await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 	return backupPath;
 }

@@ -3,6 +3,7 @@ import {
 	convertProviderBundle,
 	writeFreeProvidersBundle,
 } from "../lib/ai-provider-bundles.js";
+import { writeModelAssignmentProfiles } from "../lib/ai-provider-profiles.js";
 import { applyProviderScope } from "../lib/ai-provider-scope.js";
 import { runProviderSmokeTests } from "../lib/ai-provider-smoke.js";
 import type { InitStep } from "../types/index.js";
@@ -26,10 +27,15 @@ vi.mock("../lib/ai-provider-scope.js", () => ({
 	applyProviderScope: vi.fn(),
 }));
 
+vi.mock("../lib/ai-provider-profiles.js", () => ({
+	writeModelAssignmentProfiles: vi.fn(),
+}));
+
 const mockWriteBundle = vi.mocked(writeFreeProvidersBundle);
 const mockConvertBundle = vi.mocked(convertProviderBundle);
 const mockRunSmokeTests = vi.mocked(runProviderSmokeTests);
 const mockApplyScope = vi.mocked(applyProviderScope);
+const mockWriteProfiles = vi.mocked(writeModelAssignmentProfiles);
 
 function collectSteps(): {
 	steps: InitStep[];
@@ -257,6 +263,58 @@ describe("runAiProvidersCommand", () => {
 		});
 	});
 
+	it("generates smoke-tested model assignment profiles", async () => {
+		mockWriteProfiles.mockResolvedValue({
+			inputPath: "/target/smoke.pass.tsv",
+			outputDir: "/profiles",
+			dryRun: true,
+			wrote: false,
+			files: [
+				"/profiles/model-assignment.profiles.generated.json",
+				"/profiles/model-assignment.profiles.generated.md",
+			],
+			passModels: 3,
+			profileCounts: {
+				"sdd-strong": 2,
+				"sdd-mid": 2,
+				"sdd-cheap": 2,
+			},
+			profilePrimaries: {
+				"sdd-strong": "opencode-go/qwen3-coder",
+				"sdd-mid": "opencode-go/qwen3-coder",
+				"sdd-cheap": "google/gemini-3.1-flash-lite",
+			},
+			warnings: [],
+		});
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "profile-plan",
+				outputDir: "/profiles",
+				passListPath: "/target/smoke.pass.tsv",
+				limit: 2,
+				dryRun: true,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS });
+		expect(mockWriteProfiles).toHaveBeenCalledExactlyOnceWith({
+			inputPath: "/target/smoke.pass.tsv",
+			outputDir: "/profiles",
+			maxCandidatesPerProfile: 2,
+			dryRun: true,
+		});
+		expect(steps[1]!.detail).toContain("dry-run: would generate");
+		expect(steps[1]!.detail).toContain("sdd-strong: 2");
+		expect(steps[1]!.detail).toContain(
+			"sdd-cheap: google/gemini-3.1-flash-lite",
+		);
+		expect(steps[1]!.detail).toContain("runtime configs unchanged");
+	});
+
 	it("reports usage for unsupported subcommands", async () => {
 		const { steps, onStep } = collectSteps();
 
@@ -270,6 +328,7 @@ describe("runAiProvidersCommand", () => {
 		expect(mockConvertBundle).not.toHaveBeenCalled();
 		expect(mockRunSmokeTests).not.toHaveBeenCalled();
 		expect(mockApplyScope).not.toHaveBeenCalled();
+		expect(mockWriteProfiles).not.toHaveBeenCalled();
 		expect(steps[0]!.detail).toContain("javi-forge ai providers export-free");
 	});
 });

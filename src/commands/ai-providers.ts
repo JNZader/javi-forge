@@ -6,6 +6,7 @@ import {
 	type ProviderBundleTarget,
 	writeFreeProvidersBundle,
 } from "../lib/ai-provider-bundles.js";
+import { writeModelAssignmentProfiles } from "../lib/ai-provider-profiles.js";
 import {
 	applyProviderScope,
 	type ProviderScopeTarget,
@@ -35,6 +36,7 @@ export const AI_PROVIDERS_PROVIDER_ACTION = {
 	CONVERT: "convert",
 	SMOKE_TEST: "smoke-test",
 	APPLY_SCOPE: "apply-scope",
+	PROFILE_PLAN: "profile-plan",
 } as const;
 
 export interface AiProvidersCommandResult {
@@ -118,6 +120,7 @@ function usage(): string {
 		"  javi-forge ai providers convert <pi|opencode> <pi|opencode> [output-dir] --config <input-path>",
 		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--runtime pi|opencode] [--provider id] [--family text] [--model text] [--status pass|failed|...] [--report <previous.jsonl>]",
 		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both [--dry-run]",
+		"  javi-forge ai providers profile-plan <output-dir> --pass-list <pass.tsv|report.jsonl> [--limit candidates-per-profile] [--dry-run]",
 	].join("\n");
 }
 
@@ -334,6 +337,61 @@ async function applyScope(
 	return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
 }
 
+function profilePlanDetail(
+	result: Awaited<ReturnType<typeof writeModelAssignmentProfiles>>,
+): string {
+	return [
+		`${result.dryRun ? "dry-run: would generate" : "generated"}:`,
+		...result.files.map((file) => `  - ${file}`),
+		`pass models: ${result.passModels}`,
+		"profile candidates:",
+		renderCounts(result.profileCounts),
+		"profile primaries:",
+		...Object.entries(result.profilePrimaries).map(
+			([profile, primary]) => `  - ${profile}: ${primary ?? "n/a"}`,
+		),
+		...(result.warnings.length
+			? ["warnings:", ...result.warnings.map((warning) => `  - ${warning}`)]
+			: []),
+		"secrets: none written; runtime configs unchanged",
+	].join("\n");
+}
+
+async function profilePlan(
+	request: AiProvidersCommandRequest,
+	onStep: StepCallback,
+): Promise<AiProvidersCommandResult> {
+	report(
+		onStep,
+		"ai-providers-profile-plan",
+		"Plan AI model profiles",
+		"running",
+	);
+	const outputDir = emptyToUndefined(request.outputDir);
+	if (!outputDir) throw new Error("profile-plan requires <output-dir>");
+	const inputPath =
+		emptyToUndefined(request.passListPath) ??
+		emptyToUndefined(request.reportPath);
+	if (!inputPath)
+		throw new Error(
+			"profile-plan requires --pass-list <pass.tsv|report.jsonl>",
+		);
+	const result = await writeModelAssignmentProfiles({
+		inputPath,
+		outputDir,
+		maxCandidatesPerProfile: request.limit,
+		dryRun: request.dryRun,
+	});
+	report(
+		onStep,
+		"ai-providers-profile-plan",
+		"Plan AI model profiles",
+		"done",
+		profilePlanDetail(result),
+	);
+	return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
+}
+
 export async function runAiProvidersCommand(
 	request: AiProvidersCommandRequest,
 	onStep: StepCallback,
@@ -355,6 +413,9 @@ export async function runAiProvidersCommand(
 		}
 		if (request.providersAction === AI_PROVIDERS_PROVIDER_ACTION.APPLY_SCOPE) {
 			return await applyScope(request, onStep);
+		}
+		if (request.providersAction === AI_PROVIDERS_PROVIDER_ACTION.PROFILE_PLAN) {
+			return await profilePlan(request, onStep);
 		}
 		report(onStep, "ai-providers-usage", "AI providers", "error", usage());
 		return { status: AI_PROVIDERS_COMMAND_STATUS.FAILURE };

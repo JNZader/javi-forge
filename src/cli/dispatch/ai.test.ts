@@ -224,4 +224,46 @@ describe("ai dispatch", () => {
 			expect.any(Function),
 		);
 	});
+
+	it("routes profile-plan arguments", async () => {
+		mockRun.mockResolvedValue({ status: "success" });
+
+		await handleAi({
+			input: ["ai", "providers", "profile-plan", "/profiles"],
+			flags: {
+				target: "",
+				config: "",
+				dryRun: true,
+				report: "",
+				provider: "",
+				family: "",
+				model: "",
+				status: "",
+				limit: 4,
+				timeout: 600,
+				runtime: "",
+				includeLocal: false,
+				piCommand: "",
+				opencodeCommand: "",
+				opencodeAgent: "",
+				smokeCwd: "",
+				envFile: "",
+				prompt: "",
+				passList: "/target/smoke.pass.tsv",
+				piSettings: "",
+				opencodeConfig: "",
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			expect.objectContaining({
+				providersAction: "profile-plan",
+				outputDir: "/profiles",
+				passListPath: "/target/smoke.pass.tsv",
+				limit: 4,
+				dryRun: true,
+			}),
+			expect.any(Function),
+		);
+	});
 });

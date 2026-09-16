@@ -164,6 +164,8 @@ javi-forge ai providers convert pi opencode /tmp/pi-to-opencode --config ~/.pi/a
 javi-forge ai providers smoke-test /tmp/pi-smoke --runtime pi --provider openrouter-free --env-file ~/.config/javi-forge/secrets/providers.env
 javi-forge ai providers smoke-test /tmp/opencode-smoke --runtime opencode --provider google --env-file ~/.config/javi-forge/secrets/providers.env
 javi-forge ai providers apply-scope /tmp/opencode-smoke/smoke.jsonl --target opencode --dry-run
+profile_dir="$(mktemp -d "${TMPDIR:-/tmp}/javi-forge-model-profiles.XXXXXX")"
+javi-forge ai providers profile-plan "$profile_dir" --pass-list /tmp/opencode-smoke/javi-forge-provider-smoke-<timestamp>.pass.tsv --limit 8
 ```
 
 ### OpenCode smoke-test behavior
@@ -205,6 +207,29 @@ runtime-visible model list.
 | `--opencode-agent` | string | `title` | OpenCode agent used by smoke probes |
 | `--smoke-cwd` | string | OS temp dir for OpenCode | Working directory for smoke commands |
 | `--timeout` | number | `30` | Per-model timeout in seconds |
+
+### Model assignment profile plans
+
+`javi-forge ai providers profile-plan <output-dir> --pass-list <pass.tsv|report.jsonl>`
+turns smoke-tested provider evidence into advisory SDD model-assignment files:
+
+- `model-assignment.profiles.generated.json`
+- `model-assignment.profiles.generated.md`
+
+The generated plan groups passing models into:
+
+- `sdd-strong` — architecture, design, verification, review, and high-ambiguity
+  decisions;
+- `sdd-mid` — implementation, remediation, and multi-file debugging;
+- `sdd-cheap` — specs, tasks, archive summaries, and low-risk continuation.
+
+This command does **not** edit Pi, OpenCode, Codex, Cursor, Grok, provider auth,
+secrets, or runtime configuration. It only writes advisory artifacts under the
+requested output directory. Use `--dry-run` to preview file paths and selected
+counts without writing. Generated files are created exclusively; rerun into a
+fresh directory instead of overwriting existing artifacts. Do not feed profile
+plans from smoke-test dry-run output; `profile-plan` rejects dry-run JSONL
+reports, and TSV pass lists carry no provenance.
 
 ---
 

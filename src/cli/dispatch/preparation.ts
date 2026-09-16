@@ -31,11 +31,15 @@ export async function handlePreparation(cli: CLI): Promise<void> {
 	const result = await runPreparationCommand(
 		{
 			action: cli.input[1],
+			binding: cli.flags.binding,
 			configPath: cli.flags.config,
+			expiresAt: cli.flags.expiresAt,
 			outputsPath: cli.flags.outputs,
 			outputPath: cli.flags.output,
 			force: cli.flags.force,
+			issuedAt: cli.flags.issuedAt,
 			json,
+			nonce: cli.flags.nonce,
 		},
 		json ? () => {} : printStep,
 	);

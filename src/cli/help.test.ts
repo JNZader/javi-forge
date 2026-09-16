@@ -151,6 +151,7 @@ describe("help — preparation preflight", () => {
 		expect(HELP_TEXT).toContain("preparation template");
 		expect(HELP_TEXT).toContain("preparation preflight");
 		expect(HELP_TEXT).toContain("preparation bind");
+		expect(HELP_TEXT).toContain("preparation approval-message");
 		expect(HELP_TEXT).toContain(
 			"Write an operator-owned preparation config template",
 		);
@@ -158,16 +159,30 @@ describe("help — preparation preflight", () => {
 		expect(HELP_TEXT).toContain(
 			"Compute a read-only production preparation binding",
 		);
+		expect(HELP_TEXT).toContain("Prepare the exact approval message to sign");
 		expect(HELP_TEXT).toContain("Write a preparation config template");
 		expect(HELP_TEXT).toContain("Production preparation config JSON");
 		expect(HELP_TEXT).toContain("Production preparation outputs JSON");
+		expect(HELP_TEXT).toContain("Production preparation binding");
 		expect(HELP_TEXT).toContain("--output");
 		expect(HELP_TEXT).toContain("--outputs");
+		expect(HELP_TEXT).toContain("--binding");
+		expect(HELP_TEXT).toContain("--nonce");
+		expect(HELP_TEXT).toContain("--issued-at");
+		expect(HELP_TEXT).toContain("--expires-at");
 		expect(HELP_TEXT).toContain("--json");
 		expect(FLAGS_SCHEMA).toHaveProperty("output");
 		expect(FLAGS_SCHEMA.output.type).toBe("string");
 		expect(FLAGS_SCHEMA).toHaveProperty("outputs");
 		expect(FLAGS_SCHEMA.outputs.type).toBe("string");
+		expect(FLAGS_SCHEMA).toHaveProperty("binding");
+		expect(FLAGS_SCHEMA.binding.type).toBe("string");
+		expect(FLAGS_SCHEMA).toHaveProperty("nonce");
+		expect(FLAGS_SCHEMA.nonce.type).toBe("string");
+		expect(FLAGS_SCHEMA).toHaveProperty("issuedAt");
+		expect(FLAGS_SCHEMA.issuedAt.type).toBe("number");
+		expect(FLAGS_SCHEMA).toHaveProperty("expiresAt");
+		expect(FLAGS_SCHEMA.expiresAt.type).toBe("number");
 	});
 
 	it("shows a preparation preflight example", () => {
@@ -175,6 +190,7 @@ describe("help — preparation preflight", () => {
 		expect(examples).toContain("preparation template --output");
 		expect(examples).toContain("preparation preflight --config");
 		expect(examples).toContain("preparation bind --config");
+		expect(examples).toContain("preparation approval-message --binding");
 	});
 });
 

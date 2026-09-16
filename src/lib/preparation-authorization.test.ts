@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	ApprovalAuthority,
 	approvalMessage,
+	createApprovalPayload,
 } from "./preparation-authorization.js";
 
 const keys = generateKeyPairSync("ed25519");
@@ -51,6 +52,37 @@ afterEach(() => {
 		rmSync(root, { recursive: true, force: true });
 });
 describe("external signed preparation approval", () => {
+	it("builds the signer payload and exact domain-separated message", () => {
+		const p = createApprovalPayload(
+			{
+				binding,
+				nonce: "a".repeat(64),
+				issuedAt: 1000,
+				expiresAt: 601000,
+			},
+			1000,
+		);
+
+		expect(p).toEqual(payload());
+		expect(approvalMessage(p)).toBe(
+			`javi-forge/six-file-preparation/v1\n${JSON.stringify([1, "six-file-preparation", binding, "a".repeat(64), 1000, 601000, 1])}`,
+		);
+	});
+
+	it("rejects invalid signer payload inputs", () => {
+		expect(() =>
+			createApprovalPayload(
+				{
+					binding: "not-a-binding",
+					nonce: "a".repeat(64),
+					issuedAt: 1000,
+					expiresAt: 601000,
+				},
+				1000,
+			),
+		).toThrow("approval-denied");
+	});
+
 	it("verifies without consuming and consumes only once", () => {
 		const { authority, root } = setup();
 		const approval = authority.verify(evidence(), binding, 1000);

@@ -33,6 +33,7 @@ export const HELP_TEXT = `
     preparation template   Write an operator-owned preparation config template
     preparation preflight  Read-only production preparation preflight
     preparation bind       Compute a read-only production preparation binding
+    preparation approval-message  Prepare the exact approval message to sign
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
     plugin list       List installed plugins
@@ -123,6 +124,10 @@ export const HELP_TEXT = `
     --output PATH   Write a preparation config template to this path
     --config PATH   Production preparation config JSON
     --outputs PATH  Production preparation outputs JSON for binding computation
+    --binding HEX   Production preparation binding for approval-message
+    --nonce HEX     Optional 32-byte hex approval nonce (generated if omitted)
+    --issued-at MS  Optional approval issued-at epoch milliseconds
+    --expires-at MS Optional approval expiry epoch milliseconds
     --force         Overwrite an existing preparation template output
     --json          Emit the bounded preflight result as JSON
 
@@ -174,6 +179,7 @@ export const HELP_TEXT = `
     $ javi-forge preparation template --output preparation.config.example.json
     $ javi-forge preparation preflight --config preparation.config.json --json
     $ javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
+    $ javi-forge preparation approval-message --binding <hex> --json
 `;
 
 /**
@@ -350,6 +356,10 @@ export const FLAGS_SCHEMA = {
 	piSettings: { type: "string", default: "" },
 	opencodeConfig: { type: "string", default: "" },
 	outputs: { type: "string", default: "" },
+	binding: { type: "string", default: "" },
+	nonce: { type: "string", default: "" },
+	issuedAt: { type: "number", default: 0 },
+	expiresAt: { type: "number", default: 0 },
 	// Workflow flags
 	template: { type: "string", default: "" },
 	output: { type: "string", default: "" },

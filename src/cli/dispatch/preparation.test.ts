@@ -33,7 +33,11 @@ describe("preparation dispatch", () => {
 		await handlePreparation({
 			input: ["preparation", "preflight"],
 			flags: {
+				binding: "",
 				config: "/safe/config.json",
+				expiresAt: 0,
+				issuedAt: 0,
+				nonce: "",
 				outputs: "",
 				output: "",
 				force: false,
@@ -44,11 +48,15 @@ describe("preparation dispatch", () => {
 		expect(mockRun).toHaveBeenCalledWith(
 			{
 				action: "preflight",
+				binding: "",
 				configPath: "/safe/config.json",
+				expiresAt: 0,
 				outputsPath: "",
 				outputPath: "",
 				force: false,
+				issuedAt: 0,
 				json: false,
+				nonce: "",
 			},
 			expect.any(Function),
 		);
@@ -65,6 +73,10 @@ describe("preparation dispatch", () => {
 			input: ["preparation", "preflight"],
 			flags: {
 				config: "/safe/config.json",
+				binding: "",
+				nonce: "",
+				issuedAt: 0,
+				expiresAt: 0,
 				outputs: "",
 				output: "",
 				force: false,
@@ -97,7 +109,11 @@ describe("preparation dispatch", () => {
 		await handlePreparation({
 			input: ["preparation", "template"],
 			flags: {
+				binding: "",
 				config: "",
+				expiresAt: 0,
+				issuedAt: 0,
+				nonce: "",
 				outputs: "",
 				output: "/safe/preparation.config.example.json",
 				force: true,
@@ -108,11 +124,15 @@ describe("preparation dispatch", () => {
 		expect(mockRun).toHaveBeenCalledWith(
 			{
 				action: "template",
+				binding: "",
 				configPath: "",
+				expiresAt: 0,
 				outputsPath: "",
 				outputPath: "/safe/preparation.config.example.json",
 				force: true,
+				issuedAt: 0,
 				json: false,
+				nonce: "",
 			},
 			expect.any(Function),
 		);
@@ -128,7 +148,11 @@ describe("preparation dispatch", () => {
 		await handlePreparation({
 			input: ["preparation", "bind"],
 			flags: {
+				binding: "",
 				config: "/safe/config.json",
+				expiresAt: 0,
+				issuedAt: 0,
+				nonce: "",
 				outputs: "/safe/outputs.json",
 				output: "",
 				force: false,
@@ -139,11 +163,65 @@ describe("preparation dispatch", () => {
 		expect(mockRun).toHaveBeenCalledWith(
 			{
 				action: "bind",
+				binding: "",
 				configPath: "/safe/config.json",
+				expiresAt: 0,
 				outputsPath: "/safe/outputs.json",
 				outputPath: "",
 				force: false,
+				issuedAt: 0,
 				json: false,
+				nonce: "",
+			},
+			expect.any(Function),
+		);
+		expect(process.exitCode).toBe(0);
+	});
+
+	it("routes approval-message arguments", async () => {
+		mockRun.mockResolvedValue({
+			status: "success",
+			approvalMessage: {
+				payload: {
+					version: 1,
+					purpose: "six-file-preparation",
+					binding: "b".repeat(64),
+					nonce: "a".repeat(64),
+					issuedAt: 1000,
+					expiresAt: 601000,
+					maxUses: 1,
+				},
+				message: "message-to-sign",
+			},
+		});
+
+		await handlePreparation({
+			input: ["preparation", "approval-message"],
+			flags: {
+				binding: "b".repeat(64),
+				config: "",
+				expiresAt: 601000,
+				issuedAt: 1000,
+				nonce: "a".repeat(64),
+				outputs: "",
+				output: "",
+				force: false,
+				json: false,
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			{
+				action: "approval-message",
+				binding: "b".repeat(64),
+				configPath: "",
+				expiresAt: 601000,
+				outputsPath: "",
+				outputPath: "",
+				force: false,
+				issuedAt: 1000,
+				json: false,
+				nonce: "a".repeat(64),
 			},
 			expect.any(Function),
 		);

@@ -1,4 +1,11 @@
+import { randomBytes } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import {
+	type ApprovalPayload,
+	approvalMessage,
+	createApprovalPayload,
+} from "../lib/preparation-authorization.js";
+import { POLICY } from "../lib/preparation-capability.js";
 import {
 	createPreparationProductionConfigTemplate,
 	inspectPreparationProductionBinding,
@@ -20,6 +27,7 @@ export type PreparationCommandStatus =
 	(typeof PREPARATION_COMMAND_STATUS)[keyof typeof PREPARATION_COMMAND_STATUS];
 
 export const PREPARATION_ACTION = {
+	APPROVAL_MESSAGE: "approval-message",
 	BIND: "bind",
 	TEMPLATE: "template",
 	PREFLIGHT: "preflight",
@@ -27,17 +35,27 @@ export const PREPARATION_ACTION = {
 
 export interface PreparationCommandRequest {
 	action?: string;
+	binding?: string;
 	configPath?: string;
+	expiresAt?: number;
 	outputsPath?: string;
 	outputPath?: string;
 	force: boolean;
+	issuedAt?: number;
 	json: boolean;
+	nonce?: string;
+}
+
+export interface PreparationApprovalMessageResult {
+	payload: ApprovalPayload;
+	message: string;
 }
 
 export interface PreparationCommandResult {
 	status: PreparationCommandStatus;
 	preflight?: PreparationPreflightResult;
 	binding?: PreparationProductionBindingResult;
+	approvalMessage?: PreparationApprovalMessageResult;
 	outputPath?: string;
 	error?: string;
 }
@@ -58,6 +76,7 @@ function usage(): string {
 		"  javi-forge preparation template --output <path> [--force]",
 		"  javi-forge preparation preflight --config <path> [--json]",
 		"  javi-forge preparation bind --config <path> --outputs <path> [--json]",
+		"  javi-forge preparation approval-message --binding <hex> [--nonce <hex>] [--issued-at <ms>] [--expires-at <ms>] [--json]",
 	].join("\n");
 }
 
@@ -122,11 +141,44 @@ async function writeConfigTemplate(
 	return path;
 }
 
+function optionalPositiveInteger(
+	value: number | undefined,
+): number | undefined {
+	if (value === undefined || value === 0) return undefined;
+	if (!Number.isSafeInteger(value) || value < 0) {
+		throw new Error("approval timestamps must be safe positive integers");
+	}
+	return value;
+}
+
+function createPreparationApprovalMessage(
+	request: PreparationCommandRequest,
+): PreparationApprovalMessageResult {
+	const now = Date.now();
+	const issuedAt = optionalPositiveInteger(request.issuedAt) ?? now;
+	const expiresAt =
+		optionalPositiveInteger(request.expiresAt) ?? issuedAt + POLICY.lifetimeMs;
+	const payload = createApprovalPayload(
+		{
+			binding: request.binding?.trim() ?? "",
+			nonce: request.nonce?.trim() || randomBytes(32).toString("hex"),
+			issuedAt,
+			expiresAt,
+		},
+		now,
+	);
+	return {
+		payload,
+		message: approvalMessage(payload),
+	};
+}
+
 export async function runPreparationCommand(
 	request: PreparationCommandRequest,
 	onStep: StepCallback,
 ): Promise<PreparationCommandResult> {
 	if (
+		request.action !== PREPARATION_ACTION.APPROVAL_MESSAGE &&
 		request.action !== PREPARATION_ACTION.BIND &&
 		request.action !== PREPARATION_ACTION.PREFLIGHT &&
 		request.action !== PREPARATION_ACTION.TEMPLATE
@@ -155,6 +207,35 @@ export async function runPreparationCommand(
 				`wrote ${outputPath}\nside effects: wrote template only; no worker execution, approval verification, approval consumption, staging, model call, deploy, publish, or release`,
 			);
 			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, outputPath };
+		}
+
+		if (request.action === PREPARATION_ACTION.APPROVAL_MESSAGE) {
+			report(
+				onStep,
+				"preparation-approval-message",
+				"Preparation approval message",
+				"running",
+			);
+			const prepared = createPreparationApprovalMessage(request);
+			report(
+				onStep,
+				"preparation-approval-message",
+				"Preparation approval message",
+				"done",
+				[
+					`binding: ${prepared.payload.binding}`,
+					`nonce: ${prepared.payload.nonce}`,
+					`issuedAt: ${prepared.payload.issuedAt}`,
+					`expiresAt: ${prepared.payload.expiresAt}`,
+					"message:",
+					prepared.message,
+					"side effects: none; no signing, no private key access, no worker execution, no approval verification, no approval consumption, no staging, no model call, no deploy, no publish, no release",
+				].join("\n"),
+			);
+			return {
+				status: PREPARATION_COMMAND_STATUS.SUCCESS,
+				approvalMessage: prepared,
+			};
 		}
 
 		if (request.action === PREPARATION_ACTION.BIND) {

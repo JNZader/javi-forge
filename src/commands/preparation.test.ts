@@ -148,6 +148,7 @@ describe("runPreparationCommand", () => {
 		expect(missing.error).toContain("--config");
 		expect(unsupported.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
 		expect(unsupported.error).toContain("preparation bind");
+		expect(unsupported.error).toContain("approval-message");
 		expect(mockInspect).not.toHaveBeenCalled();
 		expect(steps.at(-1)?.detail).toContain("preparation preflight");
 	});
@@ -235,6 +236,66 @@ describe("runPreparationCommand", () => {
 		expect(result.error).toBe("preparation outputs are not valid JSON");
 		expect(steps.at(-1)?.detail).toBe("preparation outputs are not valid JSON");
 		expect(steps.at(-1)?.detail).not.toContain("secret-output");
+		expect(mockBind).not.toHaveBeenCalled();
+	});
+
+	it("prepares an approval message without signing or executing", async () => {
+		const issuedAt = Date.now();
+		const binding = "b".repeat(64);
+		const nonce = "a".repeat(64);
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "approval-message",
+				binding,
+				nonce,
+				issuedAt,
+				expiresAt: issuedAt + 600000,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.SUCCESS);
+		expect(result.approvalMessage?.payload).toMatchObject({
+			version: 1,
+			purpose: "six-file-preparation",
+			binding,
+			nonce,
+			issuedAt,
+			expiresAt: issuedAt + 600000,
+			maxUses: 1,
+		});
+		expect(result.approvalMessage?.message).toContain(
+			"javi-forge/six-file-preparation/v1",
+		);
+		expect(steps.at(-1)?.detail).toContain(`binding: ${binding}`);
+		expect(steps.at(-1)?.detail).toContain("no signing");
+		expect(steps.at(-1)?.detail).toContain("no worker execution");
+		expect(mockInspect).not.toHaveBeenCalled();
+		expect(mockBind).not.toHaveBeenCalled();
+	});
+
+	it("rejects malformed approval message input without signing", async () => {
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "approval-message",
+				binding: "not-a-binding",
+				nonce: "a".repeat(64),
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
+		expect(result.error).toBe("approval-denied");
+		expect(steps.at(-1)?.detail).toBe("approval-denied");
+		expect(mockInspect).not.toHaveBeenCalled();
 		expect(mockBind).not.toHaveBeenCalled();
 	});
 

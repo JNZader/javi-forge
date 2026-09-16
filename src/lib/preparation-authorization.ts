@@ -11,7 +11,7 @@ import {
 import { POLICY } from "./preparation-capability.js";
 import { ProtectedDirectory } from "./preparation-stager.js";
 
-interface ApprovalPayload {
+export interface ApprovalPayload {
 	version: number;
 	purpose: string;
 	binding: string;
@@ -19,6 +19,13 @@ interface ApprovalPayload {
 	issuedAt: number;
 	expiresAt: number;
 	maxUses: number;
+}
+
+export interface ApprovalPayloadInput {
+	binding: string;
+	nonce: string;
+	issuedAt: number;
+	expiresAt: number;
 }
 export interface VerifiedApproval {
 	readonly payload: Readonly<ApprovalPayload>;
@@ -35,6 +42,33 @@ const KEYS = [
 const HEX = /^[a-f0-9]{64}$/;
 function deny(): never {
 	throw new Error("approval-denied");
+}
+export function createApprovalPayload(
+	input: ApprovalPayloadInput,
+	now: number,
+): ApprovalPayload {
+	if (
+		!HEX.test(input.binding) ||
+		!HEX.test(input.nonce) ||
+		!Number.isSafeInteger(now) ||
+		!Number.isSafeInteger(input.issuedAt) ||
+		!Number.isSafeInteger(input.expiresAt) ||
+		input.issuedAt < 0 ||
+		input.issuedAt > now ||
+		input.expiresAt <= now ||
+		input.expiresAt - input.issuedAt > POLICY.lifetimeMs
+	) {
+		deny();
+	}
+	return Object.freeze({
+		version: 1,
+		purpose: "six-file-preparation",
+		binding: input.binding,
+		nonce: input.nonce,
+		issuedAt: input.issuedAt,
+		expiresAt: input.expiresAt,
+		maxUses: 1,
+	});
 }
 /** Domain-separated canonical message. No signing function or private key exists here. */
 export function approvalMessage(p: ApprovalPayload) {

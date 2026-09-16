@@ -562,6 +562,9 @@ describe("rollbackModelAssignmentProfileOverlay", () => {
 		expect(JSON.parse(readFileSync(safetyPath, "utf8"))).toEqual({
 			current: true,
 		});
+		expect(existsSync(`${settingsPath}.rollback-tmp-20260916T120000Z`)).toBe(
+			false,
+		);
 	});
 
 	it("refuses rollback when a pre-rollback safety copy already exists", async () => {

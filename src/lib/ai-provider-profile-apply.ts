@@ -1,4 +1,4 @@
-import { copyFile, readFile, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { parseModelAssignmentProfileOverlay } from "./ai-provider-profiles.js";
@@ -333,7 +333,10 @@ export async function rollbackModelAssignmentProfileOverlay(
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		}
-		await copyFile(backupPath, destPath);
+		const restored = await readFile(backupPath, "utf8");
+		const tmpPath = `${destPath}.rollback-tmp-${timestamp(now)}`;
+		await writeFile(tmpPath, restored, { flag: "wx" });
+		await rename(tmpPath, destPath);
 	}
 	return {
 		target,

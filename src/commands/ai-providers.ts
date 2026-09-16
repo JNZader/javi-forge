@@ -135,7 +135,7 @@ function usage(): string {
 		"  javi-forge ai providers export-free [output-dir] --target pi|opencode|both",
 		"  javi-forge ai providers convert <pi|opencode> <pi|opencode> [output-dir] --config <input-path>",
 		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--runtime pi|opencode] [--provider id] [--family text] [--model text] [--status pass|failed|...] [--report <previous.jsonl>]",
-		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both [--dry-run]",
+		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both --pi-settings|--opencode-config <path> [--dry-run]",
 		`  javi-forge ai providers profile-plan <output-dir> --pass-list <pass.tsv|report.jsonl> [--preset ${MODEL_ASSIGNMENT_PRESET.COMMUNITY_BACKEND_OPENCODE_GO}] [--limit candidates-per-profile] [--dry-run]`,
 		"  javi-forge ai providers profile-export <profile-plan.json> [output-dir] --target pi|opencode|codex|both [--dry-run]",
 		"  javi-forge ai providers profile-apply <overlay.json> --pass-list <pass.tsv|report.jsonl> --target pi|opencode --pi-settings|--opencode-config <path> [--dry-run]",
@@ -339,11 +339,27 @@ async function applyScope(
 		emptyToUndefined(request.outputDir);
 	if (!inputPath)
 		throw new Error("apply-scope requires <pass.tsv|report.jsonl>");
+	const target = normalizeScopeTarget(request.target);
+	const resolvedTarget = target ?? "both";
+	const piSettingsPath = emptyToUndefined(request.piSettingsPath);
+	const opencodeConfigPath = emptyToUndefined(request.opencodeConfigPath);
+	if (
+		(resolvedTarget === "pi" || resolvedTarget === "both") &&
+		!piSettingsPath
+	) {
+		throw new Error("apply-scope requires --pi-settings <path>");
+	}
+	if (
+		(resolvedTarget === "opencode" || resolvedTarget === "both") &&
+		!opencodeConfigPath
+	) {
+		throw new Error("apply-scope requires --opencode-config <path>");
+	}
 	const result = await applyProviderScope({
 		inputPath,
-		target: normalizeScopeTarget(request.target),
-		piSettingsPath: emptyToUndefined(request.piSettingsPath),
-		opencodeConfigPath: emptyToUndefined(request.opencodeConfigPath),
+		target,
+		piSettingsPath,
+		opencodeConfigPath,
 		dryRun: request.dryRun,
 	});
 	report(

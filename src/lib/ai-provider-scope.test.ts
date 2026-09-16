@@ -278,4 +278,22 @@ describe("provider scope application", () => {
 			"openrouter-free": 2,
 		});
 	});
+
+	it("refuses Pi apply-scope without --pi-settings", async () => {
+		await expect(
+			applyProviderScope({
+				inputPath: "/missing-pass.tsv",
+				target: "pi",
+			}),
+		).rejects.toThrow("apply-scope requires --pi-settings");
+	});
+
+	it("refuses OpenCode apply-scope without --opencode-config", async () => {
+		await expect(
+			applyProviderScope({
+				inputPath: "/missing-pass.tsv",
+				target: "opencode",
+			}),
+		).rejects.toThrow("apply-scope requires --opencode-config");
+	});
 });

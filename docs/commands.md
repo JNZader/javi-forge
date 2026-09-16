@@ -163,7 +163,7 @@ javi-forge ai providers export-free /tmp/free-providers --target both
 javi-forge ai providers convert pi opencode /tmp/pi-to-opencode --config ~/.pi/agent/models.json
 javi-forge ai providers smoke-test /tmp/pi-smoke --runtime pi --provider openrouter-free --env-file ~/.config/javi-forge/secrets/providers.env
 javi-forge ai providers smoke-test /tmp/opencode-smoke --runtime opencode --provider google --env-file ~/.config/javi-forge/secrets/providers.env
-javi-forge ai providers apply-scope /tmp/opencode-smoke/smoke.jsonl --target opencode --dry-run
+javi-forge ai providers apply-scope /tmp/opencode-smoke/smoke.jsonl --target opencode --opencode-config /tmp/opencode.json --dry-run
 profile_dir="$(mktemp -d "${TMPDIR:-/tmp}/javi-forge-model-profiles.XXXXXX")"
 javi-forge ai providers profile-plan "$profile_dir" --pass-list /tmp/opencode-smoke/javi-forge-provider-smoke-<timestamp>.pass.tsv --limit 8
 javi-forge ai providers profile-plan "$profile_dir" --pass-list /tmp/opencode-smoke/javi-forge-provider-smoke-<timestamp>.jsonl --preset community-backend-opencode-go --limit 8
@@ -173,7 +173,8 @@ javi-forge ai providers profile-apply /tmp/opencode.model-profiles.generated.jso
 
 `apply-scope` only accepts evidence with at least one passing model. It rejects
 smoke-test `--dry-run` JSONL and empty/no-pass inputs instead of clearing model
-configuration from preview artifacts.
+configuration from preview artifacts. Pi requires `--pi-settings` and OpenCode
+requires `--opencode-config`; there is no homedir default.
 
 ### OpenCode smoke-test behavior
 

@@ -320,10 +320,40 @@ function normalizeTarget(target?: ProviderScopeTarget): ProviderScopeTarget {
 	return PROVIDER_SCOPE_TARGET.BOTH;
 }
 
+function requireScopeRuntimePath(
+	target: ProviderScopeTarget,
+	options: Pick<
+		ApplyProviderScopeOptions,
+		"piSettingsPath" | "opencodeConfigPath"
+	>,
+): { piSettingsPath?: string; opencodeConfigPath?: string } {
+	const piSettingsPath = options.piSettingsPath?.trim();
+	const opencodeConfigPath = options.opencodeConfigPath?.trim();
+	if (
+		(target === PROVIDER_SCOPE_TARGET.PI ||
+			target === PROVIDER_SCOPE_TARGET.BOTH) &&
+		!piSettingsPath
+	) {
+		throw new Error("apply-scope requires --pi-settings <path>");
+	}
+	if (
+		(target === PROVIDER_SCOPE_TARGET.OPENCODE ||
+			target === PROVIDER_SCOPE_TARGET.BOTH) &&
+		!opencodeConfigPath
+	) {
+		throw new Error("apply-scope requires --opencode-config <path>");
+	}
+	return {
+		piSettingsPath: piSettingsPath || undefined,
+		opencodeConfigPath: opencodeConfigPath || undefined,
+	};
+}
+
 export async function applyProviderScope(
 	options: ApplyProviderScopeOptions,
 ): Promise<ApplyProviderScopeResult> {
 	const target = normalizeTarget(options.target);
+	const runtimePaths = requireScopeRuntimePath(target, options);
 	const dryRun = options.dryRun ?? false;
 	const inputPath = normalizePath(options.inputPath);
 	const input = await readProviderScopeInput(inputPath);
@@ -347,7 +377,7 @@ export async function applyProviderScope(
 		target === PROVIDER_SCOPE_TARGET.BOTH
 	) {
 		const pi = await applyPiScope({
-			path: options.piSettingsPath ?? "~/.pi/agent/settings.json",
+			path: runtimePaths.piSettingsPath as string,
 			models: input.passModels,
 			dryRun,
 			now,
@@ -362,7 +392,7 @@ export async function applyProviderScope(
 		target === PROVIDER_SCOPE_TARGET.BOTH
 	) {
 		const opencode = await applyOpenCodeScope({
-			path: options.opencodeConfigPath ?? "~/.config/opencode/opencode.json",
+			path: runtimePaths.opencodeConfigPath as string,
 			input,
 			dryRun,
 			now,

@@ -274,6 +274,7 @@ describe("runAiProvidersCommand", () => {
 				outputDir: "/target/smoke.pass.tsv",
 				target: "pi",
 				passListPath: "",
+				piSettingsPath: "/pi/settings.json",
 				dryRun: true,
 			},
 			onStep,
@@ -282,10 +283,29 @@ describe("runAiProvidersCommand", () => {
 		expect(mockApplyScope).toHaveBeenCalledExactlyOnceWith({
 			inputPath: "/target/smoke.pass.tsv",
 			target: "pi",
-			piSettingsPath: undefined,
+			piSettingsPath: "/pi/settings.json",
 			opencodeConfigPath: undefined,
 			dryRun: true,
 		});
+	});
+
+	it("refuses apply-scope to Pi without --pi-settings", async () => {
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "apply-scope",
+				outputDir: "/target/smoke.pass.tsv",
+				target: "pi",
+				dryRun: true,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.FAILURE });
+		expect(mockApplyScope).not.toHaveBeenCalled();
+		expect(steps.at(-1)?.detail).toContain("--pi-settings");
 	});
 
 	it("generates smoke-tested model assignment profiles", async () => {

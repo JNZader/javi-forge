@@ -157,11 +157,40 @@ describe("runPreparationCommand", () => {
 		expect(unsupported.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
 		expect(unsupported.error).toContain("preparation bind");
 		expect(unsupported.error).toContain("outputs-template");
+		expect(unsupported.error).toContain("preparation policy");
 		expect(unsupported.error).toContain("approval-message");
 		expect(unsupported.error).toContain("approval-check");
 		expect(unsupported.error).toContain("approval-revoke");
 		expect(mockInspect).not.toHaveBeenCalled();
 		expect(steps.at(-1)?.detail).toContain("preparation preflight");
+	});
+
+	it("prints the fixed policy without reading operator files", async () => {
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "policy",
+				configPath: "/secret/config.json",
+				outputsPath: "/secret/outputs.json",
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.SUCCESS);
+		expect(result.policy?.outputs).toEqual(OUTPUTS);
+		expect(result.policy?.policy.cwd).toContain("ere-gateway-runtime");
+		expect(steps).toHaveLength(2);
+		expect(steps.at(-1)?.detail).toContain("policy.cwd:");
+		expect(steps.at(-1)?.detail).toContain("outputs:");
+		expect(steps.at(-1)?.detail).toContain("side effects: none; no file reads");
+		expect(steps.at(-1)?.detail).not.toContain("/secret");
+		expect(mockInspect).not.toHaveBeenCalled();
+		expect(mockBind).not.toHaveBeenCalled();
+		expect(mockApprovalCheck).not.toHaveBeenCalled();
+		expect(mockApprovalRevoke).not.toHaveBeenCalled();
 	});
 
 	it("rejects malformed JSON without printing config content", async () => {

@@ -77,6 +77,9 @@ execution path.
 six-output JSON skeleton an operator can fill before binding. It writes only the
 template, refuses overwrite unless `--force` is explicit, and does not stage
 outputs or generate helper code.
+`javi-forge preparation policy [--json]` prints the compiled fixed preparation
+policy and output names without reading operator config, output files, approval
+evidence, worker paths, or runtime state.
 `javi-forge preparation bind --config <file> --outputs <file> [--json]` adds a
 second read-only diagnostic step: it validates the same runtime boundary, parses
 an exact six-output JSON object, and computes the approval binding an external

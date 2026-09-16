@@ -217,6 +217,7 @@ For the complete operator sequence, failure handling, and rollback notes, see
 ```bash
 javi-forge preparation template --output preparation.config.example.json
 javi-forge preparation outputs-template --output preparation.outputs.example.json
+javi-forge preparation policy --json
 javi-forge preparation preflight --config preparation.config.json
 javi-forge preparation preflight --config preparation.config.json --json
 javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
@@ -234,6 +235,10 @@ The outputs-template command writes an operator-owned six-output JSON skeleton
 for the binding step. It writes with exclusive create by default and requires
 `--force` to replace an existing file. The values are empty strings for the
 operator to fill; the command does not stage outputs or generate helper code.
+
+The policy command prints the compiled fixed preparation policy and output names.
+It is read-only and does not read operator config, output files, approval
+evidence, worker paths, or runtime state.
 
 The preflight command parses an exact production preparation configuration,
 checks the configured cwd/destination against policy, validates the Ed25519

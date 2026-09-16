@@ -36,6 +36,7 @@ export const PREPARATION_ACTION = {
 	APPROVAL_REVOKE: "approval-revoke",
 	BIND: "bind",
 	OUTPUTS_TEMPLATE: "outputs-template",
+	POLICY: "policy",
 	TEMPLATE: "template",
 	PREFLIGHT: "preflight",
 } as const;
@@ -59,6 +60,11 @@ export interface PreparationApprovalMessageResult {
 	message: string;
 }
 
+export interface PreparationPolicyResult {
+	policy: typeof POLICY;
+	outputs: readonly string[];
+}
+
 export interface PreparationCommandResult {
 	status: PreparationCommandStatus;
 	preflight?: PreparationPreflightResult;
@@ -66,6 +72,7 @@ export interface PreparationCommandResult {
 	approvalCheck?: PreparationApprovalCheckResult;
 	approvalMessage?: PreparationApprovalMessageResult;
 	approvalRevoke?: PreparationApprovalRevokeResult;
+	policy?: PreparationPolicyResult;
 	outputPath?: string;
 	error?: string;
 }
@@ -85,6 +92,7 @@ function usage(): string {
 		"Usage:",
 		"  javi-forge preparation template --output <path> [--force]",
 		"  javi-forge preparation outputs-template --output <path> [--force]",
+		"  javi-forge preparation policy [--json]",
 		"  javi-forge preparation preflight --config <path> [--json]",
 		"  javi-forge preparation bind --config <path> --outputs <path> [--json]",
 		"  javi-forge preparation approval-message --binding <hex> [--nonce <hex>] [--issued-at <ms>] [--expires-at <ms>] [--json]",
@@ -127,6 +135,36 @@ function detail(
 				]
 			: []),
 		sideEffects,
+	].join("\n");
+}
+
+function preparationPolicy(): PreparationPolicyResult {
+	return Object.freeze({
+		policy: POLICY,
+		outputs: OUTPUTS,
+	});
+}
+
+function policyDetail(result: PreparationPolicyResult): string {
+	return [
+		`policy.version: ${result.policy.version}`,
+		`policy.cwd: ${result.policy.cwd}`,
+		`policy.destination: ${result.policy.destination}`,
+		`policy.entrypoint: ${result.policy.entrypoint}`,
+		`policy.maxBytes: ${result.policy.maxBytes}`,
+		`policy.overallMs: ${result.policy.overallMs}`,
+		`policy.testsMs: ${result.policy.testsMs}`,
+		`policy.lifetimeMs: ${result.policy.lifetimeMs}`,
+		`policy.maxExecutions: ${result.policy.maxExecutions}`,
+		`policy.network: ${result.policy.network}`,
+		`policy.credentials: ${result.policy.credentials}`,
+		`policy.model: ${result.policy.model}`,
+		`policy.gateway: ${result.policy.gateway}`,
+		`policy.overwrite: ${result.policy.overwrite}`,
+		`policy.symlinks: ${result.policy.symlinks}`,
+		"outputs:",
+		...result.outputs.map((name) => `  - ${name}`),
+		"side effects: none; no file reads, writes, worker execution, approval verification, approval consumption, staging, model call, deploy, publish, or release",
 	].join("\n");
 }
 
@@ -248,6 +286,7 @@ export async function runPreparationCommand(
 		request.action !== PREPARATION_ACTION.APPROVAL_REVOKE &&
 		request.action !== PREPARATION_ACTION.BIND &&
 		request.action !== PREPARATION_ACTION.OUTPUTS_TEMPLATE &&
+		request.action !== PREPARATION_ACTION.POLICY &&
 		request.action !== PREPARATION_ACTION.PREFLIGHT &&
 		request.action !== PREPARATION_ACTION.TEMPLATE
 	) {
@@ -296,6 +335,19 @@ export async function runPreparationCommand(
 				`wrote ${outputPath}\nside effects: wrote outputs template only; no worker execution, approval verification, approval consumption, staging, model call, deploy, publish, or release`,
 			);
 			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, outputPath };
+		}
+
+		if (request.action === PREPARATION_ACTION.POLICY) {
+			report(onStep, "preparation-policy", "Preparation policy", "running");
+			const policy = preparationPolicy();
+			report(
+				onStep,
+				"preparation-policy",
+				"Preparation policy",
+				"done",
+				policyDetail(policy),
+			);
+			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, policy };
 		}
 
 		if (request.action === PREPARATION_ACTION.APPROVAL_MESSAGE) {

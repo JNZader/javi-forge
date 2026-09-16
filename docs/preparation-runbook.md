@@ -50,6 +50,12 @@ The operator owns these files and values:
 3. Fill a real config as `preparation.config.json` and real outputs as
    `preparation.outputs.json`.
 
+   The compiled policy can be printed without reading any operator files:
+
+   ```bash
+   javi-forge preparation policy --json
+   ```
+
    Verify every pinned path and digest externally before trusting it. The public
    key must be Ed25519. The state directory and control directory must be owned
    by the current user and mode `0700`.

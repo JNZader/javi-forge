@@ -150,6 +150,7 @@ describe("help — preparation preflight", () => {
 	it("documents the read-only preparation preflight command", () => {
 		expect(HELP_TEXT).toContain("preparation template");
 		expect(HELP_TEXT).toContain("preparation outputs-template");
+		expect(HELP_TEXT).toContain("preparation policy");
 		expect(HELP_TEXT).toContain("preparation preflight");
 		expect(HELP_TEXT).toContain("preparation bind");
 		expect(HELP_TEXT).toContain("preparation approval-message");
@@ -160,6 +161,9 @@ describe("help — preparation preflight", () => {
 		);
 		expect(HELP_TEXT).toContain(
 			"Write an operator-owned outputs JSON template",
+		);
+		expect(HELP_TEXT).toContain(
+			"Print the fixed preparation policy and output names",
 		);
 		expect(HELP_TEXT).toContain("Read-only production preparation preflight");
 		expect(HELP_TEXT).toContain(
@@ -203,6 +207,7 @@ describe("help — preparation preflight", () => {
 		const examples = HELP_TEXT.split("Examples")[1] ?? "";
 		expect(examples).toContain("preparation template --output");
 		expect(examples).toContain("preparation outputs-template --output");
+		expect(examples).toContain("preparation policy --json");
 		expect(examples).toContain("preparation preflight --config");
 		expect(examples).toContain("preparation bind --config");
 		expect(examples).toContain("preparation approval-message --binding");

@@ -185,6 +185,69 @@ describe("preparation dispatch", () => {
 		expect(process.exitCode).toBe(0);
 	});
 
+	it("routes policy arguments", async () => {
+		mockRun.mockResolvedValue({
+			status: "success",
+			policy: {
+				policy: {
+					version: 1,
+					cwd: "/home/javier/.local/share/ere-gateway-runtime/structured-1",
+					destination:
+						"/home/javier/.local/share/ere-gateway-runtime/structured-1/attempt-3",
+					entrypoint: "fixed-local-mock-tests",
+					maxBytes: 1048576,
+					overallMs: 30000,
+					testsMs: 10000,
+					lifetimeMs: 600000,
+					maxExecutions: 1,
+					directoryMode: 0o700,
+					fileMode: 0o600,
+					network: false,
+					credentials: false,
+					model: false,
+					gateway: false,
+					overwrite: false,
+					symlinks: false,
+				},
+				outputs: ["minimal.py"],
+			},
+		});
+
+		await handlePreparation({
+			input: ["preparation", "policy"],
+			flags: {
+				approval: "",
+				binding: "",
+				config: "",
+				expiresAt: 0,
+				issuedAt: 0,
+				nonce: "",
+				outputs: "",
+				output: "",
+				force: false,
+				json: true,
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			{
+				action: "policy",
+				approvalPath: "",
+				binding: "",
+				configPath: "",
+				expiresAt: 0,
+				outputsPath: "",
+				outputPath: "",
+				force: false,
+				issuedAt: 0,
+				json: true,
+				nonce: "",
+			},
+			expect.any(Function),
+		);
+		expect(process.exitCode).toBe(0);
+	});
+
 	it("routes bind arguments", async () => {
 		mockRun.mockResolvedValue({
 			status: "success",

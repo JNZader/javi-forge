@@ -19,6 +19,7 @@ import { createExecutorFixture } from "./preparation-executor.js";
 import {
 	createPreparationProductionConfigTemplate,
 	inspectPreparationApprovalCheck,
+	inspectPreparationApprovalRevocation,
 	inspectPreparationProductionBinding,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_REASON,
@@ -70,12 +71,12 @@ function outputs() {
 	return Object.fromEntries(OUTPUTS.map((name) => [name, "inert"]));
 }
 
-function approvalEvidence(preparationBinding: string) {
+function approvalEvidence(preparationBinding: string, nonce = "a".repeat(64)) {
 	const payload = {
 		version: 1,
 		purpose: "six-file-preparation",
 		binding: preparationBinding,
-		nonce: "a".repeat(64),
+		nonce,
 		issuedAt: 1000,
 		expiresAt: 601000,
 		maxUses: 1,
@@ -268,6 +269,49 @@ describe("production preparation preflight contract", () => {
 			reason: PREPARATION_PREFLIGHT_REASON.APPROVAL_DENIED,
 		});
 		expect(readdirSync(state)).toEqual([]);
+	});
+
+	it("revokes approval evidence through the shared terminal ledger", () => {
+		const binding = inspectPreparationProductionBinding(
+			config(),
+			outputs(),
+			policy(),
+		).binding;
+		const nonce = "c".repeat(64);
+		const terminal = path.join(state, `${nonce}.terminal`);
+		const evidence = approvalEvidence(binding ?? "", nonce);
+
+		expect(
+			inspectPreparationApprovalRevocation(
+				config(),
+				binding ?? "",
+				evidence,
+				1000,
+				policy(),
+			),
+		).toEqual({
+			status: PREPARATION_PREFLIGHT_STATUS.READY,
+			approval: {
+				nonce,
+				issuedAt: 1000,
+				expiresAt: 601000,
+			},
+			terminal: "revoked",
+		});
+		expect(readFileSync(terminal, "utf8")).toBe("revoked\n");
+		expect(
+			inspectPreparationApprovalCheck(
+				config(),
+				binding ?? "",
+				evidence,
+				1000,
+				policy(),
+			),
+		).toEqual({
+			status: PREPARATION_PREFLIGHT_STATUS.DENIED,
+			reason: PREPARATION_PREFLIGHT_REASON.APPROVAL_DENIED,
+		});
+		rmSync(terminal, { force: true });
 	});
 
 	it("rejects policy cwd and destination mismatches", () => {

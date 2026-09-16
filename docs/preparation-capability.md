@@ -88,6 +88,12 @@ verify, consume, execute, stage, call a model, deploy, publish, or release.
 configured Ed25519 public key and reports only bounded approval metadata. It does
 not print the evidence, signature, or payload body, and it does not consume,
 execute, stage, call a model, deploy, publish, or release.
+`javi-forge preparation approval-revoke --config <file> --binding <hex>
+--approval <file> [--json]` verifies the same evidence and writes only the
+exclusive `revoked` terminal marker in the operator-owned state directory. It
+does not print the evidence, signature, or payload body, and it does not execute
+the worker, stage outputs, consume an approval, call a model, deploy, publish,
+or release.
 
 Remaining work is to connect this boundary through a separately reviewed
 production route with real operator configuration, production identity

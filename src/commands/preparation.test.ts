@@ -4,6 +4,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	inspectPreparationApprovalCheck,
+	inspectPreparationApprovalRevocation,
 	inspectPreparationProductionBinding,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_STATUS,
@@ -30,6 +31,7 @@ vi.mock("../lib/preparation-production.js", () => ({
 			"/home/javier/.local/share/ere-gateway-runtime/structured-1/attempt-3",
 	}),
 	inspectPreparationApprovalCheck: vi.fn(),
+	inspectPreparationApprovalRevocation: vi.fn(),
 	inspectPreparationProductionBinding: vi.fn(),
 	inspectPreparationProductionPreflight: vi.fn(),
 	PREPARATION_PREFLIGHT_STATUS: {
@@ -42,6 +44,7 @@ vi.mock("../lib/preparation-production.js", () => ({
 const mockInspect = vi.mocked(inspectPreparationProductionPreflight);
 const mockBind = vi.mocked(inspectPreparationProductionBinding);
 const mockApprovalCheck = vi.mocked(inspectPreparationApprovalCheck);
+const mockApprovalRevoke = vi.mocked(inspectPreparationApprovalRevocation);
 
 function collectSteps(): {
 	steps: InitStep[];
@@ -154,6 +157,7 @@ describe("runPreparationCommand", () => {
 		expect(unsupported.error).toContain("preparation bind");
 		expect(unsupported.error).toContain("approval-message");
 		expect(unsupported.error).toContain("approval-check");
+		expect(unsupported.error).toContain("approval-revoke");
 		expect(mockInspect).not.toHaveBeenCalled();
 		expect(steps.at(-1)?.detail).toContain("preparation preflight");
 	});
@@ -344,6 +348,54 @@ describe("runPreparationCommand", () => {
 		expect(steps.at(-1)?.detail).not.toContain("secret-approval-evidence");
 		expect(mockInspect).not.toHaveBeenCalled();
 		expect(mockBind).not.toHaveBeenCalled();
+	});
+
+	it("revokes approval evidence without printing its contents", async () => {
+		mockApprovalRevoke.mockReturnValue({
+			status: PREPARATION_PREFLIGHT_STATUS.READY,
+			approval: {
+				nonce: "c".repeat(64),
+				issuedAt: 1000,
+				expiresAt: 601000,
+			},
+			terminal: "revoked",
+		});
+		const config = { workerExecutable: "/worker" };
+		const binding = "b".repeat(64);
+		const configPath = await writeConfig(config);
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const approvalPath = path.join(root, "approval.json");
+		await writeFile(approvalPath, "secret-approval-evidence", { mode: 0o600 });
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "approval-revoke",
+				approvalPath,
+				binding,
+				configPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.SUCCESS);
+		expect(result.approvalRevoke?.terminal).toBe("revoked");
+		expect(mockApprovalRevoke).toHaveBeenCalledExactlyOnceWith(
+			config,
+			binding,
+			"secret-approval-evidence",
+		);
+		expect(steps.at(-1)?.detail).toContain(`nonce: ${"c".repeat(64)}`);
+		expect(steps.at(-1)?.detail).toContain("terminal: revoked");
+		expect(steps.at(-1)?.detail).toContain(
+			"side effects: wrote revocation terminal only",
+		);
+		expect(steps.at(-1)?.detail).not.toContain("secret-approval-evidence");
+		expect(mockInspect).not.toHaveBeenCalled();
+		expect(mockBind).not.toHaveBeenCalled();
+		expect(mockApprovalCheck).not.toHaveBeenCalled();
 	});
 
 	it("rejects oversized approval evidence without printing contents", async () => {

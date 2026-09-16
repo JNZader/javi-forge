@@ -219,6 +219,7 @@ javi-forge preparation preflight --config preparation.config.json --json
 javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
 javi-forge preparation approval-message --binding <hex> --json
 javi-forge preparation approval-check --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
+javi-forge preparation approval-revoke --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
 ```
 
 The template command writes an operator-owned JSON config skeleton with the exact
@@ -245,9 +246,16 @@ the Ed25519 signature and binding with the public key in the production config,
 and reports only bounded approval metadata. It does not print the approval
 evidence, signature, or payload body, and it does not consume the nonce.
 
-These commands do **not** execute the worker, stage outputs, sign or consume
-approvals, contact a model, deploy, publish, release, or write generated
-artifacts.
+The approval-revoke command verifies the same evidence and binding, then writes
+only the exclusive `revoked` terminal marker in the operator-owned state
+directory. It does not print the approval evidence, signature, or payload body,
+execute the worker, stage outputs, consume an approval, contact a model, deploy,
+publish, release, or write generated artifacts.
+
+These commands do **not** execute the worker, stage outputs, sign approvals,
+contact a model, deploy, publish, release, or write generated artifacts. Only
+`approval-revoke` writes state, and that state is the bounded terminal revocation
+marker.
 
 ---
 

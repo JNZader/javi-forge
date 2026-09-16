@@ -9,10 +9,12 @@ import { POLICY } from "../lib/preparation-capability.js";
 import {
 	createPreparationProductionConfigTemplate,
 	inspectPreparationApprovalCheck,
+	inspectPreparationApprovalRevocation,
 	inspectPreparationProductionBinding,
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_STATUS,
 	type PreparationApprovalCheckResult,
+	type PreparationApprovalRevokeResult,
 	type PreparationPreflightResult,
 	type PreparationProductionBindingResult,
 } from "../lib/preparation-production.js";
@@ -31,6 +33,7 @@ export type PreparationCommandStatus =
 export const PREPARATION_ACTION = {
 	APPROVAL_CHECK: "approval-check",
 	APPROVAL_MESSAGE: "approval-message",
+	APPROVAL_REVOKE: "approval-revoke",
 	BIND: "bind",
 	TEMPLATE: "template",
 	PREFLIGHT: "preflight",
@@ -61,6 +64,7 @@ export interface PreparationCommandResult {
 	binding?: PreparationProductionBindingResult;
 	approvalCheck?: PreparationApprovalCheckResult;
 	approvalMessage?: PreparationApprovalMessageResult;
+	approvalRevoke?: PreparationApprovalRevokeResult;
 	outputPath?: string;
 	error?: string;
 }
@@ -83,13 +87,16 @@ function usage(): string {
 		"  javi-forge preparation bind --config <path> --outputs <path> [--json]",
 		"  javi-forge preparation approval-message --binding <hex> [--nonce <hex>] [--issued-at <ms>] [--expires-at <ms>] [--json]",
 		"  javi-forge preparation approval-check --config <path> --binding <hex> --approval <path> [--json]",
+		"  javi-forge preparation approval-revoke --config <path> --binding <hex> --approval <path> [--json]",
 	].join("\n");
 }
 
 function detail(
 	preflight:
 		| PreparationProductionBindingResult
-		| PreparationApprovalCheckResult,
+		| PreparationApprovalCheckResult
+		| PreparationApprovalRevokeResult,
+	sideEffects = "side effects: none; no worker execution, approval consumption, staging, model call, deploy, publish, or release",
 ): string {
 	return [
 		`status: ${preflight.status}`,
@@ -104,6 +111,9 @@ function detail(
 					`  expiresAt: ${preflight.approval.expiresAt}`,
 				]
 			: []),
+		...("terminal" in preflight && preflight.terminal
+			? [`terminal: ${preflight.terminal}`]
+			: []),
 		...(preflight.reason ? [`reason: ${preflight.reason}`] : []),
 		...(preflight.measurements
 			? [
@@ -114,7 +124,7 @@ function detail(
 					`  launcher: ${preflight.measurements.launcherDigest}`,
 				]
 			: []),
-		"side effects: none; no worker execution, approval verification, approval consumption, staging, model call, deploy, publish, or release",
+		sideEffects,
 	].join("\n");
 }
 
@@ -146,7 +156,9 @@ async function readOutputs(outputsPath?: string): Promise<unknown> {
 
 async function readApprovalEvidence(approvalPath?: string): Promise<string> {
 	const path = approvalPath?.trim();
-	if (!path) throw new Error("approval-check requires --approval <path>");
+	if (!path) {
+		throw new Error("approval-check/revoke requires --approval <path>");
+	}
 	const info = await stat(path);
 	if (!info.isFile() || info.size > 4096) {
 		throw new Error("preparation approval evidence is not a bounded file");
@@ -210,6 +222,7 @@ export async function runPreparationCommand(
 	if (
 		request.action !== PREPARATION_ACTION.APPROVAL_CHECK &&
 		request.action !== PREPARATION_ACTION.APPROVAL_MESSAGE &&
+		request.action !== PREPARATION_ACTION.APPROVAL_REVOKE &&
 		request.action !== PREPARATION_ACTION.BIND &&
 		request.action !== PREPARATION_ACTION.PREFLIGHT &&
 		request.action !== PREPARATION_ACTION.TEMPLATE
@@ -289,13 +302,49 @@ export async function runPreparationCommand(
 				"preparation-approval-check",
 				"Preparation approval check",
 				ok ? "done" : "error",
-				detail(approvalCheck),
+				detail(
+					approvalCheck,
+					"side effects: none; no signing, private key access, worker execution, approval consumption, staging, model call, deploy, publish, or release",
+				),
 			);
 			return {
 				status: ok
 					? PREPARATION_COMMAND_STATUS.SUCCESS
 					: PREPARATION_COMMAND_STATUS.FAILURE,
 				approvalCheck,
+			};
+		}
+
+		if (request.action === PREPARATION_ACTION.APPROVAL_REVOKE) {
+			report(
+				onStep,
+				"preparation-approval-revoke",
+				"Preparation approval revoke",
+				"running",
+			);
+			const config = await readConfig(request.configPath);
+			const approval = await readApprovalEvidence(request.approvalPath);
+			const approvalRevoke = inspectPreparationApprovalRevocation(
+				config,
+				request.binding?.trim() ?? "",
+				approval,
+			);
+			const ok = approvalRevoke.status === PREPARATION_PREFLIGHT_STATUS.READY;
+			report(
+				onStep,
+				"preparation-approval-revoke",
+				"Preparation approval revoke",
+				ok ? "done" : "error",
+				detail(
+					approvalRevoke,
+					"side effects: wrote revocation terminal only; no signing, private key access, worker execution, approval consumption, staging, model call, deploy, publish, or release",
+				),
+			);
+			return {
+				status: ok
+					? PREPARATION_COMMAND_STATUS.SUCCESS
+					: PREPARATION_COMMAND_STATUS.FAILURE,
+				approvalRevoke,
 			};
 		}
 

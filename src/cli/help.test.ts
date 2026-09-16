@@ -153,6 +153,7 @@ describe("help — preparation preflight", () => {
 		expect(HELP_TEXT).toContain("preparation bind");
 		expect(HELP_TEXT).toContain("preparation approval-message");
 		expect(HELP_TEXT).toContain("preparation approval-check");
+		expect(HELP_TEXT).toContain("preparation approval-revoke");
 		expect(HELP_TEXT).toContain(
 			"Write an operator-owned preparation config template",
 		);
@@ -164,6 +165,7 @@ describe("help — preparation preflight", () => {
 		expect(HELP_TEXT).toContain(
 			"Verify approval evidence without consuming it",
 		);
+		expect(HELP_TEXT).toContain("Revoke approval evidence without executing");
 		expect(HELP_TEXT).toContain("Write a preparation config template");
 		expect(HELP_TEXT).toContain("Production preparation config JSON");
 		expect(HELP_TEXT).toContain("Production preparation outputs JSON");
@@ -200,6 +202,7 @@ describe("help — preparation preflight", () => {
 		expect(examples).toContain("preparation bind --config");
 		expect(examples).toContain("preparation approval-message --binding");
 		expect(examples).toContain("preparation approval-check --config");
+		expect(examples).toContain("preparation approval-revoke --config");
 	});
 });
 

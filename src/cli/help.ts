@@ -35,6 +35,7 @@ export const HELP_TEXT = `
     preparation bind       Compute a read-only production preparation binding
     preparation approval-message  Prepare the exact approval message to sign
     preparation approval-check  Verify approval evidence without consuming it
+    preparation approval-revoke  Revoke approval evidence without executing
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
     plugin list       List installed plugins
@@ -126,7 +127,7 @@ export const HELP_TEXT = `
     --config PATH   Production preparation config JSON
     --outputs PATH  Production preparation outputs JSON for binding computation
     --binding HEX   Production preparation binding for approval-message
-    --approval PATH Production preparation approval evidence JSON for approval-check
+    --approval PATH Production preparation approval evidence JSON for approval-check/revoke
     --nonce HEX     Optional 32-byte hex approval nonce (generated if omitted)
     --issued-at MS  Optional approval issued-at epoch milliseconds
     --expires-at MS Optional approval expiry epoch milliseconds
@@ -183,6 +184,7 @@ export const HELP_TEXT = `
     $ javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
     $ javi-forge preparation approval-message --binding <hex> --json
     $ javi-forge preparation approval-check --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
+    $ javi-forge preparation approval-revoke --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
 `;
 
 /**

@@ -78,6 +78,18 @@ export interface PreparationApprovalCheckResult
 	approval?: Pick<ApprovalPayload, "nonce" | "issuedAt" | "expiresAt">;
 }
 
+export const PREPARATION_APPROVAL_TERMINAL = {
+	REVOKED: "revoked",
+} as const;
+
+export type PreparationApprovalTerminal =
+	(typeof PREPARATION_APPROVAL_TERMINAL)[keyof typeof PREPARATION_APPROVAL_TERMINAL];
+
+export interface PreparationApprovalRevokeResult
+	extends PreparationApprovalCheckResult {
+	terminal?: PreparationApprovalTerminal;
+}
+
 export interface PreparationProductionConfigTemplateOptions {
 	workerExecutable?: string;
 	workerSource?: string;
@@ -435,6 +447,56 @@ export function inspectPreparationApprovalCheck(
 					issuedAt: approval.payload.issuedAt,
 					expiresAt: approval.payload.expiresAt,
 				},
+			};
+		} catch {
+			return denied(PREPARATION_PREFLIGHT_REASON.APPROVAL_DENIED);
+		}
+	} finally {
+		authority?.close();
+	}
+}
+
+export function inspectPreparationApprovalRevocation(
+	input: unknown,
+	binding: string,
+	approvalEvidence: string,
+	now = Date.now(),
+	policy: PreparationProductionPolicy = POLICY,
+): PreparationApprovalRevokeResult {
+	let authority: ApprovalAuthority | undefined;
+	try {
+		let config: PreparationProductionConfig;
+		try {
+			config = parsePreparationProductionConfig(input);
+		} catch {
+			return denied(PREPARATION_PREFLIGHT_REASON.INVALID_CONFIG);
+		}
+		if (
+			config.cwd !== policy.cwd ||
+			config.destination !== policy.destination
+		) {
+			return denied(PREPARATION_PREFLIGHT_REASON.POLICY_MISMATCH);
+		}
+		const publicKey = productionPublicKey(config.publicKeyPem);
+		if (!publicKey) {
+			return denied(PREPARATION_PREFLIGHT_REASON.PUBLIC_KEY_UNAVAILABLE);
+		}
+		try {
+			authority = new ApprovalAuthority(publicKey, config.stateDirectory);
+		} catch {
+			return denied(PREPARATION_PREFLIGHT_REASON.STATE_DIRECTORY_UNSAFE);
+		}
+		try {
+			const approval = authority.verify(approvalEvidence, binding, now);
+			authority.revoke(approval, now);
+			return {
+				status: PREPARATION_PREFLIGHT_STATUS.READY,
+				approval: {
+					nonce: approval.payload.nonce,
+					issuedAt: approval.payload.issuedAt,
+					expiresAt: approval.payload.expiresAt,
+				},
+				terminal: PREPARATION_APPROVAL_TERMINAL.REVOKED,
 			};
 		} catch {
 			return denied(PREPARATION_PREFLIGHT_REASON.APPROVAL_DENIED);

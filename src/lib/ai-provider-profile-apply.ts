@@ -43,6 +43,7 @@ export interface RollbackModelAssignmentProfileOverlayOptions {
 	piSettingsPath?: string;
 	opencodeConfigPath?: string;
 	dryRun?: boolean;
+	now?: Date;
 }
 
 export interface ApplyModelAssignmentProfileOverlayResult {
@@ -313,6 +314,8 @@ export async function rollbackModelAssignmentProfileOverlay(
 	const destPath = requireTargetPath(target, options);
 	const backupPath = normalizePath(options.backupPath);
 	const dryRun = options.dryRun ?? false;
+	const now = options.now ?? new Date();
+	const safetyPath = `${destPath}.pre-rollback-${timestamp(now)}`;
 	try {
 		await readFile(backupPath);
 	} catch (error) {
@@ -321,7 +324,15 @@ export async function rollbackModelAssignmentProfileOverlay(
 		}
 		throw error;
 	}
+	const backups = [backupPath];
 	if (!dryRun) {
+		try {
+			const current = await readFile(destPath, "utf8");
+			await writeFile(safetyPath, current, { flag: "wx" });
+			backups.push(safetyPath);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
 		await copyFile(backupPath, destPath);
 	}
 	return {
@@ -329,6 +340,6 @@ export async function rollbackModelAssignmentProfileOverlay(
 		dryRun,
 		wrote: !dryRun,
 		files: [destPath],
-		backups: [backupPath],
+		backups,
 	};
 }

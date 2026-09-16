@@ -550,12 +550,40 @@ describe("rollbackModelAssignmentProfileOverlay", () => {
 			backupPath,
 			target: "pi",
 			piSettingsPath: settingsPath,
+			now: new Date("2026-09-16T12:00:00.000Z"),
 		});
 
 		expect(result.wrote).toBe(true);
 		expect(readFileSync(settingsPath, "utf8")).toBe(
 			readFileSync(backupPath, "utf8"),
 		);
+		const safetyPath = `${settingsPath}.pre-rollback-20260916T120000Z`;
+		expect(result.backups).toEqual([backupPath, safetyPath]);
+		expect(JSON.parse(readFileSync(safetyPath, "utf8"))).toEqual({
+			current: true,
+		});
+	});
+
+	it("refuses rollback when a pre-rollback safety copy already exists", async () => {
+		const settingsPath = join(dir, "settings.json");
+		const backupPath = join(dir, "settings.json.bak-restore");
+		const safetyPath = `${settingsPath}.pre-rollback-20260916T120000Z`;
+		writeFileSync(settingsPath, JSON.stringify({ current: true }));
+		writeFileSync(backupPath, JSON.stringify({ restored: true }));
+		writeFileSync(safetyPath, "existing-safety");
+
+		await expect(
+			rollbackModelAssignmentProfileOverlay({
+				backupPath,
+				target: "pi",
+				piSettingsPath: settingsPath,
+				now: new Date("2026-09-16T12:00:00.000Z"),
+			}),
+		).rejects.toMatchObject({ code: "EEXIST" });
+		expect(readFileSync(safetyPath, "utf8")).toBe("existing-safety");
+		expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
+			current: true,
+		});
 	});
 });
 

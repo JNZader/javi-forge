@@ -112,6 +112,12 @@ exclusive `revoked` terminal marker in the operator-owned state directory. It
 does not print the evidence, signature, or payload body, and it does not execute
 the worker, stage outputs, consume an approval, call a model, deploy, publish,
 or release.
+`javi-forge preparation status-ok --file <file> --session <ses_...> [--json]`
+validates one bounded captured OpenCode StructuredOutput response against the
+fixed source-only `{"status":"ok"}` contract and supplied session id. It reads
+only that capture file; it does not contact OpenCode, call a model, read
+credentials, verify or consume approvals, execute the worker, stage outputs,
+deploy, publish, or release.
 
 Remaining work is to connect this boundary through a separately reviewed
 production route with real operator configuration, production identity

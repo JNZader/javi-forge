@@ -19,6 +19,7 @@ import {
 	type PreparationPreflightResult,
 	type PreparationProductionBindingResult,
 } from "../lib/preparation-production.js";
+import { parseStatusOk } from "../lib/preparation-status-ok.js";
 import type { InitStep } from "../types/index.js";
 
 type StepCallback = (step: InitStep) => void;
@@ -42,6 +43,7 @@ export const PREPARATION_ACTION = {
 	TEMPLATE: "template",
 	PREFLIGHT: "preflight",
 	READINESS: "readiness",
+	STATUS_OK: "status-ok",
 } as const;
 
 export interface PreparationCommandRequest {
@@ -57,6 +59,7 @@ export interface PreparationCommandRequest {
 	issuedAt?: number;
 	json: boolean;
 	nonce?: string;
+	session?: string;
 }
 
 export interface PreparationApprovalMessageResult {
@@ -79,6 +82,10 @@ export interface PreparationReadinessResult {
 	approvalCheck?: PreparationApprovalCheckResult;
 }
 
+export interface PreparationStatusOkResult {
+	status: "ok";
+}
+
 export interface PreparationCommandResult {
 	status: PreparationCommandStatus;
 	preflight?: PreparationPreflightResult;
@@ -89,6 +96,7 @@ export interface PreparationCommandResult {
 	policy?: PreparationPolicyResult;
 	digest?: PreparationDigestResult;
 	readiness?: PreparationReadinessResult;
+	statusOk?: PreparationStatusOkResult;
 	outputPath?: string;
 	error?: string;
 }
@@ -116,6 +124,7 @@ function usage(): string {
 		"  javi-forge preparation approval-message --binding <hex> [--nonce <hex>] [--issued-at <ms>] [--expires-at <ms>] [--json]",
 		"  javi-forge preparation approval-check --config <path> --binding <hex> --approval <path> [--json]",
 		"  javi-forge preparation approval-revoke --config <path> --binding <hex> --approval <path> [--json]",
+		"  javi-forge preparation status-ok --file <path> --session <ses_...> [--json]",
 	].join("\n");
 }
 
@@ -211,6 +220,21 @@ function readinessDetail(result: PreparationReadinessResult): string {
 
 function preparationOutputsTemplate(): Readonly<Record<string, string>> {
 	return Object.freeze(Object.fromEntries(OUTPUTS.map((name) => [name, ""])));
+}
+
+async function readStatusOkCapture(filePath?: string): Promise<Buffer> {
+	const path = filePath?.trim();
+	if (!path) throw new Error("status-ok requires --file <path>");
+	const handle = await open(path, FS.O_RDONLY | FS.O_NOFOLLOW);
+	try {
+		const info = await handle.stat();
+		if (!info.isFile() || info.size < 1 || info.size > 1048576) {
+			throw new Error("preparation status-ok capture is not a bounded file");
+		}
+		return handle.readFile();
+	} finally {
+		await handle.close();
+	}
 }
 
 async function digestFile(filePath?: string): Promise<PreparationDigestResult> {
@@ -350,6 +374,7 @@ export async function runPreparationCommand(
 		request.action !== PREPARATION_ACTION.POLICY &&
 		request.action !== PREPARATION_ACTION.PREFLIGHT &&
 		request.action !== PREPARATION_ACTION.READINESS &&
+		request.action !== PREPARATION_ACTION.STATUS_OK &&
 		request.action !== PREPARATION_ACTION.TEMPLATE
 	) {
 		report(onStep, "preparation-usage", "Preparation", "error", usage());
@@ -427,6 +452,35 @@ export async function runPreparationCommand(
 				].join("\n"),
 			);
 			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, digest };
+		}
+
+		if (request.action === PREPARATION_ACTION.STATUS_OK) {
+			report(
+				onStep,
+				"preparation-status-ok",
+				"Preparation status-ok capture",
+				"running",
+			);
+			const session = request.session?.trim();
+			if (!session) throw new Error("status-ok requires --session <ses_...>");
+			const capture = await readStatusOkCapture(request.filePath);
+			let statusOk: PreparationStatusOkResult;
+			try {
+				statusOk = parseStatusOk(capture, session);
+			} catch {
+				throw new Error("status-ok-invalid");
+			}
+			report(
+				onStep,
+				"preparation-status-ok",
+				"Preparation status-ok capture",
+				"done",
+				[
+					`status: ${statusOk.status}`,
+					"side effects: none; bounded capture file read only; no HTTP client, no model call, no credentials, no worker execution, no approval verification, no approval consumption, no staging, no deploy, no publish, no release",
+				].join("\n"),
+			);
+			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, statusOk };
 		}
 
 		if (request.action === PREPARATION_ACTION.APPROVAL_MESSAGE) {

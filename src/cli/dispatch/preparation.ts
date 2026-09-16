@@ -42,6 +42,7 @@ export async function handlePreparation(cli: CLI): Promise<void> {
 			issuedAt: cli.flags.issuedAt,
 			json,
 			nonce: cli.flags.nonce,
+			...(cli.flags.session ? { session: cli.flags.session } : {}),
 		},
 		json ? () => {} : printStep,
 	);

@@ -294,6 +294,51 @@ describe("preparation dispatch", () => {
 		expect(process.exitCode).toBe(0);
 	});
 
+	it("routes status-ok arguments", async () => {
+		mockRun.mockResolvedValue({
+			status: "success",
+			statusOk: { status: "ok" },
+		});
+
+		await handlePreparation({
+			input: ["preparation", "status-ok"],
+			flags: {
+				approval: "",
+				binding: "",
+				config: "",
+				expiresAt: 0,
+				file: "/safe/status-ok.json",
+				issuedAt: 0,
+				nonce: "",
+				outputs: "",
+				output: "",
+				force: false,
+				json: true,
+				session: "ses_mock",
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			{
+				action: "status-ok",
+				approvalPath: "",
+				binding: "",
+				configPath: "",
+				expiresAt: 0,
+				filePath: "/safe/status-ok.json",
+				outputsPath: "",
+				outputPath: "",
+				force: false,
+				issuedAt: 0,
+				json: true,
+				nonce: "",
+				session: "ses_mock",
+			},
+			expect.any(Function),
+		);
+		expect(process.exitCode).toBe(0);
+	});
+
 	it("routes readiness arguments", async () => {
 		mockRun.mockResolvedValue({
 			status: "success",

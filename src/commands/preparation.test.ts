@@ -11,6 +11,7 @@ import {
 	inspectPreparationProductionPreflight,
 	PREPARATION_PREFLIGHT_STATUS,
 } from "../lib/preparation-production.js";
+import { parseStatusOk } from "../lib/preparation-status-ok.js";
 import type { InitStep } from "../types/index.js";
 import {
 	PREPARATION_COMMAND_STATUS,
@@ -42,11 +43,15 @@ vi.mock("../lib/preparation-production.js", () => ({
 		DENIED: "denied",
 	},
 }));
+vi.mock("../lib/preparation-status-ok.js", () => ({
+	parseStatusOk: vi.fn(() => ({ status: "ok" })),
+}));
 
 const mockInspect = vi.mocked(inspectPreparationProductionPreflight);
 const mockBind = vi.mocked(inspectPreparationProductionBinding);
 const mockApprovalCheck = vi.mocked(inspectPreparationApprovalCheck);
 const mockApprovalRevoke = vi.mocked(inspectPreparationApprovalRevocation);
+const mockStatusOk = vi.mocked(parseStatusOk);
 
 function collectSteps(): {
 	steps: InitStep[];
@@ -65,6 +70,7 @@ async function writeConfig(value: unknown): Promise<string> {
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	mockStatusOk.mockReturnValue({ status: "ok" });
 });
 
 describe("runPreparationCommand", () => {
@@ -164,6 +170,7 @@ describe("runPreparationCommand", () => {
 		expect(unsupported.error).toContain("approval-message");
 		expect(unsupported.error).toContain("approval-check");
 		expect(unsupported.error).toContain("approval-revoke");
+		expect(unsupported.error).toContain("preparation status-ok");
 		expect(mockInspect).not.toHaveBeenCalled();
 		expect(steps.at(-1)?.detail).toContain("preparation preflight");
 	});
@@ -250,6 +257,64 @@ describe("runPreparationCommand", () => {
 		expect(steps.at(-1)?.detail).toBe(
 			"preparation digest file is not a bounded regular file",
 		);
+	});
+
+	it("validates a captured status-ok response without printing capture contents", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const filePath = path.join(root, "status-ok.json");
+		await writeFile(filePath, "secret-status-ok-capture", { mode: 0o600 });
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "status-ok",
+				filePath,
+				session: "ses_mock",
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.SUCCESS);
+		expect(result.statusOk).toEqual({ status: "ok" });
+		expect(mockStatusOk).toHaveBeenCalledExactlyOnceWith(
+			Buffer.from("secret-status-ok-capture"),
+			"ses_mock",
+		);
+		expect(steps.at(-1)?.detail).toContain("status: ok");
+		expect(steps.at(-1)?.detail).toContain("bounded capture file read only");
+		expect(steps.at(-1)?.detail).not.toContain("secret-status-ok-capture");
+		expect(mockInspect).not.toHaveBeenCalled();
+		expect(mockBind).not.toHaveBeenCalled();
+		expect(mockApprovalCheck).not.toHaveBeenCalled();
+		expect(mockApprovalRevoke).not.toHaveBeenCalled();
+	});
+
+	it("rejects invalid status-ok captures without printing capture contents", async () => {
+		mockStatusOk.mockImplementationOnce(() => {
+			throw new Error("STATUS_OK_INVALID");
+		});
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const filePath = path.join(root, "status-ok.json");
+		await writeFile(filePath, "secret-invalid-capture", { mode: 0o600 });
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "status-ok",
+				filePath,
+				session: "ses_mock",
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
+		expect(result.error).toBe("status-ok-invalid");
+		expect(steps.at(-1)?.detail).toBe("status-ok-invalid");
+		expect(steps.at(-1)?.detail).not.toContain("secret-invalid-capture");
 	});
 
 	it("rejects malformed JSON without printing config content", async () => {

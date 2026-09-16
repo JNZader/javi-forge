@@ -226,6 +226,7 @@ javi-forge preparation bind --config preparation.config.json --outputs preparati
 javi-forge preparation approval-message --binding <hex> --json
 javi-forge preparation approval-check --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
 javi-forge preparation approval-revoke --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
+javi-forge preparation status-ok --file opencode-status-ok.json --session ses_example --json
 ```
 
 The template command writes an operator-owned JSON config skeleton with the exact
@@ -278,6 +279,12 @@ only the exclusive `revoked` terminal marker in the operator-owned state
 directory. It does not print the approval evidence, signature, or payload body,
 execute the worker, stage outputs, consume an approval, contact a model, deploy,
 publish, release, or write generated artifacts.
+
+The status-ok command validates one bounded captured OpenCode StructuredOutput
+response file for the fixed source-only `{"status":"ok"}` contract and session
+identity. It prints only the bounded status result; it does not contact OpenCode,
+call a model, use credentials, verify or consume approval evidence, execute the
+worker, stage outputs, deploy, publish, release, or write generated artifacts.
 
 These commands do **not** execute the worker, stage outputs, sign approvals,
 contact a model, deploy, publish, release, or write generated artifacts.

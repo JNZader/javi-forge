@@ -40,6 +40,7 @@ export const HELP_TEXT = `
     preparation approval-message  Prepare the exact approval message to sign
     preparation approval-check  Verify approval evidence without consuming it
     preparation approval-revoke  Revoke approval evidence without executing
+    preparation status-ok Verify a captured OpenCode status-ok response
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
     plugin list       List installed plugins
@@ -128,11 +129,12 @@ export const HELP_TEXT = `
 
   Preparation options (javi-forge preparation)
     --output PATH   Write a preparation config/outputs template to this path
-    --file PATH     File to hash for preparation digest
+    --file PATH     File to hash for preparation digest or status-ok capture
     --config PATH   Production preparation config JSON
     --outputs PATH  Production preparation outputs JSON for binding computation
     --binding HEX   Production preparation binding for approval-message
     --approval PATH Production preparation approval evidence JSON for approval-check/revoke
+    --session ID    Captured status-ok session id (ses_...)
     --nonce HEX     Optional 32-byte hex approval nonce (generated if omitted)
     --issued-at MS  Optional approval issued-at epoch milliseconds
     --expires-at MS Optional approval expiry epoch milliseconds
@@ -194,6 +196,7 @@ export const HELP_TEXT = `
     $ javi-forge preparation approval-message --binding <hex> --json
     $ javi-forge preparation approval-check --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
     $ javi-forge preparation approval-revoke --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
+    $ javi-forge preparation status-ok --file opencode-status-ok.json --session ses_example --json
 `;
 
 /**
@@ -372,6 +375,7 @@ export const FLAGS_SCHEMA = {
 	file: { type: "string", default: "" },
 	outputs: { type: "string", default: "" },
 	approval: { type: "string", default: "" },
+	session: { type: "string", default: "" },
 	binding: { type: "string", default: "" },
 	nonce: { type: "string", default: "" },
 	issuedAt: { type: "number", default: 0 },

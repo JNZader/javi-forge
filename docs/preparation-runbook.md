@@ -16,6 +16,7 @@ preparation CLI must preserve these boundaries:
 - no output staging;
 - no private-key access or signing;
 - no model call, gateway call, deploy, publish, or release;
+- no OpenCode runtime call from the `status-ok` validator;
 - no approval consumption.
 
 `approval-revoke` is the only command in this runbook that writes state. Its
@@ -136,6 +137,21 @@ The operator owns these files and values:
    approval evidence against that computed binding. It does not consume the
    approval, execute the worker, stage outputs, sign, call a model, deploy,
    publish, or release.
+
+9. Optionally validate a previously captured OpenCode status-ok response:
+
+   ```bash
+   javi-forge preparation status-ok \
+     --file opencode-status-ok.json \
+     --session ses_example \
+     --json
+   ```
+
+   `status-ok` is a local parser only. It reads one bounded capture file and
+   verifies the fixed source-only `{"status":"ok"}` StructuredOutput envelope
+   for the supplied session id. It does not contact OpenCode, call a model, read
+   credentials, verify or consume approval evidence, execute the worker, stage
+   outputs, deploy, publish, or release.
 
 ## Revocation sequence
 

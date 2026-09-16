@@ -138,8 +138,8 @@ function usage(): string {
 		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both [--dry-run]",
 		`  javi-forge ai providers profile-plan <output-dir> --pass-list <pass.tsv|report.jsonl> [--preset ${MODEL_ASSIGNMENT_PRESET.COMMUNITY_BACKEND_OPENCODE_GO}] [--limit candidates-per-profile] [--dry-run]`,
 		"  javi-forge ai providers profile-export <profile-plan.json> [output-dir] --target pi|opencode|codex|both [--dry-run]",
-		"  javi-forge ai providers profile-apply <overlay.json> --pass-list <pass.tsv|report.jsonl> --target pi|opencode [--dry-run]",
-		"  javi-forge ai providers profile-apply --rollback <backup-path> --target pi|opencode",
+		"  javi-forge ai providers profile-apply <overlay.json> --pass-list <pass.tsv|report.jsonl> --target pi|opencode --pi-settings|--opencode-config <path> [--dry-run]",
+		"  javi-forge ai providers profile-apply --rollback <backup-path> --target pi|opencode --pi-settings|--opencode-config <path>",
 	].join("\n");
 }
 
@@ -500,18 +500,19 @@ function profileApplyDetail(
 	].join("\n");
 }
 
-function defaultRuntimePath(
+function requireExplicitRuntimePath(
 	target: "pi" | "opencode",
 	request: AiProvidersCommandRequest,
 ): { piSettingsPath?: string; opencodeConfigPath?: string } {
-	return {
-		piSettingsPath:
-			emptyToUndefined(request.piSettingsPath) ??
-			(target === "pi" ? "~/.pi/agent/settings.json" : undefined),
-		opencodeConfigPath:
-			emptyToUndefined(request.opencodeConfigPath) ??
-			(target === "opencode" ? "~/.config/opencode/opencode.json" : undefined),
-	};
+	const piSettingsPath = emptyToUndefined(request.piSettingsPath);
+	const opencodeConfigPath = emptyToUndefined(request.opencodeConfigPath);
+	if (target === "pi" && !piSettingsPath) {
+		throw new Error("profile-apply requires --pi-settings <path>");
+	}
+	if (target === "opencode" && !opencodeConfigPath) {
+		throw new Error("profile-apply requires --opencode-config <path>");
+	}
+	return { piSettingsPath, opencodeConfigPath };
 }
 
 async function profileApply(
@@ -526,7 +527,7 @@ async function profileApply(
 	);
 	const target = normalizeProfileApplyTarget(emptyToUndefined(request.target));
 	const rollbackPath = emptyToUndefined(request.rollbackPath);
-	const runtimePaths = defaultRuntimePath(target, request);
+	const runtimePaths = requireExplicitRuntimePath(target, request);
 	const result = rollbackPath
 		? await rollbackModelAssignmentProfileOverlay({
 				backupPath: rollbackPath,

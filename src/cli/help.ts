@@ -190,7 +190,7 @@ export const HELP_TEXT = `
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.pass.tsv --target pi --dry-run
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.jsonl --target both
     $ javi-forge ai providers profile-plan /tmp/model-profiles --pass-list /tmp/opencode-smoke/smoke.jsonl --preset community-backend-opencode-go
-    $ javi-forge ai providers profile-apply /tmp/pi.model-profiles.generated.json --pass-list /tmp/opencode-smoke/smoke.jsonl --target pi --dry-run
+    $ javi-forge ai providers profile-apply /tmp/pi.model-profiles.generated.json --pass-list /tmp/opencode-smoke/smoke.jsonl --target pi --pi-settings /tmp/settings.json --dry-run
     $ javi-forge ai providers profile-apply --rollback /tmp/settings.json.bak-20260916T120000Z --target pi --pi-settings /tmp/settings.json
     $ javi-forge pi providers export-free
     $ javi-forge pi providers export-free /tmp/pi-free-providers

@@ -452,6 +452,48 @@ describe("runAiProvidersCommand", () => {
 		expect(steps[1]!.detail).toContain("updated");
 	});
 
+	it("refuses profile-apply to Pi without --pi-settings", async () => {
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "profile-apply",
+				overlayPath: "/preview/pi.model-profiles.generated.json",
+				passListPath: "/target/smoke.pass.tsv",
+				target: "pi",
+				dryRun: true,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.FAILURE });
+		expect(mockApplyProfile).not.toHaveBeenCalled();
+		expect(mockRollbackProfile).not.toHaveBeenCalled();
+		expect(steps.at(-1)?.detail).toContain("--pi-settings");
+	});
+
+	it("refuses profile-apply to OpenCode without --opencode-config", async () => {
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "profile-apply",
+				overlayPath: "/preview/opencode.model-profiles.generated.json",
+				passListPath: "/target/smoke.pass.tsv",
+				target: "opencode",
+				dryRun: true,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.FAILURE });
+		expect(mockApplyProfile).not.toHaveBeenCalled();
+		expect(mockRollbackProfile).not.toHaveBeenCalled();
+		expect(steps.at(-1)?.detail).toContain("--opencode-config");
+	});
+
 	it("reports usage for unsupported subcommands", async () => {
 		const { steps, onStep } = collectSteps();
 

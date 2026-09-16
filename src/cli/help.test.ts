@@ -123,6 +123,7 @@ describe("help — pi free-provider export", () => {
 		expect(examples).toContain("ai providers convert pi opencode");
 		expect(examples).toContain("ai providers apply-scope");
 		expect(examples).toContain("ai providers profile-apply");
+		expect(examples).toContain("--pi-settings /tmp/settings.json --dry-run");
 		expect(examples).toContain("smoke-test /tmp/opencode-smoke");
 		expect(examples).toContain("/tmp/pi-free-providers");
 	});

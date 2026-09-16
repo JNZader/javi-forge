@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -157,6 +158,7 @@ describe("runPreparationCommand", () => {
 		expect(unsupported.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
 		expect(unsupported.error).toContain("preparation bind");
 		expect(unsupported.error).toContain("outputs-template");
+		expect(unsupported.error).toContain("preparation digest");
 		expect(unsupported.error).toContain("preparation policy");
 		expect(unsupported.error).toContain("approval-message");
 		expect(unsupported.error).toContain("approval-check");
@@ -191,6 +193,62 @@ describe("runPreparationCommand", () => {
 		expect(mockBind).not.toHaveBeenCalled();
 		expect(mockApprovalCheck).not.toHaveBeenCalled();
 		expect(mockApprovalRevoke).not.toHaveBeenCalled();
+	});
+
+	it("computes a bounded digest without printing file contents", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const filePath = path.join(root, "worker");
+		await writeFile(filePath, "secret-worker-bytes", { mode: 0o600 });
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "digest",
+				filePath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.SUCCESS);
+		expect(result.digest).toEqual({
+			digest: createHash("sha256").update("secret-worker-bytes").digest("hex"),
+			bytes: Buffer.byteLength("secret-worker-bytes"),
+		});
+		expect(steps.at(-1)?.detail).toContain(`digest: ${result.digest?.digest}`);
+		expect(steps.at(-1)?.detail).toContain("bytes: 19");
+		expect(steps.at(-1)?.detail).toContain("bounded file read only");
+		expect(steps.at(-1)?.detail).not.toContain("secret-worker-bytes");
+		expect(mockInspect).not.toHaveBeenCalled();
+		expect(mockBind).not.toHaveBeenCalled();
+		expect(mockApprovalCheck).not.toHaveBeenCalled();
+		expect(mockApprovalRevoke).not.toHaveBeenCalled();
+	});
+
+	it("rejects empty digest inputs without printing path contents", async () => {
+		const root = await mkdtemp(path.join(os.tmpdir(), "preparation-command-"));
+		const filePath = path.join(root, "empty");
+		await writeFile(filePath, "", { mode: 0o600 });
+		const { steps, onStep } = collectSteps();
+
+		const result = await runPreparationCommand(
+			{
+				action: "digest",
+				filePath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
+		expect(result.error).toBe(
+			"preparation digest file is not a bounded regular file",
+		);
+		expect(steps.at(-1)?.detail).toBe(
+			"preparation digest file is not a bounded regular file",
+		);
 	});
 
 	it("rejects malformed JSON without printing config content", async () => {

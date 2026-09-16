@@ -1,5 +1,6 @@
-import { randomBytes } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { constants as FS } from "node:fs";
+import { open, readFile, stat, writeFile } from "node:fs/promises";
 import {
 	type ApprovalPayload,
 	approvalMessage,
@@ -35,6 +36,7 @@ export const PREPARATION_ACTION = {
 	APPROVAL_MESSAGE: "approval-message",
 	APPROVAL_REVOKE: "approval-revoke",
 	BIND: "bind",
+	DIGEST: "digest",
 	OUTPUTS_TEMPLATE: "outputs-template",
 	POLICY: "policy",
 	TEMPLATE: "template",
@@ -47,6 +49,7 @@ export interface PreparationCommandRequest {
 	binding?: string;
 	configPath?: string;
 	expiresAt?: number;
+	filePath?: string;
 	outputsPath?: string;
 	outputPath?: string;
 	force: boolean;
@@ -65,6 +68,11 @@ export interface PreparationPolicyResult {
 	outputs: readonly string[];
 }
 
+export interface PreparationDigestResult {
+	digest: string;
+	bytes: number;
+}
+
 export interface PreparationCommandResult {
 	status: PreparationCommandStatus;
 	preflight?: PreparationPreflightResult;
@@ -73,6 +81,7 @@ export interface PreparationCommandResult {
 	approvalMessage?: PreparationApprovalMessageResult;
 	approvalRevoke?: PreparationApprovalRevokeResult;
 	policy?: PreparationPolicyResult;
+	digest?: PreparationDigestResult;
 	outputPath?: string;
 	error?: string;
 }
@@ -93,6 +102,7 @@ function usage(): string {
 		"  javi-forge preparation template --output <path> [--force]",
 		"  javi-forge preparation outputs-template --output <path> [--force]",
 		"  javi-forge preparation policy [--json]",
+		"  javi-forge preparation digest --file <path> [--json]",
 		"  javi-forge preparation preflight --config <path> [--json]",
 		"  javi-forge preparation bind --config <path> --outputs <path> [--json]",
 		"  javi-forge preparation approval-message --binding <hex> [--nonce <hex>] [--issued-at <ms>] [--expires-at <ms>] [--json]",
@@ -170,6 +180,25 @@ function policyDetail(result: PreparationPolicyResult): string {
 
 function preparationOutputsTemplate(): Readonly<Record<string, string>> {
 	return Object.freeze(Object.fromEntries(OUTPUTS.map((name) => [name, ""])));
+}
+
+async function digestFile(filePath?: string): Promise<PreparationDigestResult> {
+	const path = filePath?.trim();
+	if (!path) throw new Error("digest requires --file <path>");
+	const handle = await open(path, FS.O_RDONLY | FS.O_NOFOLLOW);
+	try {
+		const info = await handle.stat();
+		if (!info.isFile() || info.size < 1 || info.size > 4194304) {
+			throw new Error("preparation digest file is not a bounded regular file");
+		}
+		const bytes = await handle.readFile();
+		return {
+			digest: createHash("sha256").update(bytes).digest("hex"),
+			bytes: bytes.byteLength,
+		};
+	} finally {
+		await handle.close();
+	}
 }
 
 async function readConfig(configPath?: string): Promise<unknown> {
@@ -285,6 +314,7 @@ export async function runPreparationCommand(
 		request.action !== PREPARATION_ACTION.APPROVAL_MESSAGE &&
 		request.action !== PREPARATION_ACTION.APPROVAL_REVOKE &&
 		request.action !== PREPARATION_ACTION.BIND &&
+		request.action !== PREPARATION_ACTION.DIGEST &&
 		request.action !== PREPARATION_ACTION.OUTPUTS_TEMPLATE &&
 		request.action !== PREPARATION_ACTION.POLICY &&
 		request.action !== PREPARATION_ACTION.PREFLIGHT &&
@@ -348,6 +378,23 @@ export async function runPreparationCommand(
 				policyDetail(policy),
 			);
 			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, policy };
+		}
+
+		if (request.action === PREPARATION_ACTION.DIGEST) {
+			report(onStep, "preparation-digest", "Preparation digest", "running");
+			const digest = await digestFile(request.filePath);
+			report(
+				onStep,
+				"preparation-digest",
+				"Preparation digest",
+				"done",
+				[
+					`digest: ${digest.digest}`,
+					`bytes: ${digest.bytes}`,
+					"side effects: none; bounded file read only; no file writes, worker execution, approval verification, approval consumption, staging, model call, deploy, publish, or release",
+				].join("\n"),
+			);
+			return { status: PREPARATION_COMMAND_STATUS.SUCCESS, digest };
 		}
 
 		if (request.action === PREPARATION_ACTION.APPROVAL_MESSAGE) {

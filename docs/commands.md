@@ -218,6 +218,7 @@ For the complete operator sequence, failure handling, and rollback notes, see
 javi-forge preparation template --output preparation.config.example.json
 javi-forge preparation outputs-template --output preparation.outputs.example.json
 javi-forge preparation policy --json
+javi-forge preparation digest --file /usr/bin/bwrap --json
 javi-forge preparation preflight --config preparation.config.json
 javi-forge preparation preflight --config preparation.config.json --json
 javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
@@ -239,6 +240,11 @@ operator to fill; the command does not stage outputs or generate helper code.
 The policy command prints the compiled fixed preparation policy and output names.
 It is read-only and does not read operator config, output files, approval
 evidence, worker paths, or runtime state.
+
+The digest command computes a SHA-256 digest for one bounded regular file. It
+prints only the digest and byte length; it refuses empty, oversized, symlink, or
+non-regular files. Operators can use it to fill pinned digest fields without
+printing worker/source/launcher contents.
 
 The preflight command parses an exact production preparation configuration,
 checks the configured cwd/destination against policy, validates the Ed25519

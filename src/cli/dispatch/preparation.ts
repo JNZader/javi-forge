@@ -35,6 +35,7 @@ export async function handlePreparation(cli: CLI): Promise<void> {
 			binding: cli.flags.binding,
 			configPath: cli.flags.config,
 			expiresAt: cli.flags.expiresAt,
+			...(cli.flags.file ? { filePath: cli.flags.file } : {}),
 			outputsPath: cli.flags.outputs,
 			outputPath: cli.flags.output,
 			force: cli.flags.force,

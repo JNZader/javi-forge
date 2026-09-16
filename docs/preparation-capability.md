@@ -80,6 +80,10 @@ outputs or generate helper code.
 `javi-forge preparation policy [--json]` prints the compiled fixed preparation
 policy and output names without reading operator config, output files, approval
 evidence, worker paths, or runtime state.
+`javi-forge preparation digest --file <file> [--json]` computes a SHA-256 digest
+for one bounded regular file and prints only the digest plus byte length. It
+refuses empty, oversized, symlink, or non-regular files and does not print file
+contents.
 `javi-forge preparation bind --config <file> --outputs <file> [--json]` adds a
 second read-only diagnostic step: it validates the same runtime boundary, parses
 an exact six-output JSON object, and computes the approval binding an external

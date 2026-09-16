@@ -33,6 +33,7 @@ export const HELP_TEXT = `
     preparation template   Write an operator-owned preparation config template
     preparation outputs-template  Write an operator-owned outputs JSON template
     preparation policy    Print the fixed preparation policy and output names
+    preparation digest    Compute a bounded SHA-256 digest for operator pins
     preparation preflight  Read-only production preparation preflight
     preparation bind       Compute a read-only production preparation binding
     preparation approval-message  Prepare the exact approval message to sign
@@ -126,6 +127,7 @@ export const HELP_TEXT = `
 
   Preparation options (javi-forge preparation)
     --output PATH   Write a preparation config/outputs template to this path
+    --file PATH     File to hash for preparation digest
     --config PATH   Production preparation config JSON
     --outputs PATH  Production preparation outputs JSON for binding computation
     --binding HEX   Production preparation binding for approval-message
@@ -184,6 +186,7 @@ export const HELP_TEXT = `
     $ javi-forge preparation template --output preparation.config.example.json
     $ javi-forge preparation outputs-template --output preparation.outputs.example.json
     $ javi-forge preparation policy --json
+    $ javi-forge preparation digest --file /usr/bin/bwrap --json
     $ javi-forge preparation preflight --config preparation.config.json --json
     $ javi-forge preparation bind --config preparation.config.json --outputs preparation.outputs.json --json
     $ javi-forge preparation approval-message --binding <hex> --json
@@ -364,6 +367,7 @@ export const FLAGS_SCHEMA = {
 	passList: { type: "string", default: "" },
 	piSettings: { type: "string", default: "" },
 	opencodeConfig: { type: "string", default: "" },
+	file: { type: "string", default: "" },
 	outputs: { type: "string", default: "" },
 	approval: { type: "string", default: "" },
 	binding: { type: "string", default: "" },

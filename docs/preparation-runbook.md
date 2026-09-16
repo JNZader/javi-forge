@@ -56,6 +56,13 @@ The operator owns these files and values:
    javi-forge preparation policy --json
    ```
 
+   Use the digest helper to fill pinned digest fields without printing file
+   contents:
+
+   ```bash
+   javi-forge preparation digest --file /usr/bin/bwrap --json
+   ```
+
    Verify every pinned path and digest externally before trusting it. The public
    key must be Ed25519. The state directory and control directory must be owned
    by the current user and mode `0700`.

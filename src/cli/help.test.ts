@@ -151,6 +151,7 @@ describe("help — preparation preflight", () => {
 		expect(HELP_TEXT).toContain("preparation template");
 		expect(HELP_TEXT).toContain("preparation outputs-template");
 		expect(HELP_TEXT).toContain("preparation policy");
+		expect(HELP_TEXT).toContain("preparation digest");
 		expect(HELP_TEXT).toContain("preparation preflight");
 		expect(HELP_TEXT).toContain("preparation bind");
 		expect(HELP_TEXT).toContain("preparation approval-message");
@@ -164,6 +165,9 @@ describe("help — preparation preflight", () => {
 		);
 		expect(HELP_TEXT).toContain(
 			"Print the fixed preparation policy and output names",
+		);
+		expect(HELP_TEXT).toContain(
+			"Compute a bounded SHA-256 digest for operator pins",
 		);
 		expect(HELP_TEXT).toContain("Read-only production preparation preflight");
 		expect(HELP_TEXT).toContain(
@@ -180,6 +184,7 @@ describe("help — preparation preflight", () => {
 		expect(HELP_TEXT).toContain("Production preparation binding");
 		expect(HELP_TEXT).toContain("Production preparation approval evidence");
 		expect(HELP_TEXT).toContain("--output");
+		expect(HELP_TEXT).toContain("--file");
 		expect(HELP_TEXT).toContain("--outputs");
 		expect(HELP_TEXT).toContain("--binding");
 		expect(HELP_TEXT).toContain("--approval");
@@ -189,6 +194,8 @@ describe("help — preparation preflight", () => {
 		expect(HELP_TEXT).toContain("--json");
 		expect(FLAGS_SCHEMA).toHaveProperty("output");
 		expect(FLAGS_SCHEMA.output.type).toBe("string");
+		expect(FLAGS_SCHEMA).toHaveProperty("file");
+		expect(FLAGS_SCHEMA.file.type).toBe("string");
 		expect(FLAGS_SCHEMA).toHaveProperty("outputs");
 		expect(FLAGS_SCHEMA.outputs.type).toBe("string");
 		expect(FLAGS_SCHEMA).toHaveProperty("approval");
@@ -208,6 +215,7 @@ describe("help — preparation preflight", () => {
 		expect(examples).toContain("preparation template --output");
 		expect(examples).toContain("preparation outputs-template --output");
 		expect(examples).toContain("preparation policy --json");
+		expect(examples).toContain("preparation digest --file");
 		expect(examples).toContain("preparation preflight --config");
 		expect(examples).toContain("preparation bind --config");
 		expect(examples).toContain("preparation approval-message --binding");

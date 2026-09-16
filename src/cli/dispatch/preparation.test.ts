@@ -248,6 +248,52 @@ describe("preparation dispatch", () => {
 		expect(process.exitCode).toBe(0);
 	});
 
+	it("routes digest arguments", async () => {
+		mockRun.mockResolvedValue({
+			status: "success",
+			digest: {
+				digest: "a".repeat(64),
+				bytes: 123,
+			},
+		});
+
+		await handlePreparation({
+			input: ["preparation", "digest"],
+			flags: {
+				approval: "",
+				binding: "",
+				config: "",
+				expiresAt: 0,
+				file: "/safe/worker",
+				issuedAt: 0,
+				nonce: "",
+				outputs: "",
+				output: "",
+				force: false,
+				json: true,
+			},
+		} as CLI);
+
+		expect(mockRun).toHaveBeenCalledWith(
+			{
+				action: "digest",
+				approvalPath: "",
+				binding: "",
+				configPath: "",
+				expiresAt: 0,
+				filePath: "/safe/worker",
+				outputsPath: "",
+				outputPath: "",
+				force: false,
+				issuedAt: 0,
+				json: true,
+				nonce: "",
+			},
+			expect.any(Function),
+		);
+		expect(process.exitCode).toBe(0);
+	});
+
 	it("routes bind arguments", async () => {
 		mockRun.mockResolvedValue({
 			status: "success",

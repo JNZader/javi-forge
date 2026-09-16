@@ -211,6 +211,8 @@ runtime-visible model list.
 ## preparation
 
 Run read-only production preparation diagnostics.
+For the complete operator sequence, failure handling, and rollback notes, see
+[Preparation operator runbook](preparation-runbook.md).
 
 ```bash
 javi-forge preparation template --output preparation.config.example.json

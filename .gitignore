@@ -8,3 +8,5 @@ coverage/
 reports/
 *.log
 .DS_Store
+# Local ODD scratch; javi-forge SDD artifacts live in openspec/
+odd/

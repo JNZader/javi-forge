@@ -176,6 +176,15 @@ smoke-test `--dry-run` JSONL and empty/no-pass inputs instead of clearing model
 configuration from preview artifacts. Pi requires `--pi-settings` and OpenCode
 requires `--opencode-config`; there is no homedir default.
 
+Restore an apply-scope backup onto one explicit dest. `--target both` and an
+omitted target are refused; two restores are two commands. `--rollback` skips
+the pass-list apply path.
+
+```bash
+javi-forge ai providers apply-scope --rollback /tmp/settings.json.bak-20260916T120000Z --target pi --pi-settings /tmp/settings.json
+javi-forge ai providers apply-scope --rollback /tmp/opencode.json.bak-20260916T120000Z --target opencode --opencode-config /tmp/opencode.json --dry-run
+```
+
 ### OpenCode smoke-test behavior
 
 When `--runtime opencode` is used without `--config`, `javi-forge` discovers the

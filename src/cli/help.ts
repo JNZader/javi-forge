@@ -293,10 +293,10 @@ export const HOOKS_HELP_TEXT = `
     doctor opencode may in-process import managed-current plugin bytes; import
     failure exits 1/blocked, success stays 2/inconclusive because it cannot prove
     OpenCode discovered, loaded, or executed the plugin.
-    doctor grok inspects installed files only and exits 2/inconclusive because
-    it cannot prove Grok discovered, loaded, or executed the hook.
-    doctor cursor inspects installed files only and exits 2/inconclusive because
-    it cannot prove Cursor discovered, loaded, or executed the hook.
+    doctor grok may probe the recorded hook execPath; missing file exits 1/blocked,
+    present file stays 2/inconclusive because it cannot prove Grok spawned the hook.
+    doctor cursor may probe the recorded hook execPath; missing file exits 1/blocked,
+    present file stays 2/inconclusive because it cannot prove Cursor spawned the hook.
     Linux: install/repair claude, grok, and cursor need the acl package (getfacl) to
     prove the parent chain — apt install acl / apk add acl / dnf install acl.
     Without it

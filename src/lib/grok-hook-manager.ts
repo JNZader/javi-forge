@@ -15,6 +15,7 @@ import type {
 	ExecutionReport,
 } from "./claude-hook-manager.js";
 import type { ClaudeHookComponentState } from "./claude-hook-settings.js";
+import { commandFormExecEvidence } from "./command-hook-exec-path.js";
 import { safeReadFile } from "./safe-read.js";
 import { selectSecureFs } from "./secure-fs-posix.js";
 import {
@@ -269,6 +270,7 @@ export interface GrokDoctorOptions {
 	manifest?: GrokManifest;
 	policySource?: string;
 	env?: NodeJS.ProcessEnv;
+	probeExecPath?: (execPath: string) => Promise<boolean>;
 }
 
 export async function doctorGrokSkillGuard(
@@ -300,6 +302,25 @@ export async function doctorGrokSkillGuard(
 			);
 		}
 	}
+	const unknownSources = [
+		"Grok hook discovery is not locally verified",
+		"Grok hook loading is not locally verified",
+		"Grok hook execution is not locally verified",
+	];
+	const residual = [
+		"Installed file bytes do not prove Grok discovered, loaded, or invoked the hook",
+	];
+	let blockers: string[] = [];
+	if (hook.state === "managed-current" && policy.state === "managed-current") {
+		const command = grokRecordedCommand(await readFile(paths.hookFile, "utf8"));
+		const evidence = await commandFormExecEvidence({
+			host: "Grok",
+			command,
+			probeExecPath: options.probeExecPath,
+		});
+		blockers = evidence.blockers;
+		residual.push(...evidence.residual);
+	}
 	return {
 		healthy:
 			hook.state === "managed-current" && policy.state === "managed-current",
@@ -307,18 +328,30 @@ export async function doctorGrokSkillGuard(
 		policy,
 		remediation: [...new Set(remediation)],
 		execution: {
-			status: "inconclusive",
-			blockers: [],
-			unknownSources: [
-				"Grok hook discovery is not locally verified",
-				"Grok hook loading is not locally verified",
-				"Grok hook execution is not locally verified",
-			],
-			residual: [
-				"Installed file bytes do not prove Grok discovered, loaded, or invoked the hook",
-			],
+			status: blockers.length > 0 ? "blocked" : "inconclusive",
+			blockers,
+			unknownSources,
+			residual,
 		},
 	};
+}
+
+function grokRecordedCommand(content: string): string | undefined {
+	try {
+		const value: unknown = JSON.parse(content);
+		if (!value || typeof value !== "object") return undefined;
+		const hooks = (
+			value as {
+				hooks?: {
+					PreToolUse?: Array<{ hooks?: Array<{ command?: unknown }> }>;
+				};
+			}
+		).hooks;
+		const command = hooks?.PreToolUse?.[0]?.hooks?.[0]?.command;
+		return typeof command === "string" ? command : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 interface GrokMutationSuccess {

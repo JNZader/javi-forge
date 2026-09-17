@@ -16,6 +16,7 @@ import type {
 	ExecutionReport,
 } from "./claude-hook-manager.js";
 import type { ClaudeHookComponentState } from "./claude-hook-settings.js";
+import { commandFormExecEvidence } from "./command-hook-exec-path.js";
 import { safeReadFile } from "./safe-read.js";
 import { selectSecureFs } from "./secure-fs-posix.js";
 import {
@@ -253,6 +254,7 @@ export interface CursorHookDoctorReport {
 export interface CursorDoctorOptions {
 	manifest?: CursorManifest;
 	policySource?: string;
+	probeExecPath?: (execPath: string) => Promise<boolean>;
 }
 
 async function readJsonFile(
@@ -318,6 +320,29 @@ export async function doctorCursorSkillGuard(
 			);
 		}
 	}
+	const unknownSources = [
+		"Cursor hook discovery is not locally verified",
+		"Cursor hook loading is not locally verified",
+		"Cursor hook execution is not locally verified",
+	];
+	const residual = [
+		"Installed file bytes do not prove Cursor discovered, loaded, or invoked the hook",
+	];
+	let blockers: string[] = [];
+	if (
+		hooksJson.state === "managed-current" &&
+		policy.state === "managed-current"
+	) {
+		const evidence = await commandFormExecEvidence({
+			host: "Cursor",
+			command: cursorRecordedCommand(
+				hooksRead.ok ? hooksRead.value : undefined,
+			),
+			probeExecPath: options.probeExecPath,
+		});
+		blockers = evidence.blockers;
+		residual.push(...evidence.residual);
+	}
 	return {
 		healthy:
 			hooksJson.state === "managed-current" &&
@@ -326,18 +351,21 @@ export async function doctorCursorSkillGuard(
 		policy,
 		remediation: [...new Set(remediation)],
 		execution: {
-			status: "inconclusive",
-			blockers: [],
-			unknownSources: [
-				"Cursor hook discovery is not locally verified",
-				"Cursor hook loading is not locally verified",
-				"Cursor hook execution is not locally verified",
-			],
-			residual: [
-				"Installed file bytes do not prove Cursor discovered, loaded, or invoked the hook",
-			],
+			status: blockers.length > 0 ? "blocked" : "inconclusive",
+			blockers,
+			unknownSources,
+			residual,
 		},
 	};
+}
+
+function cursorRecordedCommand(value: unknown): string | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const hooks = (
+		value as { hooks?: { preToolUse?: Array<{ command?: unknown }> } }
+	).hooks;
+	const command = hooks?.preToolUse?.[0]?.command;
+	return typeof command === "string" ? command : undefined;
 }
 
 interface CursorMutationSuccess {

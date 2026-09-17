@@ -294,11 +294,35 @@ describe("Grok Build SkillGuard manager", () => {
 		expect(report.hook.state).toBe("managed-current");
 		expect(report.policy.state).toBe("managed-current");
 		expect(report.execution.status).toBe("inconclusive");
+		expect(report.execution.blockers).toEqual([]);
 		expect(report.execution.unknownSources).toEqual([
 			"Grok hook discovery is not locally verified",
 			"Grok hook loading is not locally verified",
 			"Grok hook execution is not locally verified",
 		]);
+		expect(report.execution.residual).toContain(
+			"This process seeing the recorded execPath is not proof Grok spawned the hook",
+		);
+	});
+
+	it("doctor blocks when the recorded Grok execPath is not a file", async () => {
+		fs.mkdirSync(paths().hooksDir, { recursive: true });
+		fs.writeFileSync(
+			paths().hookFile,
+			expectedGrokHookJson(paths().policyFile),
+		);
+		fs.writeFileSync(paths().policyFile, fs.readFileSync(SHIPPED_GROK_POLICY));
+
+		const report = await doctorGrokSkillGuard(baseDir, {
+			manifest: manifest(),
+			probeExecPath: async () => false,
+		});
+
+		expect(report.healthy).toBe(true);
+		expect(report.execution.status).toBe("blocked");
+		expect(report.execution.blockers[0]).toMatch(
+			/^Grok recorded execPath is not a file: /,
+		);
 	});
 
 	it("uses the policy marker shipped beside the hook", () => {

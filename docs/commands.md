@@ -611,8 +611,10 @@ two current-user global targets, while project-scoped protection covers
 configuration boundary. Foreign, malformed, symlink, and non-regular targets
 remain fail-closed even with `--force`.
 
-`doctor grok` remains read-only and reports runtime discovery/loading/execution
-as inconclusive until a reliable Grok runtime evidence mechanism exists.
+`doctor grok` remains read-only. When both managed files are current it probes
+whether the recorded command `execPath` is a file (missing → blocked). A present
+file is still `inconclusive`: this process seeing that binary is not proof Grok
+spawned the hook.
 
 ### Cursor global hook boundary
 
@@ -624,8 +626,10 @@ and the existing Claude configuration boundary. Foreign hook registrations are
 preserved when the managed hook is added; malformed, symlink, and non-regular
 targets remain fail-closed even with `--force`.
 
-`doctor cursor` remains read-only and reports runtime discovery/loading/execution
-as inconclusive until a reliable Cursor runtime evidence mechanism exists.
+`doctor cursor` remains read-only. When both managed files are current it probes
+whether the recorded command `execPath` is a file (missing → blocked). A present
+file is still `inconclusive`: this process seeing that binary is not proof Cursor
+spawned the hook.
 
 ---
 

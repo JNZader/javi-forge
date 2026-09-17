@@ -45,6 +45,9 @@ function renderDoctor(
 	log(`  hooks.json: ${report.hooksJson.state}`);
 	log(`  policy: ${report.policy.state}`);
 	log(`  execution: ${report.execution.status}`);
+	for (const blocker of report.execution.blockers) {
+		log(`  blocker: ${blocker}`);
+	}
 	for (const unknown of report.execution.unknownSources) {
 		log(`  unknown: ${unknown}`);
 	}

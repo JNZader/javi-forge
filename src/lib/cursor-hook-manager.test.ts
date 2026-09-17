@@ -252,11 +252,38 @@ describe("Cursor SkillGuard manager", () => {
 		expect(report.hooksJson.state).toBe("managed-current");
 		expect(report.policy.state).toBe("managed-current");
 		expect(report.execution.status).toBe("inconclusive");
+		expect(report.execution.blockers).toEqual([]);
 		expect(report.execution.unknownSources).toEqual([
 			"Cursor hook discovery is not locally verified",
 			"Cursor hook loading is not locally verified",
 			"Cursor hook execution is not locally verified",
 		]);
+		expect(report.execution.residual).toContain(
+			"This process seeing the recorded execPath is not proof Cursor spawned the hook",
+		);
+	});
+
+	it("doctor blocks when the recorded Cursor execPath is not a file", async () => {
+		fs.mkdirSync(paths().hooksDir, { recursive: true });
+		fs.writeFileSync(
+			paths().hooksFile,
+			expectedCursorHooksJson(paths().policyFile),
+		);
+		fs.writeFileSync(
+			paths().policyFile,
+			fs.readFileSync(SHIPPED_CURSOR_POLICY),
+		);
+
+		const report = await doctorCursorSkillGuard(baseDir, {
+			manifest: manifest(),
+			probeExecPath: async () => false,
+		});
+
+		expect(report.healthy).toBe(true);
+		expect(report.execution.status).toBe("blocked");
+		expect(report.execution.blockers[0]).toMatch(
+			/^Cursor recorded execPath is not a file: /,
+		);
 	});
 
 	it("uses the shared policy marker shipped beside the hook", () => {

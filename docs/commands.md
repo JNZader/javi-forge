@@ -597,9 +597,10 @@ The OpenCode installer owns only the two managed files under the current user's
 `~/.config/opencode/plugins/`. It does not edit `opencode.json`, project-local
 configuration, or any other OpenCode file. Foreign, malformed, symlink, and
 non-regular plugin targets remain fail-closed even with `--force`.
-`doctor opencode` remains read-only and reports runtime discovery/loading/
-execution as inconclusive until a reliable OpenCode runtime evidence mechanism
-exists.
+`doctor opencode` remains read-only. When both managed files are current it may
+in-process import the plugin as a fail-closed smoke (import failure → blocked).
+Import success is still `inconclusive`: it is not proof OpenCode discovered,
+loaded, or invoked the plugin. `runnable` is not reported from file currency.
 
 ### Grok Build global hook boundary
 

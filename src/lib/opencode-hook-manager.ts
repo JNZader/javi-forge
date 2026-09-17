@@ -2,14 +2,15 @@
  * OpenCode SkillGuard plugin ownership manager. OpenCode discovers global
  * plugins from `~/.config/opencode/plugins`, so installation is a two-file
  * transaction: the plugin and its side-by-side policy runtime. No user config
- * is edited and doctor deliberately reports installed bytes only, never proof
- * that an OpenCode runtime loaded or executed the plugin.
+ * is edited. Doctor may in-process import managed-current plugin bytes as a
+ * fail-closed smoke; that is not proof OpenCode discovered, loaded, or ran them.
  */
 
 import { createHash, randomBytes } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { CLAUDE_HOOK_ASSETS_DIR, FORGE_ROOT } from "../constants.js";
 import type {
 	AssetManifestEntry,
@@ -174,6 +175,7 @@ export interface OpenCodeDoctorOptions {
 	manifest?: OpenCodeManifest;
 	pluginSource?: string;
 	policySource?: string;
+	importPlugin?: (pluginFile: string) => Promise<unknown>;
 }
 
 export async function doctorOpenCodeSkillGuard(
@@ -213,6 +215,34 @@ export async function doctorOpenCodeSkillGuard(
 			);
 		}
 	}
+	const unknownSources = [
+		"OpenCode plugin discovery is not locally verified",
+		"OpenCode plugin loading is not locally verified",
+		"OpenCode plugin execution is not locally verified",
+	];
+	const residual = [
+		"Installed file bytes do not prove OpenCode discovered, loaded, or invoked the plugin",
+	];
+	const blockers: string[] = [];
+	if (
+		plugin.state === "managed-current" &&
+		policy.state === "managed-current"
+	) {
+		try {
+			const importer =
+				options.importPlugin ??
+				(async (pluginFile: string) => {
+					await import(pathToFileURL(pluginFile).href);
+				});
+			await importer(paths.pluginFile);
+			residual.push(
+				"In-process import of shipped plugin bytes is not proof OpenCode loaded the plugin",
+			);
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			blockers.push(`OpenCode plugin module failed to load: ${detail}`);
+		}
+	}
 	return {
 		healthy:
 			plugin.state === "managed-current" && policy.state === "managed-current",
@@ -220,16 +250,10 @@ export async function doctorOpenCodeSkillGuard(
 		policy,
 		remediation: [...new Set(remediation)],
 		execution: {
-			status: "inconclusive",
-			blockers: [],
-			unknownSources: [
-				"OpenCode plugin discovery is not locally verified",
-				"OpenCode plugin loading is not locally verified",
-				"OpenCode plugin execution is not locally verified",
-			],
-			residual: [
-				"Installed file bytes do not prove OpenCode discovered, loaded, or invoked the plugin",
-			],
+			status: blockers.length > 0 ? "blocked" : "inconclusive",
+			blockers,
+			unknownSources,
+			residual,
 		},
 	};
 }

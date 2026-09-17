@@ -98,4 +98,31 @@ describe("runOpenCodeHookCommand", () => {
 		expect(out.join("\n")).toContain("doctor opencode: healthy");
 		expect(out.join("\n")).toContain("execution: inconclusive");
 	});
+
+	it("doctor prints blockers and exits 1 when execution is blocked", async () => {
+		const out: string[] = [];
+		const blocked = report(true);
+		blocked.execution = {
+			status: "blocked",
+			blockers: ["OpenCode plugin module failed to load: boom"],
+			unknownSources: [],
+			residual: [],
+		};
+		expect(
+			await runOpenCodeHookCommand(
+				"doctor",
+				"/cwd",
+				{},
+				{
+					doctor: vi.fn(async () => blocked),
+					log: (line) => out.push(line),
+					logError: () => {},
+				},
+			),
+		).toBe(1);
+		expect(out.join("\n")).toContain("execution: blocked");
+		expect(out.join("\n")).toContain(
+			"blocker: OpenCode plugin module failed to load: boom",
+		);
+	});
 });

@@ -201,16 +201,46 @@ describe("OpenCode SkillGuard manager", () => {
 
 		const report = await doctorOpenCodeSkillGuard(baseDir, {
 			manifest: manifest(),
+			importPlugin: async () => ({}),
 		});
 
 		expect(report.healthy).toBe(true);
 		expect(report.plugin.state).toBe("managed-current");
 		expect(report.policy.state).toBe("managed-current");
 		expect(report.execution.status).toBe("inconclusive");
+		expect(report.execution.blockers).toEqual([]);
 		expect(report.execution.unknownSources).toEqual([
 			"OpenCode plugin discovery is not locally verified",
 			"OpenCode plugin loading is not locally verified",
 			"OpenCode plugin execution is not locally verified",
+		]);
+		expect(report.execution.residual).toContain(
+			"In-process import of shipped plugin bytes is not proof OpenCode loaded the plugin",
+		);
+	});
+
+	it("doctor blocks when managed-current plugin module fails to load", async () => {
+		fs.mkdirSync(paths().pluginsDir, { recursive: true });
+		fs.writeFileSync(
+			paths().pluginFile,
+			fs.readFileSync(SHIPPED_OPENCODE_PLUGIN),
+		);
+		fs.writeFileSync(
+			paths().policyFile,
+			fs.readFileSync(SHIPPED_OPENCODE_POLICY),
+		);
+
+		const report = await doctorOpenCodeSkillGuard(baseDir, {
+			manifest: manifest(),
+			importPlugin: async () => {
+				throw new Error("boom");
+			},
+		});
+
+		expect(report.healthy).toBe(true);
+		expect(report.execution.status).toBe("blocked");
+		expect(report.execution.blockers).toEqual([
+			"OpenCode plugin module failed to load: boom",
 		]);
 	});
 });

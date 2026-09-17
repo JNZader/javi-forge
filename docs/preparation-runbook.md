@@ -3,8 +3,10 @@
 This runbook covers the currently shipped preparation operator workflow. It is
 deliberately **diagnostic and approval-oriented**: the shipped CLI can write a
 config template, measure a pinned runtime, compute a binding, prepare the exact
-approval message, verify approval evidence, and revoke approval evidence. It
-does not expose a production execution command.
+approval message, verify approval evidence, revoke approval evidence, and run
+`preparation execute` (consume once + pinned worker). Execute still has no
+destination override, model call, deploy, publish, or release. If the policy
+destination already exists, execute refuses before consume.
 
 ## Safety invariant
 

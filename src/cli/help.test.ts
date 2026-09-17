@@ -176,6 +176,7 @@ describe("help — preparation preflight", () => {
 		expect(HELP_TEXT).toContain("preparation approval-check");
 		expect(HELP_TEXT).toContain("preparation approval-revoke");
 		expect(HELP_TEXT).toContain("preparation status-ok");
+		expect(HELP_TEXT).toContain("preparation execute");
 		expect(HELP_TEXT).toContain(
 			"Write an operator-owned preparation config template",
 		);

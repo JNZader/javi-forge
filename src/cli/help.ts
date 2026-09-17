@@ -44,6 +44,7 @@ export const HELP_TEXT = `
     preparation approval-check  Verify approval evidence without consuming it
     preparation approval-revoke  Revoke approval evidence without executing
     preparation status-ok Verify a captured OpenCode status-ok response
+    preparation execute   Consume approval once and run the pinned worker (no dest override)
     plugin add        Install a plugin from GitHub (org/repo)
     plugin remove     Remove an installed plugin
     plugin list       List installed plugins
@@ -206,6 +207,7 @@ export const HELP_TEXT = `
     $ javi-forge preparation approval-check --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
     $ javi-forge preparation approval-revoke --config preparation.config.json --binding <hex> --approval preparation.approval.json --json
     $ javi-forge preparation status-ok --file opencode-status-ok.json --session ses_example --json
+    $ javi-forge preparation execute --config preparation.config.json --outputs preparation.outputs.json --approval preparation.approval.json --json
 `;
 
 /**

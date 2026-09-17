@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OUTPUTS } from "../lib/preparation-capability.js";
+import { runPreparationExecute } from "../lib/preparation-execute.js";
 import {
 	inspectPreparationApprovalCheck,
 	inspectPreparationApprovalRevocation,
@@ -43,6 +44,9 @@ vi.mock("../lib/preparation-production.js", () => ({
 		DENIED: "denied",
 	},
 }));
+vi.mock("../lib/preparation-execute.js", () => ({
+	runPreparationExecute: vi.fn(),
+}));
 vi.mock("../lib/preparation-status-ok.js", () => ({
 	parseStatusOk: vi.fn(() => ({ status: "ok" })),
 }));
@@ -52,6 +56,7 @@ const mockBind = vi.mocked(inspectPreparationProductionBinding);
 const mockApprovalCheck = vi.mocked(inspectPreparationApprovalCheck);
 const mockApprovalRevoke = vi.mocked(inspectPreparationApprovalRevocation);
 const mockStatusOk = vi.mocked(parseStatusOk);
+const mockExecute = vi.mocked(runPreparationExecute);
 
 function collectSteps(): {
 	steps: InitStep[];
@@ -149,7 +154,7 @@ describe("runPreparationCommand", () => {
 		);
 		const unsupported = await runPreparationCommand(
 			{
-				action: "execute",
+				action: "launch",
 				approvalPath: "",
 				configPath: "/tmp/config.json",
 				outputsPath: "",
@@ -809,5 +814,36 @@ describe("runPreparationCommand", () => {
 		expect(await readFile(outputPath, "utf8")).toContain(
 			"workerExecutableDigest",
 		);
+	});
+
+	it("execute refuses an existing destination without consuming", async () => {
+		mockExecute.mockResolvedValue({
+			status: "denied",
+			reason: "destination-present",
+			consumed: false,
+			audit: [],
+		});
+		const configPath = await writeConfig({ cwd: "/tmp" });
+		const root = path.dirname(configPath);
+		const outputsPath = path.join(root, "outputs.json");
+		const approvalPath = path.join(root, "approval.json");
+		await writeFile(outputsPath, "{}\n", { mode: 0o600 });
+		await writeFile(approvalPath, "{}\n", { mode: 0o600 });
+		const { steps, onStep } = collectSteps();
+		const result = await runPreparationCommand(
+			{
+				action: "execute",
+				configPath,
+				outputsPath,
+				approvalPath,
+				force: false,
+				json: false,
+			},
+			onStep,
+		);
+		expect(result.status).toBe(PREPARATION_COMMAND_STATUS.FAILURE);
+		expect(result.execute?.consumed).toBe(false);
+		expect(result.execute?.reason).toBe("destination-present");
+		expect(steps.at(-1)?.detail).toContain("consumed: false");
 	});
 });

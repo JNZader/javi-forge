@@ -7,6 +7,7 @@ import {
 	createApprovalPayload,
 } from "../lib/preparation-authorization.js";
 import { OUTPUTS, POLICY } from "../lib/preparation-capability.js";
+import { runPreparationExecute } from "../lib/preparation-execute.js";
 import {
 	createPreparationProductionConfigTemplate,
 	inspectPreparationApprovalCheck,
@@ -44,6 +45,7 @@ export const PREPARATION_ACTION = {
 	PREFLIGHT: "preflight",
 	READINESS: "readiness",
 	STATUS_OK: "status-ok",
+	EXECUTE: "execute",
 } as const;
 
 export interface PreparationCommandRequest {
@@ -97,6 +99,7 @@ export interface PreparationCommandResult {
 	digest?: PreparationDigestResult;
 	readiness?: PreparationReadinessResult;
 	statusOk?: PreparationStatusOkResult;
+	execute?: import("../lib/preparation-execute.js").PreparationExecuteResult;
 	outputPath?: string;
 	error?: string;
 }
@@ -125,6 +128,7 @@ function usage(): string {
 		"  javi-forge preparation approval-check --config <path> --binding <hex> --approval <path> [--json]",
 		"  javi-forge preparation approval-revoke --config <path> --binding <hex> --approval <path> [--json]",
 		"  javi-forge preparation status-ok --file <path> --session <ses_...> [--json]",
+		"  javi-forge preparation execute --config <path> --outputs <path> --approval <path> [--json]",
 	].join("\n");
 }
 
@@ -271,7 +275,7 @@ async function readConfig(configPath?: string): Promise<unknown> {
 
 async function readOutputs(outputsPath?: string): Promise<unknown> {
 	const path = outputsPath?.trim();
-	if (!path) throw new Error("bind requires --outputs <path>");
+	if (!path) throw new Error("preparation requires --outputs <path>");
 	try {
 		return JSON.parse(await readFile(path, "utf8")) as unknown;
 	} catch (error) {
@@ -285,7 +289,7 @@ async function readOutputs(outputsPath?: string): Promise<unknown> {
 async function readApprovalEvidence(approvalPath?: string): Promise<string> {
 	const path = approvalPath?.trim();
 	if (!path) {
-		throw new Error("approval-check/revoke requires --approval <path>");
+		throw new Error("approval-check/revoke/execute requires --approval <path>");
 	}
 	const info = await stat(path);
 	if (!info.isFile() || info.size > 4096) {
@@ -375,7 +379,8 @@ export async function runPreparationCommand(
 		request.action !== PREPARATION_ACTION.PREFLIGHT &&
 		request.action !== PREPARATION_ACTION.READINESS &&
 		request.action !== PREPARATION_ACTION.STATUS_OK &&
-		request.action !== PREPARATION_ACTION.TEMPLATE
+		request.action !== PREPARATION_ACTION.TEMPLATE &&
+		request.action !== PREPARATION_ACTION.EXECUTE
 	) {
 		report(onStep, "preparation-usage", "Preparation", "error", usage());
 		return { status: PREPARATION_COMMAND_STATUS.FAILURE, error: usage() };
@@ -638,6 +643,38 @@ export async function runPreparationCommand(
 					? PREPARATION_COMMAND_STATUS.SUCCESS
 					: PREPARATION_COMMAND_STATUS.FAILURE,
 				readiness,
+			};
+		}
+
+		if (request.action === PREPARATION_ACTION.EXECUTE) {
+			report(onStep, "preparation-execute", "Preparation execute", "running");
+			const config = await readConfig(request.configPath);
+			const outputs = await readOutputs(request.outputsPath);
+			if (!outputs || typeof outputs !== "object") {
+				throw new Error("execute requires --outputs <path>");
+			}
+			const execute = await runPreparationExecute(
+				config,
+				outputs as Readonly<Record<string, string>>,
+				await readApprovalEvidence(request.approvalPath),
+			);
+			const ok = execute.status === "prepared";
+			report(
+				onStep,
+				"preparation-execute",
+				"Preparation execute",
+				ok ? "done" : "error",
+				[
+					`status: ${execute.status}`,
+					`consumed: ${String(execute.consumed)}`,
+					...(execute.reason ? [`reason: ${execute.reason}`] : []),
+				].join("\n"),
+			);
+			return {
+				status: ok
+					? PREPARATION_COMMAND_STATUS.SUCCESS
+					: PREPARATION_COMMAND_STATUS.FAILURE,
+				execute,
 			};
 		}
 

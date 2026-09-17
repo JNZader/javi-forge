@@ -11,7 +11,10 @@ import {
 	writeModelAssignmentProfileExport,
 	writeModelAssignmentProfiles,
 } from "../lib/ai-provider-profiles.js";
-import { applyProviderScope } from "../lib/ai-provider-scope.js";
+import {
+	applyProviderScope,
+	rollbackProviderScope,
+} from "../lib/ai-provider-scope.js";
 import { runProviderSmokeTests } from "../lib/ai-provider-smoke.js";
 import type { InitStep } from "../types/index.js";
 import {
@@ -32,6 +35,7 @@ vi.mock("../lib/ai-provider-smoke.js", () => ({
 
 vi.mock("../lib/ai-provider-scope.js", () => ({
 	applyProviderScope: vi.fn(),
+	rollbackProviderScope: vi.fn(),
 }));
 
 vi.mock("../lib/ai-provider-profile-apply.js", () => ({
@@ -57,6 +61,7 @@ const mockWriteBundle = vi.mocked(writeFreeProvidersBundle);
 const mockConvertBundle = vi.mocked(convertProviderBundle);
 const mockRunSmokeTests = vi.mocked(runProviderSmokeTests);
 const mockApplyScope = vi.mocked(applyProviderScope);
+const mockRollbackScope = vi.mocked(rollbackProviderScope);
 const mockWriteProfiles = vi.mocked(writeModelAssignmentProfiles);
 const mockWriteProfileExport = vi.mocked(writeModelAssignmentProfileExport);
 const mockApplyProfile = vi.mocked(applyModelAssignmentProfileOverlay);
@@ -306,6 +311,131 @@ describe("runAiProvidersCommand", () => {
 		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.FAILURE });
 		expect(mockApplyScope).not.toHaveBeenCalled();
 		expect(steps.at(-1)?.detail).toContain("--pi-settings");
+	});
+
+	it("rolls back an apply-scope backup without a pass-list", async () => {
+		mockRollbackScope.mockResolvedValue({
+			target: "pi",
+			dryRun: false,
+			wrote: true,
+			files: ["/pi/settings.json"],
+			backups: ["/pi/settings.json.bak-20260916T120000Z"],
+		});
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "apply-scope",
+				rollbackPath: "/pi/settings.json.bak-20260916T120000Z",
+				target: "pi",
+				piSettingsPath: "/pi/settings.json",
+				dryRun: false,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS });
+		expect(mockRollbackScope).toHaveBeenCalledExactlyOnceWith({
+			backupPath: "/pi/settings.json.bak-20260916T120000Z",
+			target: "pi",
+			piSettingsPath: "/pi/settings.json",
+			opencodeConfigPath: undefined,
+			dryRun: false,
+		});
+		expect(mockApplyScope).not.toHaveBeenCalled();
+		expect(steps[1]!.detail).toContain("updated");
+	});
+
+	it("refuses apply-scope rollback with --target both", async () => {
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "apply-scope",
+				rollbackPath: "/pi/settings.json.bak",
+				target: "both",
+				piSettingsPath: "/pi/settings.json",
+				opencodeConfigPath: "/opencode/opencode.json",
+				dryRun: false,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.FAILURE });
+		expect(mockRollbackScope).not.toHaveBeenCalled();
+		expect(mockApplyScope).not.toHaveBeenCalled();
+		expect(steps.at(-1)?.detail).toMatch(/both/i);
+	});
+
+	it("refuses apply-scope rollback when --target is omitted", async () => {
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "apply-scope",
+				rollbackPath: "/pi/settings.json.bak",
+				piSettingsPath: "/pi/settings.json",
+				dryRun: false,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.FAILURE });
+		expect(mockRollbackScope).not.toHaveBeenCalled();
+		expect(mockApplyScope).not.toHaveBeenCalled();
+		expect(steps.at(-1)?.detail).toMatch(/target/i);
+	});
+
+	it("refuses apply-scope rollback without the dest flag", async () => {
+		const { steps, onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "apply-scope",
+				rollbackPath: "/pi/settings.json.bak",
+				target: "pi",
+				dryRun: false,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.FAILURE });
+		expect(mockRollbackScope).not.toHaveBeenCalled();
+		expect(mockApplyScope).not.toHaveBeenCalled();
+		expect(steps.at(-1)?.detail).toContain("--pi-settings");
+	});
+
+	it("lets apply-scope rollback win over a pass-list", async () => {
+		mockRollbackScope.mockResolvedValue({
+			target: "opencode",
+			dryRun: false,
+			wrote: true,
+			files: ["/opencode/opencode.json"],
+			backups: ["/opencode/opencode.json.bak-20260916T120000Z"],
+		});
+		const { onStep } = collectSteps();
+
+		const result = await runAiProvidersCommand(
+			{
+				action: "providers",
+				providersAction: "apply-scope",
+				rollbackPath: "/opencode/opencode.json.bak-20260916T120000Z",
+				outputDir: "/target/smoke.pass.tsv",
+				passListPath: "/override/pass.tsv",
+				target: "opencode",
+				opencodeConfigPath: "/opencode/opencode.json",
+				dryRun: false,
+			},
+			onStep,
+		);
+
+		expect(result).toEqual({ status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS });
+		expect(mockRollbackScope).toHaveBeenCalled();
+		expect(mockApplyScope).not.toHaveBeenCalled();
 	});
 
 	it("generates smoke-tested model assignment profiles", async () => {

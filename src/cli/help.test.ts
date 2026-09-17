@@ -108,6 +108,9 @@ describe("help — pi free-provider export", () => {
 		expect(HELP_TEXT).toContain("ai providers export-free");
 		expect(HELP_TEXT).toContain("ai providers convert");
 		expect(HELP_TEXT).toContain("ai providers apply-scope");
+		expect(HELP_TEXT).toContain(
+			"Restore an apply-scope or profile-apply backup",
+		);
 		expect(HELP_TEXT).toContain("ai providers profile-apply");
 		expect(HELP_TEXT).toContain("--runtime");
 		expect(HELP_TEXT).toContain("--opencode-command");
@@ -124,6 +127,9 @@ describe("help — pi free-provider export", () => {
 		expect(examples).toContain("ai providers apply-scope");
 		expect(examples).toContain(
 			"apply-scope /tmp/pi-smoke/smoke.pass.tsv --target pi --pi-settings",
+		);
+		expect(examples).toContain(
+			"apply-scope --rollback /tmp/settings.json.bak-20260916T120000Z --target pi --pi-settings",
 		);
 		expect(examples).toContain("ai providers profile-apply");
 		expect(examples).toContain("--pi-settings /tmp/settings.json --dry-run");

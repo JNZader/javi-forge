@@ -20,6 +20,7 @@ import {
 import {
 	applyProviderScope,
 	type ProviderScopeTarget,
+	rollbackProviderScope,
 } from "../lib/ai-provider-scope.js";
 import {
 	type ProviderSmokeFilters,
@@ -136,6 +137,7 @@ function usage(): string {
 		"  javi-forge ai providers convert <pi|opencode> <pi|opencode> [output-dir] --config <input-path>",
 		"  javi-forge ai providers smoke-test [output-dir|report.jsonl] [--runtime pi|opencode] [--provider id] [--family text] [--model text] [--status pass|failed|...] [--report <previous.jsonl>]",
 		"  javi-forge ai providers apply-scope <pass.tsv|report.jsonl> --target pi|opencode|both --pi-settings|--opencode-config <path> [--dry-run]",
+		"  javi-forge ai providers apply-scope --rollback <backup-path> --target pi|opencode --pi-settings|--opencode-config <path> [--dry-run]",
 		`  javi-forge ai providers profile-plan <output-dir> --pass-list <pass.tsv|report.jsonl> [--preset ${MODEL_ASSIGNMENT_PRESET.COMMUNITY_BACKEND_OPENCODE_GO}] [--limit candidates-per-profile] [--dry-run]`,
 		"  javi-forge ai providers profile-export <profile-plan.json> [output-dir] --target pi|opencode|codex|both [--dry-run]",
 		"  javi-forge ai providers profile-apply <overlay.json> --pass-list <pass.tsv|report.jsonl> --target pi|opencode --pi-settings|--opencode-config <path> [--dry-run]",
@@ -324,6 +326,31 @@ function scopeDetail(
 	].join("\n");
 }
 
+function rollbackScopeDetail(
+	result: Awaited<ReturnType<typeof rollbackProviderScope>>,
+): string {
+	return [
+		`${result.dryRun ? "dry-run: would update" : "updated"}: ${result.files.length}`,
+		"files:",
+		...result.files.map((file) => `  - ${file}`),
+		...(result.backups.length
+			? ["backups:", ...result.backups.map((file) => `  - ${file}`)]
+			: []),
+	].join("\n");
+}
+
+function requireRollbackScopeTarget(value?: string): "pi" | "opencode" {
+	const target = emptyToUndefined(value);
+	if (!target) {
+		throw new Error("apply-scope rollback requires --target pi|opencode");
+	}
+	if (target === "both") {
+		throw new Error("apply-scope rollback refuses --target both");
+	}
+	if (target === "pi" || target === "opencode") return target;
+	throw new Error(`unknown target: ${target}`);
+}
+
 async function applyScope(
 	request: AiProvidersCommandRequest,
 	onStep: StepCallback,
@@ -334,6 +361,33 @@ async function applyScope(
 		"Apply AI provider scope",
 		"running",
 	);
+	const rollbackPath = emptyToUndefined(request.rollbackPath);
+	if (rollbackPath) {
+		const target = requireRollbackScopeTarget(request.target);
+		const piSettingsPath = emptyToUndefined(request.piSettingsPath);
+		const opencodeConfigPath = emptyToUndefined(request.opencodeConfigPath);
+		if (target === "pi" && !piSettingsPath) {
+			throw new Error("apply-scope requires --pi-settings <path>");
+		}
+		if (target === "opencode" && !opencodeConfigPath) {
+			throw new Error("apply-scope requires --opencode-config <path>");
+		}
+		const result = await rollbackProviderScope({
+			backupPath: rollbackPath,
+			target,
+			piSettingsPath,
+			opencodeConfigPath,
+			dryRun: request.dryRun,
+		});
+		report(
+			onStep,
+			"ai-providers-apply-scope",
+			"Apply AI provider scope",
+			"done",
+			rollbackScopeDetail(result),
+		);
+		return { status: AI_PROVIDERS_COMMAND_STATUS.SUCCESS };
+	}
 	const inputPath =
 		emptyToUndefined(request.passListPath) ??
 		emptyToUndefined(request.outputDir);

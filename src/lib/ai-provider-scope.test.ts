@@ -1,10 +1,12 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	applyProviderScope,
 	readProviderScopeInput,
+	rollbackProviderScope,
 } from "./ai-provider-scope.js";
 
 async function tempDir(): Promise<string> {
@@ -321,5 +323,108 @@ describe("provider scope application", () => {
 				target: "opencode",
 			}),
 		).rejects.toThrow("apply-scope requires --opencode-config");
+	});
+});
+
+describe("rollbackProviderScope", () => {
+	it("restores backup bytes onto dest and snapshots previous dest", async () => {
+		const dir = await tempDir();
+		const settingsPath = join(dir, "settings.json");
+		const backupPath = join(dir, "settings.json.bak-20260916T120000Z");
+		await writeFile(settingsPath, JSON.stringify({ current: true }));
+		await writeFile(
+			backupPath,
+			`${JSON.stringify({ restored: true, extra: "keep-me" }, null, 2)}\n`,
+		);
+
+		const result = await rollbackProviderScope({
+			backupPath,
+			target: "pi",
+			piSettingsPath: settingsPath,
+			now: new Date("2026-09-16T12:00:00.000Z"),
+		});
+
+		expect(result.wrote).toBe(true);
+		expect(await readFile(settingsPath, "utf8")).toBe(
+			await readFile(backupPath, "utf8"),
+		);
+		const safetyPath = `${settingsPath}.pre-rollback-20260916T120000Z`;
+		expect(result.backups).toEqual([backupPath, safetyPath]);
+		expect(JSON.parse(await readFile(safetyPath, "utf8"))).toEqual({
+			current: true,
+		});
+		expect(existsSync(`${settingsPath}.rollback-tmp-20260916T120000Z`)).toBe(
+			false,
+		);
+	});
+
+	it("fails when the backup is missing without changing dest", async () => {
+		const dir = await tempDir();
+		const settingsPath = join(dir, "settings.json");
+		await writeFile(settingsPath, JSON.stringify({ kept: true }));
+
+		await expect(
+			rollbackProviderScope({
+				backupPath: join(dir, "missing.bak"),
+				target: "pi",
+				piSettingsPath: settingsPath,
+			}),
+		).rejects.toThrow(/missing.bak|ENOENT|not found/i);
+		expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
+			kept: true,
+		});
+	});
+
+	it("dry-runs rollback without writing dest or sibling files", async () => {
+		const dir = await tempDir();
+		const settingsPath = join(dir, "settings.json");
+		const backupPath = join(dir, "settings.json.bak-20260916T120000Z");
+		await writeFile(settingsPath, JSON.stringify({ current: true }));
+		await writeFile(backupPath, JSON.stringify({ restored: true }));
+		const before = await readdir(dir);
+
+		const result = await rollbackProviderScope({
+			backupPath,
+			target: "pi",
+			piSettingsPath: settingsPath,
+			dryRun: true,
+		});
+
+		expect(result.wrote).toBe(false);
+		expect(result.files).toEqual([settingsPath]);
+		expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
+			current: true,
+		});
+		expect(await readdir(dir)).toEqual(before);
+	});
+
+	it("refuses rollback when a pre-rollback safety copy already exists", async () => {
+		const dir = await tempDir();
+		const settingsPath = join(dir, "settings.json");
+		const backupPath = join(dir, "settings.json.bak-restore");
+		const safetyPath = `${settingsPath}.pre-rollback-20260916T120000Z`;
+		await writeFile(settingsPath, JSON.stringify({ current: true }));
+		await writeFile(backupPath, JSON.stringify({ restored: true }));
+		await writeFile(safetyPath, "existing-safety");
+
+		await expect(
+			rollbackProviderScope({
+				backupPath,
+				target: "pi",
+				piSettingsPath: settingsPath,
+				now: new Date("2026-09-16T12:00:00.000Z"),
+			}),
+		).rejects.toMatchObject({ code: "EEXIST" });
+		expect(await readFile(safetyPath, "utf8")).toBe("existing-safety");
+		expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
+			current: true,
+		});
+	});
+
+	it("does not write real Pi or OpenCode runtime configs", async () => {
+		const dir = await tempDir();
+		expect(dir.startsWith(tmpdir())).toBe(true);
+		expect(dir.includes(".pi")).toBe(false);
+		expect(dir.includes(".config/opencode")).toBe(false);
 	});
 });

@@ -104,7 +104,7 @@ export const HELP_TEXT = `
     --preset NAME   Advisory model assignment preset for profile-plan
     --pi-settings PATH Pi settings.json path for apply-scope/profile-apply
     --opencode-config PATH OpenCode opencode.json path for apply-scope/profile-apply
-    --rollback PATH Restore a profile-apply backup onto the target config
+    --rollback PATH Restore an apply-scope or profile-apply backup onto the target config
     --json          Emit JSON for commands that support structured output
     --version       Show version
     --help          Show this help
@@ -189,6 +189,7 @@ export const HELP_TEXT = `
     $ javi-forge ai providers smoke-test /tmp/pi-smoke --status failed --report /tmp/previous-smoke.jsonl
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.pass.tsv --target pi --pi-settings /tmp/settings.json --dry-run
     $ javi-forge ai providers apply-scope /tmp/pi-smoke/smoke.jsonl --target both --pi-settings /tmp/settings.json --opencode-config /tmp/opencode.json
+    $ javi-forge ai providers apply-scope --rollback /tmp/settings.json.bak-20260916T120000Z --target pi --pi-settings /tmp/settings.json
     $ javi-forge ai providers profile-plan /tmp/model-profiles --pass-list /tmp/opencode-smoke/smoke.jsonl --preset community-backend-opencode-go
     $ javi-forge ai providers profile-apply /tmp/pi.model-profiles.generated.json --pass-list /tmp/opencode-smoke/smoke.jsonl --target pi --pi-settings /tmp/settings.json --dry-run
     $ javi-forge ai providers profile-apply --rollback /tmp/settings.json.bak-20260916T120000Z --target pi --pi-settings /tmp/settings.json

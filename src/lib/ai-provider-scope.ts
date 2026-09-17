@@ -48,6 +48,25 @@ export interface ApplyProviderScopeResult {
 	opencodeMissingProviders?: string[];
 }
 
+export interface RollbackProviderScopeOptions {
+	backupPath: string;
+	target: string;
+	piSettingsPath?: string;
+	opencodeConfigPath?: string;
+	dryRun?: boolean;
+	now?: Date;
+}
+
+export interface RollbackProviderScopeResult {
+	target:
+		| typeof PROVIDER_SCOPE_TARGET.PI
+		| typeof PROVIDER_SCOPE_TARGET.OPENCODE;
+	dryRun: boolean;
+	wrote: boolean;
+	files: string[];
+	backups: string[];
+}
+
 interface SmokeReportRow {
 	provider?: unknown;
 	model?: unknown;
@@ -351,6 +370,80 @@ function requireScopeRuntimePath(
 	return {
 		piSettingsPath: piSettingsPath || undefined,
 		opencodeConfigPath: opencodeConfigPath || undefined,
+	};
+}
+
+function requireRollbackTarget(
+	target: string,
+): typeof PROVIDER_SCOPE_TARGET.PI | typeof PROVIDER_SCOPE_TARGET.OPENCODE {
+	if (target === PROVIDER_SCOPE_TARGET.BOTH) {
+		throw new Error("apply-scope rollback refuses --target both");
+	}
+	if (
+		target === PROVIDER_SCOPE_TARGET.PI ||
+		target === PROVIDER_SCOPE_TARGET.OPENCODE
+	) {
+		return target;
+	}
+	throw new Error("apply-scope rollback requires --target pi|opencode");
+}
+
+function requireRollbackDestPath(
+	target:
+		| typeof PROVIDER_SCOPE_TARGET.PI
+		| typeof PROVIDER_SCOPE_TARGET.OPENCODE,
+	options: Pick<
+		RollbackProviderScopeOptions,
+		"piSettingsPath" | "opencodeConfigPath"
+	>,
+): string {
+	if (target === PROVIDER_SCOPE_TARGET.PI) {
+		const path = options.piSettingsPath?.trim();
+		if (!path) throw new Error("apply-scope requires --pi-settings <path>");
+		return normalizePath(path);
+	}
+	const path = options.opencodeConfigPath?.trim();
+	if (!path) throw new Error("apply-scope requires --opencode-config <path>");
+	return normalizePath(path);
+}
+
+export async function rollbackProviderScope(
+	options: RollbackProviderScopeOptions,
+): Promise<RollbackProviderScopeResult> {
+	const target = requireRollbackTarget(options.target);
+	const destPath = requireRollbackDestPath(target, options);
+	const backupPath = normalizePath(options.backupPath);
+	const dryRun = options.dryRun ?? false;
+	const now = options.now ?? new Date();
+	const safetyPath = `${destPath}.pre-rollback-${timestamp(now)}`;
+	try {
+		await readFile(backupPath);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			throw new Error(`backup not found: ${backupPath}`);
+		}
+		throw error;
+	}
+	const backups = [backupPath];
+	if (!dryRun) {
+		try {
+			const current = await readFile(destPath, "utf8");
+			await writeFile(safetyPath, current, { flag: "wx" });
+			backups.push(safetyPath);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
+		const restored = await readFile(backupPath, "utf8");
+		const tmpPath = `${destPath}.rollback-tmp-${timestamp(now)}`;
+		await writeFile(tmpPath, restored, { flag: "wx" });
+		await rename(tmpPath, destPath);
+	}
+	return {
+		target,
+		dryRun,
+		wrote: !dryRun,
+		files: [destPath],
+		backups,
 	};
 }
 
